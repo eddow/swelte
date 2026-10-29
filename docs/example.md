@@ -2,6 +2,8 @@
 
 Lives at `examples/something/`. Canonical demo of `.v` imports:
 `#routes/` server RPC + `#lib/` isomorphic WASM + structured errors.
+Built with `swelte build`, served with `swelte preview` (single
+artifact: `dist/server` + `dist/`).
 
 ## Layout
 
@@ -17,8 +19,11 @@ vite.config.ts                     swelte({ vBackendUrl, routesDir, libDir })
 ## Run
 
 ```sh
-PORT=8131 v run .                 # V backend :8131 (server.v + generated routes/)
-npx vite --port 5174            # frontend :5174 → open it, not :8131
+node engine/core/dist/cli.js dev --port 5174 --backend 8131 --root examples/something
+# one command: V backend :8131 + Vite :5174, HMR reload on .v change, Ctrl-C kills both
+# manual two-terminal equivalent:
+#   PORT=8131 v run .              # V backend :8131 (server.v + generated routes/)
+#   npx vite --port 5174           # frontend :5174 → open it, not :8131
 ```
 
 ## Proved
@@ -36,4 +41,4 @@ npx vite --port 5174            # frontend :5174 → open it, not :8131
 
 ## Stubs (see docs/specs/)
 
-No `swelte dev` orchestration, WASM artifact not compiled yet (dev fallback).
+WASM artifact not compiled yet (dev fallback).

@@ -1,15 +1,60 @@
 module main
 
 import net.http
+import net.http.mime
 import net.urllib
 import os
 import routes
 
 struct Hand {}
 
+fn mime_for(path string) string {
+	ext := path.all_after_last('.').to_lower()
+	if ext == '' {
+		return 'application/octet-stream'
+	}
+	mt := mime.get_mime_type(ext)
+	if mt == '' {
+		return 'application/octet-stream'
+	}
+	if mt.starts_with('text/') || mt == 'application/javascript' {
+		return mime.get_content_type(mt)
+	}
+	return mt
+}
+
+fn serve_static(dist string, path string) (int, string, string) {
+	mut rel := path
+	if rel.contains('?') {
+		rel = rel.all_before('?')
+	}
+	if rel.ends_with('/') {
+		rel += 'index.html'
+	}
+	if rel.starts_with('/') {
+		rel = rel[1..]
+	}
+	if rel == '' {
+		rel = 'index.html'
+	}
+	if rel.contains('..') {
+		return 403, 'application/json', '{"error":"forbidden"}'
+	}
+	full := dist + '/' + rel
+	if !os.exists(full) || os.is_dir(full) {
+		index := dist + '/index.html'
+		if os.exists(index) {
+			data := os.read_bytes(index) or { return 500, 'application/json', '{"error":"read failed"}' }
+			return 200, 'text/html; charset=utf-8', data.bytestr()
+		}
+		return 404, 'application/json', '{"error":"not found"}'
+	}
+	data := os.read_bytes(full) or { return 500, 'application/json', '{"error":"read failed"}' }
+	return 200, mime_for(rel), data.bytestr()
+}
+
 fn (h Hand) handle(req http.Request) http.Response {
 	mut r := http.Response{}
-	r.header.set(.content_type, 'application/json')
 	url := req.url
 	path := if url.contains('?') { url.all_before('?') } else { url }
 	mut query := map[string]string{}
@@ -57,6 +102,15 @@ fn (h Hand) handle(req http.Request) http.Response {
 		}
 	}
 	status, body := routes.swelte_route(path, req.method.str().to_upper(), query, headers, cookies, req.data, content_type, qualifier)
+	dist := os.getenv_opt('SWELTE_DIST') or { '' }
+	if dist != '' && req.method == .get && (path == '/' || (status == 404 && body.contains('not found'))) {
+		s, ct, sb := serve_static(dist, path)
+		r.header.set(.content_type, ct)
+		r.status_code = s
+		r.body = sb
+		return r
+	}
+	r.header.set(.content_type, 'application/json')
 	r.status_code = status
 	r.body = body
 	return r

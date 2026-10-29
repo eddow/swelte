@@ -10,7 +10,7 @@ reads `.v` files as text and writes `.swelte/types/**` (`routes/`,
 
 `configResolved` (dev start) + `buildStart`, re-run on `.v`
 add/change/unlink. Warnings (`unknown` types, orphans, leaf/index
-clashes, `#lib/server` misuse, stray `@[get/post]` in `#lib/`) go to
+clashes, `#lib/backend` misuse, stray `@[get/post]` in `#lib/`) go to
 console, never fail correct V programs.
 
 ## What

@@ -2,35 +2,37 @@
 
 V + Svelte full-stack framework. V is the compute engine (native server binary, WASM client modules). Svelte 5 is the UI. One RPC protocol bridges them.
 
-Svelte, but with V: Best stack to have agents work in, optimized code out.
+Added a V in Svelte: Built for agents work in, optimized code out.
 
 **Core stack:** V (vlang) + Svelte 5 + WebAssembly + Vite.
 
 - `src/routes/` — server RPC (`.v` = route handler, `#routes/...` import → fetch)
-- `src/lib/` — isomorphic lib (`.v` = local compute, `#lib/...` import → WASM call; `server/` subdirs are server-only)
+- `src/lib/` — isomorphic lib (`.v` = local compute, `#lib/...` import → WASM call; `backend/` subdirs (or `*_backend.v`) are backend-only)
 - `.swelte/` — generated: `types/routes|lib/**` projected from V signatures + `generated/` runtime stubs + `v-shim.d.ts`
 
 ```text
-browser (:5174 dev) ── routes/HMR (Vite) ──┐
-     │  POST / { fn, args }                │  proxy
-     │  GET /?fn=&...  Accept: json        ├─► V backend (:8131)
-     └── POST /api/*  GET /api/*?fn= ──────┘  (#lib/* never leaves the browser)
+browser (:5174 dev) ── routes/HMR (Vite) ───┐
+     │  POST / { fn, args }                 │  proxy
+     │  GET /?payload=…  Accept: json       ├─► V backend (:8131)
+     └── POST /api/*  GET /api/*?payload=… ─┘  (#lib/* never leaves the browser)
 prod: browser ──► V :PORT ── static dist/ + same API routes
 ```
 
 ## Quickstart
 
-Requires: Node 20+, V 0.5.2 via `vvm` (`engine/vvm`).
+Requires: Node 20+.
 
 ```sh
+npx swelte init myapp && cd myapp
 npm install
-npm run build:engine
-# terminal 1: V backend (example)
-PORT=8131 ./engine/vvm/versions/v0.5.2/v run examples/something/server.v
-# terminal 2: frontend
-cd examples/something && npx vite --port 5174
+npx swelte dev    # Vite :5174 + V backend :8131, one command
 # open http://localhost:5174
 ```
+
+`swelte dev` resolves V itself (system `v`, else `@swelte/vvm`
+toolchain — no manual install). `swelte build` typechecks, compiles
+`dist/server`, runs `vite build`, smoke-probes page + API.
+`swelte preview` serves the build with no Vite involved.
 
 `examples/something` demonstrates: `#routes/` GET/POST + `@[rpc]`, `#lib/` WASM call (dev fallback), V struct (`Session`), structured errors.
 

@@ -19,7 +19,7 @@ via directory-mode `v run .`. Structs are prefixed per file
   Import from `#routes/...` (or relative `./x.v`).
 - `src/lib/**/*.v` — isomorphic lib. Never routed, never fetched.
   Same V compiles native + `v -b wasm`; TS import is always `async`.
-  Import from `#lib/...`. `src/lib/**/server/*.v` is **server-only**
+  Import from `#lib/...`. `src/lib/**/backend/*.v` (or `*_backend.v`) is **backend-only**
   (build error from browser code).
 
 ## Imports (named everywhere)

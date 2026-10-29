@@ -1,52 +1,59 @@
 import type { ArgDef, Command, Ctx } from './types.js';
+import { runDev } from './dev.js';
+import { runBuild } from './build.js';
+import { runPreview } from './preview.js';
+import { runInit } from './init.js';
 
 export const VERSION = '0.1.0';
 
 const devCmd: Command = {
   name: 'dev',
-  summary: 'Run Vite + V backend with HMR proxy (stub: prints plan until orchestration lands).',
+  summary: 'Run V backend + Vite with HMR proxy (one command, kills both on Ctrl-C).',
   args: [
     { name: 'port', short: 'p', help: 'Vite port', value: 'number' },
     { name: 'backend', short: 'b', help: 'V backend port', value: 'number' },
     { name: 'root', help: 'Project root', value: 'string' },
   ],
   async run(ctx: Ctx) {
-    const { resolveV, vVersion } = await import('../toolchain.js');
-    const v = resolveV(import.meta.url);
-    ctx.log(`V toolchain: ${vVersion(v)} (${v})`);
-    ctx.log('starting Vite + V backend watcher (stub — roadmap item 2).');
-    ctx.log('  - Run `vite` for the frontend.');
-    ctx.log('  - Run `v run server.v` for the V backend.');
+    await runDev(ctx);
   },
 };
 
 const buildCmd: Command = {
   name: 'build',
-  summary: 'Build: v check → .swelte/ → V binary + WASM → vite build (stub).',
-  args: [{ name: 'root', help: 'Project root', value: 'string' }],
+  summary: 'Typecheck -> generate -> v -o dist/server -> vite build (+ smoke probe).',
+  args: [
+    { name: 'root', help: 'Project root', value: 'string' },
+    { name: 'output', short: 'o', help: 'Server binary output path', value: 'string' },
+    { name: 'port', short: 'p', help: 'Smoke-probe port', value: 'number' },
+  ],
   async run(ctx: Ctx) {
-    ctx.log('build: stub — roadmap item 3.');
+    await runBuild(ctx);
   },
 };
 
 const previewCmd: Command = {
   name: 'preview',
-  summary: 'Serve the built V binary only, no Vite (stub).',
+  summary: 'Run the built V binary only: dist/ + API on one port, no Vite.',
   args: [
     { name: 'port', short: 'p', help: 'Port to serve on', value: 'number' },
     { name: 'root', help: 'Project root', value: 'string' },
+    { name: 'binary', help: 'Server binary path', value: 'string' },
   ],
   async run(ctx: Ctx) {
-    ctx.log('preview: stub — roadmap item 4.');
+    await runPreview(ctx);
   },
 };
 
 const initCmd: Command = {
   name: 'init',
-  summary: 'Scaffold a new Swelte project (stub).',
-  args: [{ name: 'root', help: 'Project root', value: 'string' }],
+  summary: 'Scaffold a new Swelte project in <dir> (default my-swelte-app).',
+  args: [
+    { name: 'root', help: 'Parent dir for the scaffold', value: 'string' },
+    { name: 'dir', help: 'Target directory name', value: 'string' },
+  ],
   async run(ctx: Ctx) {
-    ctx.log('init: stub — roadmap item 5.');
+    await runInit(ctx);
   },
 };
 

@@ -224,8 +224,12 @@ export async function __swelteWasmCall<TResult>(
 	}
 }
 
-/** True when a `#lib` rel path is server-only (a `server` path segment). */
+/** True when a `#lib` rel path is backend-only: a `backend` path segment
+ * at any depth, or a V-native `_backend.v` suffix. Kept name
+ * `isLibServerPath` (public API) — semantics are backend-only. */
 export function isLibServerPath(libRel: string): boolean {
 	const parts = libRel.split('/').filter(Boolean)
-	return parts.includes('server')
+	if (parts.includes('backend')) return true
+	const stem = (parts.pop() ?? '').replace(/\.v$/, '')
+	return stem.endsWith('_backend')
 }

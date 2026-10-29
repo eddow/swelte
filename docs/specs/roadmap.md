@@ -6,9 +6,10 @@ not implemented; items leave this file when they land in `docs/`.
 The `.v`-import design rationale lives in `v-imports.md` (§1–§5 built,
 §6 decisions log).
 
-Items 1 (dispatcher), 15-part (one-default-per-verb + unique-qualifier
-as build errors), 18-part (`time.Time→number`), 22-part (parser +
-`__swelteFetch` + stubs accept `put`/`delete`/`patch`) are built.
+Items 1–5 (dispatcher, dev, build, preview, init), 15-part
+(one-default-per-verb + unique-qualifier as build errors), 18-part
+(`time.Time→number`), 22-part (parser + `__swelteFetch` + stubs accept
+`put`/`delete`/`patch`) are built.
 Route params in `Request`, `swelte check` machine-readable output,
 and per-item remainders below are still open. Item 23 records the
 standing decision to keep the V runtime (`SwelteRequest`, `err_*`)
@@ -39,48 +40,76 @@ route code gone). Qualifier check: `GET /api/greet?delete` →
 file, so the dispatcher correctly rejects the unknown qualifier;
 add one and it dispatches).
 
-## 2. `swelte dev` orchestration
+## 2. `swelte dev` orchestration — built (2026-10-29)
 
-One command: free ports, spawn `v run server.v` + Vite with injected
-`vBackendUrl`, restart V on `.v` change, kill both on Ctrl-C. Kills the
-two-terminal dance. CLI shape (decided 2026-10-29): single `swelte` bin
-for everything (`dev | build | preview | init | check`); logic lives in
-`src/cli.ts` + `src/commands/*.ts` (TS, tsc-ed, sharing `src/`
-internals), `bin/swelte.js` stays a ~5-line shim (npm needs a runnable
-file before `tsc` runs). `bin/` is gitignored (regenerable).
+One command: free ports, spawn `v run .` + Vite with injected
+`vBackendUrl`, restart V on `.v` change, kill both on Ctrl-C.
+`vite.config.ts` reads `SWELTE_V_BACKEND_URL` (dev-injected) with a
+`http://localhost:8131` fallback so plain `npx vite` still works.
+CLI shape (decided 2026-10-29): single `swelte` bin for everything
+(`dev | build | preview | init | check`); logic lives in `src/cli.ts` +
+`src/commands/*.ts` (TS, tsc-ed, sharing `src/` internals),
+`bin/swelte.js` stays a ~5-line shim (npm needs a runnable file before
+`tsc` runs). `bin/` is gitignored (regenerable). Kill strategy:
+by-port (`fuser -k`) + by-command (`pkill -f`) + handles, because
+`npx`/`v run` wrappers re-parent the real servers out of
+`ChildProcess` reach. Pre-generate: `dev` runs the plugin's
+`configResolved` once before starting V so `routes/` exists.
+Interactive shortcuts (TTY only — signals always work): `r` + Enter
+restarts the V backend (Vite keeps HMR state), `u` + Enter restarts
+Vite, `q` + Enter quits. `killBackend` waits for the backend port to
+free (not just the `v run` wrapper exit) so restarts never EADDRINUSE.
 
-Test: `node engine/core/bin/swelte.js dev` prints the V version +
-stub plan and exits 0; `swelte bogus` exits 1 with usage;
-`swelte check --help` lists `--root`.
+Test: `node engine/core/dist/cli.js dev --port 5179 --backend 8148`
+brings up both (`ready: http://localhost:5179`), HTML + proxied
+`GET /api/greet` + `POST login` + `POST /` all correct through Vite;
+`.v` touch triggers `#N` backend restart with no EADDRINUSE;
+`r`/`u`/`q` shortcuts proven under a pty (restart V, restart Vite,
+quit with exit 0 and both ports freed); SIGINT frees both ports and
+the supervisor exits.
 
-## 3. `swelte build`
+## 3. `swelte build` — built (2026-10-29)
 
-`v check` → `.swelte/` → `v -o .swelte/server` + `v -b wasm` (per `#lib`
-file) → `vite build` → `dist/` + static-serving V binary. Binary lives
-in `.swelte/` for dev, `dist/`-adjacent for prod — never the project root.
+`v -o` typecheck → `generate()` (`.swelte/` + `routes/`) →
+`vite build` → `v -o dist/server` → smoke probe. Order matters:
+`vite build` wipes `dist/`, so the binary is compiled AFTER it
+(`0.5.2` has no `v check`; typecheck is `v -o .swelte/typecheck`,
+removed after). Binary lives in `dist/` (prod-adjacent) — never the
+project root. WASM step skipped (item 6 open). Smoke: boot
+`dist/server` with `SWELTE_DIST=dist`, `GET /` → 200,
+`GET /api/greet` → greeting, then kill.
 
-Test: `swelte build` in `examples/something` produces `dist/` +
-`dist/server` (or `.swelte/server`), zero `tsc`/`vite` errors;
-`ls` project root shows no new `server` binary.
+Test: `swelte build --root examples/something` → `dist/server` +
+`dist/index.html`, zero tsc/vite errors; root shows no binary.
 
-## 4. `swelte preview`
+## 4. `swelte preview` — built (2026-10-29)
 
 Run the built V binary only: serves `dist/` + API routes on one port.
-No Vite involved (vite-less prod run).
+No Vite involved (vite-less prod run). `server.v` serves static via
+`SWELTE_DIST` (`mime` types, `..` guard, SPA fallback to
+`index.html`); `/` is always static in prod (the `@[get]` default on
+`/` answers only in dev, where `SWELTE_DIST` is unset). `q` + Enter
+quits (TTY), signals always work.
 
-Test: stop Vite, `swelte preview --port 4173`; open
-`http://localhost:4173` (page renders), click Greet/Login (API answers);
-`ps` shows no `vite`/`node` server process — only the V binary.
+Test: `swelte preview --port 4175` after build → `/` renders HTML,
+unknown path falls back to `index.html`, `/api/greet` + `login`
+answer, asset serves `text/javascript`; only the V binary listens.
 
-## 5. `swelte init` / `create`
+## 5. `swelte init` / `create` — built (2026-10-29)
 
-Scaffold: `vite.config.ts`, `svelte.config.js`, tsconfig wildcards
-(`#routes/*.v` / `#lib/*.v` → `.swelte`), `.gitignore` for
-`.swelte/` + `server` + `dist/`.
+Scaffold: `vite.config.ts` (env-aware `vBackendUrl`), `svelte.config.js`,
+self-contained `tsconfig.json` (no repo-root extend — works out-of-tree),
+wildcards (`#routes/*.v` / `#lib/*.v` → `.swelte`), `index.html`,
+`src/{main.ts,app.html,routes/index.{svelte,v},routes/api/greet.v,lib/crypto/hash.v}`,
+`server.v` (Hand + static serving + main), `package.json` scripts,
+`.gitignore` (`routes/` + `dist/` + `server`).
 
-Test: `swelte init /tmp/probe-app && cd /tmp/probe-app && npm install &&
-npx vite build` succeeds with zero manual tsconfig/vite edits;
-`svelte-check` reports 0 errors.
+Test: `swelte init /tmp/probe-app` → 13 files; `cd` in, `npm
+install`, `swelte build` → `dist/server` + `dist/index.html` with
+smoke `page 200 + api ok`; `swelte preview --port 4175` → `/` HTML
+200, unknown path SPA-falls-back to `index.html` 200, `/api/greet`
++ `login` answer, asset `text/javascript`; no `vite` process owns
+the port (binary only).
 
 ## 6. V-WASM real compile (`#lib/`, dual pipeline)
 
@@ -114,8 +143,8 @@ to both parent and child, non-admin routes unaffected.
 `[id]`, `[...rest]` param flow into args structs.
 
 Test: add `src/routes/users/[id].v` (`@[get]` echoing `id`) +
-`.svelte`; `curl '…/users/42?fn=…'` (or open `/users/42`) returns
-`42`; `/users/` (missing segment) 404s.
+`.svelte`; `curl '…/users/42?payload="x"'` (or open `/users/42`)
+returns `42`; `/users/` (missing segment) 404s.
 
 ## 9. Trailing-slash / 404 / `+error`
 
@@ -170,7 +199,7 @@ client reports disconnect, reconnects per policy.
 ## 15. Validation strictness
 
 Orphan `routes/*.v`, leaf-vs-index clash, `.v` outside
-`routes/`+`lib/`, `#lib/server` misuse, stray `@[get/post]` in `#lib/`,
+`routes/`+`lib/`, `#lib/backend` misuse, stray `@[get/post]` in `#lib/`,
 duplicate verb defaults / duplicate qualifiers — all warn today (or
 unimplemented), none fail. Decide warn-vs-error per case;
 emit machine-readable list with file+line. Note: one-default-per-verb
@@ -182,14 +211,14 @@ Test: add an orphan `routes/stray.v` (no `.svelte` partner, not under
 fix it → build green. `swelte check` prints the same list as JSON
 (`--format json`) with file+line per entry.
 
-## 16. `#lib/server` negative test
+## 16. `#lib/backend` negative test
 
 Guard is built (resolveId+load refuse with importer+file error);
-unproven — needs a server-only fixture + import-guard test.
+unproven — needs a backend-only fixture + import-guard test.
 
-Test: add `src/lib/server/secrets.v`; import it from `index.svelte` →
+Test: add `src/lib/backend/secrets.v` (or `src/lib/secrets_backend.v`); import it from `index.svelte` →
 build fails naming importer+file; import it from a `#routes/*.v`
-only → build green.
+only → build green. Also add `src/lib/backend/ui.ts` → build warns (no TS in backend/).
 
 ## 17. Relative `./x.v` editor types
 
@@ -204,12 +233,12 @@ telling you to use the `#`-alias form.
 ## 18. `#lib/` stdlib allowlist as build error
 
 Set decided (`strings`, `math`, `encoding/*`, `crypto/*`, `json`,
-`json2`; `#lib/server/` exempt — see `v-imports.md` §2). Warns today;
+`json2`; `#lib/backend/` exempt — see `v-imports.md` §2). Warns today;
 enforce at build (error) once the V-WASM compile lands (§6).
 
 Test: add `import os` to `src/lib/crypto/hash.v` → `vite build`
 fails naming the file + banned module; same import under
-`src/lib/server/` → builds fine.
+`src/lib/backend/` → builds fine.
 
 ## 19. Single-artifact deploy
 

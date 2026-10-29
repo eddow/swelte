@@ -75,8 +75,8 @@ Rules (`routeFor`, once in `vite.ts`, reused by V dispatcher gen):
   `#lib/` (non-`server`) may import only the portable subset —
   `strings`, `math`, `encoding/*`, `crypto/*`, `json`, `json2`.
   Anything else (`os`, `net`, `db`, `time`, …) is rejected.
-  Escape hatch: `#lib/server/` allows everything (server-only,
-  never compiled to WASM — see §7). The subset expands on demand
+  Escape hatch: `#lib/backend/` allows everything (backend-only,
+  never compiled to WASM — see §7. No `.ts`/`.js`/`.svelte` under `backend/`: backend runs purely on V (decided 2026-10-29). The subset expands on demand
   when a real `#lib/` fn needs a module: add the module, not a
   per-file exemption list.
 * One WASM blob per `.v` file (cache granularity, matches the
@@ -256,11 +256,11 @@ See roadmap item 1 (built) and item 23 (static-vlib deferral).
 * Notation follows current SvelteKit: `#lib` (hash), not `$lib`.
   SvelteKit swapped `$lib` -> `#lib` (Node subpath-import style);
   we match. Same for `#routes`.
-* Keep the `#lib/server` convention: any `.v` under `src/lib/server/`
-  (at any depth: `src/lib/**/server/*.v`) is **server-only**. The
+* Keep the `#lib/backend` convention: any `.v` under `src/lib/backend/`
+  (at any depth: `src/lib/**/backend/*.v`), or any `*_backend.v` file, is **backend-only**. The
   plugin refuses to resolve it from client code (Svelte components,
   `#lib/` WASM wrappers) with a build error naming importer+file.
-  Server-only `.v` may be imported by `#routes/*.v` (V-to-V include
+  Backend-only `.v` may be imported by `#routes/*.v` (V-to-V include
   at codegen time) but never ships fetch/WASM stubs to the browser.
   Use for secrets, db handles, admin fns.
 * Handler shapes (built): verb handlers take the framework

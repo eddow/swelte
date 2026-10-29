@@ -9,7 +9,7 @@ src/
   sdk.ts        browser runtime: SwelteRpcError, __swelteFetch (#routes/*),
                 __swelteWasmCall (#lib/*). No node:* imports — bundled to browsers.
   vite.ts       Vite plugin: *.v resolveId/load codegen, #routes/#lib aliases,
-                types + stub emit into .swelte/, dev RPC proxy, #lib/server guard.
+                types + stub emit into .swelte/, dev RPC proxy, #lib/backend guard.
   toolchain.ts  node-only: V binary resolution (PATH or @swelte/vvm).
   cli.ts        `main(argv)`: dispatch to commands/*.
   commands/     one module per subcommand (dev|build|preview|init|check) + types.ts (argv parser).
