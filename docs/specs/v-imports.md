@@ -1,6 +1,9 @@
 # Spec: `.v` imports — `#routes/` server RPC vs `#lib/` isomorphic WASM
 
-Status: design reference (§1–§5 built) + decisions log (§6). No open questions.
+Status: design reference (§1–§5 built) + decisions log (§6). §6 records
+all 2026-10-29 decisions including the verb-vs-rpc handler split
+(verb handlers: `SwelteRequest` in, response out; `@[rpc]` fns:
+one args-struct).
 `docs/rpc.md`+`types.md`+`errors.md` describe the built behavior;
 this file is the design rationale and the undecided remainder.
 Forward work lives in `roadmap.md` only.
@@ -235,14 +238,17 @@ from extended configs, so no generated fragment — wildcards only).
 `generate()` runs on `configResolved` + `buildStart`, re-runs on
 `.v` add/change/unlink. All warnings carry file+line.
 
-## 5. Server side (V dispatcher) — not built
+## 5. Server side (V dispatcher) — built (2026-10-29)
 
-Only `#routes/` participates. Design: shared `routeFor` with a generated
-`.swelte/server.gen.v` (`/` -> `src/routes/index.v`, `/api/greet` ->
-`src/routes/api/greet.v`, else 404; unknown fn -> 404 + available;
-missing carrier -> 400; bad JSON -> 400; `!T` -> 400; mismatch -> 405).
+Only `#routes/` participates. `generate()` emits `routes/`
+(`module routes`: one file per routes file + `server_gen.v` with
+`SwelteRequest` + `swelte_route`), shared with `server.v` (`Hand` +
+static + `main()`) via directory-mode `v run .` (`/` ->
+`src/routes/index.v`, `/api/greet` -> `src/routes/api/greet.v`,
+else 404; unknown fn -> 404 + available; missing carrier -> 400;
+bad JSON -> 400; `!T` -> 400; mismatch -> 405).
 Envelope: `docs/errors.md`. Dev proxy: `docs/errors.md` SPA-first rule.
-See roadmap item 1 — the dispatcher generator is the next build.
+See roadmap item 1 (built) and item 23 (static-vlib deferral).
 
 ## 6. Decisions (2026-10-29, all built or recorded)
 
@@ -257,3 +263,14 @@ See roadmap item 1 — the dispatcher generator is the next build.
   Server-only `.v` may be imported by `#routes/*.v` (V-to-V include
   at codegen time) but never ships fetch/WASM stubs to the browser.
   Use for secrets, db handles, admin fns.
+* Handler shapes (built): verb handlers take the framework
+  `SwelteRequest` (query, form, headers, cookies, method, path,
+  qualifier; route params open) and return a response; `@[rpc]` fns
+  take one args-struct and return `T`/`!T`. TS stubs stay uniform
+  (`fn(args)` → `Promise`); the file path already said which kind.
+* V runtime placement (deferred — roadmap item 23): `SwelteRequest` +
+  `swelte_err_*` stay emitted into `routes/server_gen.v` until the
+  shape freezes (route params §8 open). Then: static
+  `engine/core/vlib/request.v` (`module routes`), copied verbatim by
+  `generate()`, content-hashed. Never `-I node_modules/@swelte/...`
+  (pnpm/vendored fragility); import-from-npm is TS-side only.

@@ -30,6 +30,7 @@ pub fn login(args LoginArgs) !Session {
 }
 
 @[get]
-pub fn get_greeting(args LoginArgs) string {
-	return 'Hello, ' + args.payload + '! from Swelte V backend'
+pub fn get_greeting(req SwelteRequest) string {
+	name := req.query['payload'] or { '""' }
+	return 'Hello, ' + name.trim('"') + '! from Swelte V backend'
 }

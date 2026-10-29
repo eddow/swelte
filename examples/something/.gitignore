@@ -1,6 +1,10 @@
 # build outputs — never commit
 .svelte/
+# generated V dispatcher (generate() -> routes/*.v; see roadmap item 1)
+routes/
 dist/
+# compiled dev binary (`v -o server` / `v run` output)
 server
+something
 .DS_Store
 node_modules/

@@ -74,11 +74,12 @@ async function postJson<TResult>(base: string, fn: string, args: object): Promis
 	return res.json()
 }
 
-async function getJson<TResult>(base: string, fn: string, args: object): Promise<TResult> {
+async function getVerb<TResult>(base: string, fn: string, method: string, qualifier: string, args: object): Promise<TResult> {
+	const q = qualifier ? `?q=${encodeURIComponent(qualifier)}` : ''
 	const res = await fetch(
-		`${base}?fn=${encodeURIComponent(fn)}${encodeQuery(args ?? {}).replace(/^\\?/, '&')}`,
+		`${base}${encodeQuery(args ?? {}).replace(/^\?/, q ? '&' : '?') || q}`,
 		{
-			method: 'GET',
+			method,
 			headers: { accept: 'application/json' },
 		}
 	)
@@ -86,20 +87,41 @@ async function getJson<TResult>(base: string, fn: string, args: object): Promise
 	return res.json()
 }
 
+async function postForm<TResult>(base: string, fn: string, method: string, qualifier: string, args: object): Promise<TResult> {
+	const q = qualifier ? `?q=${encodeURIComponent(qualifier)}` : ''
+	const params = new URLSearchParams()
+	for (const [k, v] of Object.entries((args ?? {}) as Record<string, unknown>)) {
+		if (v === undefined || v === null) continue
+		params.set(k, typeof v === 'string' ? v : JSON.stringify(v))
+	}
+	const res = await fetch(`${base}${q}`, {
+		method,
+		headers: { 'content-type': 'application/x-www-form-urlencoded', accept: 'application/json' },
+		body: params.toString(),
+	})
+	if (!res.ok) return throwForStatus(base, fn, res)
+	return res.json()
+}
+
 /**
  * Internal fetch for code-generated `#routes/*.v` stubs (spec v-imports.md §4).
- * kind: 'rpc' → POST JSON `{fn,args}`; 'get' → GET `?fn=`; 'post' → POST JSON
- * (the V dispatcher also accepts form `POST ?fn=` from no-JS forms).
+ * kind 'rpc' → POST JSON `{fn,args}`; verbs → method + `?q` qualifier for
+ * non-default handlers (GET query / form POST). Content-Type decides the
+ * server branch: JSON → rpc, form → verb dispatch.
  * Not user API — import the `.v` file instead.
  */
 export async function __swelteFetch<TResult>(
 	base: string,
 	fn: string,
-	kind: 'rpc' | 'get' | 'post',
-	args: object = {}
+	kind: 'rpc' | 'get' | 'post' | 'put' | 'delete' | 'patch',
+	args: object = {},
+	qualifier = ''
 ): Promise<TResult> {
-	if (kind === 'get') return getJson<TResult>(base, fn, args)
-	return postJson<TResult>(base, fn, args)
+	if (kind === 'rpc') return postJson<TResult>(base, fn, args)
+	if (kind === 'get' || kind === 'put' || kind === 'delete' || kind === 'patch') {
+		return getVerb<TResult>(base, fn, kind.toUpperCase(), qualifier, args)
+	}
+	return postForm<TResult>(base, fn, 'POST', qualifier, args)
 }
 
 // Dev fallback registry for `#lib/*.v` before `v -b wasm` artifacts exist.

@@ -12,11 +12,13 @@ pub:
 }
 
 @[get]
-pub fn get_greeting(args GetGreetingArgs) string {
-	return 'Hello, ' + args.payload + '!'
+pub fn get_greeting(req SwelteRequest) string {
+	name := req.query['payload'] or { '""' }
+	return 'Hello, ' + name.trim('"') + '!'
 }
 
 @[post]
-pub fn save_name(args SaveNameArgs) string {
-	return 'saved:' + args.payload
+pub fn save_name(req SwelteRequest) string {
+	name := req.form['payload'] or { '' }
+	return 'saved:' + name
 }

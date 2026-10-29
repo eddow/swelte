@@ -4,6 +4,14 @@ Source of truth for how Svelte calls V. No `self`, no `$ssapi`, no
 `$csapi` — every `.v` file is an ES module, every `pub fn` with an
 attribute is a named export.
 
+Generated V dispatcher (`routes/`, `module routes`): `generate()` emits
+one file per routes file (`routes/index.v`, `routes/api_greet.v`) plus
+`routes/server_gen.v` (`SwelteRequest` + `swelte_route` + `err_*`
+helpers). `server.v` is `Hand` + static handlers + `main()` only, run
+via directory-mode `v run .`. Structs are prefixed per file
+(`ApiGreet_LoginArgs`) to share one module; fns are `swelte_<mod>_*`
+(snake_case, V requirement).
+
 ## Directories
 
 - `src/routes/**/*.v` — server RPC. File path is the route:
