@@ -1,0 +1,33 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "moduleResolution": "bundler",
+    "module": "ESNext",
+    "allowJs": true,
+    "checkJs": false,
+    "types": [
+      "vite/client",
+      "svelte"
+    ],
+    "paths": {
+      "#routes/*.v": [
+        "./.swelte/types/routes/*.d.ts"
+      ],
+      "#lib/*.v": [
+        "./.swelte/types/lib/*.d.ts"
+      ],
+      "#routes/*": [
+        "./src/routes/*"
+      ],
+      "#lib/*": [
+        "./src/lib/*"
+      ]
+    }
+  },
+  "include": [
+    "src",
+    "vite.config.ts",
+    ".swelte/types",
+    ".swelte/v-shim.d.ts"
+  ]
+}

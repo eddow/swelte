@@ -1,0 +1,22 @@
+{
+  "name": "swelte-monorepo",
+  "private": true,
+  "type": "module",
+  "version": "0.1.0",
+  "workspaces": [
+    "engine/*",
+    "examples/*"
+  ],
+  "scripts": {
+    "dev": "npm run dev --workspace=examples/something",
+    "build": "npm run build --workspace=examples/something",
+    "build:engine": "npm run build --workspace=@swelte/core",
+    "biome:check": "biome format .",
+    "biome:format": "biome format --write .",
+    "biome:format:unsafe": "biome format --write . --unsafe"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.6.4",
+    "typescript": "^5.0.0"
+  }
+}

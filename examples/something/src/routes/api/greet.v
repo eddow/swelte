@@ -1,0 +1,35 @@
+// Swelte API route `/api/greet`. V struct -> TS interface projection.
+module greet
+
+import time
+
+pub struct Session {
+pub:
+	id         string
+	user       string
+	remember   bool
+	expires_at time.Time
+}
+
+pub struct LoginArgs {
+pub:
+	payload string
+}
+
+@[rpc]
+pub fn login(args LoginArgs) !Session {
+	if args.payload == '' {
+		return error('missing payload')
+	}
+	return Session{
+		id: 'sess_' + args.payload
+		user: args.payload
+		remember: true
+		expires_at: time.now()
+	}
+}
+
+@[get]
+pub fn get_greeting(args LoginArgs) string {
+	return 'Hello, ' + args.payload + '! from Swelte V backend'
+}

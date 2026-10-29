@@ -1,0 +1,19 @@
+{
+  "name": "@swelte/vvm",
+  "version": "0.1.0",
+  "description": "V Version Manager \u2014 installs and manages V toolchains inside node_modules (nvm for V)",
+  "type": "module",
+  "bin": {
+    "vvm": "./bin/vvm.js",
+    "v": "./bin/v-shim.js"
+  },
+  "files": [
+    "bin"
+  ],
+  "scripts": {
+    "postinstall": "node ./bin/postinstall.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

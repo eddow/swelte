@@ -1,0 +1,8 @@
+{
+	"npm.exclude": [
+		"**/versions/**"
+	],
+	"cSpell.words": [
+		"swelte"
+	]
+}

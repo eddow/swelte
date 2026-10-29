@@ -1,0 +1,10 @@
+node_modules/
+dist/
+examples/*/node_modules/
+examples/*/dist/
+examples/*/.swelte/
+examples/*/server
+engine/*/node_modules/
+engine/*/dist/
+engine/vvm/versions/
+engine/vvm/.active-version

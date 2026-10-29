@@ -1,0 +1,140 @@
+{
+	"$schema": "https://biomejs.dev/schemas/2.6.4/schema.json",
+	"files": {
+		"includes": [
+			"**/src/**/*.ts",
+			"**/src/**/*.json",
+			"**/src/**/*.svelte",
+			"**/src/**/*.js",
+			"**/src/**/*.css"
+		],
+		"ignoreUnknown": true
+	},
+	"vcs": {
+		"enabled": false
+	},
+	"formatter": {
+		"indentStyle": "tab",
+		"lineWidth": 100
+	},
+	"css": {
+		"parser": {
+			"tailwindDirectives": true
+		},
+		"formatter": {
+			"indentStyle": "tab",
+			"lineWidth": 100,
+			"quoteStyle": "single"
+		}
+	},
+	"javascript": {
+		"formatter": {
+			"lineWidth": 100,
+			"quoteStyle": "single",
+			"semicolons": "asNeeded",
+			"trailingCommas": "es5",
+			"indentStyle": "tab"
+		}
+	},
+	"html": {
+		"experimentalFullSupportEnabled": true,
+		"formatter": {
+			"enabled": true,
+			"indentStyle": "tab",
+			"lineWidth": 100
+		}
+	},
+	"linter": {
+		"rules": {
+			"style": {
+				"noDescendingSpecificity": "off",
+				"noNonNullAssertion": "off",
+				"useSingleVarDeclarator": {
+					"level": "warn",
+					"fix": "safe"
+				},
+				"useTemplate": {
+					"level": "warn",
+					"fix": "safe"
+				},
+				"noParameterAssign": "off",
+				"useImportType": { "level": "warn", "fix": "safe" },
+				"useConst": {
+					"level": "info",
+					"fix": "none"
+				}
+			},
+			"suspicious": {
+				"noExplicitAny": "off",
+				"noDebugger": "off",
+				"noConsole": "off",
+				"noDocumentCookie": "off",
+				"noConfusingVoidType": "off",
+				"noAssignInExpressions": "off",
+				"noImplicitAnyLet": "off",
+				"useIterableCallbackReturn": "off",
+				"noRedeclare": "off",
+				"noShadowRestrictedNames": "off"
+			},
+			"performance": {
+				"noAccumulatingSpread": "off"
+			},
+			"complexity": {
+				"noUselessFragments": "off",
+				"noBannedTypes": "off",
+				"useLiteralKeys": { "level": "off", "fix": "unsafe" },
+				"useOptionalChain": { "level": "off", "fix": "unsafe" }
+			},
+			"security": {},
+			"correctness": {
+				"noUnusedImports": {
+					"level": "info",
+					"fix": "safe"
+				},
+				"noUnusedFunctionParameters": {
+					"level": "info",
+					"fix": "safe"
+				},
+				"noUnusedLabels": "off"
+			},
+			"nursery": {},
+			"a11y": {
+				"noHeaderScope": "off",
+				"useButtonType": "off",
+				"noStaticElementInteractions": "off",
+				"useValidAnchor": "off",
+				"useSemanticElements": "off",
+				"useKeyWithClickEvents": "off",
+				"useAriaPropsSupportedByRole": "off",
+				"noLabelWithoutControl": "off",
+				"noNoninteractiveElementToInteractiveRole": "off",
+				"noRedundantRoles": "off"
+			}
+		}
+	},
+	"assist": {
+		"actions": {
+			"source": {
+				"organizeImports": "on"
+			}
+		}
+	},
+	"overrides": [
+		{
+			"includes": ["**/*.svelte"],
+			"linter": {
+				"rules": {
+					"complexity": { "noUselessLoneBlockStatements": "off" },
+					"style": {
+						"useConst": "off",
+						"useImportType": "off"
+					},
+					"correctness": {
+						"noUnusedImports": "off",
+						"noUnusedVariables": "off"
+					}
+				}
+			}
+		}
+	]
+}

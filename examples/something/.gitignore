@@ -1,0 +1,6 @@
+# build outputs — never commit
+.svelte/
+dist/
+server
+.DS_Store
+node_modules/

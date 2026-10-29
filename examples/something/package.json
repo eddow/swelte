@@ -1,0 +1,21 @@
+{
+  "name": "something",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "swelte dev",
+    "build": "swelte build",
+    "preview": "swelte preview"
+  },
+  "dependencies": {
+    "svelte": "^5.0.0",
+    "@swelte/core": "^0.1.0"
+  },
+  "devDependencies": {
+    "@sveltejs/vite-plugin-svelte": "^5.0.0",
+    "typescript": "^5.0.0",
+    "vite": "^6.0.0",
+    "@swelte/vvm": "^0.1.0"
+  }
+}

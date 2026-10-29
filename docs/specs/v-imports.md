@@ -1,0 +1,259 @@
+# Spec: `.v` imports — `#routes/` server RPC vs `#lib/` isomorphic WASM
+
+Status: design reference (§1–§5 built) + decisions log (§6). No open questions.
+`docs/rpc.md`+`types.md`+`errors.md` describe the built behavior;
+this file is the design rationale and the undecided remainder.
+Forward work lives in `roadmap.md` only.
+
+## 1. Goal
+
+Any `.v` file is an ES module. Any `pub fn` with an RPC attribute is
+a named export. **Directory decides runtime; extension stays `.v`:**
+
+```svelte
+<script lang="ts">
+  import { get_greeting } from '#routes/index.v';
+  import { login } from '#routes/api/greet.v';
+  import { hash_string } from '#lib/crypto/hash.v';
+  import type { Session } from '#routes/api/greet.v';
+</script>
+```
+
+* `#routes/**/*.v` = **server call** (fetch to the V backend).
+  File path is the route, fn name goes in the body (`[@rpc]`)
+  or in `?fn=` (verb attributes).
+* `#lib/**/*.v` = **isomorphic lib** (local WASM call, works offline).
+  No route, no fetch. Same V source compiles to native (server) +
+  WASM (browser); TS import is always `async` to unify both.
+
+Deleted: `self` bare specifier, `$ssapi/*`, `$csapi/*`,
+`sdk.post/get/worker.call` as user API, `@[expose]`, `src/pages/`,
+`src/ssapi/`, `src/csapi/`, `src/api/`, `./$types` shims.
+`@swelte/rust` is dropped — WASM stays V (`v -b wasm`), no Rust
+package, no `*.rs` imports. Aliases follow SvelteKit: `#routes`, `#lib`.
+
+## 2. File layout
+
+```
+src/routes/index.svelte + src/routes/index.v      route `/`
+src/routes/about.svelte + src/routes/about.v      route `/about`
+src/routes/api/greet.v                            route `/api/greet`
+src/routes/api/admin/users.v                      route `/api/admin/users`
+src/lib/crypto/hash.v                             isomorphic, no route
+src/lib/format.v                                  isomorphic, no route
+```
+
+### `#routes/` — server RPC
+
+Rules (`routeFor`, once in `vite.ts`, reused by V dispatcher gen):
+
+* `src/routes/<path>.v` -> `/<path>`, except `src/routes/api/**`
+  -> `/api/**` (same string, kept explicit so API files need no
+  `.svelte` partner).
+* `index.v` -> `/` (or `/api/` under api — discouraged, warn).
+* Every routed `.v` must have either a `.svelte` partner (page) or
+  live under `api/` (headless JSON). Orphan `routes/*.v` without a
+  partner outside `api/` is a build warning (future: error).
+* Leaf-vs-index clash (`foo.v` + `foo/index.v`) is a build warning
+  with file+line.
+
+`src/routes/` is the rename of old `src/pages/`. `src/api/`
+(previous revision) and `src/ssapi/` (implemented) both move here:
+`src/ssapi/greet.v` -> `src/routes/api/greet.v`, route
+`/ssapi/greet` -> `/api/greet`.
+
+### `#lib/` — isomorphic WASM
+
+* Any path under `src/lib/`. Never routed, never fetched, never
+  appears in the V dispatcher or the dev proxy.
+* Same V source must compile both ways: `v` native (unused on server
+  for now, but kept importable) and `v -b wasm` (browser).
+  Constraint decided 2026-10-29 (warn in dev, error at build):
+  `#lib/` (non-`server`) may import only the portable subset —
+  `strings`, `math`, `encoding/*`, `crypto/*`, `json`, `json2`.
+  Anything else (`os`, `net`, `db`, `time`, …) is rejected.
+  Escape hatch: `#lib/server/` allows everything (server-only,
+  never compiled to WASM — see §7). The subset expands on demand
+  when a real `#lib/` fn needs a module: add the module, not a
+  per-file exemption list.
+* One WASM blob per `.v` file (cache granularity, matches the
+  one-file-one-module mental model). Shared `#lib` helpers without
+  attributes are bundled into each importer (static link), not split.
+* Runs on the importing thread (plain `async` call). Decided 2026-10-29:
+  main thread, no Worker opt-in flag for now — revisit only with measured
+  jank. Never a shared cross-module bus (the old `csapi` worker design
+  is dead).
+
+Sexy property this buys: the *same* `hash_string` V fn is unit-tested
+natively (`v test`), served nowhere, and executed in the browser as
+WASM. One language, one file, two targets.
+
+## 3. Attributes
+
+### Server (`#routes/`) — decided 2026-10-29
+
+Each verb attribute IS the HTTP verb. One default fn per verb per file;
+`fn` name never travels (no `?fn=`, no `"fn"` — those were the old model,
+removed). `@[rpc]` fns are the only named functions: many per file,
+`fn` in the JSON body.
+
+| attribute | HTTP | carrier | routing |
+|---|---|---|---|
+| `@[rpc]` | POST, JSON `Accept: application/json` | body `{ "fn", "args" }` | `fn` = V fn name; unlimited per file |
+| `@[get]` / `@[get('q')]` | GET `Accept: application/json` | query = args | default, or `?q` present |
+| `@[post]` / `@[post('q')]` | POST form (multipart / urlencoded) | form fields = args | default, or `?q` present |
+| `@[put]` / `@[put('q')]`, `@[delete]` / `@[delete('q')]`, `@[patch]` / `@[patch('q')]` | respective method | same per-method rules | same |
+
+* No attribute = internal helper, never exported, never routed.
+* Verbs stack across methods (`@[get; post]` = both), but **one default
+  per verb per file** — two `@[post]` defaults = build error.
+  Qualifiers must be unique per verb per file.
+  `@[rpc]` is unaffected (many per file, always).
+* Qualifier syntax: `@[post('delete')]` — single identifier, single
+  quotes. Trigger: `<form action="?delete" method="POST">` (SvelteKit's
+  `?/delete` shape, without the slash). JSON POSTs never consult
+  qualifiers; form POSTs never consult `"fn"`. Content-Type decides:
+  `application/json` → `@[rpc]` dispatch by body; form content-type →
+  verb dispatch by qualifier.
+* Signatures differ by kind. `@[rpc]` keeps the single-args-struct rule
+  (`pub fn login(args LoginArgs)`). Verb handlers take the framework
+  `Request` (query, form fields, headers, cookies, route params —
+  exact shape with the dispatcher, roadmap item 1):
+  ```v
+  @[post('delete')]
+  pub fn delete_account(req Request) ! { ... }
+  ```
+* Per-fn, not per-file. `@[rpc]` is the JSON-SPA path; verbs are the
+  linkable/cacheable (GET) and progressive-enhancement (form POST,
+  no-JS `<form>` hits the same fn) path. Importers may still
+  `import { delete_account } from '#routes/x.v'` — the stub POSTs the
+  form encoding with `?delete`; or they use a plain `<form>` and skip
+  JS entirely.
+
+### Isomorphic (`#lib/`)
+
+* `@[rpc]` = expose. Same spelling as server, different backend:
+  local WASM call instead of fetch. No verbs — `@[get]`/`@[post]`
+  in `#lib/` are build warnings (ignored, fn still exposed as RPC).
+* No attribute = internal helper (static-linked, never exported).
+* V signature rules identical to server: one args-struct,
+  `!T` = may reject with `SwelteRpcError` (`status: 0`,
+  `body.error = err.msg()`), `?T` = `T | null`.
+  Single-args-struct expansion in TS unchanged.
+
+Why the same `[@rpc]`? One concept ("callable across the boundary"),
+two bindings (fetch vs WASM). The importer never cares which; the
+file path (`#routes/` vs `#lib/`) already said it.
+
+## 4. Compile time: what `import './x.v'` does
+
+The Vite plugin already parses `.v` as text
+(`parseVFile`/`parseStructs`); it now emits **two** artifacts per file
+and branches codegen on directory:
+
+### `#routes/*.v` -> fetch stub
+
+Runtime `.swelte/generated/routes/<mod>.js`:
+
+```js
+// auto-generated from src/routes/api/greet.v — do not edit
+import { __swelteFetch } from '@swelte/core';
+export function get_greeting(args) {
+  return __swelteFetch('/api/greet', 'get_greeting', 'get', args);
+}
+export function login(args) {
+  return __swelteFetch('/api/greet', 'login', 'rpc', args);
+}
+```
+
+`__swelteFetch(base, fn, kind, args)` (internal, in `sdk.ts`):
+`rpc` -> `POST base {fn,args}` JSON; `get` -> `GET base?fn=&...args`;
+`post` -> form `POST base?fn=`. Rejects with `SwelteRpcError`.
+
+### `#lib/*.v` -> WASM stub (dual pipeline, decided 2026-10-29)
+
+Runtime `.swelte/generated/lib/<mod>.js` (same shape both modes —
+the bridge masks the difference, importers never change):
+
+```js
+// auto-generated from src/lib/crypto/hash.v — do not edit
+import { __swelteWasmCall } from '@swelte/core';
+const wasmUrl = "<project>/.swelte/generated/lib/crypto/hash.wasm?url";
+export function hash_string(args) {
+  return __swelteWasmCall(wasmUrl, "hash_string", args);
+}
+```
+
+Dev fallback today: no artifact yet -> in-process registry fallback +
+clear `SwelteRpcError(0)` (never a build-breaking dynamic import).
+
+| mode | WASM output | why |
+|---|---|---|
+| `vite dev` | per-file micro-module (`.swelte/dev/<mod>.wasm`) | HMR: editing `crypto/hash.v` recompiles only that file (ms), Vite swaps the module, rest of the app untouched; untouched utils stay cached |
+| `vite build` | single bundle (`dist/assets/app_lib.wasm`, via a generated entry importing all client-used `#lib/` files, `v -b wasm -prod`) | LTO + dead-code elimination across files (<100KB target); one runtime/memory overhead; one `compileStreaming()` on cold start |
+
+The plugin branches on `command === 'serve'` vs `'build'`. `buildStart`
+collects the client-imported `#lib/` set for the bundle entry; dev
+compiles per-file on change.
+
+* Args cross the boundary as JSON (`json.encode`/`decode` both sides),
+  never as raw linear-memory structs in v1 — same trick that dodges
+  string-alloc-across-boundary pain.
+* `!T` failure -> rejects with `SwelteRpcError(status 0)`.
+  Same class as server errors, one `catch` handles either.
+* Prod dispatch: the consolidated bundle exposes one dispatcher;
+  per-file stubs resolve their call into it (same `__swelteWasmCall`
+  signature — dev per-file URL vs prod bundle URL + fn name).
+
+### Shared machinery
+
+```ts
+resolveId(id, importer) {
+  if (id.endsWith('.v')) return '\0swelte:' + resolve(importer, id);
+}
+load(id) {
+  if (!id.startsWith('\0swelte:')) return null;
+  const file = realpath(id);
+  if (file.includes('/src/lib/')) return jsWasmFor(parseVFile(src));
+  if (file.includes('/src/routes/'))
+    return jsFetchFor(parseVFile(src), routeFor(file));
+  // warn: .v outside both dirs — ignored (never routed, never typed)
+}
+```
+
+Plus: `.swelte/v-shim.d.ts` (one `declare module '#routes/x.v'` /
+`'#lib/y.v'` per known file, type bodies inlined — no relative
+re-export, TS2686), `config()` aliases
+`{ #routes -> src/routes, #lib -> src/lib }`, `.swelte/types/**`
+projection (`time.Time->number` (unix epoch, decided 2026-10-29), `!T` strips + fallible,
+unknown -> `unknown` + warning; `time`/`os`-only types in `#lib/`
+warn louder). User tsconfig holds the STABLE wildcards (written once):
+`#routes/*.v -> ./.swelte/types/routes/*.d.ts`,
+`#lib/*.v -> ./.swelte/types/lib/*.d.ts` (TS drops non-`*` exact keys
+from extended configs, so no generated fragment — wildcards only).
+
+`generate()` runs on `configResolved` + `buildStart`, re-runs on
+`.v` add/change/unlink. All warnings carry file+line.
+
+## 5. Server side (V dispatcher) — not built
+
+Only `#routes/` participates. Design: shared `routeFor` with a generated
+`.swelte/server.gen.v` (`/` -> `src/routes/index.v`, `/api/greet` ->
+`src/routes/api/greet.v`, else 404; unknown fn -> 404 + available;
+missing carrier -> 400; bad JSON -> 400; `!T` -> 400; mismatch -> 405).
+Envelope: `docs/errors.md`. Dev proxy: `docs/errors.md` SPA-first rule.
+See roadmap item 1 — the dispatcher generator is the next build.
+
+## 6. Decisions (2026-10-29, all built or recorded)
+
+* `time.Time` wire format: unix int (`json.encode(time)` as-is, zero V-side work), TS projects `number` (epoch seconds). No drift: wire and projection agree. `docs/types.md` updated.
+* Notation follows current SvelteKit: `#lib` (hash), not `$lib`.
+  SvelteKit swapped `$lib` -> `#lib` (Node subpath-import style);
+  we match. Same for `#routes`.
+* Keep the `#lib/server` convention: any `.v` under `src/lib/server/`
+  (at any depth: `src/lib/**/server/*.v`) is **server-only**. The
+  plugin refuses to resolve it from client code (Svelte components,
+  `#lib/` WASM wrappers) with a build error naming importer+file.
+  Server-only `.v` may be imported by `#routes/*.v` (V-to-V include
+  at codegen time) but never ships fetch/WASM stubs to the browser.
+  Use for secrets, db handles, admin fns.
