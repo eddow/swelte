@@ -16,7 +16,9 @@ via directory-mode `v run .`. Structs are prefixed per file
 
 - `src/routes/**/*.v` — server RPC. File path is the route:
   `+page.v` → `/`, `api/greet.v` → `/api/greet` (`index.v` is the legacy
-  spelling of `+page.v`, same URL).
+  spelling of `+page.v`, same URL). Dynamic segments: `users/[id].v` →
+  `/users/[id]`, `files/[...rest].v` → `/files/[...rest]` (roadmap §8;
+  params arrive in `Request.params`).
   Import from `#routes/...` (or relative `./x.v`).
 - `src/lib/**/*.v` — isomorphic lib. Never routed, never fetched.
   Same V compiles native + `v -b wasm`; TS import is always `async`.
@@ -84,7 +86,9 @@ pub fn delete_account(req Request) ! { ... }
 fields, headers, cookies, route params — exact shape with the
 dispatcher, roadmap item 1).
 `!T` = may reject with `SwelteRpcError` (status 0 for local `#lib/`
-calls). `?T` = `T | null`.
+calls). `?T` = `T | null`. `Request.params` carries dynamic-segment
+values (`req.params['id']` for `/users/[id]`); client stubs
+interpolate them into the URL and strip them from the payload.
 
 ## Transport
 

@@ -27,7 +27,10 @@ middleware (`+route.v` only, roadmap §7) exports no callables to TS —
 but the wrapper's `pub struct`s are still projected (wrapper is
 +layout-shaped, shared types flow to `+page.svelte`).
 `routeFor` (`src/routes/<p>.v` → `/<p>`, `src/lib/**` → no route) is
-shared with the V dispatcher.
+shared with the V dispatcher. Dynamic file segments (`[id]`,
+`[...rest]`) pass through into the route pattern; `SwelteRequest`
+carries a `params: Record<string, string>` field alongside
+`query`/`form`/headers.
 
 ```v
 pub struct LoginArgs { pub: payload string }

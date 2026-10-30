@@ -6,8 +6,8 @@ not implemented; items leave this file when they land in `docs/`.
 The `.v`-import design rationale lives in `v-imports.md` (§1–§5 built,
 §6 decisions log).
 
-Items 1–7 (dispatcher, dev, build, preview, init, V-WASM, +route
-wrappers + middleware), 15-part
+Items 1–8 (dispatcher, dev, build, preview, init, V-WASM, +route
+wrappers + middleware, dynamic segments), 15-part
 (one-default-per-verb + unique-qualifier as build errors), 18-part
 (`time.Time→number`; allowlist enforced at build for `#lib/` WASM,
 runtime-warn remainder only for the known-broken wasm-backend stdlib),
@@ -215,13 +215,41 @@ on either side); endpoints in `+route.v`,
 `@[before]`/`@[after]` in leaves, and bad middleware shapes →
 build errors naming file+fn.
 
-## 8. Dynamic segments
+## 8. Dynamic segments — built (2026-10-30)
 
-`[id]`, `[...rest]` param flow into args structs.
+`src/routes/users/[id].v` → `/users/[id]` (single segment),
+`src/routes/files/[...rest].v` → `/files/[...rest]` (catch-all, must be
+the last segment). The V dispatcher matches segment-wise
+(`swelte_match_route` in `routes/server_gen.v`): exact arms first
+(static wins), then dynamic arms ordered fewest-`[`-segments first,
+`[...rest]` catch-all last, alphabetical tiebreak (`foo/[id]` beats
+`foo/[...rest]` for `/foo/42`). Matched params flow into
+`SwelteRequest.params` (`req.params['id']`), percent-decoded
+(`urllib.path_unescape`; stub encodes with `encodeURIComponent`,
+catch-all per-segment so `/` survives); non-`SwelteRequest` verb fns
+also resolve narrow args from `form → query → params`. TS side:
+`SwelteRequest` gains `params: Record<string, string>`; fetch stubs
+interpolate path params into the URL (`__swelteUrl`, params stripped
+from the payload, missing param throws client-side); `.d.ts` types
+dynamic params as required (`args: { id: string } &
+Record<string, string>`).
 
-Test: add `src/routes/users/[id].v` (`@[get]` echoing `id`) +
-`.svelte`; `curl '…/users/42?payload="x"'` (or open `/users/42`)
-returns `42`; `/users/` (missing segment) 404s.
+Build errors (file+line): malformed brackets, non-final catch-all,
+duplicate param in one path, same normalized shape across files —
+`[id]` and `[...rest]` are DIFFERENT shapes (`foo/[id].v` +
+`foo/[...rest].v` coexist; `users/[id]` vs `users/[slug]` clash),
+dynamic `+route.v` dirs. Missing single segment (`/users/`, `/users`)
+404s; `/files/` matches with an empty `rest` (catch-all convention).
+
+Test: `src/routes/users/[id].v` (`@[get]` echoing `id`) +
+`src/routes/files/[...rest].v`; `curl …/users/42` → `"user:42"`;
+`…/users/` + `…/users` → 404 `{"error":"not found"}`;
+`…/files/a/b/c` → `"files:a/b/c"`; `…/users/a%20b` → `"user:a b"`
+(decoded); overlapping `foo/[id].v` + `foo/[...rest].v` → `/foo/42`
+hits the single arm, `/foo/a/b` the catch-all; stub
+`file_detail({rest:'a/b/c'})` → `/files/a/b/c` (slashes preserved);
+`/` + `/api/greet` + admin guard unaffected; `v -o` compiles with no
+warnings.
 
 ## 9. Trailing-slash / 404 / `+error`
 

@@ -10,6 +10,8 @@ artifact: `dist/server` + `dist/`).
 ```
 src/routes/+page.svelte + +page.v   / (get_greeting GET, save_name POST)
 src/routes/api/greet.v              /api/greet (get_greeting GET, login @[rpc] → Session)
+src/routes/users/[id].v             /users/[id] ([id] → req.params['id], roadmap §8)
+src/routes/files/[...rest].v        /files/[...rest] (catch-all → req.params['rest'])
 src/routes/admin/+route.svelte + +route.v   /admin wrapper (nav + @[before] sess guard / @[after] passthrough)
 src/routes/admin/+page.svelte + +page.v     /admin leaf (admin_whoami GET, reads injected x-user)
 src/lib/crypto/hash.v               isomorphic (hash_string @[rpc] → WASM/dev fallback)
@@ -39,6 +41,9 @@ node engine/core/dist/cli.js dev --port 5174 --backend 8131 --root examples/some
   `routes/admin__page.v` + `routes/server_gen.v` (`module routes`,
   `SwelteRequest` + `swelte_route`), one-default-per-verb +
   unique-qualifier enforced at generate time.
+- Dynamic segments proven: `/users/42` → `"user:42"`, `/users/` + `/users` →
+  404, `/files/a/b/c` → `"files:a/b/c"` (`req.params`; static beats
+  dynamic, `[...rest]` last).
 - Middleware chain proven: `admin/+route.v` `@[before]` rejects without
   `sess` cookie (400 `missing session`), injects `x-user` otherwise;
   `@[after]` passes through; `/` + `/api/greet` unaffected (scoping).

@@ -78,6 +78,12 @@ Rules (`routeFor`, once in `vite.ts`, reused by V dispatcher gen):
 * Every routed `.v` must have either a `.svelte` partner (page) or
   live under `api/` (headless JSON). Orphan `routes/*.v` without a
   partner outside `api/` is a build warning (future: error).
+* Dynamic segments (roadmap §8, built 2026-10-30): `[id]` matches one
+  non-empty segment, `[...rest]` matches the remainder (must be the
+  last segment). Matched values flow into `SwelteRequest.params`;
+  static routes win over dynamic, fewer params win over catch-all.
+  Build errors: malformed brackets, non-final catch-all, duplicate
+  params, same normalized shape across files.
 
 `src/routes/` is the rename of old `src/pages/`. `src/api/`
 (previous revision) and `src/ssapi/` (implemented) both move here:
