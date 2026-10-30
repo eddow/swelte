@@ -42,6 +42,7 @@ interface RpcFn {
 	tsret: string
 	fallible: boolean
 	singleArgsStruct?: string
+	setsCookie: boolean
 }
 
 function splitTopLevel(s: string, sep: string): string[] {
@@ -65,19 +66,46 @@ export function parseVFile(src: string): RpcFn[] {
 	const structs = parseStructs(src)
 	const structByName = new Map(structs.map((s) => [s.name, s]))
 	const fns: RpcFn[] = []
+	// V allows stacked attributes on consecutive lines (`@[rpc]` newline
+	// `@[sets_cookie]` newline `pub fn`). The function regex below matches
+	// the LAST bracket group before `pub fn`, so a stacked group would be
+	// missed. Merge first: collapse `]\s*\n\s*@[` runs (whitespace-only span
+	// between groups) into `; ` so stacked groups parse as one.
+	const merged = src.replace(/\]\s*\n\s*@\[/g, '; ')
+	// Single-inline `@[sets_cookie]` outside the merged group still counts:
+	// pre-scan for bare carrier lines immediately (whitespace-only span)
+	// followed by a verb-attribute line + `pub fn`.
+	const bareSpans: { end: number; name: string }[] = []
+	const bareRe = /@\[\s*sets_cookie\s*\]/g
+	let bm: RegExpExecArray | null
+	while ((bm = bareRe.exec(merged)) !== null) {
+		bareSpans.push({ end: bm.index + bm[0].length, name: 'sets_cookie' })
+	}
 	const re =
 		/@\[([^\]]*)\]\s*pub\s+fn\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(([^)]*)\)\s*([?!]?(?:\([^)]*\)|[A-Za-z_\][\w.[\]]*))?/g
 	let m: RegExpExecArray | null
-	while ((m = re.exec(src)) !== null) {
+	while ((m = re.exec(merged)) !== null) {
 		const attrParts = splitTopLevel(m[1], ';')
 		const verbs: { verb: string; qualifier?: string }[] = []
+		let setsCookie = false
+		for (const bs of bareSpans) {
+			if (bs.end <= m.index && merged.slice(bs.end, m.index).trim() === '') {
+				if (bs.name === 'sets_cookie') setsCookie = true
+			}
+		} // end bare-carrier attach
 		for (const p of attrParts) {
 			const pm = /^\s*([A-Za-z_][A-Za-z0-9_]*)\s*(?:\(\s*'([A-Za-z_][A-Za-z0-9_]*)'\s*\))?\s*$/.exec(p)
+			if (pm && pm[1] === 'sets_cookie' && !pm[2]) {
+				setsCookie = true
+				continue
+			}
 			if (pm && ['get', 'post', 'rpc', 'put', 'delete', 'patch', 'before', 'after'].includes(pm[1])) {
 				verbs.push({ verb: pm[1], qualifier: pm[2] })
 			}
 		}
-		if (verbs.length === 0) continue
+		if (verbs.length === 0) {
+			continue
+		}
 		const name = m[2]
 		const rawParams = (m[3] ?? '').trim()
 		const rawRet = (m[4] ?? '').trim()
@@ -136,6 +164,7 @@ export function parseVFile(src: string): RpcFn[] {
 				tsret: tsTypeFor(vret),
 				fallible,
 				singleArgsStruct,
+				setsCookie,
 			})
 		}
 	}
@@ -633,6 +662,24 @@ export function swelte(options: SweltePluginOptions = {}): Plugin {
 		o.push('\treturn urllib.path_unescape(s) or { s }')
 		o.push('}')
 		o.push('')
+		o.push('fn swelte_forbidden() (int, string, []string) {')
+		o.push('	return 403, \'{\"error\":\"forbidden\"}\', []string{}')
+		o.push('}')
+		o.push('')
+		o.push('fn swelte_method_not_allowed() (int, string, []string) {')
+		o.push('	return 405, \'{\"error\":\"method not allowed\"}\', []string{}')
+		o.push('}')
+		o.push('')
+		o.push('fn swelte_method_gate(method string) (int, string, []string) {')
+		o.push('\tif method == \'POST\' || method == \'PUT\' || method == \'PATCH\' || method == \'DELETE\' { return swelte_forbidden() }')
+		o.push('\treturn swelte_method_not_allowed()')
+		o.push('}')
+		o.push('')
+		o.push('fn swelte_normalize_path(path string) string {')
+		o.push('\tif path.len > 1 && path.ends_with(\'/\') { return path[..path.len - 1] }')
+		o.push('\treturn path')
+		o.push('}')
+		o.push('')
 		o.push('pub struct SwelteRequest {')
 		o.push('pub mut:')
 		o.push('\tquery map[string]string')
@@ -645,35 +692,48 @@ export function swelte(options: SweltePluginOptions = {}): Plugin {
 		o.push('\tqualifier string')
 		o.push('}')
 		o.push('')
-		o.push('fn swelte_err_unknown(path string, fn_name string, available []string) (int, string) {')
+		o.push('fn swelte_err_unknown(path string, fn_name string, available []string) (int, string, []string) {')
 		o.push("\tmut avail := '['")
 		o.push('\tfor i, a in available {')
 		o.push("\t\tif i > 0 { avail += ',' }")
 		o.push('\t\tavail += json.encode(a)')
 		o.push('\t}')
 		o.push("\tavail += ']'")
-		o.push('\treturn 404, \'{"error":"unknown fn","fn":\' + json.encode(fn_name) + \',"path":\' + json.encode(path) + \',"available":\' + avail + \'}\'')
+		o.push('\treturn 404, \'{"error":"unknown fn","fn":\' + json.encode(fn_name) + \',"path":\' + json.encode(path) + \',"available":\' + avail + \'}\', []string{}')
 		o.push('}')
 		o.push('')
-		o.push('fn swelte_err_bad(path string, fn_name string, detail string) (int, string) {')
-		o.push('\treturn 400, \'{"error":\' + json.encode(detail) + \',"fn":\' + json.encode(fn_name) + \',"path":\' + json.encode(path) + \'}\'')
+		o.push('fn swelte_err_unknown_cookies(path string, fn_name string, available []string) (int, string, []string) {')
+		o.push('\treturn swelte_err_unknown(path, fn_name, available)')
 		o.push('}')
 		o.push('')
-		o.push('fn swelte_err_unknown_qual(path string, available []string) (int, string) {')
+		o.push('fn swelte_err_bad(path string, fn_name string, detail string) (int, string, []string) {')
+		o.push('\treturn 400, \'{"error":\' + json.encode(detail) + \',"fn":\' + json.encode(fn_name) + \',"path":\' + json.encode(path) + \'}\', []string{}')
+		o.push('}')
+		o.push('')
+		o.push('fn swelte_err_bad_cookies(path string, fn_name string, detail string) (int, string, []string) {')
+		o.push('\treturn swelte_err_bad(path, fn_name, detail)')
+		o.push('}')
+		o.push('')
+		o.push('fn swelte_err_unknown_qual(path string, available []string) (int, string, []string) {')
 		o.push('\tmut avail := \'[\'')
 		o.push('\tfor i, a in available {')
 		o.push("\t\tif i > 0 { avail += ',' }")
 		o.push('\t\tavail += json.encode(a)')
 		o.push('\t}')
 		o.push("\tavail += ']'")
-		o.push('\treturn 404, \'{"error":"unknown qualifier","path":\' + json.encode(path) + \',"available":\' + avail + \'}\'')
+		o.push('\treturn 404, \'{"error":"unknown qualifier","path":\' + json.encode(path) + \',"available":\' + avail + \'}\', []string{}')
+		o.push('}')
+		o.push('')
+		o.push('fn swelte_err_unknown_qual_cookies(path string, available []string) (int, string, []string) {')
+		o.push('\treturn swelte_err_unknown_qual(path, available)')
 		o.push('}')
 		o.push('')
 		o.push('fn swelte_match_route(pattern string, path string) (bool, map[string]string) {')
+		o.push('\tnorm_path := swelte_normalize_path(path)')
 		o.push('\tmut params := map[string]string{}')
-		o.push("\tif pattern == '/' { if path == '/' || path == '' { return true, params } return false, params }")
+		o.push("\tif pattern == '/' { if norm_path == '/' || norm_path == '' { return true, params } return false, params }")
 		o.push('\tmut psegs := pattern.split("/")')
-		o.push('\tmut segs := path.split("/")')
+		o.push('\tmut segs := norm_path.split("/")')
 		o.push("\tif psegs.len > 0 && psegs[0] == '' { psegs.delete(0) }")
 		o.push("\tif segs.len > 0 && segs[0] == '' { segs.delete(0) }")
 		o.push("\tif psegs.len > 0 && psegs.last().starts_with('[...') {")
@@ -696,17 +756,18 @@ export function swelte(options: SweltePluginOptions = {}): Plugin {
 		o.push('\treturn true, params')
 		o.push('}')
 		o.push('')
-		o.push('pub fn swelte_route(path string, method string, query map[string]string, headers map[string]string, cookies map[string]string, body string, content_type string, qualifier string) (int, string) {')
+		o.push('pub fn swelte_route(path string, method string, query map[string]string, headers map[string]string, cookies map[string]string, body string, content_type string, qualifier string) (int, string, []string) {')
+		o.push('\tnorm_path := swelte_normalize_path(path)')
 		for (const d of dispatched.filter((x) => !x.route.includes('['))) {
-			o.push(`\tif path == ${vJsonStr(d.route)} { return ${d.prefix}dispatch(path, method, query, map[string]string{}, headers, cookies, body, content_type, qualifier) }`)
+			o.push(`\tif norm_path == ${vJsonStr(d.route)} { return ${d.prefix}dispatch(norm_path, method, query, map[string]string{}, headers, cookies, body, content_type, qualifier) }`)
 		}
 		// Dynamic arms (section 8) after exact arms: static beats dynamic; among
 		// dynamics, fewer [segs] first, [...rest] catch-all last (stable sort).
 		for (const d of [...dispatched].filter((x) => x.route.includes('[')).sort((a, b) => { const ca = a.route.includes('[...') ? 1 : 0; const cb = b.route.includes('[...') ? 1 : 0; if (ca !== cb) return ca - cb; const pa = (a.route.match(/\[/g) || []).length; const pb = (b.route.match(/\[/g) || []).length; if (pa !== pb) return pa - pb; return a.route < b.route ? -1 : a.route > b.route ? 1 : 0; })) {
-			o.push(`\t${d.prefix}matched, ${d.prefix}params := swelte_match_route(${vJsonStr(d.route)}, path)`)
-			o.push(`\tif ${d.prefix}matched { return ${d.prefix}dispatch(path, method, query, ${d.prefix}params, headers, cookies, body, content_type, qualifier) }`)
+			o.push(`\t${d.prefix}matched, ${d.prefix}params := swelte_match_route(${vJsonStr(d.route)}, norm_path)`)
+			o.push(`\tif ${d.prefix}matched { return ${d.prefix}dispatch(norm_path, method, query, ${d.prefix}params, headers, cookies, body, content_type, qualifier) }`)
 		}
-		o.push(`\treturn 404, '{"error":"not found"}'`)
+		o.push(`\treturn 404, '{"error":"not found"}', []string{}`)
 		o.push('}')
 		o.push('')
 		return o.join('\n')
@@ -737,6 +798,23 @@ export function swelte(options: SweltePluginOptions = {}): Plugin {
 			}
 		}
 		if (seenImp.size) o.push('')
+		// §10: per-fn Set-Cookie emitters live in the same `module routes`
+		// file as the dispatcher that calls them (V: same-module call).
+		// EVERY dispatch success path calls swelte_set_cookies_for_<fn>(),
+		// so every rpc/verb fn gets an emitter: flagged fns return the
+		// sess cookie template (placeholder replaced by Hand), unflagged
+		// fns return []string{}.
+		for (const fn of fns) {
+			if (fn.attr !== 'rpc' && fn.attr !== 'before' && fn.attr !== 'after' && !['get', 'post', 'put', 'delete', 'patch'].includes(fn.attr)) continue
+			o.push(`fn swelte_set_cookies_for_${prefix}${fn.name}() []string {`)
+			if (fn.setsCookie) {
+				o.push(`\treturn ['sess=__SWELTE_SESS__; Path=/; HttpOnly; SameSite=Lax; Max-Age=604800']`)
+			} else {
+				o.push(`\treturn []string{}`)
+			}
+			o.push(`}`)
+			o.push('')
+		}
 		// Shared structs: prefix to avoid duplicate-definition collisions
 		// when several per-file outputs share `module routes`.
 		const structNames = new Set(parseStructs(src).map((s) => s.name))
@@ -776,12 +854,12 @@ export function swelte(options: SweltePluginOptions = {}): Plugin {
 			}
 		}
 		if (befores.length === 0 && afters.length === 0) {
-			o.push(`pub fn ${prefix}dispatch(path string, method string, query map[string]string, params map[string]string, headers map[string]string, cookies map[string]string, body string, content_type string, qualifier string) (int, string) {`)
+			o.push(`pub fn ${prefix}dispatch(path string, method string, query map[string]string, params map[string]string, headers map[string]string, cookies map[string]string, body string, content_type string, qualifier string) (int, string, []string) {`)
 			o.push(...dispatchBody(prefix, mod, fns, null))
 			o.push('')
 			return o.join('\n')
 		}
-		o.push(`pub fn ${prefix}dispatch(path string, method string, query map[string]string, params map[string]string, headers map[string]string, cookies map[string]string, body string, content_type string, qualifier string) (int, string) {`)
+		o.push(`pub fn ${prefix}dispatch(path string, method string, query map[string]string, params map[string]string, headers map[string]string, cookies map[string]string, body string, content_type string, qualifier string) (int, string, []string) {`)
 		o.push(`\tmut form_before := map[string]string{}`)
 		o.push(`\tif content_type.contains('multipart/form-data') {`)
 		o.push(`\t\tmut boundary_before := ''`)
@@ -796,19 +874,21 @@ export function swelte(options: SweltePluginOptions = {}): Plugin {
 		o.push(`\tmut swelte_req := SwelteRequest{ query: query, form: form_before, headers: headers, cookies: cookies, params: params, method: method, path: path, qualifier: qualifier }`)
 		for (const b of befores) {
 			const bn = b.includes('_') ? b.slice(b.lastIndexOf('_') + 1) : b
-			o.push(`\tswelte_req = ${b}(swelte_req) or { return swelte_err_bad(path, '${bn}', err.msg()) }`)
+			o.push(`\tswelte_req = ${b}(swelte_req) or { return swelte_err_bad_cookies(path, '${bn}', err.msg()) }`)
 		}
-		o.push(`\tcode_before, body_before := ${prefix}dispatch_verbs(path, method, query, params, headers, cookies, body, content_type, qualifier, swelte_req)`)
+		o.push(`\tmut swelte_cookies := []string{}`)
+		o.push(`\tcode_before, body_before, verbs_cookies := ${prefix}dispatch_verbs(path, method, query, params, headers, cookies, body, content_type, qualifier, swelte_req)`)
+		o.push(`\tswelte_cookies << verbs_cookies`)
 		o.push(`\tmut swelte_code := code_before`)
 		o.push(`\tmut swelte_body := body_before`)
 		for (const a of afters) {
 			const an = a.includes('_') ? a.slice(a.lastIndexOf('_') + 1) : a
-			o.push(`\tswelte_code, swelte_body = ${a}(swelte_req, swelte_code, swelte_body) or { return swelte_err_bad(path, '${an}', err.msg()) }`)
+			o.push(`\tswelte_code, swelte_body = ${a}(swelte_req, swelte_code, swelte_body) or { return swelte_err_bad_cookies(path, '${an}', err.msg()) }`)
 		}
-		o.push(`\treturn swelte_code, swelte_body`)
+		o.push(`\treturn swelte_code, swelte_body, swelte_cookies`)
 		o.push('}')
 		o.push('')
-		o.push(`fn ${prefix}dispatch_verbs(path string, method string, query map[string]string, params map[string]string, headers map[string]string, cookies map[string]string, body string, content_type string, qualifier string, swelte_req SwelteRequest) (int, string) {`)
+		o.push(`fn ${prefix}dispatch_verbs(path string, method string, query map[string]string, params map[string]string, headers map[string]string, cookies map[string]string, body string, content_type string, qualifier string, swelte_req SwelteRequest) (int, string, []string) {`)
 		// `req` outlives the method arm (assigned per-arm below, read by
 		// handler calls): declare once at function scope.
 		o.push(`\tmut req := SwelteRequest{ query: query, form: map[string]string{}, headers: headers, cookies: cookies, params: params, method: method, path: path, qualifier: qualifier }`)
@@ -829,39 +909,44 @@ export function swelte(options: SweltePluginOptions = {}): Plugin {
 			const avail = '[' + rpcFns.map((f) => vJsonStr(f.name)).join(', ') + ']'
 			o.push(`\tif method == 'POST' && (content_type.contains('application/json') || content_type == '') {`)
 			o.push(`\t\tparsed := json2.decode[map[string]json2.Any](body) or {`)
-			o.push(`\t\t\treturn swelte_err_bad(path, '', 'bad json body')`)
+			o.push(`\t\t\treturn swelte_err_bad_cookies(path, '', 'bad json body')`)
 			o.push(`\t\t}`)
 			o.push(`\t\tfn_any := parsed['fn'] or {`)
-			o.push(`\t\t\treturn swelte_err_bad(path, '', 'missing fn')`)
+			o.push(`\t\t\treturn swelte_err_bad_cookies(path, '', 'missing fn')`)
 			o.push(`\t\t}`)
 			o.push(`\t\tfn_name := fn_any.str().trim('"')`)
 			o.push(`\t\targs_any := parsed['args'] or { json2.Any(json2.null) }`)
 			o.push(`\t\targs_json := json2.encode(args_any)`)
 			for (const fn of rpcFns) {
 				const rs = fn.singleArgsStruct ? vType(fn.singleArgsStruct, mod) : null
-				const dec = rs ? `json.decode(${rs}, args_json) or { return swelte_err_bad(path, fn_name, 'bad args') }` : `args_json`
+				const dec = rs ? `json.decode(${rs}, args_json) or { return swelte_err_bad_cookies(path, fn_name, 'bad args') }` : `args_json`
 				const call = `${prefix}${fn.name}(${dec})`
+				const ck = `swelte_set_cookies_for_${prefix}${fn.name}()`
 				o.push(`\t\tif fn_name == ${vJsonStr(fn.name)} {`)
 				if (fn.fallible) {
-					o.push(`\t\t\tres := ${call} or { return swelte_err_bad(path, fn_name, err.msg()) }`)
-					o.push(fn.vret === 'void' ? `\t\t\treturn 200, '{}'` : `\t\t\treturn 200, json.encode(res)`)
+					o.push(`\t\t\tres := ${call} or { return swelte_err_bad_cookies(path, fn_name, err.msg()) }`)
+					o.push(fn.vret === 'void' ? `\t\t\treturn 200, '{}', ${ck}` : `\t\t\treturn 200, json.encode(res), ${ck}`)
 				} else if (fn.vret === 'void') {
 					o.push(`\t\t\t${call}`)
-					o.push(`\t\t\treturn 200, '{}'`)
+					o.push(`\t\t\treturn 200, '{}', ${ck}`)
 				} else {
-					o.push(`\t\t\treturn 200, json.encode(${call})`)
+					o.push(`\t\t\treturn 200, json.encode(${call}), ${ck}`)
 				}
 				o.push(`\t\t}`)
 			}
 			o.push(`\t\tif fn_name == '' {`)
-			o.push(`\t\t\treturn swelte_err_bad(path, fn_name, 'missing fn')`)
+			o.push(`\t\t\treturn swelte_err_bad_cookies(path, fn_name, 'missing fn')`)
 			o.push(`\t\t}`)
-			o.push(`\t\treturn swelte_err_unknown(path, fn_name, ${avail})`)
+			o.push(`\t\treturn swelte_err_unknown_cookies(path, fn_name, ${avail})`)
 			o.push(`\t}`)
 		}
 		// §7: @[after] runs on the outcome: @[before] failures never reach
 		// the verbs body (they return 4xx from dispatch), so @[after]
 		// only observes real verb outcomes — no error attr possible here.
+		// §10: unknown method on an endpoint-less file is 405; mutating
+		// verbs on an RPC-less path shape is 403 (CSRF-relevant: plain
+		// cross-site forms can only send GET/POST, so POST here is safe).
+		const methodGate: string = sharedReq == null ? `swelte_method_not_allowed()` : `swelte_method_gate(method)`
 		for (const vb of ['get', 'post', 'put', 'delete', 'patch']) {
 			const hs = fns.filter((f) => f.attr === vb)
 			if (!hs.length) continue
@@ -892,26 +977,31 @@ export function swelte(options: SweltePluginOptions = {}): Plugin {
 				const cond = h.qualifier ? `qualifier == ${vJsonStr(h.qualifier)}` : `qualifier == ''`
 				const isReq = h.params.length === 1 && h.params[0].vtype === 'SwelteRequest'
 				const call = isReq ? `${prefix}${h.name}(req)` : `${prefix}${h.name}(${h.params.map((p) => `req.form['${p.name}'] or { req.query['${p.name}'] or { req.params['${p.name}'] or { '' } } }`).join(', ')})`
+				const ck = `swelte_set_cookies_for_${prefix}${h.name}()`
 				o.push(`\t\tif ${cond} {`)
 				if (h.fallible) {
-					o.push(`\t\t\tres := ${call} or { return swelte_err_bad(path, ${vJsonStr(h.name)}, err.msg()) }`)
-					o.push(h.vret === 'void' ? `\t\t\treturn 200, '{}'` : `\t\t\treturn 200, json.encode(res)`)
+					o.push(`\t\t\tres := ${call} or { return swelte_err_bad_cookies(path, ${vJsonStr(h.name)}, err.msg()) }`)
+					o.push(h.vret === 'void' ? `\t\t\treturn 200, '{}', ${ck}` : `\t\t\treturn 200, json.encode(res), ${ck}`)
 				} else if (h.vret === 'void') {
 					o.push(`\t\t\t${call}`)
-					o.push(`\t\t\treturn 200, '{}'`)
+					o.push(`\t\t\treturn 200, '{}', ${ck}`)
 				} else {
-					o.push(`\t\t\treturn 200, json.encode(${call})`)
+					o.push(`\t\t\treturn 200, json.encode(${call}), ${ck}`)
 				}
 				o.push(`\t\t}`)
 			}
 			if (quals.length) {
-				o.push(`\t\treturn swelte_err_unknown_qual(path, [${quals.map((q) => vJsonStr(q)).join(', ')}])`)
+				o.push(`\t\treturn swelte_err_unknown_qual_cookies(path, [${quals.map((q) => vJsonStr(q)).join(', ')}])`)
 			} else {
-				o.push(`\t\treturn swelte_err_bad(path, '', 'missing qualifier')`)
+				o.push(`\t\treturn swelte_err_bad_cookies(path, '', 'missing qualifier')`)
 			}
 			o.push(`\t}`)
 		}
-		o.push(`\treturn 405, '{"error":"method not allowed"}'`)
+		if (sharedReq == null && fns.some((f) => f.attr === 'get')) {
+			o.push(`\treturn swelte_method_not_allowed()`)
+		} else {
+			o.push(`\treturn ${methodGate}`)
+		}
 		o.push('}')
 		o.push('')
 		return o
@@ -1165,6 +1255,13 @@ export function swelte(options: SweltePluginOptions = {}): Plugin {
 			const slash = mod.lastIndexOf('/')
 			const base = slash < 0 ? mod : mod.slice(slash + 1)
 			const dir = slash < 0 ? '' : mod.slice(0, slash)
+			// Single-global +error (roadmap §9): only src/routes/+error.svelte
+			// is recognized — nested */+error.svelte is a build error.
+			if (base === '+error' && dir !== '') {
+				throw new Error(
+					`[swelte] ${routesDir}/${rel} is not allowed — only src/routes/+error.svelte exists (single global error boundary, no per-directory inheritance).`,
+				)
+			}
 			if (base !== '+page' && base !== 'index') continue
 			if (dir === '') continue // root +page has no sibling to collide with
 			for (const sib of [`${dir}.svelte`, `${dir}.v`]) {
@@ -1245,6 +1342,14 @@ export function swelte(options: SweltePluginOptions = {}): Plugin {
 					const shA = d.route.replace(/\[\.\.\.[^\]]+\]/g, '...').replace(/\[[^\]]+\]/g, '[]');
 					const shB = (route as string).replace(/\[\.\.\.[^\]]+\]/g, '...').replace(/\[[^\]]+\]/g, '[]');
 					if (route.includes('[') && shA === shB) throw new Error(`[swelte] ${routesDir}/${rel} has the same dynamic shape as ${routesDir}/${d.mod}.v (${shB}) — rename one file.`);
+				}
+				// §10: @[sets_cookie] only on @[rpc]/verb fns; never on
+				// @[before]/@[after] middleware or +route.v wrapper endpoints
+				// (wrappers declare no endpoints of their own, §7). The
+				// multi-attr form is @[rpc; sets_cookie] on one fn.
+				for (const fn of allFns) {
+					if (fn.setsCookie && (fn.attr === 'before' || fn.attr === 'after'))
+						throw new Error(`[swelte] ${routesDir}/${rel}: @[sets_cookie] on ${fn.name} — middleware (@[before]/@[after]) cannot set cookies; put it on an @[rpc]/verb handler.`)
 				}
 				dispatched.push({ route, mod, prefix: vPrefix(mod) })
 				// Runtime fetch stub for the browser import (dev + build).
@@ -1448,6 +1553,34 @@ export function swelte(options: SweltePluginOptions = {}): Plugin {
 			}
 			for (const key of [...bodies.keys()].filter((k) => k.startsWith('lib/'))) {
 				emit(`#lib/${key.slice('lib/'.length)}.v`, 'lib', key.slice('lib/'.length))
+			}
+			// Roadmap §17: exact-key `./<base>.v` aliases — only when the
+			// basename is UNIQUE across the whole project (routes + lib).
+			// Ambiguous basenames (`+page.v` ×3) and sub-path relatives
+			// (`./sub/y.v`) keep the `*.v` fallback (any): use `#`-aliases.
+			// Bodies inlined (TS2686 forbids re-export in ambient modules).
+			{
+				const baseCount = new Map<string, number>()
+				const baseBody = new Map<string, { spec: string; sub: string; mod: string }>()
+				for (const key of bodies.keys()) {
+					const mod = key.includes('/') ? key.slice(key.indexOf('/') + 1) : key
+					const base = mod.includes('/') ? mod.slice(mod.lastIndexOf('/') + 1) : mod
+					baseCount.set(base, (baseCount.get(base) ?? 0) + 1)
+					const sub = key.startsWith('lib/') ? 'lib' : 'routes'
+					const prefix = sub === 'lib' ? '#lib' : '#routes'
+					if (!baseBody.has(base)) baseBody.set(base, { spec: `${prefix}/${mod}.v`, sub, mod })
+				}
+				for (const [base, n] of [...baseCount.entries()].sort()) {
+					if (n !== 1) continue
+					const b = baseBody.get(base)
+					if (!b) continue
+					const body = bodies.get(`${b.sub}/${b.mod}`)
+					if (!body) continue
+					decls.push(`declare module './${base}.v' {`)
+					for (const l of body) decls.push(`  ${l}`)
+					decls.push(`}`)
+					decls.push('')
+				}
 			}
 			decls.push(`// Fallback for unknown .v files only.`)
 			decls.push(`declare module '*.v' {`)

@@ -268,6 +268,43 @@ export async function __swelteWasmCall<TResult>(
 	}
 }
 
+// Pre-SSR `+error` contract (spec ssr.md §1b): page shells are public,
+// page data is guarded. A `load()`-time 4xx/5xx renders the global
+// `+error.svelte` ({ status, message }) client-side today; SSR renders
+// the same component server-side later. Action-time failures (button
+// POSTs) stay inline — only page-data loads route here.
+export interface SweltePageError {
+	status: number
+	message: string
+}
+
+export type SwelteLoadResult<T> = { data: T; error?: undefined } | { data?: undefined; error: SweltePageError }
+
+/**
+ * Page-data loader: runs a `.v` stub, maps any `SwelteRpcError` (or
+ * unexpected throw) to `{ error: { status, message } }` for the global
+ * `+error` view. Non-`SwelteRpcError` throws surface as status 500.
+ * Use for `load()`-time fetches only — form/action errors stay inline.
+ */
+export async function loadPage<T>(fn: () => Promise<T>): Promise<SwelteLoadResult<T>> {
+	try {
+		return { data: await fn() }
+	} catch (e) {
+		if (e instanceof SwelteRpcError) return { error: { status: e.status, message: e.message } }
+		return { error: { status: 500, message: String(e) } }
+	}
+}
+
+/** True when a load result is the error branch (narrows `SwelteLoadResult`). */
+export function isPageError<T>(r: SwelteLoadResult<T>): r is { error: SweltePageError } {
+	return (r as { error?: unknown }).error !== undefined
+}
+
+/** True when a load result is the data branch (narrows `SwelteLoadResult`). */
+export function isPageData<T>(r: SwelteLoadResult<T>): r is { data: T } {
+	return (r as { error?: unknown }).error === undefined
+}
+
 /** True when a `#lib` rel path is backend-only: a `backend` path segment
  * at any depth, or a V-native `_backend.v` suffix. Kept name
  * `isLibServerPath` (public API) — semantics are backend-only. */

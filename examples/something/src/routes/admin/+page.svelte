@@ -1,23 +1,21 @@
 <script lang="ts">
 import { admin_whoami } from '#routes/admin/+page.v'
-import { SwelteRpcError } from '@swelte/core'
+import { loadPage, type SwelteLoadResult } from '@swelte/core'
+import ErrorPage from '../+error.svelte'
 
-let whoami = $state('')
-let lastError = $state('')
+let result: SwelteLoadResult<string> | null = $state(null)
 
 async function load() {
-	lastError = ''
-	try {
-		whoami = await admin_whoami({})
-	} catch (e) {
-		lastError = e instanceof SwelteRpcError ? e.message : String(e)
-	}
+	result = await loadPage(() => admin_whoami({}))
 }
 </script>
 
 <main>
 	<h1>admin</h1>
-	<button onclick={load}>Who am I (guarded GET)</button>
-	{#if whoami}<p>{whoami}</p>{/if}
-	{#if lastError}<pre style="color:crimson">{lastError}</pre>{/if}
+	{#if result?.error}
+		<ErrorPage status={result.error.status} message={result.error.message} />
+	{:else}
+		<button onclick={load}>Who am I (guarded GET)</button>
+		{#if result?.data}<p>{result.data}</p>{/if}
+	{/if}
 </main>

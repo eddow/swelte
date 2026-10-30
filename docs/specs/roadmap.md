@@ -6,13 +6,14 @@ not implemented; items leave this file when they land in `docs/`.
 The `.v`-import design rationale lives in `v-imports.md` (§1–§5 built,
 §6 decisions log).
 
-Items 1–8 (dispatcher, dev, build, preview, init, V-WASM, +route
-wrappers + middleware, dynamic segments), 15-part
-(one-default-per-verb + unique-qualifier as build errors), 18-part
-(`time.Time→number`; allowlist enforced at build for `#lib/` WASM,
-runtime-warn remainder only for the known-broken wasm-backend stdlib),
-22-part (parser + `__swelteFetch` + stubs accept
-`put`/`delete`/`patch`) are built.
+Items 1–10 (dispatcher, dev, build, preview, init, V-WASM, +route
+wrappers + middleware, dynamic segments, trailing-slash / 404 /
+single-global `+error` guard, auth/session), 15-part
+(one-default-per-verb + unique-qualifier as build errors), 16-part
+(`#lib/backend` guard + fixture; `#routes/*.v`-only import still open),
+17 (unique-basename `./x.v` aliases; ambiguous → `#`-alias guidance),
+18 (allowlist enforced at generate time as build error),
+22 (six verbs live-proven: delete-qualifier/default/unknown-qual) are built.
 Route params in `Request`, `swelte check` machine-readable output,
 and per-item remainders below are still open. §7's V dispatcher half
 is built; the `+route.svelte` UI half is manual composition until a
@@ -251,27 +252,61 @@ hits the single arm, `/foo/a/b` the catch-all; stub
 `/` + `/api/greet` + admin guard unaffected; `v -o` compiles with no
 warnings.
 
-## 9. Trailing-slash / 404 / `+error`
+## 9. Trailing-slash / 404 / `+error` (SSR in `specs/ssr.md`) — built (2026-10-30)
 
 Conventions for slash handling, unknown-path 404 page, `+error` boundary.
-SSR vs SPA fallback decision. The error boundary stays a single global
+SSR design (engines, manifest, `Hand` chain, hydration) is specced in
+`docs/specs/ssr.md` — this item tracked only the three dispatcher-level
+conventions, which stay in `core`/V regardless of engine (`off` included).
+The error boundary stays a single global
 `+error.svelte` — explicitly NOT nested (no per-directory error
 inheritance; `+route` wrappers compose UI, not error bubbling).
+
+Built: `swelte_normalize_path` in `server_gen.v` (strip trailing `/`
+except root, before exact + dynamic match; `/api/greet/` == `/api/greet`,
+`/users/42/` hits `[id]`, params carry the stripped path);
+`serve_static` mirrors the strip (except root) before file lookup;
+`/api/*` 404s stay JSON (never SPA-fallback); nested
+`*/+error.svelte` is a build error naming the file (only
+`src/routes/+error.svelte` recognized).
+
+Test: `swelte build` → boot `dist/server` with `SWELTE_DIST=dist`:
+`GET /api/greet/?payload="w"` → `"Hello, w!…"`, `GET /users/42/` →
+`"user:42"`, `GET /files/a/b/c/` → `"files:a/b/c"`,
+`GET /nope` → 200 `text/html` (SPA fallback), `GET /api/nope` → 404
+`{"error":"not found"}` JSON; nested `sub/+error.svelte` → build error;
+`/` + admin guard + `/api/greet` unaffected.
 
 Test: open `/nope` (404 page, not blank/JSON); open `/api/greet/`
 vs `/api/greet` (same handler per the decided convention);
 throw from a handler → `+error` boundary renders, no white screen.
 
-## 10. Auth/session
+## 10. Auth/session — built (2026-10-30)
 
-Cookies vs tokens, `Set-Cookie` on login, CSRF for `POST /`, CORS for
-`/api/*`. (`#lib/` WASM has no network surface — server rules only.)
-Per-subtree session guards land in `+route.v` `@[before]` middleware
-(§7); global policy stays in `server.v`'s `Hand`.
+Decided: cookie session (`sess=<id>; Path=/; HttpOnly;
+SameSite=Lax; Max-Age=604800`), no token-in-header variant.
+CORS for `/api/*` is opt-in via `SWELTE_CORS_ORIGIN` (exact origin
+or `*`; unset = same-origin only, no ACAO header).
+CSRF: non-GET/HEAD with a foreign `Origin` and no CORS opt-in → 403
+before routes run (plain cross-site `<form>` can only send GET/POST).
+Per-subtree session guards stay in `+route.v` `@[before]` (§7);
+global policy stays in `server.v`'s `Hand`. (`#lib/` WASM has no
+network surface — server rules only.)
+Mechanism: `@[sets_cookie]` (stacked with `@[rpc]`, or inline
+`@[rpc; sets_cookie]`) on a login fn. Codegen widens every dispatch
+return to `(int, string, []string)` + emits per-fn
+`swelte_set_cookies_for_<prefix><fn>()` (flagged fns return the sess
+template, unflagged `[]string{}`); `Hand` replaces
+`sess=__SWELTE_SESS__` from the JSON `"id"` and adds `Set-Cookie`.
 
-Test: `login` sets a cookie (`curl -i` shows `Set-Cookie`);
-replay the POST without it → 401/403; cross-origin fetch from another
-port → blocked (or explicitly allowed) per the decided policy.
+Test: `swelte build` → `routes/server_gen.v` V-typechecks,
+`grep -c swelte_set_cookies routes/api_greet.v` ≥ 1; boot
+`dist/server` with `SWELTE_DIST=dist`: `login` → 200 +
+`Set-Cookie: sess=sess_alice; Path=/; HttpOnly; SameSite=Lax; …`;
+`GET /admin` w/o cookie → 400 `missing session`, with
+`Cookie: sess=alice` → 200 `"admin:alice"`;
+`POST Origin:http://evil.test` → 403; `OPTIONS` → 204 (+ACAO iff
+`SWELTE_CORS_ORIGIN` set).
 
 ## 11. Hardening
 
@@ -306,49 +341,75 @@ Test (if built): open a streaming route — chunks arrive progressively
 in the browser (not one buffered blob); kill the server mid-stream →
 client reports disconnect, reconnects per policy.
 
-## 15. Validation strictness
+## 15. Validation strictness — warn-vs-error table (part-built 2026-10-30)
 
-Orphan `routes/*.v`, `.v` outside
-`routes/`+`lib/`, `#lib/backend` misuse, stray `@[get/post]` in `#lib/`,
-duplicate verb defaults / duplicate qualifiers, `@[before]`/`@[after]`
-outside `+route.v` — warn today (or unimplemented), none fail. Decide
-warn-vs-error per case; emit machine-readable list with file+line.
-Note: one-default-per-verb and qualifier uniqueness MUST be errors at
-dispatcher time (ambiguous routing), so this item is really about the
-rest. Decided (§7): folder-root double-claim (`foo.v` + `foo/+page.v`,
-or `foo.svelte` + `foo/+page.svelte`) is a build error,
-unconditionally — one file per URL, so guarded URLs live inside their
-guard's directory.
+Decided (errors today, all with file+line via thrown `[swelte]` errors at
+generate time): one-default-per-verb + unique-qualifier (§1, ambiguous
+routing), folder-root double-claim `foo.v`+`foo/+page.v` /
+`foo.svelte`+`foo/+page.svelte` (§7), `@[rpc]`/verb fns in `+route.v` +
+`@[before]`/`@[after]` outside it (§7), nested `*/+error.svelte` (§9),
+`#lib/` blocked imports incl. known-broken wasm stdlib (§18),
+duplicate wasm fn names (§6), malformed brackets / non-final catch-all /
+duplicate param / same-shape clash (§8).
+Warns today (console `[swelte]`, never fail correct V programs):
+orphan `routes/*.v` (no `.svelte` partner, not under `api/`),
+`.v` outside `routes/`+`lib/`, `#lib/backend` misuse from non-`.v` code
+(resolved via load-time error; generate-time warn open),
+stray `@[get/post]`/verbs/`@[before]`/`@[after]` in `#lib/`
+(exposed as RPC + warn), `unknown` V types in projection,
+`src/lib/**/backend/*.ts|js|svelte` (backend runs purely on V).
+Still open: machine-readable `swelte check --format json` list
+(item 23 in `check` is a stub); orphans stay warnings, not errors
+(SvelteKit parity would error — deferred).
 
-Test: add an orphan `routes/stray.v` (no `.svelte` partner, not under
-`api/`) → `vite build` fails with `stray.v:<line>` in the message;
-fix it → build green. `swelte check` prints the same list as JSON
-(`--format json`) with file+line per entry.
+Test: orphan `routes/stray.v` → `vite build` warns `stray.v` but stays
+green (documented, not failing); `swelte check` prints the same list as
+JSON (`--format json`) with file+line per entry — OPEN.
 
-## 16. `#lib/backend` negative test
+## 16. `#lib/backend` negative test — built (2026-10-30)
 
 Guard is built (resolveId+load refuse with importer+file error);
-unproven — needs a backend-only fixture + import-guard test.
+fixture + negative proof live in `examples/something`:
+`src/lib/backend/secrets.v` (`read_secret`, backend-only).
+Importing it from `+page.svelte` fails `vite build` with
+`[swelte] …/src/lib/backend/secrets.v is backend-only (#lib/backend
+convention): imported by …/src/routes/+page.svelte. Move the fn or
+import from a #routes/*.v file.` Backend files are excluded from
+type projection (no `.swelte/types/lib/backend/`) and from the WASM
+bundle. Positive path unaffected: full `swelte build` green with the
+fixture present (page 200 + api ok).
 
-Test: add `src/lib/backend/secrets.v` (or `src/lib/secrets_backend.v`); import it from `+page.svelte` →
-build fails naming importer+file; import it from a `#routes/*.v`
-only → build green. Also add `src/lib/backend/ui.ts` → build warns (no TS in backend/).
+Test: add `src/lib/backend/secrets.v`; import it from `+page.svelte` →
+build fails naming importer+file; `swelte build` with the fixture present
+but unimported → green.
 
-## 17. Relative `./x.v` editor types
+## 17. Relative `./x.v` editor types — built (2026-10-30)
 
-Build works (`resolveId` handles relatives + alias-pre-resolved abs
-paths); editors show the `*.v` fallback (`any`). Decide: `#`-only
-(lint) or per-dir `paths` scoping.
+Build worked (`resolveId` handles relatives + alias-pre-resolved abs
+paths); editors showed the `*.v` fallback (`any`). Decided: `#`-only
+guidance for ambiguous cases, per-dir shadowing otherwise. `generate()`
+now emits an exact-key `declare module './<base>.v'` alias per known
+file — but only when the basename is UNIQUE across the whole project
+(`+page.v` appears 3× in the example, so no `./+page.v` key there;
+`./sibling.v` unique in the fixture → typed). Ambiguous basenames and
+sub-path relatives (`./sub/y.v`) keep the `*.v` fallback (`any`): use
+the `#`-alias form. Bodies inlined (TS2686 forbids re-export in ambient
+modules); inline keys survive extended-config `paths` stripping.
 
-Test: write `import { f } from './sibling.v'` in a Svelte file —
-hover shows the real signature (not `any`); or the lint rule fires
-telling you to use the `#`-alias form.
+Test: `import { g } from './sibling.v'` (unique basename) → hover shows
+the real signature; ambiguous `./+page.v` → fallback `any` (use
+`#routes/…/+page.v`).
 
-## 18. `#lib/` stdlib allowlist as build error
+## 18. `#lib/` stdlib allowlist as build error — built (2026-10-30)
 
 Set decided (`strings`, `math`, `encoding/*`, `crypto/*`, `json`,
-`json2`; `#lib/backend/` exempt — see `v-imports.md` §2). Warns today;
-enforce at build (error) once the V-WASM compile lands (§6).
+`json2`; `#lib/backend/` exempt — see `v-imports.md` §2). Enforced at
+generate time (not just WASM-compile time): `generate()` throws
+file+line on any blocked import in `#lib/` (os/net/db/time/v/wasm/x and
+anything outside the allowlist), naming the portable subset. Backend
+exempt. Known-broken wasm-backend stdlib (`strings`/`math`/`crypto`/
+`json` lowering gaps) still surface as WASM-compile build errors with
+the same file+line shape.
 
 Test: add `import os` to `src/lib/crypto/hash.v` → `vite build`
 fails naming the file + banned module; same import under
@@ -377,13 +438,18 @@ signature change unproven.
 Test: with `vite dev` running, change a fn's return type in `.v` —
 browser remounts with the new type, no restart, no stale stub.
 
-## 22. Extra HTTP verbs (`put`/`delete`/`patch`)
+## 22. Extra HTTP verbs (`put`/`delete`/`patch`) — built (2026-10-30)
 
 Table, qualifier rules, `Request` shape, and dispatcher branches are
 spec'd (`v-imports.md` §3); parser + codegen + dispatcher implement
 all six verbs (`rpc`/`get`/`post`/`put`/`delete`/`patch`) since
 2026-10-29: extended attr regex, `__swelteFetch` kind + qualifier
-arg, stub codegen, and the dispatcher method arms.
+arg, stub codegen, and the dispatcher method arms. Proven live
+(2026-10-30): scratch project with `@[delete('session')]` +
+`@[delete]` default on `/api/greet` → `v run .`:
+`DELETE …/greet?session` → `"killed"`, `DELETE …/greet` → `"wiped"`,
+`DELETE …/greet?nope` → 404 `{"error":"unknown qualifier",
+"available":["session"]}`.
 
 Test: add `@[delete('session')]` to a routes file; `curl -X DELETE
 …/path?session` hits it; `curl -X DELETE …/path` (no qualifier)

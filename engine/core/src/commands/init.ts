@@ -182,7 +182,31 @@ pub fn get_greeting(req SwelteRequest) string {
 	name := req.query['payload'] or { '""' }
 	return 'Hello, ' + name.trim('"') + '! from Swelte V backend'
 }
+
+@[delete('session')]
+pub fn kill_session(req SwelteRequest) string {
+	return 'killed'
+}
+
+@[delete]
+pub fn wipe_sessions(req SwelteRequest) string {
+	return 'wiped'
+}
 `)
+  write(root, 'src/routes/api/sibling.v', `// Unique-basename fixture (roadmap §17): editors resolve
+  // ./sibling.v to the real signature via the generated shim.
+  module sibling
+
+  pub struct GreetIn {
+  pub:
+  	name string
+  }
+
+  @[rpc]
+  pub fn g(args GreetIn) string {
+  	return 'hi ' + args.name
+  }
+  `)
   write(root, 'src/lib/crypto/hash.v', `// Swelte isomorphic lib. Same V compiles to native + \`v -b wasm\`.
 module crypto
 
@@ -262,6 +286,22 @@ fn (h Hand) handle(req http.Request) http.Response {
 	mut r := http.Response{}
 	url := req.url
 	path := if url.contains('?') { url.all_before('?') } else { url }
+	// §10 CORS: same-origin by default. Cross-origin fetch is blocked
+	// unless the project opts in via SWELTE_CORS_ORIGIN (exact origin or
+	// '*' for public APIs). Preflight answers without hitting routes.
+	cors_origin := os.getenv_opt('SWELTE_CORS_ORIGIN') or { '' }
+	origin := req.header.get_custom('Origin') or { '' }
+	cors_ok := cors_origin != '' && (cors_origin == '*' || cors_origin == origin)
+	if req.method == .options {
+		if cors_ok {
+			r.header.set(.access_control_allow_origin, if cors_origin == '*' { '*' } else { origin })
+			r.header.set_custom('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS') or {}
+			r.header.set_custom('Access-Control-Allow-Headers', 'Content-Type, Accept') or {}
+			r.header.set_custom('Access-Control-Max-Age', '86400') or {}
+		}
+		r.status_code = 204
+		return r
+	}
 	mut query := map[string]string{}
 	if url.contains('?') {
 		for part in url.all_after('?').split('&') {
@@ -303,18 +343,52 @@ fn (h Hand) handle(req http.Request) http.Response {
 			}
 		}
 	}
-	status, body := routes.swelte_route(path, req.method.str().to_upper(), query, headers, cookies, req.data, content_type, qualifier)
-	// Static fallback (preview/prod): API 404 + dist/ present -> serve file.
+	status, body, set_cookies := routes.swelte_route(path, req.method.str().to_upper(), query, headers, cookies, req.data, content_type, qualifier)
+	// §10 CSRF: plain cross-site <form> can only send GET/POST. Mutating
+	// verbs from another origin are rejected before touching routes.
+	// GET navigations + preflight-approved CORS origins pass through.
+	if !cors_ok && origin != '' && req.method != .get && req.method != .head {
+		r.header.set(.content_type, 'application/json')
+		r.status_code = 403
+		r.body = '{"error":"forbidden"}'
+		return r
+	}
+	// Static fallback (preview/prod): page 404 + dist/ present -> serve file.
 	// Dev (no dist/): keep the JSON 404 so the Vite proxy can tell.
+	// /api/* never falls back (roadmap §9): API 404s stay JSON.
 	dist := os.getenv_opt('SWELTE_DIST') or { '' }
-	if dist != '' && req.method == .get && (path == '/' || (status == 404 && body.contains('not found'))) {
+	if dist != '' && req.method == .get && !path.starts_with('/api/') && (path == '/' || (status == 404 && body.contains('not found'))) {
 		s, ct, sb := serve_static(dist, path)
 		r.header.set(.content_type, ct)
 		r.status_code = s
 		r.body = sb
 		return r
 	}
+	// §10 Set-Cookie: replace the sess placeholder with the session id from
+	// the JSON body ("id":"<sess_…>"). Non-login 200s carry no cookies.
+	mut cookies_out := set_cookies.clone()
+	if status == 200 && cookies_out.len > 0 {
+		mut sess := ''
+		after_id := body.all_after('"id":"')
+		if after_id != body {
+			sess = after_id.all_before('"')
+		}
+		if sess != '' {
+			for i in 0 .. cookies_out.len {
+				cookies_out[i] = cookies_out[i].replace('sess=__SWELTE_SESS__', 'sess=' + sess)
+			}
+		} else {
+			cookies_out = []string{}
+		}
+	}
 	r.header.set(.content_type, 'application/json')
+	for c in cookies_out {
+		r.header.add(.set_cookie, c)
+	}
+	if cors_ok {
+		r.header.set(.access_control_allow_origin, if cors_origin == '*' { '*' } else { origin })
+		r.header.set_custom('Access-Control-Allow-Credentials', 'true') or {}
+	}
 	r.status_code = status
 	r.body = body
 	return r
