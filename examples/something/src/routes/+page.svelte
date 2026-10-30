@@ -82,4 +82,14 @@ async function doLogin() {
 	{#if lastError}
 		<pre style="color:crimson; white-space:pre-wrap;">{lastError}</pre>
 	{/if}
+	<hr>
+	<h2>No-JS proof (plain forms, no fetch)</h2>
+	<form method="post" action="/">
+		<input type="hidden" name="payload" value="nojs-alice">
+		<button type="submit">Save via plain form (→ 303 → /)</button>
+	</form>
+	<form method="post" action="/api/greet?upload" enctype="multipart/form-data">
+		<input type="file" name="file">
+		<button type="submit">Upload via plain form (→ 303)</button>
+	</form>
 </main>

@@ -684,6 +684,7 @@ export function swelte(options: SweltePluginOptions = {}): Plugin {
 		o.push('pub mut:')
 		o.push('\tquery map[string]string')
 		o.push('\tform map[string]string')
+		o.push('\tfiles map[string]string')
 		o.push('\theaders map[string]string')
 		o.push('\tcookies map[string]string')
 		o.push('\tparams map[string]string')
@@ -861,17 +862,24 @@ export function swelte(options: SweltePluginOptions = {}): Plugin {
 		}
 		o.push(`pub fn ${prefix}dispatch(path string, method string, query map[string]string, params map[string]string, headers map[string]string, cookies map[string]string, body string, content_type string, qualifier string) (int, string, []string) {`)
 		o.push(`\tmut form_before := map[string]string{}`)
+		o.push(`\tmut files_before := map[string]string{}`)
 		o.push(`\tif content_type.contains('multipart/form-data') {`)
 		o.push(`\t\tmut boundary_before := ''`)
 		o.push(`\t\tfor part in content_type.split(';') {`)
 		o.push(`\t\t\tp_before := part.trim_space()`)
 		o.push(`\t\t\tif p_before.starts_with('boundary=') { boundary_before = p_before.all_after('boundary=').trim('"') }`)
 		o.push(`\t\t}`)
-		o.push(`\t\tif boundary_before != '' { form_before, _ = http.parse_multipart_form(body, boundary_before) }`)
+		o.push(`\t\tmut swelte_raw_before := map[string][]http.FileData{}`)
+		o.push(`\t\tif boundary_before != '' { form_before, swelte_raw_before = http.parse_multipart_form(body, boundary_before) }`)
+		o.push(`\t\tfor k, fs in swelte_raw_before {`)
+		o.push(`\t\t\tmut swelte_names := []string{}`)
+		o.push(`\t\t\tfor f in fs { swelte_names << f.filename }`)
+		o.push(`\t\t\tfiles_before[k] = swelte_names.join(';')`)
+		o.push(`\t\t}`)
 		o.push(`\t} else if content_type.contains('application/x-www-form-urlencoded') || body != '' {`)
 		o.push(`\t\tform_before = http.parse_form(body)`)
 		o.push(`\t}`)
-		o.push(`\tmut swelte_req := SwelteRequest{ query: query, form: form_before, headers: headers, cookies: cookies, params: params, method: method, path: path, qualifier: qualifier }`)
+		o.push(`\tmut swelte_req := SwelteRequest{ query: query, form: form_before, files: files_before, headers: headers, cookies: cookies, params: params, method: method, path: path, qualifier: qualifier }`)
 		for (const b of befores) {
 			const bn = b.includes('_') ? b.slice(b.lastIndexOf('_') + 1) : b
 			o.push(`\tswelte_req = ${b}(swelte_req) or { return swelte_err_bad_cookies(path, '${bn}', err.msg()) }`)
@@ -891,7 +899,7 @@ export function swelte(options: SweltePluginOptions = {}): Plugin {
 		o.push(`fn ${prefix}dispatch_verbs(path string, method string, query map[string]string, params map[string]string, headers map[string]string, cookies map[string]string, body string, content_type string, qualifier string, swelte_req SwelteRequest) (int, string, []string) {`)
 		// `req` outlives the method arm (assigned per-arm below, read by
 		// handler calls): declare once at function scope.
-		o.push(`\tmut req := SwelteRequest{ query: query, form: map[string]string{}, headers: headers, cookies: cookies, params: params, method: method, path: path, qualifier: qualifier }`)
+		o.push(`\tmut req := SwelteRequest{ query: query, form: map[string]string{}, files: map[string]string{}, headers: headers, cookies: cookies, params: params, method: method, path: path, qualifier: qualifier }`)
 		o.push(...dispatchBody(prefix, mod, fns, 'swelte_req'))
 		o.push('')
 		return o.join('\n')
@@ -952,26 +960,33 @@ export function swelte(options: SweltePluginOptions = {}): Plugin {
 			if (!hs.length) continue
 			const quals = hs.filter((h) => h.qualifier).map((h) => h.qualifier as string)
 			o.push(`\tif method == '${vb.toUpperCase()}' {`)
-			o.push(`\t\tmut form := map[string]string{}`)
-			o.push(`\t\tif content_type.contains('multipart/form-data') {`)
-			o.push(`\t\t\tmut boundary := ''`)
-			o.push(`\t\t\tfor part in content_type.split(';') {`)
-			o.push(`\t\t\t\tp := part.trim_space()`)
-			o.push(`\t\t\t\tif p.starts_with('boundary=') { boundary = p.all_after('boundary=').trim('"') }`)
-			o.push(`\t\t\t}`)
-			o.push(`\t\t\tif boundary != '' { form, _ = http.parse_multipart_form(body, boundary) }`)
-			o.push(`\t\t} else if content_type.contains('application/x-www-form-urlencoded') || body != '' {`)
-			o.push(`\t\t\tform = http.parse_form(body)`)
-			o.push(`\t\t}`)
-			// §7: with @[before] wrappers the request already exists
-			// (pre-filtered `swelte_req`) — reuse it. V maps can't be
-			// assigned (`req.form = form` fails: use `.clone()`).
+			// §13: with @[before] wrappers the request already exists
+			// (pre-filtered `swelte_req`, parsed once in dispatch) — reuse
+			// it directly, no second multipart parse. Unchained leaves
+			// parse here (form/files declared only in that branch).
 			if (sharedReq) {
 				o.push(`\t\treq = ${sharedReq}`)
-				o.push(`\t\treq.form = form.clone()`)
 				o.push(`\t\treq.method = '${vb.toUpperCase()}'`)
 			} else {
-				o.push(`\t\tmut req := SwelteRequest{ query: query, form: form, headers: headers, cookies: cookies, params: params, method: '${vb.toUpperCase()}', path: path, qualifier: qualifier }`)
+				o.push(`\t\tmut form := map[string]string{}`)
+				o.push(`\t\tmut files := map[string]string{}`)
+				o.push(`\t\tif content_type.contains('multipart/form-data') {`)
+				o.push(`\t\t\tmut boundary := ''`)
+				o.push(`\t\t\tfor part in content_type.split(';') {`)
+				o.push(`\t\t\t\tp := part.trim_space()`)
+				o.push(`\t\t\t\tif p.starts_with('boundary=') { boundary = p.all_after('boundary=').trim('"') }`)
+				o.push(`\t\t\t}`)
+				o.push(`\t\t\tmut swelte_raw_files := map[string][]http.FileData{}`)
+				o.push(`\t\t\tif boundary != '' { form, swelte_raw_files = http.parse_multipart_form(body, boundary) }`)
+				o.push(`\t\t\tfor k, fs in swelte_raw_files {`)
+				o.push(`\t\t\t\tmut swelte_names := []string{}`)
+				o.push(`\t\t\t\tfor f in fs { swelte_names << f.filename }`)
+				o.push(`\t\t\t\tfiles[k] = swelte_names.join(';')`)
+				o.push(`\t\t\t}`)
+				o.push(`\t\t} else if content_type.contains('application/x-www-form-urlencoded') || body != '' {`)
+				o.push(`\t\t\tform = http.parse_form(body)`)
+				o.push(`\t\t}`)
+				o.push(`\t\tmut req := SwelteRequest{ query: query, form: form, files: files, headers: headers, cookies: cookies, params: params, method: '${vb.toUpperCase()}', path: path, qualifier: qualifier }`)
 			}
 			for (const h of hs) {
 				const cond = h.qualifier ? `qualifier == ${vJsonStr(h.qualifier)}` : `qualifier == ''`
@@ -1103,6 +1118,7 @@ export function swelte(options: SweltePluginOptions = {}): Plugin {
 				out.push('export interface SwelteRequest {')
 				out.push('  query: Record<string, string>;')
 				out.push('  form: Record<string, string>;')
+			out.push('  files: Record<string, string>;')
 				out.push('  headers: Record<string, string>;')
 				out.push('  cookies: Record<string, string>;')
 				out.push('  params: Record<string, string>;')

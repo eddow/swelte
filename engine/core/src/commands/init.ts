@@ -192,21 +192,40 @@ pub fn kill_session(req SwelteRequest) string {
 pub fn wipe_sessions(req SwelteRequest) string {
 	return 'wiped'
 }
+
+@[get('slow')]
+pub fn slow_probe(req SwelteRequest) string {
+	ms_str := req.query['ms'] or { ''}
+	ms := ms_str.int()
+	if ms > 0 {
+		time.sleep(time.millisecond * ms)
+	}
+	return 'slow-ok'
+}
+
+@[post('upload')]
+pub fn upload_file(req SwelteRequest) !string {
+	names := req.files['file'] or { return error('missing file') }
+	if names == '' {
+		return error('missing file')
+	}
+	return 'got:' + names
+}
 `)
-  write(root, 'src/routes/api/sibling.v', `// Unique-basename fixture (roadmap §17): editors resolve
-  // ./sibling.v to the real signature via the generated shim.
-  module sibling
+write(root, 'src/routes/api/sibling.v', `// Unique-basename fixture (roadmap §17): editors resolve
+// ./sibling.v to the real signature via the generated shim.
+module sibling
 
-  pub struct GreetIn {
-  pub:
-  	name string
-  }
+pub struct GreetIn {
+pub:
+	name string
+}
 
-  @[rpc]
-  pub fn g(args GreetIn) string {
-  	return 'hi ' + args.name
-  }
-  `)
+@[rpc]
+pub fn g(args GreetIn) string {
+	return 'hi ' + args.name
+}
+`)
   write(root, 'src/lib/crypto/hash.v', `// Swelte isomorphic lib. Same V compiles to native + \`v -b wasm\`.
 module crypto
 
@@ -229,8 +248,143 @@ import net.http.mime
 import net.urllib
 import os
 import routes
+import strconv
+import sync
+import time
 
-struct Hand {}
+// §11 Hardening (global, in Hand — never in \`+route.v\` middleware):
+// body-size cap (413), per-IP fixed-window rate limit (429), handler
+// timeout via spawn + select (slow handlers report 500, server stays up;
+// timed-out threads still run to completion in the background, so a burst
+// of slow handlers still costs a thread each).
+// Single-instance in-memory only; multi-instance deploys approximate.
+// Stale rate-limit buckets are evicted opportunistically (see below).
+// Env knobs (unset/invalid/0/negative = built-in default):
+//   SWELTE_BODY_LIMIT  max req.data bytes before routing (default 10MB)
+//   SWELTE_RATE_LIMIT  requests per IP per window (default 120)
+//   SWELTE_RATE_WINDOW_MS  window length (default 60000)
+//   SWELTE_HANDLER_TIMEOUT_MS  handler budget (default 10000)
+const swelte_default_body_limit = 10 * 1024 * 1024
+const swelte_default_rate_limit = 120
+const swelte_default_rate_window_ms = i64(60 * 1000)
+const swelte_default_handler_timeout_ms = i64(10 * 1000)
+
+fn swelte_env_int(key string, fallback i64) i64 {
+	raw := os.getenv_opt(key) or { return fallback }
+	v := strconv.parse_int(raw, 10, 64) or { return fallback }
+	if v <= 0 {
+		return fallback
+	}
+	return v
+}
+
+fn swelte_body_limit() int {
+	return int(swelte_env_int('SWELTE_BODY_LIMIT', swelte_default_body_limit))
+}
+
+fn swelte_rate_limit() int {
+	return int(swelte_env_int('SWELTE_RATE_LIMIT', swelte_default_rate_limit))
+}
+
+fn swelte_rate_window_ms() i64 {
+	return swelte_env_int('SWELTE_RATE_WINDOW_MS', swelte_default_rate_window_ms)
+}
+
+fn swelte_handler_timeout_ms() i64 {
+	return swelte_env_int('SWELTE_HANDLER_TIMEOUT_MS', swelte_default_handler_timeout_ms)
+}
+
+struct SwelteBucket {
+mut:
+	window_start i64
+	count        int
+}
+
+// §11 rate-limit state lives on the handler: \`handle\` takes \`mut h\`,
+// so per-connection calls share the map under a mutex. No \`__global\`
+// (needs \`-enable-globals\`); single-instance in-memory only.
+struct Hand {
+mut:
+	buckets map[string]SwelteBucket
+	mu      sync.Mutex
+}
+
+fn (mut h Hand) swelte_rate_limited(ip string) bool {
+	limit := swelte_rate_limit()
+	window := swelte_rate_window_ms()
+	now := time.now().unix_milli()
+	h.mu.lock()
+	defer {
+		h.mu.unlock()
+	}
+	// Opportunistic eviction: drop buckets idle for 2 windows so the map
+	// cannot grow without bound (memory-DoS vector). Linear scan under
+	// the mutex — fine at dev/prod-single-instance scale.
+	for k, v in h.buckets {
+		if now - v.window_start >= 2 * window {
+			h.buckets.delete(k)
+		}
+	}
+	mut b := h.buckets[ip] or { SwelteBucket{window_start: now} }
+	if now - b.window_start >= window {
+		b.window_start = now
+		b.count = 0
+	}
+	b.count += 1
+	h.buckets[ip] = b
+	return b.count > limit
+}
+
+// Route-call inputs cross the spawn boundary for the timeout watchdog.
+struct SwelteRouteCall {
+	path         string
+	method       string
+	query        map[string]string
+	headers      map[string]string
+	cookies      map[string]string
+	body         string
+	content_type string
+	qualifier    string
+}
+
+struct SwelteRouteOut {
+	status      int
+	body        string
+	set_cookies []string
+}
+
+fn swelte_route_spawned(c SwelteRouteCall, ch chan SwelteRouteOut) {
+	status, body, set_cookies := routes.swelte_route(c.path, c.method, c.query,
+		c.headers, c.cookies, c.body, c.content_type, c.qualifier)
+	ch <- SwelteRouteOut{status, body, set_cookies}
+}
+
+fn swelte_call_route(path string, method string, query map[string]string, headers map[string]string, cookies map[string]string, body string, content_type string, qualifier string) SwelteRouteOut {
+	budget := swelte_handler_timeout_ms()
+	ch := chan SwelteRouteOut{cap: 1}
+	call := SwelteRouteCall{path, method, query, headers, cookies, body, content_type,
+		qualifier}
+	spawn swelte_route_spawned(call, ch)
+	select {
+		out := <-ch {
+			return out
+		}
+		budget * time.millisecond {
+			return SwelteRouteOut{500, '{"error":"handler timeout"}', []string{}}
+		}
+	}
+	// Unreachable: select always returns via the channel or the timeout.
+	return SwelteRouteOut{500, '{"error":"handler timeout"}', []string{}}
+}
+
+fn swelte_html_escape(s string) string {
+	mut out := s
+	out = out.replace('&', '&amp;')
+	out = out.replace('<', '&lt;')
+	out = out.replace('>', '&gt;')
+	out = out.replace('"', '&quot;')
+	return out
+}
 
 fn mime_for(path string) string {
 	if path.to_lower().ends_with('.wasm') {
@@ -264,13 +418,11 @@ fn serve_static(dist string, path string) (int, string, string) {
 	if rel == '' {
 		rel = 'index.html'
 	}
-	// Path traversal guard.
 	if rel.contains('..') {
 		return 403, 'application/json', '{"error":"forbidden"}'
 	}
 	full := dist + '/' + rel
 	if !os.exists(full) || os.is_dir(full) {
-		// SPA fallback: unknown path serves index.html (client router owns it).
 		index := dist + '/index.html'
 		if os.exists(index) {
 			data := os.read_bytes(index) or { return 500, 'application/json', '{"error":"read failed"}' }
@@ -282,13 +434,10 @@ fn serve_static(dist string, path string) (int, string, string) {
 	return 200, mime_for(rel), data.bytestr()
 }
 
-fn (h Hand) handle(req http.Request) http.Response {
+fn (mut h Hand) handle(req http.Request) http.Response {
 	mut r := http.Response{}
 	url := req.url
 	path := if url.contains('?') { url.all_before('?') } else { url }
-	// §10 CORS: same-origin by default. Cross-origin fetch is blocked
-	// unless the project opts in via SWELTE_CORS_ORIGIN (exact origin or
-	// '*' for public APIs). Preflight answers without hitting routes.
 	cors_origin := os.getenv_opt('SWELTE_CORS_ORIGIN') or { '' }
 	origin := req.header.get_custom('Origin') or { '' }
 	cors_ok := cors_origin != '' && (cors_origin == '*' || cors_origin == origin)
@@ -310,6 +459,7 @@ fn (h Hand) handle(req http.Request) http.Response {
 			}
 			idx := part.index('=') or { -1 }
 			if idx < 0 {
+				// Bare key (\`?delete\`): qualifier trigger, value is presence.
 				query[urllib.query_unescape(part) or { part }] = ''
 			} else {
 				k := part[..idx]
@@ -334,28 +484,49 @@ fn (h Hand) handle(req http.Request) http.Response {
 		}
 	}
 	content_type := req.header.get(.content_type) or { '' }
+	// §11 Hardening: client IP comes from the server-injected Remote-Addr
+	// header (V net.http adds it from conn.peer_ip in server.v — never
+	// X-Forwarded-For, which is client-controlled and spoofable).
+	ip := headers['Remote-Addr'] or { '0.0.0.0' }
+	if h.swelte_rate_limited(ip) {
+		r.header.set(.content_type, 'application/json')
+		r.status_code = 429
+		r.body = '{"error":"rate limited"}'
+		return r
+	}
+	// §11 Hardening: body cap before routing (multipart included —
+	// uploads in §13 live under the same knob).
+	if req.data.len > swelte_body_limit() {
+		r.header.set(.content_type, 'application/json')
+		r.status_code = 413
+		r.body = '{"error":"body too large"}'
+		return r
+	}
 	mut qualifier := query['q'] or { '' }
 	if qualifier == '' {
 		for k, v in query {
+			// First bare key (\`?delete\`, value == '') doubles as qualifier.
+			// Real args (\`?payload=x\`) have values and are skipped.
 			if v == '' {
 				qualifier = k
 				break
 			}
 		}
 	}
-	status, body, set_cookies := routes.swelte_route(path, req.method.str().to_upper(), query, headers, cookies, req.data, content_type, qualifier)
-	// §10 CSRF: plain cross-site <form> can only send GET/POST. Mutating
-	// verbs from another origin are rejected before touching routes.
-	// GET navigations + preflight-approved CORS origins pass through.
+	// §11 Hardening: handler timeout watchdog — slow handlers report 500,
+	// the server keeps serving (the timed-out thread still runs to completion
+	// in the background — its send drops; a burst of slow handlers still
+	// costs a thread each).
+	out := swelte_call_route(path, req.method.str().to_upper(), query, headers, cookies, req.data, content_type, qualifier)
+	status := out.status
+	body := out.body
+	set_cookies := out.set_cookies
 	if !cors_ok && origin != '' && req.method != .get && req.method != .head {
 		r.header.set(.content_type, 'application/json')
 		r.status_code = 403
 		r.body = '{"error":"forbidden"}'
 		return r
 	}
-	// Static fallback (preview/prod): page 404 + dist/ present -> serve file.
-	// Dev (no dist/): keep the JSON 404 so the Vite proxy can tell.
-	// /api/* never falls back (roadmap §9): API 404s stay JSON.
 	dist := os.getenv_opt('SWELTE_DIST') or { '' }
 	if dist != '' && req.method == .get && !path.starts_with('/api/') && (path == '/' || (status == 404 && body.contains('not found'))) {
 		s, ct, sb := serve_static(dist, path)
@@ -364,8 +535,6 @@ fn (h Hand) handle(req http.Request) http.Response {
 		r.body = sb
 		return r
 	}
-	// §10 Set-Cookie: replace the sess placeholder with the session id from
-	// the JSON body ("id":"<sess_…>"). Non-login 200s carry no cookies.
 	mut cookies_out := set_cookies.clone()
 	if status == 200 && cookies_out.len > 0 {
 		mut sess := ''
@@ -380,6 +549,34 @@ fn (h Hand) handle(req http.Request) http.Response {
 		} else {
 			cookies_out = []string{}
 		}
+	}
+	// §12 No-JS forms: browser navigations (Accept: text/html, no JSON)
+	// get a redirect on success / server-rendered error page on failure
+	// instead of JSON. Fetch stubs (Accept: application/json) keep JSON.
+	wants_html := headers['Accept'] or { headers['accept'] or { '' } }.contains('text/html')
+		&& !(headers['Accept'] or { headers['accept'] or { '' } }.contains('application/json'))
+	if wants_html && status == 200 {
+		r.header.set(.location, path)
+		for c in cookies_out {
+			r.header.add(.set_cookie, c)
+		}
+		if cors_ok {
+			r.header.set(.access_control_allow_origin, if cors_origin == '*' { '*' } else { origin })
+			r.header.set_custom('Access-Control-Allow-Credentials', 'true') or {}
+		}
+		r.status_code = 303
+		r.body = ''
+		return r
+	}
+	if wants_html && status >= 400 {
+		mut msg := body.all_after('"error":"')
+		if msg != body {
+			msg = msg.all_before('"')
+		}
+		r.header.set(.content_type, 'text/html; charset=utf-8')
+		r.status_code = status
+		r.body = '<!doctype html><html><body><p>' + swelte_html_escape(msg) + '</p><p><a href="' + path + '">back</a></p></body></html>'
+		return r
 	}
 	r.header.set(.content_type, 'application/json')
 	for c in cookies_out {
@@ -404,7 +601,7 @@ fn main() {
 	println('swelte-v-backend listening on :' + port)
 	s.listen_and_serve()
 }
-`)
+`)  
   write(root, '.gitignore', `# build outputs — never commit
 .svelte/
 # generated V dispatcher (routes/*.v at the project root) — NOT

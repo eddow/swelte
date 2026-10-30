@@ -44,6 +44,8 @@ node engine/core/dist/cli.js dev --port 5174 --backend 8131 --root examples/some
 - Dynamic segments proven: `/users/42` → `"user:42"`, `/users/` + `/users` →
   404, `/files/a/b/c` → `"files:a/b/c"` (`req.params`; static beats
   dynamic, `[...rest]` last).
+- Uploads proven: multipart `POST /api/greet?upload` reads `req.files['file']` (fallible `!string`) → `"got:<name>"`; only filenames kept (bytes parsed then discarded, never persisted); JS stubs send `File`/`Blob` args as `FormData`; 5MB under the 10MB `SWELTE_BODY_LIMIT` cap → 200; over-cap body → 413.
+- No-JS proven: `Accept: text/html` POST → 303 + `Location` on success, rendered HTML error on failure; `Accept: application/json` keeps JSON (same handler, content-negotiated). Page has plain `<form method=post>` variants (save + upload).
 - Middleware chain proven: `admin/+route.v` `@[before]` rejects without
   `sess` cookie (400 `missing session`), injects `x-user` otherwise;
   `@[after]` passes through; `/` + `/api/greet` unaffected (scoping).

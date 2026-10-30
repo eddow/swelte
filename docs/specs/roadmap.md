@@ -6,9 +6,10 @@ not implemented; items leave this file when they land in `docs/`.
 The `.v`-import design rationale lives in `v-imports.md` (§1–§5 built,
 §6 decisions log).
 
-Items 1–10 (dispatcher, dev, build, preview, init, V-WASM, +route
+Items 1–13 (dispatcher, dev, build, preview, init, V-WASM, +route
 wrappers + middleware, dynamic segments, trailing-slash / 404 /
-single-global `+error` guard, auth/session), 15-part
+single-global `+error` guard, auth/session, hardening, no-JS forms,
+file uploads), 15-part
 (one-default-per-verb + unique-qualifier as build errors), 16-part
 (`#lib/backend` guard + fixture; `#routes/*.v`-only import still open),
 17 (unique-basename `./x.v` aliases; ambiguous → `#`-alias guidance),
@@ -308,29 +309,60 @@ Test: `swelte build` → `routes/server_gen.v` V-typechecks,
 `POST Origin:http://evil.test` → 403; `OPTIONS` → 204 (+ACAO iff
 `SWELTE_CORS_ORIGIN` set).
 
-## 11. Hardening
+## 11. Hardening — built (2026-10-30)
 
-Rate-limit, body size caps, timeouts. Global: enforced in `server.v`'s
-`Hand`, not in `+route.v` middleware (§7 draws the line).
+App-owned `server.v` `Hand`, never `+route.v` middleware (§7 line).
+Per-IP fixed-window rate limit → 429 `{"error":"rate limited"}`
+(state on the handler struct under a mutex, single-instance in-memory;
+IP from server-injected `Remote-Addr`, never `X-Forwarded-For`).
+Body cap (`SWELTE_BODY_LIMIT`, default 10MB) → 413 before routing
+(multipart included — uploads in §13 live under the same knob).
+Handler timeout (`SWELTE_HANDLER_TIMEOUT_MS`, default 10s) via
+spawn + select: slow handler → 500 `{"error":"handler timeout"}`,
+server keeps serving (the timed-out thread still runs to completion in
+the background, so a burst of slow handlers still costs a thread each).
+Env knobs share one rule: unset, invalid, `0`, or negative → default
+(no disable switch; `0` means default, not off). Rate-limit buckets idle
+for 2 windows are evicted under the mutex (map can't grow without
+bound). Mirrored by hand into the `init` template (app-owned copies,
+`diff server.v` vs `init` output stays empty).
 
-Test: burst 100 POSTs in 1s → 429s after the limit; POST a 50MB body →
-413; hang a handler → client gets a timeout error, server stays up.
+Test: `SWELTE_RATE_LIMIT=5` → 6th–7th GET 429; burst at default limit
+(120) → all 200; 11MB urlencoded → 413; 5MB multipart under the 10MB
+cap → 200. Slow probe `@[get('slow')]` (`?ms=` sleep):
+`SWELTE_HANDLER_TIMEOUT_MS=400` + `GET /api/greet?slow&ms=2000` → 500
+`{"error":"handler timeout"}`, next request 200 (server alive).
 
-## 12. No-JS form proof
+## 12. No-JS form proof — built (2026-10-30)
 
-Verb handlers are spec'd; prove end-to-end: no-JS `<form action="?q">`
-→ `@[post('q')]` → redirect + error rendering without JS.
+Same handler, content-negotiated: browser navigations
+(`Accept: text/html`, no `application/json`) → success `303` +
+`Location: <path>` (cookies preserved), failure → rendered HTML
+error page (same status, `<p><msg></p>` + back link). Fetch stubs
+(`Accept: application/json`) keep JSON. `Hand`-level rule (transport,
+not handler logic — like CORS/CSRF in §10).
 
-Test: disable JS in the browser, submit the login form — lands on the
-redirect target with the session visible; submit empty → error text
-renders server-side (no console, no JS).
+Test: `Accept: text/html` POST `/` → 303 + `Location: /`;
+empty multipart POST `/api/greet?upload` → 400 HTML error page;
+same with `Accept: application/json` → 400 JSON. Message is
+HTML-escaped. Page carries plain
+`<form method=post>` variants (save + upload, no JS).
 
-## 13. File uploads
+## 13. File uploads — built (2026-10-30)
 
-`multipart` handling, large bodies.
+`SwelteRequest.files: map[string]string` — uploaded filenames per
+field (`;`-joined on multi); only filenames are kept (multipart bytes are
+parsed then discarded — v1 has no temp-file persistence). Chained
+(`@[before]`) requests parse once in `dispatch` and reuse the result in
+`dispatch_verbs` (no second multipart parse). Multipart branch in the
+unchained path keeps `parse_multipart_form` filenames instead of
+discarding (`_`). TS `SwelteRequest` gains `files` (query/form/params
+pattern); stubs send `File`/`Blob` args as `FormData`. Name the
+gap honestly: "stores it" is future work — v1 echoes the name.
 
-Test: upload a 5MB file through a form → `@[post]` handler; server
-stores it, responds with size + name; browser shows both.
+Test: `-F file=@up.txt` → `"got:up.txt"`; missing/empty →
+`!string` error (`missing file`, 400 JSON / HTML per Accept); 5MB
+multipart under the 10MB cap → 200.
 
 ## 14. Streaming (SSE/WS)
 

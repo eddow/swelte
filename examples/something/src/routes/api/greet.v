@@ -45,3 +45,24 @@ pub fn kill_session(req SwelteRequest) string {
 pub fn wipe_sessions(req SwelteRequest) string {
 	return 'wiped'
 }
+
+// Slow probe (roadmap §11): sleeps `?ms=` ms so the handler-timeout
+// watchdog can be exercised (SWELTE_HANDLER_TIMEOUT_MS).
+@[get('slow')]
+pub fn slow_probe(req SwelteRequest) string {
+	ms_str := req.query['ms'] or { '' }
+	ms := ms_str.int()
+	if ms > 0 {
+		time.sleep(time.millisecond * ms)
+	}
+	return 'slow-ok'
+}
+
+@[post('upload')]
+pub fn upload_file(req SwelteRequest) !string {
+	names := req.files['file'] or { return error('missing file') }
+	if names == '' {
+		return error('missing file')
+	}
+	return 'got:' + names
+}

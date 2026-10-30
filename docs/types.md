@@ -30,7 +30,12 @@ but the wrapper's `pub struct`s are still projected (wrapper is
 shared with the V dispatcher. Dynamic file segments (`[id]`,
 `[...rest]`) pass through into the route pattern; `SwelteRequest`
 carries a `params: Record<string, string>` field alongside
-`query`/`form`/headers.
+`query`/`form`/`files`/headers. `files: Record<string, string>`
+holds uploaded filenames per field (`;`-joined on multi); only the
+filenames are kept — multipart bytes are parsed then discarded
+(dispatch-time only, never projected as args). Stubs send `File`/`Blob`
+args as `multipart/form-data` (browser-set boundary); plain values stay
+urlencoded.
 
 ```v
 pub struct LoginArgs { pub: payload string }

@@ -54,7 +54,7 @@ JSON body. No `?fn=` anywhere (removed with the old model).
 |---|---|---|---|
 | `#routes/` | `@[rpc]` | POST JSON `Accept: application/json` | body `{ "fn", "args" }`; unlimited per file |
 | `#routes/` | `@[get]` / `@[get('q')]` | GET `Accept: application/json` | query = args; default, or `?q` present |
-| `#routes/` | `@[post]` / `@[post('q')]` | POST form (multipart / urlencoded) | form fields = args; default, or `?q` present |
+| `#routes/` | `@[post]` / `@[post('q')]` | POST form (multipart / urlencoded) | form fields = args; default, or `?q` present. `File`/`Blob` stub args → multipart, filenames land in `Request.files` (bytes discarded); plain values → urlencoded |
 | `#routes/` | `@[put]`/`@[delete]`/`@[patch]` (+`('q')`) | respective method | same per-method rules |
 | `#routes/` | `@[before]` / `@[after]` (only in `+route.v`) | — (subtree middleware, roadmap §7) | `@[before]`: root→leaf, `SwelteRequest -> !SwelteRequest`; `@[after]`: leaf→root, response observe-or-replace; middleware fns never exported to TS, but the wrapper's `pub struct`s are (+layout-shaped shared types) |
 | `#lib/` | `@[rpc]` | local WASM call | none (direct dispatch) |
@@ -82,8 +82,8 @@ pub fn delete_account(req Request) ! { ... }
 ```
 
 `@[rpc]` fns take one args-struct (`pub fn f(args Args)`); TS sends
-`{...}`. Verb handlers take the framework `Request` (query, form
-fields, headers, cookies, route params — exact shape with the
+`{...}`. Verb handlers take the framework `Request` (query, form,
+files, headers, cookies, route params — exact shape with the
 dispatcher, roadmap item 1).
 `!T` = may reject with `SwelteRpcError` (status 0 for local `#lib/`
 calls). `?T` = `T | null`. `Request.params` carries dynamic-segment

@@ -89,8 +89,27 @@ async function getVerb<TResult>(base: string, fn: string, method: string, qualif
 
 async function postForm<TResult>(base: string, fn: string, method: string, qualifier: string, args: object): Promise<TResult> {
 	const q = qualifier ? `?q=${encodeURIComponent(qualifier)}` : ''
+	// §13 uploads: File/Blob values go multipart (browser sets the boundary);
+	// plain values stay urlencoded. Server reads filenames from req.files.
+	const entries = Object.entries((args ?? {}) as Record<string, unknown>)
+	const hasFile = entries.some(([, v]) => v instanceof File || v instanceof Blob || (Array.isArray(v) && v.some((x) => x instanceof File || x instanceof Blob)))
+	if (hasFile) {
+		const fd = new FormData()
+		for (const [k, v] of entries) {
+			if (v === undefined || v === null) continue
+			if (Array.isArray(v)) { for (const x of v) fd.append(k, x instanceof File || x instanceof Blob ? x : String(x)) }
+			else fd.append(k, v instanceof File || v instanceof Blob ? v : typeof v === 'string' ? v : JSON.stringify(v))
+		}
+		const res = await fetch(`${base}${q}`, {
+			method,
+			headers: { accept: 'application/json' },
+			body: fd,
+		})
+		if (!res.ok) return throwForStatus(base, fn, res)
+		return res.json()
+	}
 	const params = new URLSearchParams()
-	for (const [k, v] of Object.entries((args ?? {}) as Record<string, unknown>)) {
+	for (const [k, v] of entries) {
 		if (v === undefined || v === null) continue
 		params.set(k, typeof v === 'string' ? v : JSON.stringify(v))
 	}

@@ -18,6 +18,16 @@ Every 4xx from the V backend is JSON:
 - unknown `?q` qualifier → 404 + available qualifiers for that verb
 - method without handler (e.g. DELETE on a file with no `@[delete]`) → 405
 - unknown path → 404 `{"error":"not found"}`
+- body over `SWELTE_BODY_LIMIT` (default 10MB) → 413 `{"error":"body too large"}` (before routing, multipart included)
+- over `SWELTE_RATE_LIMIT` reqs / `SWELTE_RATE_WINDOW_MS` per IP → 429 `{"error":"rate limited"}` (fixed-window, in-memory, single-instance; IP from V-injected `Remote-Addr`, never `X-Forwarded-For`)
+- handler over `SWELTE_HANDLER_TIMEOUT_MS` (default 10s) → 500 `{"error":"handler timeout"}` (server stays up; the timed-out thread still runs to completion in the background, so a burst of slow handlers still costs a thread each)
+
+Env knobs share one rule: unset, invalid, `0`, or negative → built-in
+default. (No disable switch: `0` means default, not off.)
+
+### No-JS forms (§12)
+
+Browser navigations (`Accept: text/html`, no `application/json`) bypass JSON: success → `303` + `Location` (cookies preserved), failure → rendered HTML error page (same status, message HTML-escaped). Fetch stubs (`Accept: application/json`) keep today's JSON. Same handler, content-negotiated.
 
 ## Client
 
