@@ -34,7 +34,8 @@ node engine/core/dist/cli.js dev --port 5174 --backend 8131 --root examples/some
 
 - `/` GET/POST (`get_greeting`/`save_name`), `/api/greet` GET + `login → Session{id,user,remember,expires_at}`,
   empty payload → 400, unknown fn → 404 + available, `vite build` green.
-- Page buttons: Greet / Save / Hash (`#lib` real WASM) / Login.
+- Page buttons: Greet / Save / Hash (`#lib` real WASM) / Login / Stream (`@[sse]` `tick_stream`).
+- SSE proven (true streaming via veb, emit mode): `Accept: text/event-stream` on `/api/greet` → 200 with per-event flush (`data: tick 1` ~0.5s, `tick 2` ~1.0s, `tick 3` ~1.5s with `?wait_ms=500` — pacing proves zero buffering); plain JSON GETs keep hitting `@[get]` on the same URL.
 - `hash_string` compiles to real WASM (`v -b wasm -os browser`):
   dev `.swelte/dev/crypto/hash.wasm` + prod `dist/assets/app_lib-*.wasm`.
 - Generated dispatcher proven: `routes/_page.v` + `routes/api_greet.v` +

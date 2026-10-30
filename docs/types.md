@@ -17,8 +17,8 @@ outside `+route.v`) fail the build with file+line.
 
 ## What
 
-`parseVFile` extracts `@[rpc|get|post|put|delete|patch|before|after] pub fn name(params) ret`
-(verb attributes take an optional `('qualifier')`) +
+`parseVFile` extracts `@[rpc|get|post|put|delete|patch|sse|before|after] pub fn name(params) ret`
+(verb attributes take an optional `('qualifier')`; `@[sse]` is GET+`Accept: text/event-stream`, same qualifier rules) +
 `parseStructs` extracts `pub struct` fields. `@[rpc]` fns keep the
 single-args-struct rule (fn taking one struct param expands to that
 struct's fields in TS); verb handlers take the framework `Request`
@@ -27,7 +27,10 @@ middleware (`+route.v` only, roadmap §7) exports no callables to TS —
 but the wrapper's `pub struct`s are still projected (wrapper is
 +layout-shaped, shared types flow to `+page.svelte`).
 `routeFor` (`src/routes/<p>.v` → `/<p>`, `src/lib/**` → no route) is
-shared with the V dispatcher. Dynamic file segments (`[id]`,
+shared with the V dispatcher. `@[sse]` fns project as
+`AsyncGenerator<string>` (roadmap item 14, veb streaming, either
+shape); neither shape nor a mix is a build error — the emit param is
+harness-injected, never client-supplied. Dynamic file segments (`[id]`,
 `[...rest]`) pass through into the route pattern; `SwelteRequest`
 carries a `params: Record<string, string>` field alongside
 `query`/`form`/`files`/headers. `files: Record<string, string>`

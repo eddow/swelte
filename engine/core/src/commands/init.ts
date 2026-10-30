@@ -9,20 +9,23 @@ import { join, resolve } from 'node:path'
 import type { Ctx } from './types.js'
 
 function write(root: string, rel: string, content: string): void {
-  const abs = join(root, rel)
-  mkdirSync(join(abs, '..'), { recursive: true })
-  writeFileSync(abs, content)
+	const abs = join(root, rel)
+	mkdirSync(join(abs, '..'), { recursive: true })
+	writeFileSync(abs, content)
 }
 
 export async function runInit(ctx: Ctx): Promise<void> {
-  const target = ctx.rest[0] ?? String(ctx.opts.dir ?? 'my-swelte-app')
-  const root = resolve(String(ctx.opts.root ?? process.cwd()), target)
-  if (existsSync(root) && readdirSync(root).length > 0) {
-    throw new Error(`target ${root} exists and is not empty (pass an empty dir)`)
-  }
-  mkdirSync(root, { recursive: true })
-  const name = target.split('/').filter(Boolean).pop() ?? 'my-swelte-app'
-  write(root, 'package.json', `{
+	const target = ctx.rest[0] ?? String(ctx.opts.dir ?? 'my-swelte-app')
+	const root = resolve(String(ctx.opts.root ?? process.cwd()), target)
+	if (existsSync(root) && readdirSync(root).length > 0) {
+		throw new Error(`target ${root} exists and is not empty (pass an empty dir)`)
+	}
+	mkdirSync(root, { recursive: true })
+	const name = target.split('/').filter(Boolean).pop() ?? 'my-swelte-app'
+	write(
+		root,
+		'package.json',
+		`{
   "name": "${name}",
   "private": true,
   "version": "0.1.0",
@@ -43,8 +46,12 @@ export async function runInit(ctx: Ctx): Promise<void> {
     "@swelte/vvm": "^0.1.0"
   }
 }
-`)
-  write(root, 'vite.config.ts', `import { defineConfig } from 'vite';
+`
+	)
+	write(
+		root,
+		'vite.config.ts',
+		`import { defineConfig } from 'vite';
 import { svelte } from '@sveltejs/vite-plugin-svelte';
 import { swelte } from '@swelte/core/vite';
 
@@ -63,15 +70,23 @@ export default defineConfig({
     }),
   ],
 });
-`)
-  write(root, 'svelte.config.js', `import { vitePreprocess } from '@sveltejs/vite-plugin-svelte';
+`
+	)
+	write(
+		root,
+		'svelte.config.js',
+		`import { vitePreprocess } from '@sveltejs/vite-plugin-svelte';
 
 /** @type {import('@sveltejs/vite-plugin-svelte').SvelteConfig} */
 export default {
   preprocess: vitePreprocess()
 };
-`)
-  write(root, 'tsconfig.json', `{
+`
+	)
+	write(
+		root,
+		'tsconfig.json',
+		`{
   "compilerOptions": {
     "target": "ES2022",
     "module": "ESNext",
@@ -92,8 +107,12 @@ export default {
   },
   "include": ["src", "vite.config.ts", ".swelte/types", ".swelte/v-shim.d.ts"]
 }
-`)
-  write(root, 'index.html', `<!doctype html>
+`
+	)
+	write(
+		root,
+		'index.html',
+		`<!doctype html>
 <html lang="en">
   <head>
     <meta charset="utf-8" />
@@ -105,13 +124,21 @@ export default {
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>
-`)
-  write(root, 'src/main.ts', `import { mount } from 'svelte'
+`
+	)
+	write(
+		root,
+		'src/main.ts',
+		`import { mount } from 'svelte'
 import Index from './routes/+page.svelte'
 
 mount(Index, { target: document.getElementById('app')! })
-`)
-  write(root, 'src/app.html', `<!doctype html>
+`
+	)
+	write(
+		root,
+		'src/app.html',
+		`<!doctype html>
 <html lang="en">
   <head>
     <meta charset="utf-8" />
@@ -123,8 +150,12 @@ mount(Index, { target: document.getElementById('app')! })
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>
-`)
-  write(root, 'src/routes/+page.svelte', `<script lang="ts">
+`
+	)
+	write(
+		root,
+		'src/routes/+page.svelte',
+		`<script lang="ts">
 import { get_greeting } from '#routes/+page.v'
 let name = $state('world')
 let greeting = $state('')
@@ -136,8 +167,12 @@ async function load() { greeting = await get_greeting({ payload: name }) }
   <button onclick={load}>Greet (#routes GET)</button>
   {#if greeting}<p>{greeting}</p>{/if}
 </main>
-`)
-  write(root, 'src/routes/+page.v', `// Swelte route handler for \`/\`.
+`
+	)
+	write(
+		root,
+		'src/routes/+page.v',
+		`// Swelte route handler for \`/\`.
 module plus_page
 
 @[get]
@@ -145,8 +180,12 @@ pub fn get_greeting(req SwelteRequest) string {
 	name := req.query['payload'] or { '""' }
 	return 'Hello, ' + name.trim('"') + '!'
 }
-`)
-  write(root, 'src/routes/api/greet.v', `// Swelte API route \`/api/greet\`.
+`
+	)
+	write(
+		root,
+		'src/routes/api/greet.v',
+		`// Swelte API route \`/api/greet\`.
 module greet
 
 import time
@@ -211,8 +250,12 @@ pub fn upload_file(req SwelteRequest) !string {
 	}
 	return 'got:' + names
 }
-`)
-write(root, 'src/routes/api/sibling.v', `// Unique-basename fixture (roadmap §17): editors resolve
+`
+	)
+	write(
+		root,
+		'src/routes/api/sibling.v',
+		`// Unique-basename fixture (roadmap §17): editors resolve
 // ./sibling.v to the real signature via the generated shim.
 module sibling
 
@@ -225,8 +268,12 @@ pub:
 pub fn g(args GreetIn) string {
 	return 'hi ' + args.name
 }
-`)
-  write(root, 'src/lib/crypto/hash.v', `// Swelte isomorphic lib. Same V compiles to native + \`v -b wasm\`.
+`
+	)
+	write(
+		root,
+		'src/lib/crypto/hash.v',
+		`// Swelte isomorphic lib. Same V compiles to native + \`v -b wasm\`.
 module crypto
 
 pub struct HashArgs {
@@ -238,10 +285,16 @@ pub:
 pub fn hash_string(args HashArgs) string {
 	return 'hash(' + args.input + ')'
 }
-`)
-  // server.v: Hand + static-file serving + main (calls generated routes/).
-  // Copied from the proven something example (BUILD_SERVED below).
-  write(root, 'server.v', `module main
+`
+	)
+	// server.v: veb App + Ctx + before_request (calls generated routes/).
+	// veb owns the socket loop (real streaming via takeover_conn + veb.sse);
+	// before_request runs before routing — set ctx.done + return a Result
+	// to answer directly, leave it unset to 404 (static/unknown paths).
+	write(
+		root,
+		'server.v',
+		`module main
 
 import net.http
 import net.http.mime
@@ -251,6 +304,8 @@ import routes
 import strconv
 import sync
 import time
+import veb
+import veb.sse
 
 // §11 Hardening (global, in Hand — never in \`+route.v\` middleware):
 // body-size cap (413), per-IP fixed-window rate limit (429), handler
@@ -300,38 +355,42 @@ mut:
 	count        int
 }
 
-// §11 rate-limit state lives on the handler: \`handle\` takes \`mut h\`,
-// so per-connection calls share the map under a mutex. No \`__global\`
-// (needs \`-enable-globals\`); single-instance in-memory only.
-struct Hand {
+// §11 rate-limit state lives on the veb App: before_request runs on the
+// App receiver, so per-request calls share the map under a mutex. No
+// \`__global\` (needs \`-enable-globals\`); single-instance in-memory only.
+pub struct Ctx {
+	veb.Context
+}
+
+pub struct App {
 mut:
 	buckets map[string]SwelteBucket
 	mu      sync.Mutex
 }
 
-fn (mut h Hand) swelte_rate_limited(ip string) bool {
+fn (mut app App) swelte_rate_limited(ip string) bool {
 	limit := swelte_rate_limit()
 	window := swelte_rate_window_ms()
 	now := time.now().unix_milli()
-	h.mu.lock()
+	app.mu.lock()
 	defer {
-		h.mu.unlock()
+		app.mu.unlock()
 	}
 	// Opportunistic eviction: drop buckets idle for 2 windows so the map
 	// cannot grow without bound (memory-DoS vector). Linear scan under
 	// the mutex — fine at dev/prod-single-instance scale.
-	for k, v in h.buckets {
+	for k, v in app.buckets {
 		if now - v.window_start >= 2 * window {
-			h.buckets.delete(k)
+			app.buckets.delete(k)
 		}
 	}
-	mut b := h.buckets[ip] or { SwelteBucket{window_start: now} }
+	mut b := app.buckets[ip] or { SwelteBucket{window_start: now} }
 	if now - b.window_start >= window {
 		b.window_start = now
 		b.count = 0
 	}
 	b.count += 1
-	h.buckets[ip] = b
+	app.buckets[ip] = b
 	return b.count > limit
 }
 
@@ -434,26 +493,30 @@ fn serve_static(dist string, path string) (int, string, string) {
 	return 200, mime_for(rel), data.bytestr()
 }
 
-fn (mut h Hand) handle(req http.Request) http.Response {
-	mut r := http.Response{}
-	url := req.url
-	path := if url.contains('?') { url.all_before('?') } else { url }
+fn (mut app App) before_request(mut ctx Ctx) veb.Result {
+	path := if ctx.req.url.contains('?') { ctx.req.url.all_before('?') } else { ctx.req.url }
 	cors_origin := os.getenv_opt('SWELTE_CORS_ORIGIN') or { '' }
-	origin := req.header.get_custom('Origin') or { '' }
+	origin := ctx.req.header.get_custom('Origin') or { '' }
 	cors_ok := cors_origin != '' && (cors_origin == '*' || cors_origin == origin)
-	if req.method == .options {
+	set_cors := fn (mut ctx Ctx, cors_ok bool, cors_origin string, origin string) {
 		if cors_ok {
-			r.header.set(.access_control_allow_origin, if cors_origin == '*' { '*' } else { origin })
-			r.header.set_custom('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS') or {}
-			r.header.set_custom('Access-Control-Allow-Headers', 'Content-Type, Accept') or {}
-			r.header.set_custom('Access-Control-Max-Age', '86400') or {}
+			ctx.set_header(.access_control_allow_origin, if cors_origin == '*' { '*' } else { origin })
+			ctx.res.header.set_custom('Access-Control-Allow-Credentials', 'true') or {}
 		}
-		r.status_code = 204
-		return r
+	}
+	if ctx.req.method == .options {
+		if cors_ok {
+			ctx.set_header(.access_control_allow_origin, if cors_origin == '*' { '*' } else { origin })
+			ctx.res.header.set_custom('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS') or {}
+			ctx.res.header.set_custom('Access-Control-Allow-Headers', 'Content-Type, Accept') or {}
+			ctx.res.header.set_custom('Access-Control-Max-Age', '86400') or {}
+		}
+		ctx.res.set_status(.no_content)
+		return ctx.send_response_to_client('text/plain', '')
 	}
 	mut query := map[string]string{}
-	if url.contains('?') {
-		for part in url.all_after('?').split('&') {
+	if ctx.req.url.contains('?') {
+		for part in ctx.req.url.all_after('?').split('&') {
 			if part == '' {
 				continue
 			}
@@ -469,13 +532,13 @@ fn (mut h Hand) handle(req http.Request) http.Response {
 		}
 	}
 	mut headers := map[string]string{}
-	for k in req.header.keys() {
-		if v := req.header.get_custom(k) {
+	for k in ctx.req.header.keys() {
+		if v := ctx.req.header.get_custom(k) {
 			headers[k] = v
 		}
 	}
 	mut cookies := map[string]string{}
-	if c := req.header.get(.cookie) {
+	if c := ctx.req.header.get(.cookie) {
 		for part in c.split(';') {
 			kv := part.split('=')
 			if kv.len == 2 {
@@ -483,24 +546,19 @@ fn (mut h Hand) handle(req http.Request) http.Response {
 			}
 		}
 	}
-	content_type := req.header.get(.content_type) or { '' }
-	// §11 Hardening: client IP comes from the server-injected Remote-Addr
-	// header (V net.http adds it from conn.peer_ip in server.v — never
-	// X-Forwarded-For, which is client-controlled and spoofable).
-	ip := headers['Remote-Addr'] or { '0.0.0.0' }
-	if h.swelte_rate_limited(ip) {
-		r.header.set(.content_type, 'application/json')
-		r.status_code = 429
-		r.body = '{"error":"rate limited"}'
-		return r
+	content_type := ctx.req.header.get(.content_type) or { '' }
+	// §11 Hardening: client IP comes from veb's parsed peer address
+	// (never X-Forwarded-For, which is client-controlled and spoofable).
+	ip := ctx.ip()
+	if app.swelte_rate_limited(ip) {
+		ctx.res.set_status(.too_many_requests)
+		return ctx.send_response_to_client('application/json', '{"error":"rate limited"}')
 	}
 	// §11 Hardening: body cap before routing (multipart included —
 	// uploads in §13 live under the same knob).
-	if req.data.len > swelte_body_limit() {
-		r.header.set(.content_type, 'application/json')
-		r.status_code = 413
-		r.body = '{"error":"body too large"}'
-		return r
+	if ctx.req.data.len > swelte_body_limit() {
+		ctx.res.set_status(.request_entity_too_large)
+		return ctx.send_response_to_client('application/json', '{"error":"body too large"}')
 	}
 	mut qualifier := query['q'] or { '' }
 	if qualifier == '' {
@@ -513,27 +571,49 @@ fn (mut h Hand) handle(req http.Request) http.Response {
 			}
 		}
 	}
-	// §11 Hardening: handler timeout watchdog — slow handlers report 500,
-	// the server keeps serving (the timed-out thread still runs to completion
-	// in the background — its send drops; a burst of slow handlers still
-	// costs a thread each).
-	out := swelte_call_route(path, req.method.str().to_upper(), query, headers, cookies, req.data, content_type, qualifier)
+	// §14 SSE (true streaming, veb): before_request owns \`ctx\`, so SSE
+	// intent is intercepted HERE — never reaches dispatch. On a
+	// GET+Accept match on an SSE route: build the SwelteRequest,
+	// resolve events via the generated accessor, take over + stream.
+	sse_prefix, sse_params := routes.swelte_sse_route(path, ctx.req.method.str().to_upper(), query, headers, qualifier)
+	if sse_prefix != '' {
+		mut sse_req := routes.SwelteRequest{ query: query, form: map[string]string{}, files: map[string]string{}, headers: headers, cookies: cookies, params: sse_params, method: 'GET', path: path, qualifier: qualifier }
+		if cors_ok {
+			ctx.set_header(.access_control_allow_origin, if cors_origin == '*' { '*' } else { origin })
+			ctx.res.header.set_custom('Access-Control-Allow-Credentials', 'true') or {}
+		}
+		if !routes.swelte_sse_is_emit(sse_prefix) {
+			routes.swelte_sse_events_for(sse_prefix, qualifier, sse_req) or {
+				ctx.res.set_status(.bad_request)
+				return ctx.send_response_to_client('application/json', '{"error":"' + err.msg() + '"}')
+			}
+		} else {
+			// Emit-mode fns run inside the writer (post-takeover), so an
+			// unknown qualifier would strand the client on a bare stream.
+			// Pre-flight ONLY the qualifier here (side-effect free — the
+			// fn itself runs once, inside the writer).
+			routes.swelte_sse_check_qual(sse_prefix, qualifier) or {
+				ctx.res.set_status(.bad_request)
+				return ctx.send_response_to_client('application/json', '{"error":"' + err.msg() + '"}')
+			}
+		}
+		return swelte_serve_sse(mut ctx, sse_prefix, qualifier, sse_req)
+	}
+	// (swelte_call_route is sync — veb runs before_request on a worker;
+	// the \`spawn select\` watchdog keeps the server responsive).
+	out := swelte_call_route(path, ctx.req.method.str().to_upper(), query, headers, cookies, ctx.req.data, content_type, qualifier)
 	status := out.status
 	body := out.body
 	set_cookies := out.set_cookies
-	if !cors_ok && origin != '' && req.method != .get && req.method != .head {
-		r.header.set(.content_type, 'application/json')
-		r.status_code = 403
-		r.body = '{"error":"forbidden"}'
-		return r
+	if !cors_ok && origin != '' && ctx.req.method != .get && ctx.req.method != .head {
+		ctx.res.set_status(.forbidden)
+		return ctx.send_response_to_client('application/json', '{"error":"forbidden"}')
 	}
 	dist := os.getenv_opt('SWELTE_DIST') or { '' }
-	if dist != '' && req.method == .get && !path.starts_with('/api/') && (path == '/' || (status == 404 && body.contains('not found'))) {
+	if dist != '' && ctx.req.method == .get && !path.starts_with('/api/') && (path == '/' || (status == 404 && body.contains('not found'))) {
 		s, ct, sb := serve_static(dist, path)
-		r.header.set(.content_type, ct)
-		r.status_code = s
-		r.body = sb
-		return r
+		ctx.res.set_status(http.status_from_int(s))
+		return ctx.send_response_to_client(ct, sb)
 	}
 	mut cookies_out := set_cookies.clone()
 	if status == 200 && cookies_out.len > 0 {
@@ -555,54 +635,116 @@ fn (mut h Hand) handle(req http.Request) http.Response {
 	// instead of JSON. Fetch stubs (Accept: application/json) keep JSON.
 	wants_html := headers['Accept'] or { headers['accept'] or { '' } }.contains('text/html')
 		&& !(headers['Accept'] or { headers['accept'] or { '' } }.contains('application/json'))
+	for c in cookies_out {
+		ctx.res.header.add(.set_cookie, c)
+	}
+	set_cors(mut ctx, cors_ok, cors_origin, origin)
 	if wants_html && status == 200 {
-		r.header.set(.location, path)
-		for c in cookies_out {
-			r.header.add(.set_cookie, c)
-		}
-		if cors_ok {
-			r.header.set(.access_control_allow_origin, if cors_origin == '*' { '*' } else { origin })
-			r.header.set_custom('Access-Control-Allow-Credentials', 'true') or {}
-		}
-		r.status_code = 303
-		r.body = ''
-		return r
+		ctx.res.set_status(.see_other)
+		return ctx.redirect(path, typ: .see_other)
 	}
 	if wants_html && status >= 400 {
 		mut msg := body.all_after('"error":"')
 		if msg != body {
 			msg = msg.all_before('"')
 		}
-		r.header.set(.content_type, 'text/html; charset=utf-8')
-		r.status_code = status
-		r.body = '<!doctype html><html><body><p>' + swelte_html_escape(msg) + '</p><p><a href="' + path + '">back</a></p></body></html>'
-		return r
+		ctx.res.set_status(http.status_from_int(status))
+		return ctx.send_response_to_client('text/html; charset=utf-8', '<!doctype html><html><body><p>' + swelte_html_escape(msg) + '</p><p><a href="' + path + '">back</a></p></body></html>')
 	}
-	r.header.set(.content_type, 'application/json')
-	for c in cookies_out {
-		r.header.add(.set_cookie, c)
+	// §14 SSE (true streaming, veb): the dispatch SSE arm never reaches
+	// here — it takes over the conn in swelte_serve_sse below and returns
+	// veb.no_result(). This is the JSON path only.
+	ctx.res.set_status(http.status_from_int(status))
+	return ctx.send_response_to_client('application/json', body)
+}
+
+// §14 SSE (true streaming): veb takeover + producer/writer split.
+// WHY TWO THREADS: time.sleep in the same thread that calls
+// send_message parks V's scheduler — all frames flush at once
+// (proven: sleeps-in-writer bundles; channel-split paces).
+// So the user fn runs as a PRODUCER (sleeps/waits/upstream reads OK)
+// feeding a channel; the WRITER only sends. Client disconnect:
+// send_message errors, writer breaks, producer's sends drop.
+// Handler-timeout watchdog does NOT apply (long-lived by design);
+// SWELTE_SSE_MAX_EVENTS caps runaway streams.
+fn swelte_sse_max_events() int {
+	return int(swelte_env_int('SWELTE_SSE_MAX_EVENTS', 10000))
+}
+
+struct SwelteSseJob {
+	prefix    string
+	qualifier string
+	req       routes.SwelteRequest
+	pch       chan string
+}
+
+fn swelte_sse_produce(job SwelteSseJob) {
+	if routes.swelte_sse_is_emit(job.prefix) {
+		emit := fn [job] (e string) bool {
+			job.pch <- e
+			return true
+		}
+		routes.swelte_sse_emit_for(job.prefix, job.qualifier, job.req, emit) or {}
+	} else {
+		events := routes.swelte_sse_events_for(job.prefix, job.qualifier, job.req) or {
+			[]string{}
+		}
+		for e in events {
+			job.pch <- e
+		}
 	}
-	if cors_ok {
-		r.header.set(.access_control_allow_origin, if cors_origin == '*' { '*' } else { origin })
-		r.header.set_custom('Access-Control-Allow-Credentials', 'true') or {}
+	job.pch.close()
+}
+
+fn swelte_serve_sse(mut ctx Ctx, prefix string, qualifier string, req routes.SwelteRequest) veb.Result {
+	ctx.takeover_conn()
+	pch := chan string{cap: 64}
+	job := SwelteSseJob{prefix, qualifier, req, pch}
+	spawn swelte_sse_produce(job)
+	spawn swelte_sse_write(mut ctx, pch)
+	return veb.no_result()
+}
+
+fn swelte_sse_write(mut ctx Ctx, pch chan string) {
+	mut sse_conn := sse.start_connection(mut ctx.Context)
+	cap := swelte_sse_max_events()
+	mut n := 0
+	for {
+		e := <-pch or { break }
+		if e.starts_with('__wait_ms:') {
+			ms := e.all_after(':').int()
+			if ms > 0 && ms <= 10000 {
+				time.sleep(time.millisecond * ms)
+			}
+			continue
+		}
+		if n >= cap {
+			break
+		}
+		n++
+		sse_conn.send_message(data: e) or { break }
 	}
-	r.status_code = status
-	r.body = body
-	return r
+	sse_conn.send_message(data: 'swelte:close') or {}
+	sse_conn.close()
+}
+
+@[get; post; put; patch; delete; options; head]
+@['/:path...']
+pub fn (mut app App) swelte_catchall(mut ctx Ctx) veb.Result {
+	return app.before_request(mut ctx)
 }
 
 fn main() {
-	port := os.getenv_opt('PORT') or { '8131' }
-	mut s := http.Server{
-		addr: ':' + port
-		handler: Hand{}
-		show_startup_message: false
-	}
-	println('swelte-v-backend listening on :' + port)
-	s.listen_and_serve()
+	port := (os.getenv_opt('PORT') or { '8131' }).int()
+	mut app := &App{}
+	veb.run_at[App, Ctx](mut app, port: port, family: .ip) or { panic(err.msg()) }
 }
-`)  
-  write(root, '.gitignore', `# build outputs — never commit
+`,
+	)
+	write(
+		root,
+		'.gitignore',
+		`# build outputs — never commit
 .svelte/
 # generated V dispatcher (routes/*.v at the project root) — NOT
 # src/routes/, which holds hand-written sources
@@ -611,7 +753,8 @@ dist/
 server
 .DS_Store
 node_modules/
-`)
-  ctx.log(`scaffolded ${root}`)
-  ctx.log('next: npm install && swelte dev')
+`
+	)
+	ctx.log(`scaffolded ${root}`)
+	ctx.log('next: npm install && swelte dev')
 }

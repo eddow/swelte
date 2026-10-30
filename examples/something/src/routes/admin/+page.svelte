@@ -16,6 +16,8 @@ async function load() {
 		<ErrorPage status={result.error.status} message={result.error.message} />
 	{:else}
 		<button onclick={load}>Who am I (guarded GET)</button>
-		{#if result?.data}<p>{result.data}</p>{/if}
+		{#if result?.data}
+			<p>{result.data}</p>
+		{/if}
 	{/if}
 </main>

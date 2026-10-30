@@ -1,7 +1,15 @@
 import type { Plugin } from 'vite'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { execFileSync as execVSync } from 'node:child_process'
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import {
+	existsSync,
+	mkdirSync,
+	readdirSync,
+	readFileSync,
+	rmSync,
+	statSync,
+	writeFileSync,
+} from 'node:fs'
 import { createRequire } from 'node:module'
 import { dirname, join, relative, resolve, sep } from 'node:path'
 import { resolveV } from './toolchain.js'
@@ -9,6 +17,13 @@ import { resolveV } from './toolchain.js'
 // Lazy V binary for `v -b wasm` (resolved on first compile).
 // (module import must not throw when the caller passes a plain path).
 let vBin = ''
+
+function v(ss: string[], ...values: unknown[]) {
+	return ss.reduce((result, str, i) => {
+		const v = values[i]
+		return result + str + (Array.isArray(v) ? v.join('') : (v ?? ''))
+	}, '')
+}
 
 const _createRequire = createRequire
 void _createRequire
@@ -35,7 +50,7 @@ interface RpcParam {
 
 interface RpcFn {
 	name: string
-	attr: 'get' | 'post' | 'rpc' | 'put' | 'delete' | 'patch' | 'before' | 'after'
+	attr: 'get' | 'post' | 'rpc' | 'put' | 'delete' | 'patch' | 'sse' | 'before' | 'after'
 	qualifier?: string
 	params: RpcParam[]
 	vret: string
@@ -81,10 +96,22 @@ export function parseVFile(src: string): RpcFn[] {
 	while ((bm = bareRe.exec(merged)) !== null) {
 		bareSpans.push({ end: bm.index + bm[0].length, name: 'sets_cookie' })
 	}
-	const re =
-		/@\[([^\]]*)\]\s*pub\s+fn\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(([^)]*)\)\s*([?!]?(?:\([^)]*\)|[A-Za-z_\][\w.[\]]*))?/g
+	const re = /@\[([^\]]*)\]\s*pub\s+fn\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(/g
 	let m: RegExpExecArray | null
 	while ((m = re.exec(merged)) !== null) {
+		// Paren-aware param scan: `emit fn (string) bool` contains
+		// parens, so `([^)]*)` truncates. Walk balanced from the open
+		// paren instead; the return type follows `)` up to `{`/`\n`.
+		let depth = 1
+		let i = m.index + m[0].length
+		while (i < merged.length && depth > 0) {
+			if (merged[i] === '(') depth++
+			else if (merged[i] === ')') depth--
+			i++
+		}
+		if (depth !== 0) continue
+		const rawParamsFull = merged.slice(m.index + m[0].length, i - 1)
+		const retMatch = /^\s*([?!]?(?:\([^)]*\)|[A-Za-z_\][\w.[\]]*))?/.exec(merged.slice(i, i + 80))
 		const attrParts = splitTopLevel(m[1], ';')
 		const verbs: { verb: string; qualifier?: string }[] = []
 		let setsCookie = false
@@ -94,12 +121,16 @@ export function parseVFile(src: string): RpcFn[] {
 			}
 		} // end bare-carrier attach
 		for (const p of attrParts) {
-			const pm = /^\s*([A-Za-z_][A-Za-z0-9_]*)\s*(?:\(\s*'([A-Za-z_][A-Za-z0-9_]*)'\s*\))?\s*$/.exec(p)
+			const pm =
+				/^\s*([A-Za-z_][A-Za-z0-9_]*)\s*(?:\(\s*'([A-Za-z_][A-Za-z0-9_]*)'\s*\))?\s*$/.exec(p)
 			if (pm && pm[1] === 'sets_cookie' && !pm[2]) {
 				setsCookie = true
 				continue
 			}
-			if (pm && ['get', 'post', 'rpc', 'put', 'delete', 'patch', 'before', 'after'].includes(pm[1])) {
+			if (
+				pm &&
+				['get', 'post', 'rpc', 'put', 'delete', 'patch', 'sse', 'before', 'after'].includes(pm[1])
+			) {
 				verbs.push({ verb: pm[1], qualifier: pm[2] })
 			}
 		}
@@ -107,8 +138,8 @@ export function parseVFile(src: string): RpcFn[] {
 			continue
 		}
 		const name = m[2]
-		const rawParams = (m[3] ?? '').trim()
-		const rawRet = (m[4] ?? '').trim()
+		const rawParams = (rawParamsFull ?? '').trim()
+		const rawRet = (retMatch?.[1] ?? '').trim()
 		let params: RpcParam[] = []
 		let singleArgsStruct: string | undefined
 		const parts = rawParams === '' || rawParams === 'void' ? [] : splitTopLevel(rawParams, ',')
@@ -284,7 +315,10 @@ function parseStructs(src: string): VStruct[] {
 /** Dynamic path params of a route pattern (`users/[id]` -> ['id']). */
 function routeParams(route: string): string[] {
 	const out: string[] = []
-	for (const m of route.matchAll(/\[\.\.\.([A-Za-z_][A-Za-z0-9_]*)\]|\[([A-Za-z_][A-Za-z0-9_]*)\]/g)) out.push(m[1] ?? m[2])
+	for (const m of route.matchAll(
+		/\[\.\.\.([A-Za-z_][A-Za-z0-9_]*)\]|\[([A-Za-z_][A-Za-z0-9_]*)\]/g
+	))
+		out.push(m[1] ?? m[2])
 	return out
 }
 
@@ -310,9 +344,7 @@ export function swelte(options: SweltePluginOptions = {}): Plugin {
 	// never leak into a bundle.
 	const usedLibFiles = new Set<string>()
 	const vBackendUrl =
-		options.vBackendUrl ??
-		process.env.SWELTE_V_BACKEND_URL ??
-		process.env.VITE_SWELTE_V_BACKEND_URL
+		options.vBackendUrl ?? process.env.SWELTE_V_BACKEND_URL ?? process.env.VITE_SWELTE_V_BACKEND_URL
 	function serverRoot(): string {
 		return activeRoot
 	}
@@ -333,7 +365,15 @@ export function swelte(options: SweltePluginOptions = {}): Plugin {
 				const mod = p.split(/\s+/).pop() as string
 				const top = mod.split('.')[0]
 				if (top === 'main' || top === 'builtin' || top === '') continue
-				if (top === 'os' || top === 'net' || top === 'db' || top === 'time' || top === 'v' || top === 'wasm' || top === 'x') {
+				if (
+					top === 'os' ||
+					top === 'net' ||
+					top === 'db' ||
+					top === 'time' ||
+					top === 'v' ||
+					top === 'wasm' ||
+					top === 'x'
+				) {
 					blocked.push(mod)
 					continue
 				}
@@ -347,7 +387,18 @@ export function swelte(options: SweltePluginOptions = {}): Plugin {
 		const t = vtype.trim().replace(/^\?/, '')
 		if (t === 'string') return 'string'
 		if (t === 'bool') return 'bool'
-		if (t === 'int' || t === 'i8' || t === 'i16' || t === 'i32' || t === 'u8' || t === 'u16' || t === 'u32' || t === 'rune' || t === 'char') return 'int'
+		if (
+			t === 'int' ||
+			t === 'i8' ||
+			t === 'i16' ||
+			t === 'i32' ||
+			t === 'u8' ||
+			t === 'u16' ||
+			t === 'u32' ||
+			t === 'rune' ||
+			t === 'char'
+		)
+			return 'int'
 		return null
 	}
 
@@ -356,7 +407,18 @@ export function swelte(options: SweltePluginOptions = {}): Plugin {
 		if (t === '' || t === 'void') return 'void'
 		if (t === 'string') return 'string'
 		if (t === 'bool') return 'bool'
-		if (t === 'int' || t === 'i8' || t === 'i16' || t === 'i32' || t === 'u8' || t === 'u16' || t === 'u32' || t === 'rune' || t === 'char') return 'int'
+		if (
+			t === 'int' ||
+			t === 'i8' ||
+			t === 'i16' ||
+			t === 'i32' ||
+			t === 'u8' ||
+			t === 'u16' ||
+			t === 'u32' ||
+			t === 'rune' ||
+			t === 'char'
+		)
+			return 'int'
 		return null
 	}
 
@@ -365,26 +427,53 @@ export function swelte(options: SweltePluginOptions = {}): Plugin {
 		for (const f of fns) {
 			for (const p of f.params) {
 				if (wasmParamKind(p.vtype) === null) {
-					throw new Error(libRel + ': ' + f.name + '(' + p.name + ': ' + p.vtype + ') cannot cross the WASM boundary')
+					throw new Error(
+						libRel +
+							': ' +
+							f.name +
+							'(' +
+							p.name +
+							': ' +
+							p.vtype +
+							') cannot cross the WASM boundary'
+					)
 				}
 			}
-			if (f.fallible) throw new Error(libRel + ': ' + f.name + ' is fallible — the V wasm backend cannot compile !T/?T (compiler ICE)')
-			if (wasmReturnKind(f.vret) === null) throw new Error(libRel + ': ' + f.name + ' returns ' + (f.vret || '(unparsed)'))
+			if (f.fallible)
+				throw new Error(
+					libRel +
+						': ' +
+						f.name +
+						' is fallible — the V wasm backend cannot compile !T/?T (compiler ICE)'
+				)
+			if (wasmReturnKind(f.vret) === null)
+				throw new Error(libRel + ': ' + f.name + ' returns ' + (f.vret || '(unparsed)'))
 		}
 		const blocked = wasmBlockedImports(src)
 		if (blocked.length > 0) throw new Error(libRel + ': blocked import(s): ' + blocked.join(', '))
-		const broken = [...new Set(
-			[...src.matchAll(/^\s*import\s+([^\n;]+)/gm)]
-				.flatMap((m) => m[1].split(','))
-				.map((p) => p.trim().split(/\s+/).pop() as string)
-				.map((mm) => mm.split('.')[0])
-				.filter((top) => WASM_KNOWN_BROKEN.has(top))
-		)]
-		if (broken.length > 0) throw new Error(libRel + ': uses known-broken wasm stdlib (' + broken.join(', ') + ') — V 0.5.2 backend limitation')
+		const broken = [
+			...new Set(
+				[...src.matchAll(/^\s*import\s+([^\n;]+)/gm)]
+					.flatMap((m) => m[1].split(','))
+					.map((p) => p.trim().split(/\s+/).pop() as string)
+					.map((mm) => mm.split('.')[0])
+					.filter((top) => WASM_KNOWN_BROKEN.has(top))
+			),
+		]
+		if (broken.length > 0)
+			throw new Error(
+				libRel +
+					': uses known-broken wasm stdlib (' +
+					broken.join(', ') +
+					') — V 0.5.2 backend limitation'
+			)
 		const body = src
 			.replace(/^\s*module\s+\S+.*$/m, 'module main')
 			.replace(/@\[([^\]]*)\]\s*/g, (_mm, attrs: string) => {
-				const keep = attrs.split(';').map((a: string) => a.trim()).filter((a: string) => a && !/^(rpc|get|post|put|delete|patch)\b/.test(a))
+				const keep = attrs
+					.split(';')
+					.map((a: string) => a.trim())
+					.filter((a: string) => a && !/^(rpc|get|post|put|delete|patch|sse)\b/.test(a))
 				return keep.length > 0 ? '@[' + keep.join('; ') + '] ' : ''
 			})
 		const compiled = [
@@ -402,11 +491,17 @@ export function swelte(options: SweltePluginOptions = {}): Plugin {
 		writeFileSync(tmp, compiled)
 		try {
 			if (!vBin) vBin = resolveV(import.meta.url)
-			execVSync(vBin, ['-b', 'wasm', '-os', 'browser', '-o', outWasm, tmp], { stdio: ['ignore', 'pipe', 'pipe'] })
+			execVSync(vBin, ['-b', 'wasm', '-os', 'browser', '-o', outWasm, tmp], {
+				stdio: ['ignore', 'pipe', 'pipe'],
+			})
 			const size = statSync(outWasm).size
 			return size
 		} finally {
-			try { rmSync(tmp, { force: true }) } catch { /* ignore */ }
+			try {
+				rmSync(tmp, { force: true })
+			} catch {
+				/* ignore */
+			}
 		}
 	}
 
@@ -422,7 +517,10 @@ export function swelte(options: SweltePluginOptions = {}): Plugin {
 	 * leaf - never the sibling). foo/+router.v (roadmap 8, not built)
 	 * will own foo/** - never foo itself - so it never collides. */
 	function relPosix(abs: string, f: string): string {
-		return f.slice(abs.length + 1).split(sep).join('/')
+		return f
+			.slice(abs.length + 1)
+			.split(sep)
+			.join('/')
 	}
 	function doubleClaimCheck(routesAbs: string, routesDir: string, mod: string, rel: string): void {
 		const dirOf = (m: string) => (m.includes('/') ? m.slice(0, m.lastIndexOf('/')) : '')
@@ -449,31 +547,43 @@ export function swelte(options: SweltePluginOptions = {}): Plugin {
 			// a `.v`-less `foo.svelte` still owns the URL and collides
 			// with a `foo/+page.v` leaf. Exclude only self's own files.
 			if (v !== selfV && existsSync(join(routesAbs, v))) others.push(routesDir + '/' + v)
-			if (routesDir + '/' + st !== routesDir + '/' + selfSvelte && existsSync(join(routesAbs, st))) {
+			if (
+				routesDir + '/' + st !== routesDir + '/' + selfSvelte &&
+				existsSync(join(routesAbs, st))
+			) {
 				others.push(routesDir + '/' + st)
 			}
 		}
 		if (others.length > 0) {
-			throw new Error(`[swelte] ${routesDir}/${rel} claims the same URL as ${others.join(' + ')} — one file per URL (guarded URLs live inside their guard's directory; keep the +page leaf).`)
+			throw new Error(
+				`[swelte] ${routesDir}/${rel} claims the same URL as ${others.join(' + ')} — one file per URL (guarded URLs live inside their guard's directory; keep the +page leaf).`
+			)
 		}
 	}
 
 	/** Middleware shapes (§7). */
 	function validateMiddlewareFn(rel: string, m: RpcFn): void {
-		if (m.qualifier) throw new Error(
-			`[swelte] ${rel}: @[${m.attr}] ${m.name} takes no qualifier (wrappers run for the whole subtree, not one ?q).`,
-		)
+		if (m.qualifier)
+			throw new Error(
+				`[swelte] ${rel}: @[${m.attr}] ${m.name} takes no qualifier (wrappers run for the whole subtree, not one ?q).`
+			)
 		if (m.attr === 'before') {
 			if (m.params.length !== 1 || m.params[0].vtype !== 'SwelteRequest')
-				throw new Error(`[swelte] ${rel}: @[before] ${m.name} must take exactly one SwelteRequest param.`)
+				throw new Error(
+					`[swelte] ${rel}: @[before] ${m.name} must take exactly one SwelteRequest param.`
+				)
 			if (m.vret !== 'SwelteRequest' || !m.fallible)
 				throw new Error(`[swelte] ${rel}: @[before] ${m.name} must return !SwelteRequest.`)
 		} else {
 			const pv = m.params.map((pp) => pp.vtype)
 			if (pv.length !== 3 || pv[0] !== 'SwelteRequest' || pv[1] !== 'int' || pv[2] !== 'string')
-				throw new Error(`[swelte] ${rel}: @[after] ${m.name} must take (SwelteRequest, int, string).`)
+				throw new Error(
+					`[swelte] ${rel}: @[after] ${m.name} must take (SwelteRequest, int, string).`
+				)
 			if (!/^\(\s*int\s*,\s*string\s*\)$/.test(m.vret) || !m.fallible)
-				throw new Error(`[swelte] ${rel}: @[after] ${m.name} must return !(int, string) (got ${m.fallible ? '!' : ''}${m.vret || 'none'}).`)
+				throw new Error(
+					`[swelte] ${rel}: @[after] ${m.name} must return !(int, string) (got ${m.fallible ? '!' : ''}${m.vret || 'none'}).`
+				)
 		}
 	}
 
@@ -510,13 +620,16 @@ export function swelte(options: SweltePluginOptions = {}): Plugin {
 			const single = /^\[([A-Za-z_][A-Za-z0-9_]*)\]$/.exec(s)
 			const rest = /^\[\.\.\.([A-Za-z_][A-Za-z0-9_]*)\]$/.exec(s)
 			if (single) {
-				if (seen.has(single[1])) throw new Error(`[swelte] ${what}: duplicate route param [${single[1]}]`)
+				if (seen.has(single[1]))
+					throw new Error(`[swelte] ${what}: duplicate route param [${single[1]}]`)
 				seen.add(single[1])
 				continue
 			}
 			if (rest) {
-				if (i !== segs.length - 1) throw new Error(`[swelte] ${what}: [...${rest[1]}] catch-all must be the last segment`)
-				if (seen.has(rest[1])) throw new Error(`[swelte] ${what}: duplicate route param [...${rest[1]}]`)
+				if (i !== segs.length - 1)
+					throw new Error(`[swelte] ${what}: [...${rest[1]}] catch-all must be the last segment`)
+				if (seen.has(rest[1]))
+					throw new Error(`[swelte] ${what}: duplicate route param [...${rest[1]}]`)
 				seen.add(rest[1])
 				continue
 			}
@@ -531,10 +644,14 @@ export function swelte(options: SweltePluginOptions = {}): Plugin {
 	function routeFor(routesAbs: string, file: string): string | null {
 		const mod = modulePath(routesAbs, file)
 		if (mod === '+route' || mod.endsWith('/+route')) {
-			if (mod.includes('[')) throw new Error(`[swelte] ${routesDir}/${relPosix(routesAbs, file)}: dynamic wrapper dirs are not supported (no brackets in +route.v paths)`)
+			if (mod.includes('['))
+				throw new Error(
+					`[swelte] ${routesDir}/${relPosix(routesAbs, file)}: dynamic wrapper dirs are not supported (no brackets in +route.v paths)`
+				)
 			return null
 		}
-		const leaf = mod === 'index' || mod.endsWith('/index') || mod === '+page' || mod.endsWith('/+page')
+		const leaf =
+			mod === 'index' || mod.endsWith('/index') || mod === '+page' || mod.endsWith('/+page')
 		if (leaf) {
 			// Folder-root leaf: strip the leaf segment (`+page` or legacy
 			// `index`) to get the directory, whose path is the URL.
@@ -544,7 +661,8 @@ export function swelte(options: SweltePluginOptions = {}): Plugin {
 			// listVFiles is deterministic; route identity never depends
 			// on it (pure function of mod).
 			const dir = mod.includes('/') ? mod.slice(0, mod.lastIndexOf('/')) : ''
-			if (dir !== '') validateDynamicSegs(`${routesDir}/${relPosix(routesAbs, file)}`, dir.split('/'))
+			if (dir !== '')
+				validateDynamicSegs(`${routesDir}/${relPosix(routesAbs, file)}`, dir.split('/'))
 			return dir === '' || dir === 'api' ? '/' : `/${dir}`
 		}
 		validateDynamicSegs(`${routesDir}/${relPosix(routesAbs, file)}`, mod.split('/'))
@@ -594,7 +712,8 @@ export function swelte(options: SweltePluginOptions = {}): Plugin {
 				const hi = buf.findIndex((b) => /^(\s*)pub\s+fn\s+([A-Za-z_][A-Za-z0-9_]*)/.test(b))
 				const fm = /^(\s*)pub\s+fn\s+([A-Za-z_][A-Za-z0-9_]*)/.exec(buf[hi < 0 ? 0 : hi] ?? '')
 				if (fm) {
-					buf[hi < 0 ? 0 : hi] = `${fm[1]}pub fn ${wprefix}${fm[2]}${(buf[hi < 0 ? 0 : hi]).slice(fm[0].length)}`
+					buf[hi < 0 ? 0 : hi] =
+						`${fm[1]}pub fn ${wprefix}${fm[2]}${(buf[hi < 0 ? 0 : hi]).slice(fm[0].length)}`
 					for (let i = 0; i < buf.length; i++) {
 						if (i === 0) {
 							const t0 = buf[0].trim()
@@ -618,7 +737,10 @@ export function swelte(options: SweltePluginOptions = {}): Plugin {
 				const fnHere = /^\s*(pub\s+)?fn\s+[A-Za-z_][A-Za-z0-9_]*\s*\(/.test(line)
 				const attrHere = /@\[[^\]]*(before|after)/.test(line)
 				const bareAttr = /^\s*@\[/.test(line) && !fnHere
-				if (bareAttr) { buf.push(line); continue }
+				if (bareAttr) {
+					buf.push(line)
+					continue
+				}
 				if (fnHere) {
 					keep = attrHere || buf.some((b) => /@\[[^\]]*(before|after)/.test(b))
 					buf.push(line)
@@ -650,7 +772,10 @@ export function swelte(options: SweltePluginOptions = {}): Plugin {
 		return out
 	}
 
-	function emitServerGen(dispatched: { route: string; mod: string; prefix: string }[]): string {
+	function emitServerGen(
+		dispatched: { route: string; mod: string; prefix: string }[],
+		sseMods: Set<string> = new Set()
+	): string {
 		const o: string[] = []
 		o.push('// Auto-generated by swelte from V signatures. Do not edit.')
 		o.push('module routes')
@@ -671,12 +796,14 @@ export function swelte(options: SweltePluginOptions = {}): Plugin {
 		o.push('}')
 		o.push('')
 		o.push('fn swelte_method_gate(method string) (int, string, []string) {')
-		o.push('\tif method == \'POST\' || method == \'PUT\' || method == \'PATCH\' || method == \'DELETE\' { return swelte_forbidden() }')
+		o.push(
+			"\tif method == 'POST' || method == 'PUT' || method == 'PATCH' || method == 'DELETE' { return swelte_forbidden() }"
+		)
 		o.push('\treturn swelte_method_not_allowed()')
 		o.push('}')
 		o.push('')
 		o.push('fn swelte_normalize_path(path string) string {')
-		o.push('\tif path.len > 1 && path.ends_with(\'/\') { return path[..path.len - 1] }')
+		o.push("\tif path.len > 1 && path.ends_with('/') { return path[..path.len - 1] }")
 		o.push('\treturn path')
 		o.push('}')
 		o.push('')
@@ -693,88 +820,222 @@ export function swelte(options: SweltePluginOptions = {}): Plugin {
 		o.push('\tqualifier string')
 		o.push('}')
 		o.push('')
-		o.push('fn swelte_err_unknown(path string, fn_name string, available []string) (int, string, []string) {')
+		o.push(
+			'fn swelte_err_unknown(path string, fn_name string, available []string) (int, string, []string) {'
+		)
 		o.push("\tmut avail := '['")
 		o.push('\tfor i, a in available {')
 		o.push("\t\tif i > 0 { avail += ',' }")
 		o.push('\t\tavail += json.encode(a)')
 		o.push('\t}')
 		o.push("\tavail += ']'")
-		o.push('\treturn 404, \'{"error":"unknown fn","fn":\' + json.encode(fn_name) + \',"path":\' + json.encode(path) + \',"available":\' + avail + \'}\', []string{}')
+		o.push(
+			'\treturn 404, \'{"error":"unknown fn","fn":\' + json.encode(fn_name) + \',"path":\' + json.encode(path) + \',"available":\' + avail + \'}\', []string{}'
+		)
 		o.push('}')
 		o.push('')
-		o.push('fn swelte_err_unknown_cookies(path string, fn_name string, available []string) (int, string, []string) {')
+		o.push(
+			'fn swelte_err_unknown_cookies(path string, fn_name string, available []string) (int, string, []string) {'
+		)
 		o.push('\treturn swelte_err_unknown(path, fn_name, available)')
 		o.push('}')
 		o.push('')
-		o.push('fn swelte_err_bad(path string, fn_name string, detail string) (int, string, []string) {')
-		o.push('\treturn 400, \'{"error":\' + json.encode(detail) + \',"fn":\' + json.encode(fn_name) + \',"path":\' + json.encode(path) + \'}\', []string{}')
+		o.push(
+			'fn swelte_err_bad(path string, fn_name string, detail string) (int, string, []string) {'
+		)
+		o.push(
+			"\treturn 400, '{\"error\":' + json.encode(detail) + ',\"fn\":' + json.encode(fn_name) + ',\"path\":' + json.encode(path) + '}', []string{}"
+		)
 		o.push('}')
 		o.push('')
-		o.push('fn swelte_err_bad_cookies(path string, fn_name string, detail string) (int, string, []string) {')
+		o.push(
+			'fn swelte_err_bad_cookies(path string, fn_name string, detail string) (int, string, []string) {'
+		)
 		o.push('\treturn swelte_err_bad(path, fn_name, detail)')
 		o.push('}')
 		o.push('')
 		o.push('fn swelte_err_unknown_qual(path string, available []string) (int, string, []string) {')
-		o.push('\tmut avail := \'[\'')
+		o.push("\tmut avail := '['")
 		o.push('\tfor i, a in available {')
 		o.push("\t\tif i > 0 { avail += ',' }")
 		o.push('\t\tavail += json.encode(a)')
 		o.push('\t}')
 		o.push("\tavail += ']'")
-		o.push('\treturn 404, \'{"error":"unknown qualifier","path":\' + json.encode(path) + \',"available":\' + avail + \'}\', []string{}')
+		o.push(
+			'\treturn 404, \'{"error":"unknown qualifier","path":\' + json.encode(path) + \',"available":\' + avail + \'}\', []string{}'
+		)
 		o.push('}')
 		o.push('')
-		o.push('fn swelte_err_unknown_qual_cookies(path string, available []string) (int, string, []string) {')
+		o.push(
+			'fn swelte_err_unknown_qual_cookies(path string, available []string) (int, string, []string) {'
+		)
 		o.push('\treturn swelte_err_unknown_qual(path, available)')
 		o.push('}')
 		o.push('')
 		o.push('fn swelte_match_route(pattern string, path string) (bool, map[string]string) {')
 		o.push('\tnorm_path := swelte_normalize_path(path)')
 		o.push('\tmut params := map[string]string{}')
-		o.push("\tif pattern == '/' { if norm_path == '/' || norm_path == '' { return true, params } return false, params }")
+		o.push(
+			"\tif pattern == '/' { if norm_path == '/' || norm_path == '' { return true, params } return false, params }"
+		)
 		o.push('\tmut psegs := pattern.split("/")')
 		o.push('\tmut segs := norm_path.split("/")')
 		o.push("\tif psegs.len > 0 && psegs[0] == '' { psegs.delete(0) }")
 		o.push("\tif segs.len > 0 && segs[0] == '' { segs.delete(0) }")
 		o.push("\tif psegs.len > 0 && psegs.last().starts_with('[...') {")
-		o.push("\t	name := psegs.last()[4..psegs.last().len - 1]")
+		o.push('\t	name := psegs.last()[4..psegs.last().len - 1]')
 		o.push('\t	if segs.len < psegs.len - 1 { return false, params }')
 		o.push('\t	for i in 0 .. psegs.len - 1 {')
-		o.push("\t		ps := psegs[i]")
-		o.push("\t		if ps.starts_with('[') { params[ps[1..ps.len - 1]] = if i < segs.len { swelte_unescape(segs[i]) } else { '' } } else if i >= segs.len || ps != segs[i] { return false, params }")
+		o.push('\t		ps := psegs[i]')
+		o.push(
+			"\t		if ps.starts_with('[') { params[ps[1..ps.len - 1]] = if i < segs.len { swelte_unescape(segs[i]) } else { '' } } else if i >= segs.len || ps != segs[i] { return false, params }"
+		)
 		o.push('\t	}')
-		o.push("\t\tmut rest_parts := segs[psegs.len - 1" + ".." + "].clone()")
-		o.push("\t\tfor ri, rp in rest_parts { rest_parts[ri] = swelte_unescape(rp) }")
-		o.push("\t\tparams[name] = rest_parts.join("+'"/"'+")")
+		o.push('\t\tmut rest_parts := segs[psegs.len - 1' + '..' + '].clone()')
+		o.push('\t\tfor ri, rp in rest_parts { rest_parts[ri] = swelte_unescape(rp) }')
+		o.push('\t\tparams[name] = rest_parts.join(' + '"/"' + ')')
 		o.push('\t	return true, params')
 		o.push('\t}')
 		o.push('\tif psegs.len != segs.len { return false, params }')
 		o.push('\tfor i in 0 .. psegs.len {')
-		o.push("\t	ps := psegs[i]")
-		o.push("\t	if ps.starts_with('[') { if segs[i] == '' { return false, params } params[ps[1..ps.len - 1]] = swelte_unescape(segs[i]) } else if ps != segs[i] { return false, params }")
+		o.push('\t	ps := psegs[i]')
+		o.push(
+			"\t	if ps.starts_with('[') { if segs[i] == '' { return false, params } params[ps[1..ps.len - 1]] = swelte_unescape(segs[i]) } else if ps != segs[i] { return false, params }"
+		)
 		o.push('\t}')
 		o.push('\treturn true, params')
 		o.push('}')
 		o.push('')
-		o.push('pub fn swelte_route(path string, method string, query map[string]string, headers map[string]string, cookies map[string]string, body string, content_type string, qualifier string) (int, string, []string) {')
+		o.push(
+			'pub fn swelte_route(path string, method string, query map[string]string, headers map[string]string, cookies map[string]string, body string, content_type string, qualifier string) (int, string, []string) {'
+		)
 		o.push('\tnorm_path := swelte_normalize_path(path)')
 		for (const d of dispatched.filter((x) => !x.route.includes('['))) {
-			o.push(`\tif norm_path == ${vJsonStr(d.route)} { return ${d.prefix}dispatch(norm_path, method, query, map[string]string{}, headers, cookies, body, content_type, qualifier) }`)
+			o.push(
+				`\tif norm_path == ${vJsonStr(d.route)} { return ${d.prefix}dispatch(norm_path, method, query, map[string]string{}, headers, cookies, body, content_type, qualifier) }`
+			)
 		}
 		// Dynamic arms (section 8) after exact arms: static beats dynamic; among
 		// dynamics, fewer [segs] first, [...rest] catch-all last (stable sort).
-		for (const d of [...dispatched].filter((x) => x.route.includes('[')).sort((a, b) => { const ca = a.route.includes('[...') ? 1 : 0; const cb = b.route.includes('[...') ? 1 : 0; if (ca !== cb) return ca - cb; const pa = (a.route.match(/\[/g) || []).length; const pb = (b.route.match(/\[/g) || []).length; if (pa !== pb) return pa - pb; return a.route < b.route ? -1 : a.route > b.route ? 1 : 0; })) {
-			o.push(`\t${d.prefix}matched, ${d.prefix}params := swelte_match_route(${vJsonStr(d.route)}, norm_path)`)
-			o.push(`\tif ${d.prefix}matched { return ${d.prefix}dispatch(norm_path, method, query, ${d.prefix}params, headers, cookies, body, content_type, qualifier) }`)
+		for (const d of [...dispatched]
+			.filter((x) => x.route.includes('['))
+			.sort((a, b) => {
+				const ca = a.route.includes('[...') ? 1 : 0
+				const cb = b.route.includes('[...') ? 1 : 0
+				if (ca !== cb) return ca - cb
+				const pa = (a.route.match(/\[/g) || []).length
+				const pb = (b.route.match(/\[/g) || []).length
+				if (pa !== pb) return pa - pb
+				return a.route < b.route ? -1 : a.route > b.route ? 1 : 0
+			})) {
+			o.push(
+				`\t${d.prefix}matched, ${d.prefix}params := swelte_match_route(${vJsonStr(d.route)}, norm_path)`
+			)
+			o.push(
+				`\tif ${d.prefix}matched { return ${d.prefix}dispatch(norm_path, method, query, ${d.prefix}params, headers, cookies, body, content_type, qualifier) }`
+			)
 		}
 		o.push(`\treturn 404, '{"error":"not found"}', []string{}`)
+		o.push('}')
+		o.push('')
+		// SSE route predicate (§14, true streaming via veb).
+		// `before_request` (which owns `ctx`) calls this FIRST: on a
+		// GET+Accept match on an SSE route it takes over + streams and
+		// never reaches dispatch. Returns the dispatch prefix for the
+		// matched file (whose `sse_events` accessor yields the list),
+		// or '' when this request is not an SSE stream.
+		o.push(
+			'pub fn swelte_sse_route(path string, method string, query map[string]string, headers map[string]string, qualifier string) (string, map[string]string) {'
+		)
+		o.push("\tmut accept := headers['Accept'] or { headers['accept'] or { '' } }")
+		o.push(
+			"\tif method != 'GET' || !accept.contains('text/event-stream') { return '', map[string]string{} }"
+		)
+		o.push('\tnorm_path := swelte_normalize_path(path)')
+		for (const d of dispatched.filter((x) => !x.route.includes('['))) {
+			if (!sseMods.has(d.mod)) continue
+			o.push(
+				`\tif norm_path == ${vJsonStr(d.route)} { return ${vJsonStr(d.prefix)}, map[string]string{} }`
+			)
+		}
+		for (const d of [...dispatched]
+			.filter((x) => x.route.includes('['))
+			.sort((a, b) => {
+				const ca = a.route.includes('[...') ? 1 : 0
+				const cb = b.route.includes('[...') ? 1 : 0
+				if (ca !== cb) return ca - cb
+				const pa = (a.route.match(/\[/g) || []).length
+				const pb = (b.route.match(/\[/g) || []).length
+				if (pa !== pb) return pa - pb
+				return a.route < b.route ? -1 : a.route > b.route ? 1 : 0
+			})) {
+			if (!sseMods.has(d.mod)) continue
+			o.push(
+				`\t${d.prefix}matched, ${d.prefix}params := swelte_match_route(${vJsonStr(d.route)}, norm_path)`
+			)
+			o.push(`\tif ${d.prefix}matched { return ${vJsonStr(d.prefix)}, ${d.prefix}params }`)
+		}
+		o.push(`\treturn '', map[string]string{}`)
+		o.push('}')
+		o.push('')
+		// SSE events fan-out (§14): `before_request` resolves the route
+		// to a dispatch prefix; this maps prefix → per-file accessor.
+		// List mode returns the list; emit mode runs the fn with the
+		// harness emitter. Qualifier pre-check is side-effect free
+		// (emit fns run ONLY inside the writer, post-takeover).
+		o.push(
+			'pub fn swelte_sse_events_for(prefix string, qualifier string, req SwelteRequest) ![]string {'
+		)
+		for (const d of dispatched) {
+			if (!sseMods.has(d.mod)) continue
+			o.push(
+				`\tif prefix == ${vJsonStr(d.prefix)} { return ${d.prefix}sse_events(qualifier, req) }`
+			)
+		}
+		o.push(`\treturn error('no sse route for prefix: ' + prefix)`)
+		o.push('}')
+		o.push('')
+		o.push('pub fn swelte_sse_is_emit(prefix string) bool {')
+		for (const d of dispatched) {
+			if (!sseMods.has(d.mod)) continue
+			o.push(`\tif prefix == ${vJsonStr(d.prefix)} { return ${d.prefix}sse_is_emit() }`)
+		}
+		o.push(`\treturn false`)
+		o.push('}')
+		o.push('')
+		o.push('pub fn swelte_sse_check_qual(prefix string, qualifier string) ! {')
+		for (const d of dispatched) {
+			if (!sseMods.has(d.mod)) continue
+			o.push(
+				`\tif prefix == ${vJsonStr(d.prefix)} { ${d.prefix}sse_check_qual(qualifier) or { return err } return }`
+			)
+		}
+		o.push(`\treturn error('no sse route for prefix: ' + prefix)`)
+		o.push('}')
+		o.push('')
+		o.push(
+			'pub fn swelte_sse_emit_for(prefix string, qualifier string, req SwelteRequest, emit fn (string) bool) ! {'
+		)
+		for (const d of dispatched) {
+			if (!sseMods.has(d.mod)) continue
+			o.push(
+				`\tif prefix == ${vJsonStr(d.prefix)} { ${d.prefix}sse_emit(qualifier, req, emit) or { return err } return }`
+			)
+		}
+		o.push(`\treturn error('no sse route for prefix: ' + prefix)`)
 		o.push('}')
 		o.push('')
 		return o.join('\n')
 	}
 
-	function emitRouteFile(mod: string, route: string, prefix: string, src: string, fns: RpcFn[], chain: WrapperMw[]): string {
+	function emitRouteFile(
+		mod: string,
+		route: string,
+		prefix: string,
+		src: string,
+		fns: RpcFn[],
+		chain: WrapperMw[]
+	): string {
 		const o: string[] = []
 		o.push('// Auto-generated by swelte from V signatures. Do not edit.')
 		o.push(`// Route: ${route} <- ${mod}.v`)
@@ -793,7 +1054,15 @@ export function swelte(options: SweltePluginOptions = {}): Plugin {
 			for (const m of impsrc.matchAll(/^\s*import\s+(.+)$/gm)) {
 				const imp = m[1].trim()
 				const first = imp.split(/[\s,]/)[0]
-				if (!imp || first === 'routes' || first === 'json' || first === 'x.json2' || first === 'net.http' || seenImp.has(imp)) continue
+				if (
+					!imp ||
+					first === 'routes' ||
+					first === 'json' ||
+					first === 'x.json2' ||
+					first === 'net.http' ||
+					seenImp.has(imp)
+				)
+					continue
 				seenImp.add(imp)
 				o.push(`import ${imp}`)
 			}
@@ -806,7 +1075,13 @@ export function swelte(options: SweltePluginOptions = {}): Plugin {
 		// sess cookie template (placeholder replaced by Hand), unflagged
 		// fns return []string{}.
 		for (const fn of fns) {
-			if (fn.attr !== 'rpc' && fn.attr !== 'before' && fn.attr !== 'after' && !['get', 'post', 'put', 'delete', 'patch'].includes(fn.attr)) continue
+			if (
+				fn.attr !== 'rpc' &&
+				fn.attr !== 'before' &&
+				fn.attr !== 'after' &&
+				!['get', 'post', 'put', 'delete', 'patch', 'sse'].includes(fn.attr)
+			)
+				continue
 			o.push(`fn swelte_set_cookies_for_${prefix}${fn.name}() []string {`)
 			if (fn.setsCookie) {
 				o.push(`\treturn ['sess=__SWELTE_SESS__; Path=/; HttpOnly; SameSite=Lax; Max-Age=604800']`)
@@ -831,7 +1106,11 @@ export function swelte(options: SweltePluginOptions = {}): Plugin {
 			if (/^module\s+\S+/.test(t)) continue
 			if (/^\s*import\s+/.test(line)) continue
 			let out = line.replace(/^(\s*)pub\s+fn\s+([A-Za-z_][A-Za-z0-9_]*)/, `$1pub fn ${prefix}$2`)
-				out = out.replace(/^(\s*)(pub\s+struct\s+)([A-Za-z_][A-Za-z0-9_]*)/, (mm: string, sp: string, kw: string, nm: string) => `${sp}${kw}${(structNames as Set<string>).has(nm) ? vType(nm, mod) : prefix + nm}`)
+			out = out.replace(
+				/^(\s*)(pub\s+struct\s+)([A-Za-z_][A-Za-z0-9_]*)/,
+				(mm: string, sp: string, kw: string, nm: string) =>
+					`${sp}${kw}${(structNames as Set<string>).has(nm) ? vType(nm, mod) : prefix + nm}`
+			)
 			out = out.replace(/^(\s*)struct\s+([A-Za-z_][A-Za-z0-9_]*)/, `$1struct ${prefix}$2`)
 			for (const sn of structNames) {
 				if (new RegExp(`^\\s*(pub\\s+)?struct\\s+${sn}\\b`).test(t)) continue
@@ -855,22 +1134,31 @@ export function swelte(options: SweltePluginOptions = {}): Plugin {
 			}
 		}
 		if (befores.length === 0 && afters.length === 0) {
-			o.push(`pub fn ${prefix}dispatch(path string, method string, query map[string]string, params map[string]string, headers map[string]string, cookies map[string]string, body string, content_type string, qualifier string) (int, string, []string) {`)
+			o.push(
+				`pub fn ${prefix}dispatch(path string, method string, query map[string]string, params map[string]string, headers map[string]string, cookies map[string]string, body string, content_type string, qualifier string) (int, string, []string) {`
+			)
 			o.push(...dispatchBody(prefix, mod, fns, null))
 			o.push('')
+			o.push(...emitSseEvents(prefix, mod, fns))
 			return o.join('\n')
 		}
-		o.push(`pub fn ${prefix}dispatch(path string, method string, query map[string]string, params map[string]string, headers map[string]string, cookies map[string]string, body string, content_type string, qualifier string) (int, string, []string) {`)
+		o.push(
+			`pub fn ${prefix}dispatch(path string, method string, query map[string]string, params map[string]string, headers map[string]string, cookies map[string]string, body string, content_type string, qualifier string) (int, string, []string) {`
+		)
 		o.push(`\tmut form_before := map[string]string{}`)
 		o.push(`\tmut files_before := map[string]string{}`)
 		o.push(`\tif content_type.contains('multipart/form-data') {`)
 		o.push(`\t\tmut boundary_before := ''`)
 		o.push(`\t\tfor part in content_type.split(';') {`)
 		o.push(`\t\t\tp_before := part.trim_space()`)
-		o.push(`\t\t\tif p_before.starts_with('boundary=') { boundary_before = p_before.all_after('boundary=').trim('"') }`)
+		o.push(
+			`\t\t\tif p_before.starts_with('boundary=') { boundary_before = p_before.all_after('boundary=').trim('"') }`
+		)
 		o.push(`\t\t}`)
 		o.push(`\t\tmut swelte_raw_before := map[string][]http.FileData{}`)
-		o.push(`\t\tif boundary_before != '' { form_before, swelte_raw_before = http.parse_multipart_form(body, boundary_before) }`)
+		o.push(
+			`\t\tif boundary_before != '' { form_before, swelte_raw_before = http.parse_multipart_form(body, boundary_before) }`
+		)
 		o.push(`\t\tfor k, fs in swelte_raw_before {`)
 		o.push(`\t\t\tmut swelte_names := []string{}`)
 		o.push(`\t\t\tfor f in fs { swelte_names << f.filename }`)
@@ -879,30 +1167,130 @@ export function swelte(options: SweltePluginOptions = {}): Plugin {
 		o.push(`\t} else if content_type.contains('application/x-www-form-urlencoded') || body != '' {`)
 		o.push(`\t\tform_before = http.parse_form(body)`)
 		o.push(`\t}`)
-		o.push(`\tmut swelte_req := SwelteRequest{ query: query, form: form_before, files: files_before, headers: headers, cookies: cookies, params: params, method: method, path: path, qualifier: qualifier }`)
+		o.push(
+			`\tmut swelte_req := SwelteRequest{ query: query, form: form_before, files: files_before, headers: headers, cookies: cookies, params: params, method: method, path: path, qualifier: qualifier }`
+		)
 		for (const b of befores) {
 			const bn = b.includes('_') ? b.slice(b.lastIndexOf('_') + 1) : b
-			o.push(`\tswelte_req = ${b}(swelte_req) or { return swelte_err_bad_cookies(path, '${bn}', err.msg()) }`)
+			o.push(
+				`\tswelte_req = ${b}(swelte_req) or { return swelte_err_bad_cookies(path, '${bn}', err.msg()) }`
+			)
 		}
 		o.push(`\tmut swelte_cookies := []string{}`)
-		o.push(`\tcode_before, body_before, verbs_cookies := ${prefix}dispatch_verbs(path, method, query, params, headers, cookies, body, content_type, qualifier, swelte_req)`)
+		o.push(
+			`\tcode_before, body_before, verbs_cookies := ${prefix}dispatch_verbs(path, method, query, params, headers, cookies, body, content_type, qualifier, swelte_req)`
+		)
 		o.push(`\tswelte_cookies << verbs_cookies`)
 		o.push(`\tmut swelte_code := code_before`)
 		o.push(`\tmut swelte_body := body_before`)
 		for (const a of afters) {
 			const an = a.includes('_') ? a.slice(a.lastIndexOf('_') + 1) : a
-			o.push(`\tswelte_code, swelte_body = ${a}(swelte_req, swelte_code, swelte_body) or { return swelte_err_bad_cookies(path, '${an}', err.msg()) }`)
+			o.push(
+				`\tswelte_code, swelte_body = ${a}(swelte_req, swelte_code, swelte_body) or { return swelte_err_bad_cookies(path, '${an}', err.msg()) }`
+			)
 		}
 		o.push(`\treturn swelte_code, swelte_body, swelte_cookies`)
 		o.push('}')
 		o.push('')
-		o.push(`fn ${prefix}dispatch_verbs(path string, method string, query map[string]string, params map[string]string, headers map[string]string, cookies map[string]string, body string, content_type string, qualifier string, swelte_req SwelteRequest) (int, string, []string) {`)
+		o.push(
+			`fn ${prefix}dispatch_verbs(path string, method string, query map[string]string, params map[string]string, headers map[string]string, cookies map[string]string, body string, content_type string, qualifier string, swelte_req SwelteRequest) (int, string, []string) {`
+		)
 		// `req` outlives the method arm (assigned per-arm below, read by
 		// handler calls): declare once at function scope.
-		o.push(`\tmut req := SwelteRequest{ query: query, form: map[string]string{}, files: map[string]string{}, headers: headers, cookies: cookies, params: params, method: method, path: path, qualifier: qualifier }`)
+		o.push(
+			`\tmut req := SwelteRequest{ query: query, form: map[string]string{}, files: map[string]string{}, headers: headers, cookies: cookies, params: params, method: method, path: path, qualifier: qualifier }`
+		)
 		o.push(...dispatchBody(prefix, mod, fns, 'swelte_req'))
 		o.push('')
+		o.push(...emitSseEvents(prefix, mod, fns))
 		return o.join('\n')
+	}
+
+	/** SSE events accessor (§14, true streaming via veb). Per file with
+	 * `@[sse]` fns: `swelte_sse_events(qualifier, req)` returns the fn's
+	 * event list for the qualifier, or an error for unknown qualifiers /
+	 * fallible failures. `before_request` calls this (it owns `ctx`),
+	 * then streams via `swelte_serve_sse`. No body, no sentinel. */
+	function emitSseEvents(prefix: string, mod: string, fns: RpcFn[]): string[] {
+		const sseFns = fns.filter((f) => f.attr === 'sse')
+		const o: string[] = []
+		if (!sseFns.length) return o
+		o.push(`pub fn ${prefix}sse_events(qualifier string, req SwelteRequest) ![]string {`)
+		for (const h of sseFns) {
+			const emitP = h.params.length > 0 ? h.params[h.params.length - 1] : null
+			if (emitP && /^fn\s*\(\s*string\s*\)(\s*bool)?$/.test(emitP.vtype.trim())) continue
+			const cond = h.qualifier ? `qualifier == ${vJsonStr(h.qualifier)}` : `qualifier == ''`
+			const isReq = h.params.length === 1 && h.params[0].vtype === 'SwelteRequest'
+			const call = isReq
+				? `${prefix}${h.name}(req)`
+				: `${prefix}${h.name}(${h.params.map((p) => `req.form['${p.name}'] or { req.query['${p.name}'] or { req.params['${p.name}'] or { '' } } }`).join(', ')})`
+			o.push(`\tif ${cond} {`)
+			if (h.fallible) {
+				o.push(`\t\treturn ${call} or { return err }`)
+			} else {
+				o.push(`\t\treturn ${call}`)
+			}
+			o.push(`\t}`)
+		}
+		const quals = sseFns.filter((h) => h.qualifier).map((h) => vJsonStr(h.qualifier as string))
+		o.push(
+			`\treturn error('unknown qualifier: ' + qualifier + ' (available: [${quals.join(', ')}])')`
+		)
+		o.push('}')
+		o.push('')
+		o.push(`pub fn ${prefix}sse_is_emit() bool {`)
+		o.push(
+			`\treturn ${sseFns.some((h) => {
+				const p = h.params.length > 0 ? h.params[h.params.length - 1] : null
+				return p !== null && /^fn\s*\(\s*string\s*\)(\s*bool)?$/.test(p.vtype.trim())
+			})}`
+		)
+		o.push('}')
+		o.push('')
+		o.push(`pub fn ${prefix}sse_check_qual(qualifier string) ! {`)
+		for (const h of sseFns) {
+			const cond = h.qualifier ? `qualifier == ${vJsonStr(h.qualifier)}` : `qualifier == ''`
+			o.push(`\tif ${cond} { return }`)
+		}
+		o.push(
+			`\treturn error('unknown qualifier: ' + qualifier + ' (available: [${quals.join(', ')}])')`
+		)
+		o.push('}')
+		o.push('')
+		o.push(
+			`pub fn ${prefix}sse_emit(qualifier string, req SwelteRequest, emit fn (string) bool) ! {`
+		)
+		for (const h of sseFns) {
+			const emitP = h.params.length > 0 ? h.params[h.params.length - 1] : null
+			if (!(emitP && /^fn\s*\(\s*string\s*\)(\s*bool)?$/.test(emitP.vtype.trim()))) continue
+			const cond = h.qualifier ? `qualifier == ${vJsonStr(h.qualifier)}` : `qualifier == ''`
+			const narrow = h.params.slice(0, -1)
+			const isReq = narrow.length === 1 && narrow[0].vtype === 'SwelteRequest'
+			const callArgs = isReq
+				? `req, emit`
+				: narrow.length
+					? narrow
+							.map(
+								(p) =>
+									`req.form['${p.name}'] or { req.query['${p.name}'] or { req.params['${p.name}'] or { '' } } }`
+							)
+							.join(', ') + `, emit`
+					: `emit`
+			o.push(`\tif ${cond} {`)
+			if (h.fallible) {
+				o.push(`\t\t${prefix}${h.name}(${callArgs}) or { return err }`)
+			} else {
+				o.push(`\t\t${prefix}${h.name}(${callArgs})`)
+			}
+			o.push(`\t\treturn`)
+			o.push(`\t}`)
+		}
+		o.push(
+			`\treturn error('unknown qualifier: ' + qualifier + ' (available: [${quals.join(', ')}])')`
+		)
+		o.push('}')
+		o.push('')
+		return o
 	}
 
 	/** Extracted verb/rpc body (unchanged semantics — moved verbatim out
@@ -910,12 +1298,19 @@ export function swelte(options: SweltePluginOptions = {}): Plugin {
 	 * `sharedReq`: §7 pre-chain request (already @[before]-filtered) —
 	 * verb branches reuse it instead of building their own; null =
 	 * build locally (byte-identical to the old inline code). */
-	function dispatchBody(prefix: string, mod: string, fns: RpcFn[], sharedReq: string | null): string[] {
+	function dispatchBody(
+		prefix: string,
+		mod: string,
+		fns: RpcFn[],
+		sharedReq: string | null
+	): string[] {
 		const o: string[] = []
 		const rpcFns = fns.filter((f) => f.attr === 'rpc')
 		if (rpcFns.length) {
 			const avail = '[' + rpcFns.map((f) => vJsonStr(f.name)).join(', ') + ']'
-			o.push(`\tif method == 'POST' && (content_type.contains('application/json') || content_type == '') {`)
+			o.push(
+				`\tif method == 'POST' && (content_type.contains('application/json') || content_type == '') {`
+			)
 			o.push(`\t\tparsed := json2.decode[map[string]json2.Any](body) or {`)
 			o.push(`\t\t\treturn swelte_err_bad_cookies(path, '', 'bad json body')`)
 			o.push(`\t\t}`)
@@ -927,13 +1322,21 @@ export function swelte(options: SweltePluginOptions = {}): Plugin {
 			o.push(`\t\targs_json := json2.encode(args_any)`)
 			for (const fn of rpcFns) {
 				const rs = fn.singleArgsStruct ? vType(fn.singleArgsStruct, mod) : null
-				const dec = rs ? `json.decode(${rs}, args_json) or { return swelte_err_bad_cookies(path, fn_name, 'bad args') }` : `args_json`
+				const dec = rs
+					? `json.decode(${rs}, args_json) or { return swelte_err_bad_cookies(path, fn_name, 'bad args') }`
+					: `args_json`
 				const call = `${prefix}${fn.name}(${dec})`
 				const ck = `swelte_set_cookies_for_${prefix}${fn.name}()`
 				o.push(`\t\tif fn_name == ${vJsonStr(fn.name)} {`)
 				if (fn.fallible) {
-					o.push(`\t\t\tres := ${call} or { return swelte_err_bad_cookies(path, fn_name, err.msg()) }`)
-					o.push(fn.vret === 'void' ? `\t\t\treturn 200, '{}', ${ck}` : `\t\t\treturn 200, json.encode(res), ${ck}`)
+					o.push(
+						`\t\t\tres := ${call} or { return swelte_err_bad_cookies(path, fn_name, err.msg()) }`
+					)
+					o.push(
+						fn.vret === 'void'
+							? `\t\t\treturn 200, '{}', ${ck}`
+							: `\t\t\treturn 200, json.encode(res), ${ck}`
+					)
 				} else if (fn.vret === 'void') {
 					o.push(`\t\t\t${call}`)
 					o.push(`\t\t\treturn 200, '{}', ${ck}`)
@@ -954,7 +1357,34 @@ export function swelte(options: SweltePluginOptions = {}): Plugin {
 		// §10: unknown method on an endpoint-less file is 405; mutating
 		// verbs on an RPC-less path shape is 403 (CSRF-relevant: plain
 		// cross-site forms can only send GET/POST, so POST here is safe).
-		const methodGate: string = sharedReq == null ? `swelte_method_not_allowed()` : `swelte_method_gate(method)`
+		const methodGate: string =
+			sharedReq == null ? `swelte_method_not_allowed()` : `swelte_method_gate(method)`
+		// SSE (roadmap §14, true streaming via veb): GET-only. One
+		// `@[sse]` fn per file (qualifier rules mirror verbs: default
+		// or `('q')`, unique per file). The fn returns a LIST of event
+		// payloads (`[]string`). The dispatch SSE arm does NOT emit a
+		// body — instead `before_request` (which owns `ctx`) checks for
+		// SSE intent FIRST via the generated `swelte_is_sse_route` +
+		// per-file match, takes over the conn, and streams. Dispatch
+		// stays pure (status/body/cookies) for the JSON watchdog path.
+		// This arm only validates qualifiers for SSE routes so direct
+		// dispatch calls still 404 unknown qualifiers correctly.
+		const sseFns = fns.filter((f) => f.attr === 'sse')
+		if (sseFns.length) {
+			o.push(
+				`\tif method == 'GET' && headers['Accept'] or { headers['accept'] or { '' } }.contains('text/event-stream') {`
+			)
+			const sseQuals = sseFns.filter((h) => h.qualifier).map((h) => h.qualifier as string)
+			if (sseQuals.length) {
+				o.push(
+					`\t\tif qualifier != '' && qualifier !in [${sseQuals.map((q) => vJsonStr(q)).join(', ')}] { return swelte_err_unknown_qual_cookies(path, [${sseQuals.map((q) => vJsonStr(q)).join(', ')}]) }`
+				)
+			} else {
+				o.push(`\t\tif qualifier != '' { return swelte_err_unknown_qual_cookies(path, []) }`)
+			}
+			o.push(`\t\treturn swelte_err_bad_cookies(path, '', 'sse handled in before_request')`)
+			o.push(`\t}`)
+		}
 		for (const vb of ['get', 'post', 'put', 'delete', 'patch']) {
 			const hs = fns.filter((f) => f.attr === vb)
 			if (!hs.length) continue
@@ -974,29 +1404,45 @@ export function swelte(options: SweltePluginOptions = {}): Plugin {
 				o.push(`\t\t\tmut boundary := ''`)
 				o.push(`\t\t\tfor part in content_type.split(';') {`)
 				o.push(`\t\t\t\tp := part.trim_space()`)
-				o.push(`\t\t\t\tif p.starts_with('boundary=') { boundary = p.all_after('boundary=').trim('"') }`)
+				o.push(
+					`\t\t\t\tif p.starts_with('boundary=') { boundary = p.all_after('boundary=').trim('"') }`
+				)
 				o.push(`\t\t\t}`)
 				o.push(`\t\t\tmut swelte_raw_files := map[string][]http.FileData{}`)
-				o.push(`\t\t\tif boundary != '' { form, swelte_raw_files = http.parse_multipart_form(body, boundary) }`)
+				o.push(
+					`\t\t\tif boundary != '' { form, swelte_raw_files = http.parse_multipart_form(body, boundary) }`
+				)
 				o.push(`\t\t\tfor k, fs in swelte_raw_files {`)
 				o.push(`\t\t\t\tmut swelte_names := []string{}`)
 				o.push(`\t\t\t\tfor f in fs { swelte_names << f.filename }`)
 				o.push(`\t\t\t\tfiles[k] = swelte_names.join(';')`)
 				o.push(`\t\t\t}`)
-				o.push(`\t\t} else if content_type.contains('application/x-www-form-urlencoded') || body != '' {`)
+				o.push(
+					`\t\t} else if content_type.contains('application/x-www-form-urlencoded') || body != '' {`
+				)
 				o.push(`\t\t\tform = http.parse_form(body)`)
 				o.push(`\t\t}`)
-				o.push(`\t\tmut req := SwelteRequest{ query: query, form: form, files: files, headers: headers, cookies: cookies, params: params, method: '${vb.toUpperCase()}', path: path, qualifier: qualifier }`)
+				o.push(
+					`\t\tmut req := SwelteRequest{ query: query, form: form, files: files, headers: headers, cookies: cookies, params: params, method: '${vb.toUpperCase()}', path: path, qualifier: qualifier }`
+				)
 			}
 			for (const h of hs) {
 				const cond = h.qualifier ? `qualifier == ${vJsonStr(h.qualifier)}` : `qualifier == ''`
 				const isReq = h.params.length === 1 && h.params[0].vtype === 'SwelteRequest'
-				const call = isReq ? `${prefix}${h.name}(req)` : `${prefix}${h.name}(${h.params.map((p) => `req.form['${p.name}'] or { req.query['${p.name}'] or { req.params['${p.name}'] or { '' } } }`).join(', ')})`
+				const call = isReq
+					? `${prefix}${h.name}(req)`
+					: `${prefix}${h.name}(${h.params.map((p) => `req.form['${p.name}'] or { req.query['${p.name}'] or { req.params['${p.name}'] or { '' } } }`).join(', ')})`
 				const ck = `swelte_set_cookies_for_${prefix}${h.name}()`
 				o.push(`\t\tif ${cond} {`)
 				if (h.fallible) {
-					o.push(`\t\t\tres := ${call} or { return swelte_err_bad_cookies(path, ${vJsonStr(h.name)}, err.msg()) }`)
-					o.push(h.vret === 'void' ? `\t\t\treturn 200, '{}', ${ck}` : `\t\t\treturn 200, json.encode(res), ${ck}`)
+					o.push(
+						`\t\t\tres := ${call} or { return swelte_err_bad_cookies(path, ${vJsonStr(h.name)}, err.msg()) }`
+					)
+					o.push(
+						h.vret === 'void'
+							? `\t\t\treturn 200, '{}', ${ck}`
+							: `\t\t\treturn 200, json.encode(res), ${ck}`
+					)
 				} else if (h.vret === 'void') {
 					o.push(`\t\t\t${call}`)
 					o.push(`\t\t\treturn 200, '{}', ${ck}`)
@@ -1006,7 +1452,9 @@ export function swelte(options: SweltePluginOptions = {}): Plugin {
 				o.push(`\t\t}`)
 			}
 			if (quals.length) {
-				o.push(`\t\treturn swelte_err_unknown_qual_cookies(path, [${quals.map((q) => vJsonStr(q)).join(', ')}])`)
+				o.push(
+					`\t\treturn swelte_err_unknown_qual_cookies(path, [${quals.map((q) => vJsonStr(q)).join(', ')}])`
+				)
 			} else {
 				o.push(`\t\treturn swelte_err_bad_cookies(path, '', 'missing qualifier')`)
 			}
@@ -1026,52 +1474,108 @@ export function swelte(options: SweltePluginOptions = {}): Plugin {
 	function jsFetchFor(route: string, fns: RpcFn[]): string {
 		const lines = [
 			'// Auto-generated by swelte from V signatures. Do not edit.',
-			`import { __swelteFetch } from '@swelte/core';`,
+			`import { __swelteFetch${fns.some((f) => f.attr === 'sse') ? ', __swelteStream' : ''} } from '@swelte/core';`,
 			'',
 		]
 		const hasDyn = route.includes('[')
-	if (hasDyn) {
-		lines.push(`const __swelteBase = ${JSON.stringify(route)};`)
-		lines.push('function __swelteUrl(args = {}) {')
-		lines.push('  let u = __swelteBase;')
-		lines.push('  for (const m of __swelteBase.matchAll(/' + '\\' + '[\\' + '...([A-Za-z_][A-Za-z0-9_]*)' + '\\' + ']' + '|' + '\\' + '[([A-Za-z_][A-Za-z0-9_]*)' + '\\' + ']/g)) {')
-		lines.push('    const name = m[1] ?? m[2];')
-		lines.push('    const v = args?.[name];')
-		lines.push("    if (v === undefined || v === null) throw new Error(`swelte: missing route param '${name}' for ${__swelteBase}`);")
-		lines.push('    const enc = m[1] !== undefined ? String(v).split("\/").map(encodeURIComponent).join("\/") : encodeURIComponent(String(v));')
-		lines.push('    u = u.replace(m[0], enc);')
-		lines.push('  }')
-		lines.push('  return u;')
-		lines.push('}')
-		lines.push('')
-	}
-	for (const fn of fns) {
-		// Verb handlers: server builds SwelteRequest from the HTTP
-		// exchange. Optional client args become query/form fields;
-		// dynamic path segments ([id]/[...rest], roadmap §8) are
-		// interpolated into the URL and stripped from the payload.
-		// @[rpc] fns send {fn,args} in the JSON body. Same stub
-		// shape — kind decides. (`args = {}`: plain JS, no TS syntax —
-		// stubs must parse as JS for non-TS consumers.)
-		lines.push(`export function ${fn.name}(args = {}) {`)
 		if (hasDyn) {
-			lines.push('  const { __swelteRest, ...__swelteArgs } = (() => {')
-			lines.push('    const c = { ...(args ?? {}) };')
-			lines.push('    for (const m of __swelteBase.matchAll(/' + '\\' + '[\\' + '...([A-Za-z_][A-Za-z0-9_]*)' + '\\' + ']' + '|' + '\\' + '[([A-Za-z_][A-Za-z0-9_]*)' + '\\' + ']/g)) delete c[m[1] ?? m[2]];')
-			lines.push('    return c;')
-			lines.push('  })();')
-			lines.push('  void __swelteRest;')
+			lines.push(`const __swelteBase = ${JSON.stringify(route)};`)
+			lines.push('function __swelteUrl(args = {}) {')
+			lines.push('  let u = __swelteBase;')
 			lines.push(
-				`  return __swelteFetch(__swelteUrl(args), ${JSON.stringify(fn.name)}, ${JSON.stringify(fn.attr)}, __swelteArgs, ${JSON.stringify(fn.qualifier ?? '')});`
+				'  for (const m of __swelteBase.matchAll(/' +
+					'\\' +
+					'[\\' +
+					'...([A-Za-z_][A-Za-z0-9_]*)' +
+					'\\' +
+					']' +
+					'|' +
+					'\\' +
+					'[([A-Za-z_][A-Za-z0-9_]*)' +
+					'\\' +
+					']/g)) {'
 			)
-		} else {
+			lines.push('    const name = m[1] ?? m[2];')
+			lines.push('    const v = args?.[name];')
 			lines.push(
-				`  return __swelteFetch(${JSON.stringify(route)}, ${JSON.stringify(fn.name)}, ${JSON.stringify(fn.attr)}, args, ${JSON.stringify(fn.qualifier ?? '')});`
+				"    if (v === undefined || v === null) throw new Error(`swelte: missing route param '${name}' for ${__swelteBase}`);"
 			)
+			lines.push(
+				'    const enc = m[1] !== undefined ? String(v).split("\/").map(encodeURIComponent).join("\/") : encodeURIComponent(String(v));'
+			)
+			lines.push('    u = u.replace(m[0], enc);')
+			lines.push('  }')
+			lines.push('  return u;')
+			lines.push('}')
+			lines.push('')
 		}
-		lines.push('}')
-		lines.push('')
-	}
+		for (const fn of fns) {
+			// Verb handlers: server builds SwelteRequest from the HTTP
+			// exchange. Optional client args become query/form fields;
+			// dynamic path segments ([id]/[...rest], roadmap §8) are
+			// interpolated into the URL and stripped from the payload.
+			// @[rpc] fns send {fn,args} in the JSON body. Same stub
+			// shape — kind decides. (`args = {}`: plain JS, no TS syntax —
+			// stubs must parse as JS for non-TS consumers.)
+			lines.push(
+				`export ${fn.attr === 'sse' ? 'async function *' : 'function'} ${fn.name}(args = {}) {`
+			)
+			if (hasDyn && fn.attr === 'sse') {
+				lines.push('  const { __swelteRest, ...__swelteArgs } = (() => {')
+				lines.push('    const c = { ...(args ?? {}) };')
+				lines.push(
+					'    for (const m of __swelteBase.matchAll(/' +
+						'\\\\' +
+						'[\\\\' +
+						'...([A-Za-z_][A-Za-z0-9_]*)' +
+						'\\\\' +
+						']' +
+						'|' +
+						'\\\\' +
+						'[([A-Za-z_][A-Za-z0-9_]*)' +
+						'\\\\' +
+						']/g)) delete c[m[1] ?? m[2]];'
+				)
+				lines.push('    return c;')
+				lines.push('  })();')
+				lines.push('  void __swelteRest;')
+				lines.push(
+					`  yield* __swelteStream(__swelteUrl(args), ${JSON.stringify(fn.name)}, __swelteArgs, ${JSON.stringify(fn.qualifier ?? '')});`
+				)
+			} else if (fn.attr === 'sse') {
+				lines.push(
+					`  yield* __swelteStream(${JSON.stringify(route)}, ${JSON.stringify(fn.name)}, args, ${JSON.stringify(fn.qualifier ?? '')});`
+				)
+			} else if (hasDyn) {
+				lines.push('  const { __swelteRest, ...__swelteArgs } = (() => {')
+				lines.push('    const c = { ...(args ?? {}) };')
+				lines.push(
+					'    for (const m of __swelteBase.matchAll(/' +
+						'\\' +
+						'[\\' +
+						'...([A-Za-z_][A-Za-z0-9_]*)' +
+						'\\' +
+						']' +
+						'|' +
+						'\\' +
+						'[([A-Za-z_][A-Za-z0-9_]*)' +
+						'\\' +
+						']/g)) delete c[m[1] ?? m[2]];'
+				)
+				lines.push('    return c;')
+				lines.push('  })();')
+				lines.push('  void __swelteRest;')
+				lines.push(
+					`  return __swelteFetch(__swelteUrl(args), ${JSON.stringify(fn.name)}, ${JSON.stringify(fn.attr)}, __swelteArgs, ${JSON.stringify(fn.qualifier ?? '')});`
+				)
+			} else {
+				lines.push(
+					`  return __swelteFetch(${JSON.stringify(route)}, ${JSON.stringify(fn.name)}, ${JSON.stringify(fn.attr)}, args, ${JSON.stringify(fn.qualifier ?? '')});`
+				)
+			}
+			lines.push('}')
+			lines.push('')
+		}
 		return lines.join('\n')
 	}
 
@@ -1085,11 +1589,25 @@ export function swelte(options: SweltePluginOptions = {}): Plugin {
 			'',
 		]
 		for (const fn of fns) {
-			const params = JSON.stringify(fn.params.map((p) => ({ name: p.name, kind: wasmParamKind(p.vtype) || 'unsupported', vtype: p.vtype })))
+			const params = JSON.stringify(
+				fn.params.map((p) => ({
+					name: p.name,
+					kind: wasmParamKind(p.vtype) || 'unsupported',
+					vtype: p.vtype,
+				}))
+			)
 			const ret = JSON.stringify(wasmReturnKind(fn.vret) || 'unsupported')
 			lines.push('const ' + fn.name + '_params = ' + params + ';')
 			lines.push('export function ' + fn.name + '(args) {')
-			lines.push("  return __swelteWasmCall(wasmUrl, 'main." + fn.name + "', args, " + fn.name + '_params, ' + ret + ');')
+			lines.push(
+				"  return __swelteWasmCall(wasmUrl, 'main." +
+					fn.name +
+					"', args, " +
+					fn.name +
+					'_params, ' +
+					ret +
+					');'
+			)
 			lines.push('}')
 			lines.push('')
 		}
@@ -1118,7 +1636,7 @@ export function swelte(options: SweltePluginOptions = {}): Plugin {
 				out.push('export interface SwelteRequest {')
 				out.push('  query: Record<string, string>;')
 				out.push('  form: Record<string, string>;')
-			out.push('  files: Record<string, string>;')
+				out.push('  files: Record<string, string>;')
 				out.push('  headers: Record<string, string>;')
 				out.push('  cookies: Record<string, string>;')
 				out.push('  params: Record<string, string>;')
@@ -1177,7 +1695,71 @@ export function swelte(options: SweltePluginOptions = {}): Plugin {
 							`export type ${Res} = ${ret};${fn.fallible ? ' // !T: may reject with SwelteRpcError' : ''}`
 						)
 					}
-					if (!isReq && fn.params.length && !(fn.params.length === 1 && fn.params[0].name === 'req')) {
+					if (fn.attr === 'sse') {
+						// SSE (roadmap §14, true streaming via veb): two shapes.
+						// List mode: fn returns `[]string` (event list, streamed
+						// per-event). Emit mode: fn takes a trailing
+						// `emit fn (string) bool` param and returns void/`!void`;
+						// each `emit(e)` flushes one frame NOW (`if !emit(e) {
+						// return }` on disconnect). Emit and list are exclusive.
+						const emitParam = fn.params.length > 0 ? fn.params[fn.params.length - 1] : null
+						const isEmit =
+							emitParam !== null && /^fn\s*\(\s*string\s*\)(\s*bool)?$/.test(emitParam.vtype.trim())
+						if (isEmit) {
+							if (fn.vret !== 'void') {
+								const msg = `[swelte] ${sub}/${mod}.v: @[sse] ${fn.name} with emit param must return void (emit flushes per-event; got ${fn.vret || 'none'})`
+								warnings.push(msg)
+								throw new Error(msg)
+							}
+						} else if (fn.vret !== '[]string') {
+							const msg = `[swelte] ${sub}/${mod}.v: @[sse] ${fn.name} must return []string (event list) or take a trailing emit fn (string) bool param (got ${fn.vret || 'none'})`
+							warnings.push(msg)
+							throw new Error(msg)
+						}
+						// Emit param is harness-injected (never client-supplied):
+						// strip it from the Args interface. `isReq` covers the
+						// (req) and (req, emit) shapes; bare multi-param fns
+						// keep their narrow args minus emit.
+						const clientParams = isEmit ? fn.params.slice(0, -1) : fn.params
+						const clientIsReq =
+							(clientParams.length === 1 && clientParams[0].vtype === 'SwelteRequest') ||
+							(clientParams.length === 1 && clientParams[0].name === 'req')
+						if (!clientIsReq && clientParams.length) {
+							out.push(`export interface ${pascal(fn.name)}Args {`)
+							for (const p of clientParams) {
+								if (p.tstype === 'unknown')
+									warnings.push(
+										`${sub}/${mod}.${fn.name} param ${p.name}: unknown V type '${p.vtype}' → unknown`
+									)
+								out.push(`  ${p.name}${p.optional ? '?' : ''}: ${p.tstype};`)
+							}
+							out.push('}')
+							out.push(
+								`export function ${fn.name}(args: ${pascal(fn.name)}Args): AsyncGenerator<string, void, void>;${fn.fallible ? ' // !T: may reject with SwelteRpcError' : ''}`
+							)
+						} else if (clientIsReq) {
+							const dynPs = routeParams(route)
+							if (dynPs.length) {
+								out.push(
+									`export function ${fn.name}(args: { ${dynPs.map((n) => `${n}: string`).join('; ')} } & Record<string, string>): AsyncGenerator<string, void, void>;${fn.fallible ? ' // !T: may reject with SwelteRpcError' : ''}`
+								)
+							} else {
+								out.push(
+									`export function ${fn.name}(args?: Record<string, string>): AsyncGenerator<string, void, void>;${fn.fallible ? ' // !T: may reject with SwelteRpcError' : ''}`
+								)
+							}
+						} else {
+							out.push(`// ${fn.name} takes no args (SSE handler without params).`)
+							out.push(`export function ${fn.name}(): AsyncGenerator<string, void, void>;`)
+						}
+						out.push('')
+						continue
+					}
+					if (
+						!isReq &&
+						fn.params.length &&
+						!(fn.params.length === 1 && fn.params[0].name === 'req')
+					) {
 						out.push(`export interface ${pascal(fn.name)}Args {`)
 						for (const p of fn.params) {
 							if (p.tstype === 'unknown')
@@ -1187,16 +1769,18 @@ export function swelte(options: SweltePluginOptions = {}): Plugin {
 							out.push(`  ${p.name}${p.optional ? '?' : ''}: ${p.tstype};`)
 						}
 						out.push('}')
-						out.push(
-							`export function ${fn.name}(args: ${pascal(fn.name)}Args): Promise<${Res}>;`
-						)
+						out.push(`export function ${fn.name}(args: ${pascal(fn.name)}Args): Promise<${Res}>;`)
 					} else if (isReq) {
 						const dynPs = routeParams(route)
-					if (dynPs.length) {
-						out.push(`export function ${fn.name}(args: { ${dynPs.map((n) => `${n}: string`).join('; ')} } & Record<string, string>): Promise<${Res}>;`)
-					} else {
-						out.push(`export function ${fn.name}(args?: Record<string, string>): Promise<${Res}>;`)
-					}
+						if (dynPs.length) {
+							out.push(
+								`export function ${fn.name}(args: { ${dynPs.map((n) => `${n}: string`).join('; ')} } & Record<string, string>): Promise<${Res}>;`
+							)
+						} else {
+							out.push(
+								`export function ${fn.name}(args?: Record<string, string>): Promise<${Res}>;`
+							)
+						}
 					} else {
 						out.push(`// ${fn.name} takes no args (verb handler without params).`)
 						out.push(`export function ${fn.name}(): Promise<${Res}>;`)
@@ -1275,7 +1859,7 @@ export function swelte(options: SweltePluginOptions = {}): Plugin {
 			// is recognized — nested */+error.svelte is a build error.
 			if (base === '+error' && dir !== '') {
 				throw new Error(
-					`[swelte] ${routesDir}/${rel} is not allowed — only src/routes/+error.svelte exists (single global error boundary, no per-directory inheritance).`,
+					`[swelte] ${routesDir}/${rel} is not allowed — only src/routes/+error.svelte exists (single global error boundary, no per-directory inheritance).`
 				)
 			}
 			if (base !== '+page' && base !== 'index') continue
@@ -1283,7 +1867,7 @@ export function swelte(options: SweltePluginOptions = {}): Plugin {
 			for (const sib of [`${dir}.svelte`, `${dir}.v`]) {
 				if (existsSync(join(routesAbs, sib))) {
 					throw new Error(
-						`[swelte] ${routesDir}/${sib} claims the same URL as ${routesDir}/${rel} — one file per URL (guarded URLs live inside their guard's directory; keep the +page leaf).`,
+						`[swelte] ${routesDir}/${sib} claims the same URL as ${routesDir}/${rel} — one file per URL (guarded URLs live inside their guard's directory; keep the +page leaf).`
 					)
 				}
 			}
@@ -1300,7 +1884,10 @@ export function swelte(options: SweltePluginOptions = {}): Plugin {
 				const rel = relPosix(routesAbs, f)
 				const isWrapper = mod === '+route' || mod.endsWith('/+route')
 				if (isWrapper) {
-					if (fns.length > 0) throw new Error(`[swelte] ${routesDir}/${rel}: @[rpc]/verb handlers are not allowed in +route.v (wrapper: @[before]/@[after] middleware only).`)
+					if (fns.length > 0)
+						throw new Error(
+							`[swelte] ${routesDir}/${rel}: @[rpc]/verb handlers are not allowed in +route.v (wrapper: @[before]/@[after] middleware only).`
+						)
 					for (const m of mwFns) validateMiddlewareFn(`${routesDir}/${rel}`, m)
 					// Wrappers are +layout-shaped: no callable exports, but
 					// their `pub struct`s are shared with the client (e.g. a
@@ -1311,7 +1898,10 @@ export function swelte(options: SweltePluginOptions = {}): Plugin {
 				}
 				// Log the file set ONCE per generate (debug): routeGen flip
 				// between `/x` and `/x/+page` diagnosis.
-				for (const m of mwFns) throw new Error(`[swelte] ${routesDir}/${rel}: @[${m.attr}] ${m.name} is only allowed in +route.v wrappers.`)
+				for (const m of mwFns)
+					throw new Error(
+						`[swelte] ${routesDir}/${rel}: @[${m.attr}] ${m.name} is only allowed in +route.v wrappers.`
+					)
 				// +route.v wrappers claim no URL — they returned above, so
 				// every file reaching here competes for its URL.
 				doubleClaimCheck(routesAbs, routesDir, mod, rel)
@@ -1326,10 +1916,24 @@ export function swelte(options: SweltePluginOptions = {}): Plugin {
 						)
 					}
 				}
-				if (rpcFns.length === 0 && verbFns.length === 0) continue
+				if (rpcFns.length === 0 && verbFns.length === 0 && fns.every((x) => x.attr !== 'sse'))
+					continue
 				// One-default-per-verb + unique qualifier: build error
-				// (ambiguous routing — roadmap item 15).
-				for (const vb of ['get', 'post', 'put', 'delete', 'patch']) {
+				// (ambiguous routing — roadmap item 15). SSE mirrors the
+				// verb rules (default or ('q'), unique per file) but is
+				// GET+Accept-gated, so an `@[sse]` default coexists with an
+				// `@[get]` default on the same file (§14). Stacking `@[sse]`
+				// with a verb (`@[get; sse]`, `@[rpc; sse]`) on one fn is a
+				// build error — parseVFile fans stacked attrs out to one
+				// RpcFn per verb, so the same name shows up twice.
+				for (const m of allFns.filter((x) => x.attr === 'sse')) {
+					const clash = allFns.find((x) => x.name === m.name && x.attr !== 'sse')
+					if (clash)
+						throw new Error(
+							`[swelte] ${routesDir}/${rel}: @[sse] on ${m.name} cannot stack with @[${clash.attr}] — one transport per fn (SSE is GET+Accept-gated, verbs are method-gated). Split into two fns.`
+						)
+				}
+				for (const vb of ['get', 'post', 'put', 'delete', 'patch', 'sse']) {
 					const hs = fns.filter((x) => x.attr === vb)
 					const defaults = hs.filter((x) => !x.qualifier)
 					if (defaults.length > 1) {
@@ -1355,9 +1959,14 @@ export function swelte(options: SweltePluginOptions = {}): Plugin {
 				// same shape (`users/[id]` vs `users/[slug]`) are ambiguous —
 				// build error naming both files.
 				for (const d of dispatched) {
-					const shA = d.route.replace(/\[\.\.\.[^\]]+\]/g, '...').replace(/\[[^\]]+\]/g, '[]');
-					const shB = (route as string).replace(/\[\.\.\.[^\]]+\]/g, '...').replace(/\[[^\]]+\]/g, '[]');
-					if (route.includes('[') && shA === shB) throw new Error(`[swelte] ${routesDir}/${rel} has the same dynamic shape as ${routesDir}/${d.mod}.v (${shB}) — rename one file.`);
+					const shA = d.route.replace(/\[\.\.\.[^\]]+\]/g, '...').replace(/\[[^\]]+\]/g, '[]')
+					const shB = (route as string)
+						.replace(/\[\.\.\.[^\]]+\]/g, '...')
+						.replace(/\[[^\]]+\]/g, '[]')
+					if (route.includes('[') && shA === shB)
+						throw new Error(
+							`[swelte] ${routesDir}/${rel} has the same dynamic shape as ${routesDir}/${d.mod}.v (${shB}) — rename one file.`
+						)
 				}
 				// §10: @[sets_cookie] only on @[rpc]/verb fns; never on
 				// @[before]/@[after] middleware or +route.v wrapper endpoints
@@ -1365,7 +1974,9 @@ export function swelte(options: SweltePluginOptions = {}): Plugin {
 				// multi-attr form is @[rpc; sets_cookie] on one fn.
 				for (const fn of allFns) {
 					if (fn.setsCookie && (fn.attr === 'before' || fn.attr === 'after'))
-						throw new Error(`[swelte] ${routesDir}/${rel}: @[sets_cookie] on ${fn.name} — middleware (@[before]/@[after]) cannot set cookies; put it on an @[rpc]/verb handler.`)
+						throw new Error(
+							`[swelte] ${routesDir}/${rel}: @[sets_cookie] on ${fn.name} — middleware (@[before]/@[after]) cannot set cookies; put it on an @[rpc]/verb handler.`
+						)
 				}
 				dispatched.push({ route, mod, prefix: vPrefix(mod) })
 				// Runtime fetch stub for the browser import (dev + build).
@@ -1373,10 +1984,7 @@ export function swelte(options: SweltePluginOptions = {}): Plugin {
 				// the stubs land per-mod but keep them deterministic too.
 				const genModDir = join(genDir, 'generated', 'routes', mod.split('/').slice(0, -1).join('/'))
 				mkdirSync(genModDir, { recursive: true })
-				writeFileSync(
-					join(genModDir, `${mod.split('/').pop()}.js`),
-					jsFetchFor(route, fns)
-				)
+				writeFileSync(join(genModDir, `${mod.split('/').pop()}.js`), jsFetchFor(route, fns))
 			}
 			// Per-file dispatchers (roadmap item 1): one `module routes`
 			// file per routes file, sharing directory-mode `v run` with
@@ -1411,11 +2019,18 @@ export function swelte(options: SweltePluginOptions = {}): Plugin {
 					const wsrc = readFileSync(wf, 'utf8')
 					const mws = parseVFile(wsrc).filter((x) => x.attr === 'before' || x.attr === 'after')
 					if (mws.length === 0) continue
-					chain.push({ wmod, src: wsrc, mws: mws.map((m) => ({ name: m.name, attr: m.attr as 'before' | 'after' })) })
+					chain.push({
+						wmod,
+						src: wsrc,
+						mws: mws.map((m) => ({ name: m.name, attr: m.attr as 'before' | 'after' })),
+					})
 				}
 				const fns = parseVFile(src).filter((x) => x.attr !== 'before' && x.attr !== 'after')
 				mkdirSync(routesGenDir, { recursive: true })
-				writeFileSync(join(routesGenDir, `${vFileSafe(d.mod)}.v`), emitRouteFile(d.mod, d.route, d.prefix, src, fns, chain))
+				writeFileSync(
+					join(routesGenDir, `${vFileSafe(d.mod)}.v`),
+					emitRouteFile(d.mod, d.route, d.prefix, src, fns, chain)
+				)
 			}
 			// Prune stale generated files (renamed/deleted routes).
 			// Compare against the CURRENT naming (vFileSafe) — and drop
@@ -1440,7 +2055,16 @@ export function swelte(options: SweltePluginOptions = {}): Plugin {
 			// Master dispatcher: route table + shared helpers, also `module routes`.
 			if (dispatched.length) {
 				mkdirSync(routesGenDir, { recursive: true })
-				writeFileSync(join(routesGenDir, `server_gen.v`), emitServerGen(dispatched))
+				const sseMods = new Set<string>()
+				for (const f of routeFiles) {
+					try {
+						const mod = modulePath(routesAbs, f)
+						if (parseVFile(readFileSync(f, 'utf8')).some((x) => x.attr === 'sse')) sseMods.add(mod)
+					} catch {
+						/* ignore */
+					}
+				}
+				writeFileSync(join(routesGenDir, `server_gen.v`), emitServerGen(dispatched, sseMods))
 			}
 			// Leaf-vs-index clash: foo.v + foo/index.v (or +page.v) both exist.
 			// Warn-only here (the hard build error lives in the per-file
@@ -1463,15 +2087,28 @@ export function swelte(options: SweltePluginOptions = {}): Plugin {
 				const walk = (dir: string) => {
 					for (const e of readdirSync(dir, { withFileTypes: true })) {
 						const abs = join(dir, e.name)
-						if (e.isDirectory()) { walk(abs); continue }
+						if (e.isDirectory()) {
+							walk(abs)
+							continue
+						}
 						if (/\.(ts|js|mjs|cjs|svelte)$/.test(e.name)) {
-							const rel = abs.split(sep).join('/').slice(libAbs.split(sep).join('/').length + 1)
+							const rel = abs
+								.split(sep)
+								.join('/')
+								.slice(libAbs.split(sep).join('/').length + 1)
 							if (rel.split('/').includes('backend')) bad.push(`${libDir}/${rel}`)
 						}
+					}
 				}
+				try {
+					walk(libAbs)
+				} catch {
+					/* ignore */
 				}
-				try { walk(libAbs) } catch { /* ignore */ }
-				for (const b of bad) warnings.push(`${b}: backend/ runs purely on V — no TS/JS/Svelte here (move it out of backend/)`)
+				for (const b of bad)
+					warnings.push(
+						`${b}: backend/ runs purely on V — no TS/JS/Svelte here (move it out of backend/)`
+					)
 			}
 			for (const f of listVFiles(libAbs)) {
 				const src = readFileSync(f, 'utf8')
@@ -1483,8 +2120,13 @@ export function swelte(options: SweltePluginOptions = {}): Plugin {
 				// §7: middleware/verbs are meaningless in #lib — keep the
 				// warn-and-expose-RPC behavior for verbs, extend it to
 				// @[before]/@[after].
-				const verbFns = parseVFile(src).filter((x) => x.attr !== 'rpc' && x.attr !== 'before' && x.attr !== 'after')
-				for (const vf of [...verbFns, ...parseVFile(src).filter((x) => x.attr === 'before' || x.attr === 'after')]) {
+				const verbFns = parseVFile(src).filter(
+					(x) => x.attr !== 'rpc' && x.attr !== 'before' && x.attr !== 'after'
+				)
+				for (const vf of [
+					...verbFns,
+					...parseVFile(src).filter((x) => x.attr === 'before' || x.attr === 'after'),
+				]) {
 					warnings.push(
 						`${libDir}/${mod}.v: @[${vf.attr}] on ${vf.name} is ignored in #lib — only @[rpc] exposes (still exported as RPC)`
 					)
@@ -1498,7 +2140,11 @@ export function swelte(options: SweltePluginOptions = {}): Plugin {
 				try {
 					const outWasm = resolve(root, devWasmDir, mod + '.wasm')
 					let fresh = false
-					try { fresh = statSync(outWasm).mtimeMs >= statSync(f).mtimeMs } catch { /* missing */ }
+					try {
+						fresh = statSync(outWasm).mtimeMs >= statSync(f).mtimeMs
+					} catch {
+						/* missing */
+					}
 					if (!fresh) compileLibWasm(src, mod, outWasm, libDir + '/' + mod + '.v')
 				} catch (e) {
 					throw new Error('WASM compile failed: ' + (e as Error).message)
@@ -1540,12 +2186,12 @@ export function swelte(options: SweltePluginOptions = {}): Plugin {
 				})
 				bodies.set(`${sub}/${mod}`, lines)
 			}
-				for (const f of listVFiles(routesAbs)) {
-					const src = readFileSync(f, 'utf8')
-					const fns = parseVFile(src)
-					if (fns.length === 0) continue
-					collect('routes', modulePath(routesAbs, f))
-				}
+			for (const f of listVFiles(routesAbs)) {
+				const src = readFileSync(f, 'utf8')
+				const fns = parseVFile(src)
+				if (fns.length === 0) continue
+				collect('routes', modulePath(routesAbs, f))
+			}
 			if (existsSync(libAbs)) {
 				for (const f of listVFiles(libAbs)) {
 					const mod = modulePath(libAbs, f)
@@ -1792,7 +2438,9 @@ export function swelte(options: SweltePluginOptions = {}): Plugin {
 					)
 				}
 				const rpcFns = parseVFile(src).filter((x) => x.attr === 'rpc')
-				const verbFns = parseVFile(src).filter((x) => x.attr !== 'rpc' && x.attr !== 'before' && x.attr !== 'after')
+				const verbFns = parseVFile(src).filter(
+					(x) => x.attr !== 'rpc' && x.attr !== 'before' && x.attr !== 'after'
+				)
 				const allFns = [...rpcFns, ...verbFns]
 				if (allFns.length === 0) return 'export {}; // swelte: no RPC fns in this .v file'
 				return jsWasmFor(root, mod, allFns)
@@ -1819,7 +2467,9 @@ export function swelte(options: SweltePluginOptions = {}): Plugin {
 						const m = server.moduleGraph.getModuleById(virt)
 						if (m) server.moduleGraph.invalidateModule(m)
 					}
-				} catch { /* HMR best-effort */ }
+				} catch {
+					/* HMR best-effort */
+				}
 			}
 			server.watcher.on('add', regen)
 			server.watcher.on('change', regen)
@@ -1858,10 +2508,17 @@ export function swelte(options: SweltePluginOptions = {}): Plugin {
 							// no ?q=) are never RPC — let Vite serve index.html.
 							// Only JSON GETs (Accept: application/json) and writes
 							// (JSON body or form content-type) proxy.
-							if (isSelf && req.method === 'GET' && !url.searchParams.has('q') && !accept.includes('application/json')) return next()
+							if (
+								isSelf &&
+								req.method === 'GET' &&
+								!url.searchParams.has('q') &&
+								!accept.includes('application/json')
+							)
+								return next()
 							const looksRpc =
 								ctype.includes('application/json') ||
 								(req.method === 'GET' && accept.includes('application/json')) ||
+								(req.method === 'GET' && accept.includes('text/event-stream')) ||
 								ctype.includes('multipart/form-data') ||
 								ctype.includes('application/x-www-form-urlencoded')
 							if (!looksRpc) return next()
@@ -1891,6 +2548,24 @@ export function swelte(options: SweltePluginOptions = {}): Plugin {
 									/* ignore */
 								}
 							})
+							// SSE passthrough (roadmap §14): stream the upstream body
+							// chunk-by-chunk — never buffer it. `arrayBuffer()` would hold
+							// every frame until the stream closes and the browser would see
+							// all ticks at once. Non-SSE responses stay buffered (small JSON).
+							if (accept.includes('text/event-stream') && upstream.body) {
+								const reader = upstream.body.getReader()
+								try {
+									for (;;) {
+										const { done, value } = await reader.read()
+										if (value) res.write(Buffer.from(value))
+										if (done) break
+									}
+								} finally {
+									reader.releaseLock()
+								}
+								res.end()
+								return
+							}
 							const buf = Buffer.from(await upstream.arrayBuffer())
 							res.end(buf)
 						}
@@ -1903,82 +2578,131 @@ export function swelte(options: SweltePluginOptions = {}): Plugin {
 		generateBundle(_opts, bundle) {
 			const root = activeRoot || process.cwd()
 			const libAbs = resolve(root, libDir)
-				if (existsSync(libAbs)) {
-					// Tree-shaking: only bundle #lib/ files actually imported
-					// by client code (recorded in resolveId). Vite's own
-					// tree-shaking then drops unused exports within them —
-					// untouched helpers never enter the wasm.
-					const usedNorm = (fp: string): string => resolve(fp).split(sep).join('/')
-					const usedSet = new Set([...usedLibFiles].map(usedNorm))
-					const mods: string[] = []
-					const bodies: string[] = []
-					for (const f of listVFiles(libAbs)) {
-						if (!usedSet.has(usedNorm(f))) continue
-						const mod = modulePath(libAbs, f)
-						if (isBackendMod(mod)) continue
-						const src = readFileSync(f, 'utf8')
-						if (!parseVFile(src).some((x) => x.attr === 'rpc')) continue
-						mods.push(mod)
-						bodies.push(src)
-					}
-					if (mods.length > 0) {
-						const seenFns = new Set<string>()
-						const parts: string[] = []
-						for (let i = 0; i < mods.length; i++) {
-							const mod = mods[i]
-							const src = bodies[i]
-							for (const fn of parseVFile(src).filter((x) => x.attr === 'rpc')) {
-								if (seenFns.has(fn.name)) throw new Error('WASM bundle: duplicate fn ' + fn.name + ' (in ' + mod + '.v)')
-								seenFns.add(fn.name)
-								for (const p of fn.params) {
-									if (wasmParamKind(p.vtype) === null) throw new Error(libDir + '/' + mod + '.v: ' + fn.name + ' unsupported param')
-								}
-								if (fn.fallible) throw new Error(libDir + '/' + mod + '.v: ' + fn.name + ' is fallible')
-								if (wasmReturnKind(fn.vret) === null) throw new Error(libDir + '/' + mod + '.v: ' + fn.name + ' unsupported return')
+			if (existsSync(libAbs)) {
+				// Tree-shaking: only bundle #lib/ files actually imported
+				// by client code (recorded in resolveId). Vite's own
+				// tree-shaking then drops unused exports within them —
+				// untouched helpers never enter the wasm.
+				const usedNorm = (fp: string): string => resolve(fp).split(sep).join('/')
+				const usedSet = new Set([...usedLibFiles].map(usedNorm))
+				const mods: string[] = []
+				const bodies: string[] = []
+				for (const f of listVFiles(libAbs)) {
+					if (!usedSet.has(usedNorm(f))) continue
+					const mod = modulePath(libAbs, f)
+					if (isBackendMod(mod)) continue
+					const src = readFileSync(f, 'utf8')
+					if (!parseVFile(src).some((x) => x.attr === 'rpc')) continue
+					mods.push(mod)
+					bodies.push(src)
+				}
+				if (mods.length > 0) {
+					const seenFns = new Set<string>()
+					const parts: string[] = []
+					for (let i = 0; i < mods.length; i++) {
+						const mod = mods[i]
+						const src = bodies[i]
+						for (const fn of parseVFile(src).filter((x) => x.attr === 'rpc')) {
+							if (seenFns.has(fn.name))
+								throw new Error('WASM bundle: duplicate fn ' + fn.name + ' (in ' + mod + '.v)')
+							seenFns.add(fn.name)
+							for (const p of fn.params) {
+								if (wasmParamKind(p.vtype) === null)
+									throw new Error(libDir + '/' + mod + '.v: ' + fn.name + ' unsupported param')
 							}
-							const blocked = wasmBlockedImports(src)
-							if (blocked.length > 0) throw new Error(libDir + '/' + mod + '.v: blocked import(s): ' + blocked.join(', '))
-							const broken = [...new Set(
+							if (fn.fallible)
+								throw new Error(libDir + '/' + mod + '.v: ' + fn.name + ' is fallible')
+							if (wasmReturnKind(fn.vret) === null)
+								throw new Error(libDir + '/' + mod + '.v: ' + fn.name + ' unsupported return')
+						}
+						const blocked = wasmBlockedImports(src)
+						if (blocked.length > 0)
+							throw new Error(libDir + '/' + mod + '.v: blocked import(s): ' + blocked.join(', '))
+						const broken = [
+							...new Set(
 								[...src.matchAll(/^\s*import\s+([^\n;]+)/gm)]
 									.flatMap((m) => m[1].split(','))
 									.map((p) => p.trim().split(/\s+/).pop() as string)
 									.map((mm) => mm.split('.')[0])
 									.filter((top) => WASM_KNOWN_BROKEN.has(top))
-							)]
-							if (broken.length > 0) throw new Error(libDir + '/' + mod + '.v: uses known-broken wasm stdlib (' + broken.join(', ') + ') — V 0.5.2 backend limitation')
-							parts.push(src.replace(/^\s*module\s+\S+.*$/m, '').replace(/@\[([^\]]*)\]\s*/g, (_m, attrs: string) => {
-								const keep = attrs.split(';').map((a: string) => a.trim()).filter((a: string) => a && !/^(rpc|get|post|put|delete|patch)\b/.test(a))
-								return keep.length > 0 ? '@[' + keep.join('; ') + '] ' : ''
-							}))
-						}
-						const entry = ['module main', '', "@[export: 'swelte_alloc']", 'pub fn swelte_alloc(n int) &u8 {', '\treturn unsafe { malloc(if n <= 0 { 1 } else { n }) }', '}', '', ...parts].join('\n')
-						const tmpEntry = join(resolve(root, outDir), '.bundle.compile.v')
-						writeFileSync(tmpEntry, entry)
-						try {
-							const tmpWasm = join(resolve(root, outDir), '.' + prodWasmName)
-							if (!vBin) vBin = resolveV(import.meta.url)
-							execVSync(vBin, ['-b', 'wasm', '-os', 'browser', '-o', tmpWasm, tmpEntry], { stdio: ['ignore', 'pipe', 'pipe'] })
-							const bytes = readFileSync(tmpWasm)
-							const ref = this.emitFile({ type: 'asset', name: prodWasmName, source: bytes })
-							const fileName = this.getFileName(ref)
-							for (const [id, info] of Object.entries(bundle)) {
-								if (id.endsWith('.js') && info.type === 'chunk' && info.code.includes('/assets/' + prodWasmName)) {
-									info.code = info.code.split('/assets/' + prodWasmName).join('/' + fileName)
-								}
+							),
+						]
+						if (broken.length > 0)
+							throw new Error(
+								libDir +
+									'/' +
+									mod +
+									'.v: uses known-broken wasm stdlib (' +
+									broken.join(', ') +
+									') — V 0.5.2 backend limitation'
+							)
+						parts.push(
+							src
+								.replace(/^\s*module\s+\S+.*$/m, '')
+								.replace(/@\[([^\]]*)\]\s*/g, (_m, attrs: string) => {
+									const keep = attrs
+										.split(';')
+										.map((a: string) => a.trim())
+										.filter((a: string) => a && !/^(rpc|get|post|put|delete|patch|sse)\b/.test(a))
+									return keep.length > 0 ? '@[' + keep.join('; ') + '] ' : ''
+								})
+						)
+					}
+					const entry = [
+						'module main',
+						'',
+						"@[export: 'swelte_alloc']",
+						'pub fn swelte_alloc(n int) &u8 {',
+						'\treturn unsafe { malloc(if n <= 0 { 1 } else { n }) }',
+						'}',
+						'',
+						...parts,
+					].join('\n')
+					const tmpEntry = join(resolve(root, outDir), '.bundle.compile.v')
+					writeFileSync(tmpEntry, entry)
+					try {
+						const tmpWasm = join(resolve(root, outDir), '.' + prodWasmName)
+						if (!vBin) vBin = resolveV(import.meta.url)
+						execVSync(vBin, ['-b', 'wasm', '-os', 'browser', '-o', tmpWasm, tmpEntry], {
+							stdio: ['ignore', 'pipe', 'pipe'],
+						})
+						const bytes = readFileSync(tmpWasm)
+						const ref = this.emitFile({ type: 'asset', name: prodWasmName, source: bytes })
+						const fileName = this.getFileName(ref)
+						for (const [id, info] of Object.entries(bundle)) {
+							if (
+								id.endsWith('.js') &&
+								info.type === 'chunk' &&
+								info.code.includes('/assets/' + prodWasmName)
+							) {
+								info.code = info.code.split('/assets/' + prodWasmName).join('/' + fileName)
 							}
-							try { rmSync(tmpWasm) } catch { /* ignore */ }
-						} finally {
-							try { rmSync(tmpEntry) } catch { /* ignore */ }
+						}
+						try {
+							rmSync(tmpWasm)
+						} catch {
+							/* ignore */
+						}
+					} finally {
+						try {
+							rmSync(tmpEntry)
+						} catch {
+							/* ignore */
 						}
 					}
 				}
+			}
 			void _opts
 			void bundle
 		},
 	}
 }
 
-function wasmDevMiddleware(server: { config: { root: string }; watcher: unknown; moduleGraph: unknown }): (req: IncomingMessage, res: ServerResponse, next: () => void) => void {
+function wasmDevMiddleware(server: {
+	config: { root: string }
+	watcher: unknown
+	moduleGraph: unknown
+}): (req: IncomingMessage, res: ServerResponse, next: () => void) => void {
 	void server
 	return (_req: IncomingMessage, _res: ServerResponse, _next: () => void) => undefined
 }

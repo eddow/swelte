@@ -66,3 +66,29 @@ pub fn upload_file(req SwelteRequest) !string {
 	}
 	return 'got:' + names
 }
+
+// SSE probe (roadmap §14, emit mode): GET + Accept: text/event-stream
+// takes over the conn; each `emit` flushes one frame immediately —
+// sleeps pace the frames (real incremental flush, nothing buffered).
+// Plain JSON GETs keep hitting `get_greeting` above.
+@[sse]
+pub fn tick_stream(req SwelteRequest, emit fn (string) bool) {
+	n := req.query['n'] or { '3' }
+	w := req.query['wait_ms'] or { '0' }
+	mut count := n.int()
+	if count < 1 {
+		count = 1
+	}
+	if count > 50 {
+		count = 50
+	}
+	wait := w.int()
+	for i in 1 .. count + 1 {
+		if wait > 0 && wait <= 10000 {
+			time.sleep(time.millisecond * wait)
+		}
+		if !emit('tick ${i}') {
+			return
+		}
+	}
+}

@@ -1,5 +1,6 @@
 <script lang="ts">
-	let { status = 500, message = 'Something went wrong' }: { status?: number; message?: string } = $props()
+let { status = 500, message = 'Something went wrong' }: { status?: number; message?: string } =
+	$props()
 </script>
 
 <main>

@@ -364,14 +364,34 @@ Test: `-F file=@up.txt` → `"got:up.txt"`; missing/empty →
 `!string` error (`missing file`, 400 JSON / HTML per Accept); 5MB
 multipart under the 10MB cap → 200.
 
-## 14. Streaming (SSE/WS)
+## 14. Streaming (SSE) — built (2026-10-30, true streaming via veb)
 
-README-era promise; `rpc.md` is silent. Either spec as v2-defer or
-define now: which fns stream, wire format, reconnect, backpressure.
+`@[sse]` on a `#routes/*.v` fn (GET-only, `Accept: text/event-stream`;
+plain JSON GETs keep hitting `@[get]` on the same file). One default or
+`('q')` per file, unique qualifiers (verb rules, item 15); stacking
+`@[sse]` with a verb/rpc on one fn is a build error. Two shapes,
+mutually exclusive: list mode returns `[]string` (harness streams
+each per-event); emit mode takes trailing `emit fn (string) bool` +
+returns void — the writer runs the fn with a harness-injected
+emitter, each `emit(e)` flushes one frame NOW
+(`if !emit(e) { return }` on disconnect). The veb harness
+(`before_request`, which owns `ctx`) intercepts SSE intent FIRST via
+generated `swelte_sse_route` + `swelte_sse_is_emit` +
+`swelte_sse_emit_for`/`swelte_sse_events_for`, then `takeover_conn` +
+`spawn`s the writer (real incremental streaming, proven with
+`?wait_ms=500` pacing: frames at 0.5s gaps).
+`swelte:close` data line marks stream end. Neither-shape/mixed-shape
+fns, fallible `!T` failures, and unknown qualifiers stay JSON (never a
+stream). The SSE path is EXEMPT from the 10s handler watchdog
+(long-lived by design); `SWELTE_SSE_MAX_EVENTS` caps runaway streams
+(default 10000). Client: `__swelteStream` (`AsyncGenerator<string>`,
+`for await`), unchanged — frames now arrive progressively.
 
-Test (if built): open a streaming route — chunks arrive progressively
-in the browser (not one buffered blob); kill the server mid-stream →
-client reports disconnect, reconnects per policy.
+Test: `curl -N -H 'Accept: text/event-stream' '…/api/greet?n=3&wait_ms=500'`
+shows `tick 1` ~0.5s, `tick 2` ~1.0s, `tick 3` ~1.5s (pacing PROVES
+flush, zero buffering); plain `Accept: application/json` GET → JSON
+from `@[get]` (same URL); `for await (const e of tick_stream())`
+yields each frame; `!T` failure → JSON 400 `SwelteRpcError`.
 
 ## 15. Validation strictness — warn-vs-error table (part-built 2026-10-30)
 

@@ -74,31 +74,50 @@ async function postJson<TResult>(base: string, fn: string, args: object): Promis
 	return res.json()
 }
 
-async function getVerb<TResult>(base: string, fn: string, method: string, qualifier: string, args: object): Promise<TResult> {
+async function getVerb<TResult>(
+	base: string,
+	fn: string,
+	method: string,
+	qualifier: string,
+	args: object
+): Promise<TResult> {
 	const q = qualifier ? `?q=${encodeURIComponent(qualifier)}` : ''
-	const res = await fetch(
-		`${base}${encodeQuery(args ?? {}).replace(/^\?/, q ? '&' : '?') || q}`,
-		{
-			method,
-			headers: { accept: 'application/json' },
-		}
-	)
+	const res = await fetch(`${base}${encodeQuery(args ?? {}).replace(/^\?/, q ? '&' : '?') || q}`, {
+		method,
+		headers: { accept: 'application/json' },
+	})
 	if (!res.ok) return throwForStatus(base, fn, res)
 	return res.json()
 }
 
-async function postForm<TResult>(base: string, fn: string, method: string, qualifier: string, args: object): Promise<TResult> {
+async function postForm<TResult>(
+	base: string,
+	fn: string,
+	method: string,
+	qualifier: string,
+	args: object
+): Promise<TResult> {
 	const q = qualifier ? `?q=${encodeURIComponent(qualifier)}` : ''
 	// §13 uploads: File/Blob values go multipart (browser sets the boundary);
 	// plain values stay urlencoded. Server reads filenames from req.files.
 	const entries = Object.entries((args ?? {}) as Record<string, unknown>)
-	const hasFile = entries.some(([, v]) => v instanceof File || v instanceof Blob || (Array.isArray(v) && v.some((x) => x instanceof File || x instanceof Blob)))
+	const hasFile = entries.some(
+		([, v]) =>
+			v instanceof File ||
+			v instanceof Blob ||
+			(Array.isArray(v) && v.some((x) => x instanceof File || x instanceof Blob))
+	)
 	if (hasFile) {
 		const fd = new FormData()
 		for (const [k, v] of entries) {
 			if (v === undefined || v === null) continue
-			if (Array.isArray(v)) { for (const x of v) fd.append(k, x instanceof File || x instanceof Blob ? x : String(x)) }
-			else fd.append(k, v instanceof File || v instanceof Blob ? v : typeof v === 'string' ? v : JSON.stringify(v))
+			if (Array.isArray(v)) {
+				for (const x of v) fd.append(k, x instanceof File || x instanceof Blob ? x : String(x))
+			} else
+				fd.append(
+					k,
+					v instanceof File || v instanceof Blob ? v : typeof v === 'string' ? v : JSON.stringify(v)
+				)
 		}
 		const res = await fetch(`${base}${q}`, {
 			method,
@@ -143,6 +162,57 @@ export async function __swelteFetch<TResult>(
 	return postForm<TResult>(base, fn, 'POST', qualifier, args)
 }
 
+/**
+ * Internal SSE reader for code-generated `@[sse]` stubs (roadmap §14,
+ * veb streaming). GETs `base` with `Accept: text/event-stream` and
+ * yields each `data:` frame as it arrives (true incremental flush —
+ * the server `send_message`s per event). `swelte:close` ends the
+ * stream. Non-2xx throws SwelteRpcError via throwForStatus (JSON).
+ * Not user API — import the `.v` file instead.
+ */
+export async function* __swelteStream(
+	base: string,
+	fn: string,
+	args: object = {},
+	qualifier = '',
+	opts: { signal?: AbortSignal; lastEventId?: string } = {}
+): AsyncGenerator<string, void, void> {
+	const q = qualifier ? `?q=${encodeURIComponent(qualifier)}` : ''
+	const url = `${base}${encodeQuery(args ?? {}).replace(/^\?/, q ? '&' : '?') || q}`
+	const headers: Record<string, string> = { accept: 'text/event-stream' }
+	if (opts.lastEventId) headers['last-event-id'] = opts.lastEventId
+	const res = await fetch(url, { headers, signal: opts.signal })
+	if (!res.ok) return throwForStatus(base, fn, res)
+	if (!res.body) return
+	const reader = res.body.getReader()
+	const dec = new TextDecoder()
+	let buf = ''
+	for (;;) {
+		const { done, value } = await reader.read()
+		if (value) buf += dec.decode(value, { stream: !done })
+		for (;;) {
+			const idx = buf.indexOf('\n\n')
+			if (idx < 0) break
+			const frame = buf.slice(0, idx)
+			buf = buf.slice(idx + 2)
+			let data = ''
+			for (const line of frame.replace(/\r\n/g, '\n').split('\n')) {
+				if (line.startsWith('data:')) data += (data ? '\n' : '') + line.slice(5).replace(/^ /, '')
+			}
+			if (data === 'swelte:close') return
+			if (data !== '') yield data
+		}
+		if (done) {
+			const tail = buf.trim()
+			if (tail.startsWith('data:')) {
+				const data = tail.slice(5).replace(/^ /, '')
+				if (data !== '' && data !== 'swelte:close') yield data
+			}
+			return
+		}
+	}
+}
+
 // Dev fallback registry for `#lib/*.v` when a WASM artifact is missing
 // (uncompiled file, pruned module). Keyed by bare fn name. Production
 // WASM modules bypass the registry entirely.
@@ -175,10 +245,14 @@ function wasmEnv(memory: () => WebAssembly.Memory | undefined): WebAssembly.Impo
 		env: {
 			__panic_abort: (ptr: number, len: number) => {
 				const mem = memory()
-				const msg = mem ? new TextDecoder().decode(new Uint8Array(mem.buffer, ptr, len)) : 'wasm panic'
+				const msg = mem
+					? new TextDecoder().decode(new Uint8Array(mem.buffer, ptr, len))
+					: 'wasm panic'
 				throw new Error(msg)
 			},
-			__writeln: () => { /* V println inside wasm — drop (no console spam) */ },
+			__writeln: () => {
+				/* V println inside wasm — drop (no console spam) */
+			},
 		},
 	}
 }
@@ -190,7 +264,10 @@ async function loadWasm(url: string): Promise<WasmExports> {
 			let mem: WebAssembly.Memory | undefined
 			const res = await fetch(url)
 			if (!res.ok) throw new Error(`WASM fetch ${url}: HTTP ${res.status}`)
-			const { instance } = await WebAssembly.instantiateStreaming(res, wasmEnv(() => mem))
+			const { instance } = await WebAssembly.instantiateStreaming(
+				res,
+				wasmEnv(() => mem)
+			)
 			mem = instance.exports.memory as WebAssembly.Memory
 			if (!mem || typeof (instance.exports.swelte_alloc as unknown) !== 'function') {
 				throw new Error(`WASM ${url}: missing memory/swelte_alloc exports`)
@@ -219,7 +296,7 @@ export async function __swelteWasmCall<TResult>(
 	params: WasmParam[] = [],
 	retKind: 'string' | 'int' | 'bool' | 'void' | 'unsupported' = 'unsupported'
 ): Promise<TResult> {
-	const bare = fn.includes('.') ? fn.split('.').pop() as string : fn
+	const bare = fn.includes('.') ? (fn.split('.').pop() as string) : fn
 	const fallback = libFallbacks.get(bare)
 	const fail = (detail: string): TResult => {
 		throw new SwelteRpcError(wasmUrl, bare, 0, { error: detail, fn: bare, path: wasmUrl }, '')
@@ -228,9 +305,16 @@ export async function __swelteWasmCall<TResult>(
 		const ex = await loadWasm(wasmUrl)
 		const target = ex[fn] ?? ex[bare]
 		if (typeof target !== 'function') {
-			if (fallback) return Promise.resolve(fallback((args ?? {}) as Record<string, unknown>) as TResult)
+			if (fallback)
+				return Promise.resolve(fallback((args ?? {}) as Record<string, unknown>) as TResult)
 			const available = Object.keys(ex).filter((k) => k !== 'memory' && k !== 'swelte_alloc')
-			throw new SwelteRpcError(wasmUrl, bare, 0, { error: 'unknown fn', fn: bare, path: wasmUrl, available }, '')
+			throw new SwelteRpcError(
+				wasmUrl,
+				bare,
+				0,
+				{ error: 'unknown fn', fn: bare, path: wasmUrl, available },
+				''
+			)
 		}
 		const call = target as (...a: number[]) => number | undefined
 		const mem = () => new Uint8Array(ex.memory.buffer)
@@ -265,7 +349,8 @@ export async function __swelteWasmCall<TResult>(
 		if (retKind === 'string') {
 			const rop = dv().getInt32(rp, true)
 			const rol = dv().getInt32(rp + 4, true)
-			if (rop <= 0 || rol < 0 || rol > 16 * 1024 * 1024) return fail(`bad string return (ptr=${rop} len=${rol})`)
+			if (rop <= 0 || rol < 0 || rol > 16 * 1024 * 1024)
+				return fail(`bad string return (ptr=${rop} len=${rol})`)
 			return dec.decode(new Uint8Array(ex.memory.buffer, rop, rol)) as TResult
 		}
 		if (retKind === 'bool') return Boolean(raw) as TResult
@@ -297,7 +382,9 @@ export interface SweltePageError {
 	message: string
 }
 
-export type SwelteLoadResult<T> = { data: T; error?: undefined } | { data?: undefined; error: SweltePageError }
+export type SwelteLoadResult<T> =
+	| { data: T; error?: undefined }
+	| { data?: undefined; error: SweltePageError }
 
 /**
  * Page-data loader: runs a `.v` stub, maps any `SwelteRpcError` (or

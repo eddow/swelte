@@ -1,7 +1,8 @@
 <script lang="ts">
+import { tick } from 'svelte'
 import { get_greeting, save_name } from '#routes/+page.v'
 import type { GetGreetingResult, SaveNameResult, SwelteRequest } from '#routes/+page.v'
-import { login } from '#routes/api/greet.v'
+import { login, tick_stream } from '#routes/api/greet.v'
 import type { LoginArgs, Session } from '#routes/api/greet.v'
 import { hash_string } from '#lib/crypto/hash.v'
 import type { HashArgs, HashStringResult } from '#lib/crypto/hash.v'
@@ -13,6 +14,7 @@ let saved: SaveNameResult = $state('')
 let session: Session | null = $state(null)
 let hashed: HashStringResult = $state('')
 let lastError = $state('')
+let ticks: string[] = $state([])
 
 function showError(e: unknown) {
 	if (e instanceof SwelteRpcError) {
@@ -56,6 +58,18 @@ async function doLogin() {
 		showError(e)
 	}
 }
+async function streamTicks() {
+	lastError = ''
+	ticks = []
+	try {
+		for await (const t of tick_stream({ n: '3', wait_ms: '500' })) {
+			ticks = [...ticks, t]
+			await tick()
+		}
+	} catch (e) {
+		showError(e)
+	}
+}
 </script>
 
 <main>
@@ -66,6 +80,7 @@ async function doLogin() {
 		<button onclick={saveName}>Save (#routes POST)</button>
 		<button onclick={hashName}>Hash (#lib WASM)</button>
 		<button onclick={doLogin}>Login (#routes api struct)</button>
+		<button onclick={streamTicks}>Stream (#routes SSE)</button>
 	</div>
 	{#if greeting}
 		<p>{greeting}</p>
@@ -78,6 +93,9 @@ async function doLogin() {
 	{/if}
 	{#if session}
 		<p>session {session.id} for {session.user} (remember={session.remember})</p>
+	{/if}
+	{#if ticks.length}
+		<p>stream: {ticks.join(' | ')}</p>
 	{/if}
 	{#if lastError}
 		<pre style="color:crimson; white-space:pre-wrap;">{lastError}</pre>
