@@ -42,7 +42,7 @@ A popular systems-monolith approach where a Go backend serves an embedded fronte
 
 | Feature | Go Monolith (Go + `go:embed`) | Swelte (V + Svelte 5) |
 | --- | --- | --- |
-| **Code Organization** | Decoupled projects in separate directories; manual API serialization layers | Unified `$lib/` directory with seamless isomorphic boundaries |
+| **Code Organization** | Decoupled projects in separate directories; manual API serialization layers | Unified `#lib/` directory with seamless isomorphic boundaries |
 | **Routing & Interop** | REST/JSON or manual gRPC configuration | Native type-safe boundaries and clean route-level boundaries |
 
 * **Where Swelte Wins:** **Isomorphic fluidity.** Swelte unifies client and server code organization without forcing developers to manually plumb boilerplate serialization routines between separate codebases.

@@ -1,7 +1,7 @@
 // `swelte init <dir>`: scaffold a new Swelte project.
 // Mirrors examples/something: vite.config.ts (env-aware vBackendUrl),
 // svelte.config.js, tsconfig wildcards, index.html, src/{main.ts,app.html,
-// routes/index.{svelte,v},routes/api/greet.v,lib/crypto/hash.v}, server.v
+// routes/+page.{svelte,v},routes/api/greet.v,lib/crypto/hash.v}, server.v
 // (Hand + static + main, calls generated routes/), package.json scripts,
 // .gitignore. Then the user runs npm install + swelte dev.
 import { existsSync, mkdirSync, readdirSync, writeFileSync } from 'node:fs'
@@ -107,7 +107,7 @@ export default {
 </html>
 `)
   write(root, 'src/main.ts', `import { mount } from 'svelte'
-import Index from './routes/index.svelte'
+import Index from './routes/+page.svelte'
 
 mount(Index, { target: document.getElementById('app')! })
 `)
@@ -124,8 +124,8 @@ mount(Index, { target: document.getElementById('app')! })
   </body>
 </html>
 `)
-  write(root, 'src/routes/index.svelte', `<script lang="ts">
-import { get_greeting } from '#routes/index.v'
+  write(root, 'src/routes/+page.svelte', `<script lang="ts">
+import { get_greeting } from '#routes/+page.v'
 let name = $state('world')
 let greeting = $state('')
 async function load() { greeting = await get_greeting({ payload: name }) }
@@ -137,8 +137,8 @@ async function load() { greeting = await get_greeting({ payload: name }) }
   {#if greeting}<p>{greeting}</p>{/if}
 </main>
 `)
-  write(root, 'src/routes/index.v', `// Swelte route handler for \`/\`.
-module index
+  write(root, 'src/routes/+page.v', `// Swelte route handler for \`/\`.
+module plus_page
 
 @[get]
 pub fn get_greeting(req SwelteRequest) string {
@@ -333,7 +333,9 @@ fn main() {
 `)
   write(root, '.gitignore', `# build outputs — never commit
 .svelte/
-routes/
+# generated V dispatcher (routes/*.v at the project root) — NOT
+# src/routes/, which holds hand-written sources
+/routes/
 dist/
 server
 .DS_Store

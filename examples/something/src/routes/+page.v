@@ -1,5 +1,5 @@
-// Swelte route handler for `/`. Named fns importable from `#routes/index.v`.
-module index
+// Swelte route handler for `/`. Named fns importable from `#routes/+page.v`.
+module plus_page
 
 @[get]
 pub fn get_greeting(req SwelteRequest) string {

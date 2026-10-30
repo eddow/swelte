@@ -8,8 +8,10 @@ artifact: `dist/server` + `dist/`).
 ## Layout
 
 ```
-src/routes/index.svelte + index.v   / (get_greeting GET, save_name POST)
+src/routes/+page.svelte + +page.v   / (get_greeting GET, save_name POST)
 src/routes/api/greet.v              /api/greet (get_greeting GET, login @[rpc] → Session)
+src/routes/admin/+route.svelte + +route.v   /admin wrapper (nav + @[before] sess guard / @[after] passthrough)
+src/routes/admin/+page.svelte + +page.v     /admin leaf (admin_whoami GET, reads injected x-user)
 src/lib/crypto/hash.v               isomorphic (hash_string @[rpc] → WASM/dev fallback)
 server.v                            Hand + static + main() — calls generated routes/swelte_route
 routes/                             generated V dispatcher (regenerating, gitignored)
@@ -33,9 +35,15 @@ node engine/core/dist/cli.js dev --port 5174 --backend 8131 --root examples/some
 - Page buttons: Greet / Save / Hash (`#lib` real WASM) / Login.
 - `hash_string` compiles to real WASM (`v -b wasm -os browser`):
   dev `.swelte/dev/crypto/hash.wasm` + prod `dist/assets/app_lib-*.wasm`.
-- Generated dispatcher proven: `routes/index.v` + `routes/api_greet.v` +
-  `routes/server_gen.v` (`module routes`, `SwelteRequest` + `swelte_route`),
-  one-default-per-verb + unique-qualifier enforced at generate time.
+- Generated dispatcher proven: `routes/_page.v` + `routes/api_greet.v` +
+  `routes/admin__page.v` + `routes/server_gen.v` (`module routes`,
+  `SwelteRequest` + `swelte_route`), one-default-per-verb +
+  unique-qualifier enforced at generate time.
+- Middleware chain proven: `admin/+route.v` `@[before]` rejects without
+  `sess` cookie (400 `missing session`), injects `x-user` otherwise;
+  `@[after]` passes through; `/` + `/api/greet` unaffected (scoping).
+  Folder-root double-claim (`foo.v` + `foo/+page.v`, or `foo.svelte` +
+  `foo/+page.svelte`, either extension on either side) is a build error.
   Error matrix: unknown fn → 404 + available, bad JSON → 400,
   missing fn → 400, `!T` → 400 `err.msg()`, unknown path → 404,
   method without handler → 405.

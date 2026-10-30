@@ -6,14 +6,17 @@ not implemented; items leave this file when they land in `docs/`.
 The `.v`-import design rationale lives in `v-imports.md` (§1–§5 built,
 §6 decisions log).
 
-Items 1–6 (dispatcher, dev, build, preview, init, V-WASM), 15-part
+Items 1–7 (dispatcher, dev, build, preview, init, V-WASM, +route
+wrappers + middleware), 15-part
 (one-default-per-verb + unique-qualifier as build errors), 18-part
 (`time.Time→number`; allowlist enforced at build for `#lib/` WASM,
 runtime-warn remainder only for the known-broken wasm-backend stdlib),
 22-part (parser + `__swelteFetch` + stubs accept
 `put`/`delete`/`patch`) are built.
 Route params in `Request`, `swelte check` machine-readable output,
-and per-item remainders below are still open. Item 23 records the
+and per-item remainders below are still open. §7's V dispatcher half
+is built; the `+route.svelte` UI half is manual composition until a
+client router lands (§7 Test note). Item 23 records the
 standing decision to keep the V runtime (`SwelteRequest`, `err_*`)
 emitted until the shape freezes, then ship it as a static vlib.
 
@@ -102,7 +105,7 @@ answer, asset serves `text/javascript`; only the V binary listens.
 Scaffold: `vite.config.ts` (env-aware `vBackendUrl`), `svelte.config.js`,
 self-contained `tsconfig.json` (no repo-root extend — works out-of-tree),
 wildcards (`#routes/*.v` / `#lib/*.v` → `.swelte`), `index.html`,
-`src/{main.ts,app.html,routes/index.{svelte,v},routes/api/greet.v,lib/crypto/hash.v}`,
+`src/{main.ts,app.html,routes/+page.{svelte,v},routes/api/greet.v,lib/crypto/hash.v}`,
 `server.v` (Hand + static serving + main), `package.json` scripts,
 `.gitignore` (`routes/` + `dist/` + `server`).
 
@@ -161,14 +164,56 @@ binary serves it —
 `server.v` maps `.wasm` → `application/wasm`); bundle call →
 `"hash(world)"`; smoke `page 200 + api ok`.
 
-## 7. Layouts
+## 7. `+route` wrappers + middleware (`before`/`after`) — built (2026-10-30)
 
-`+layout.svelte` / `+layout.v` inheritance semantics (nested layouts,
-data flow down).
+`+route.svelte` / `+route.v` replace SvelteKit's `+layout.*` (no
+`+layout` / `+page` / `+layout.server` / `+page.server` split): one
+pair per directory wraps its subtree's pages and API routes.
+Folder-root leaves are `+page.svelte` / `+page.v` (replacing
+`index.*`: `foo/index.v` → `foo/+page.v`, same URL). So `/foo` has
+two spellings with different wrapping: `foo.v` (unwrapped) vs
+`foo/+page.v` (wrapped by `foo/+route.v`). Same for UI:
+`foo.svelte` is not wrapped by `foo/+route.svelte`;
+`foo/+page.svelte` is. Everything else stays as committed
+(flat `foo.v → /foo`, `routeFor`, dispatcher).
+The `.v` side adds middleware: `@[before]` fns run
+root→leaf before the handler (transform-or-reject:
+`SwelteRequest -> !SwelteRequest`); `@[after]` fns run leaf→root
+after it (observe-or-replace the `(status, body)` response).
+Global concerns (CORS/CSRF, rate-limit) stay in `server.v`'s `Hand`;
+per-subtree auth/session is the motivating case.
 
-Test: add `src/routes/admin/+layout.svelte` with a nav + `+layout.v`
-supplying a session prop; visit `/admin/*` — nav renders, prop flows
-to both parent and child, non-admin routes unaffected.
+Rules (locked): wrapping is directory-subtree (SvelteKit
+semantics) over a pure ancestor walk — no sideways lookup.
+`foo/+route.v` covers `foo/**/*` plus the folder-root `foo/+page`
+leaf — never the sibling `foo.v` / `foo.svelte`. (`foo/+router.v`,
+roadmap §8, will own `foo/**/*` — never `foo` itself.)
+`foo.v` + `foo/+page.v` (or `foo.svelte` + `foo/+page.svelte`)
+claiming the same URL is a build error, unconditionally — either
+extension on either side (one file per URL, so guarded URLs live
+inside their guard's directory).
+Middleware fns are never exported to TS (file path already said the
+kind), same as verb handlers; `+route.v` `pub struct`s ARE exported
+to TS — the wrapper is +layout-shaped, so shared types (e.g. a
+`load`-style shape) flow to `+page.svelte` via
+`import type … from '#routes/foo/+route.v'`.
+
+Test: `src/routes/admin/+route.svelte` (nav + `<slot/>`-style
+`children` snippet) + `+route.v` (`@[before]` requiring a `sess`
+cookie → 400 otherwise, `@[after]` pass-through);
+`admin/+page.svelte`/`.v` leaf (`@[get]` echoing the user from
+the injected `x-user` header). `GET /admin` without cookie → 400
+`missing session` from the wrapper (proves the chain); with
+`Cookie: sess=alice` → 200 `"admin:alice"`; `/` and `/api/greet`
+unaffected (proves scoping). UI composition is manual until a
+client router lands: the example's `admin/+page.svelte` imports
+nothing from `+route.svelte` — the wrapper's nav/chrome is proven
+by file presence + V chain, not by rendered nesting. Negatives:
+`foo.v` + `foo/+page.v` → build error naming both files
+(`foo.svelte` + `foo/+page.svelte` likewise, even with no `.v`
+on either side); endpoints in `+route.v`,
+`@[before]`/`@[after]` in leaves, and bad middleware shapes →
+build errors naming file+fn.
 
 ## 8. Dynamic segments
 
@@ -181,7 +226,9 @@ returns `42`; `/users/` (missing segment) 404s.
 ## 9. Trailing-slash / 404 / `+error`
 
 Conventions for slash handling, unknown-path 404 page, `+error` boundary.
-SSR vs SPA fallback decision.
+SSR vs SPA fallback decision. The error boundary stays a single global
+`+error.svelte` — explicitly NOT nested (no per-directory error
+inheritance; `+route` wrappers compose UI, not error bubbling).
 
 Test: open `/nope` (404 page, not blank/JSON); open `/api/greet/`
 vs `/api/greet` (same handler per the decided convention);
@@ -191,6 +238,8 @@ throw from a handler → `+error` boundary renders, no white screen.
 
 Cookies vs tokens, `Set-Cookie` on login, CSRF for `POST /`, CORS for
 `/api/*`. (`#lib/` WASM has no network surface — server rules only.)
+Per-subtree session guards land in `+route.v` `@[before]` middleware
+(§7); global policy stays in `server.v`'s `Hand`.
 
 Test: `login` sets a cookie (`curl -i` shows `Set-Cookie`);
 replay the POST without it → 401/403; cross-origin fetch from another
@@ -198,7 +247,8 @@ port → blocked (or explicitly allowed) per the decided policy.
 
 ## 11. Hardening
 
-Rate-limit, body size caps, timeouts.
+Rate-limit, body size caps, timeouts. Global: enforced in `server.v`'s
+`Hand`, not in `+route.v` middleware (§7 draws the line).
 
 Test: burst 100 POSTs in 1s → 429s after the limit; POST a 50MB body →
 413; hang a handler → client gets a timeout error, server stays up.
@@ -230,13 +280,17 @@ client reports disconnect, reconnects per policy.
 
 ## 15. Validation strictness
 
-Orphan `routes/*.v`, leaf-vs-index clash, `.v` outside
+Orphan `routes/*.v`, `.v` outside
 `routes/`+`lib/`, `#lib/backend` misuse, stray `@[get/post]` in `#lib/`,
-duplicate verb defaults / duplicate qualifiers — all warn today (or
-unimplemented), none fail. Decide warn-vs-error per case;
-emit machine-readable list with file+line. Note: one-default-per-verb
-and qualifier uniqueness MUST be errors at dispatcher time (ambiguous
-routing), so this item is really about the rest.
+duplicate verb defaults / duplicate qualifiers, `@[before]`/`@[after]`
+outside `+route.v` — warn today (or unimplemented), none fail. Decide
+warn-vs-error per case; emit machine-readable list with file+line.
+Note: one-default-per-verb and qualifier uniqueness MUST be errors at
+dispatcher time (ambiguous routing), so this item is really about the
+rest. Decided (§7): folder-root double-claim (`foo.v` + `foo/+page.v`,
+or `foo.svelte` + `foo/+page.svelte`) is a build error,
+unconditionally — one file per URL, so guarded URLs live inside their
+guard's directory.
 
 Test: add an orphan `routes/stray.v` (no `.svelte` partner, not under
 `api/`) → `vite build` fails with `stray.v:<line>` in the message;
@@ -248,7 +302,7 @@ fix it → build green. `swelte check` prints the same list as JSON
 Guard is built (resolveId+load refuse with importer+file error);
 unproven — needs a backend-only fixture + import-guard test.
 
-Test: add `src/lib/backend/secrets.v` (or `src/lib/secrets_backend.v`); import it from `index.svelte` →
+Test: add `src/lib/backend/secrets.v` (or `src/lib/secrets_backend.v`); import it from `+page.svelte` →
 build fails naming importer+file; import it from a `#routes/*.v`
 only → build green. Also add `src/lib/backend/ui.ts` → build warns (no TS in backend/).
 

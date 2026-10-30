@@ -5,7 +5,7 @@ Source of truth for how Svelte calls V. No `self`, no `$ssapi`, no
 attribute is a named export.
 
 Generated V dispatcher (`routes/`, `module routes`): `generate()` emits
-one file per routes file (`routes/index.v`, `routes/api_greet.v`) plus
+one file per routes file (routes/+page.v`, `routes/api_greet.v`) plus
 `routes/server_gen.v` (`SwelteRequest` + `swelte_route` + `err_*`
 helpers). `server.v` is `Hand` + static handlers + `main()` only, run
 via directory-mode `v run .`. Structs are prefixed per file
@@ -15,7 +15,8 @@ via directory-mode `v run .`. Structs are prefixed per file
 ## Directories
 
 - `src/routes/**/*.v` — server RPC. File path is the route:
-  `index.v` → `/`, `api/greet.v` → `/api/greet`.
+  `+page.v` → `/`, `api/greet.v` → `/api/greet` (`index.v` is the legacy
+  spelling of `+page.v`, same URL).
   Import from `#routes/...` (or relative `./x.v`).
 - `src/lib/**/*.v` — isomorphic lib. Never routed, never fetched.
   Same V compiles native + `v -b wasm`; TS import is always `async`.
@@ -29,7 +30,7 @@ export. No attribute = internal, never exported.
 
 ```svelte
 <script lang="ts">
-  import { get_greeting, save_name } from '#routes/index.v';
+  import { get_greeting, save_name } from '#routes/+page.v';
   import { login } from '#routes/api/greet.v';
   import { hash_string } from '#lib/crypto/hash.v';
 </script>
@@ -53,6 +54,7 @@ JSON body. No `?fn=` anywhere (removed with the old model).
 | `#routes/` | `@[get]` / `@[get('q')]` | GET `Accept: application/json` | query = args; default, or `?q` present |
 | `#routes/` | `@[post]` / `@[post('q')]` | POST form (multipart / urlencoded) | form fields = args; default, or `?q` present |
 | `#routes/` | `@[put]`/`@[delete]`/`@[patch]` (+`('q')`) | respective method | same per-method rules |
+| `#routes/` | `@[before]` / `@[after]` (only in `+route.v`) | — (subtree middleware, roadmap §7) | `@[before]`: root→leaf, `SwelteRequest -> !SwelteRequest`; `@[after]`: leaf→root, response observe-or-replace; middleware fns never exported to TS, but the wrapper's `pub struct`s are (+layout-shaped shared types) |
 | `#lib/` | `@[rpc]` | local WASM call | none (direct dispatch) |
 
 - No attribute = internal helper, never exported, never routed.
@@ -60,6 +62,10 @@ JSON body. No `?fn=` anywhere (removed with the old model).
   per file (two `@[post]` defaults = build error); qualifiers unique
   per verb per file. `@[rpc]` unaffected (many per file, always).
 - `@[get]`/`@[post]` in `#lib/` warn and still expose as RPC.
+- `@[before]`/`@[after]` only in `+route.v` wrappers (roadmap §7):
+  subtree middleware, never exported as callables to TS (but the
+  wrapper's `pub struct`s are — +layout-shaped shared types).
+  `+route.v` files declare no `@[rpc]`/verb endpoints of their own.
 
 ```v
 module greet

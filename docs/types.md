@@ -9,18 +9,23 @@ reads `.v` files as text and writes `.swelte/types/**` (`routes/`,
 ## When
 
 `configResolved` (dev start) + `buildStart`, re-run on `.v`
-add/change/unlink. Warnings (`unknown` types, orphans, leaf/index
-clashes, `#lib/backend` misuse, stray `@[get/post]` in `#lib/`) go to
-console, never fail correct V programs.
+add/change/unlink. Warnings (`unknown` types, orphans,
+`#lib/backend` misuse, stray `@[get/post]` in `#lib/`) go to
+console, never fail correct V programs. Errors (one-default-per-verb,
+unique qualifiers, folder-root double claim, `@[before]`/`@[after]`
+outside `+route.v`) fail the build with file+line.
 
 ## What
 
-`parseVFile` extracts `@[rpc|get|post|put|delete|patch] pub fn name(params) ret`
+`parseVFile` extracts `@[rpc|get|post|put|delete|patch|before|after] pub fn name(params) ret`
 (verb attributes take an optional `('qualifier')`) +
 `parseStructs` extracts `pub struct` fields. `@[rpc]` fns keep the
 single-args-struct rule (fn taking one struct param expands to that
 struct's fields in TS); verb handlers take the framework `Request`
-(shape with the dispatcher, roadmap item 1).
+(shape with the dispatcher, roadmap item 1); `@[before]`/`@[after]`
+middleware (`+route.v` only, roadmap §7) exports no callables to TS —
+but the wrapper's `pub struct`s are still projected (wrapper is
++layout-shaped, shared types flow to `+page.svelte`).
 `routeFor` (`src/routes/<p>.v` → `/<p>`, `src/lib/**` → no route) is
 shared with the V dispatcher.
 

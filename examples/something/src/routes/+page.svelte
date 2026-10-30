@@ -1,6 +1,6 @@
 <script lang="ts">
-import { get_greeting, save_name } from '#routes/index.v'
-import type { GetGreetingResult, SaveNameResult, SwelteRequest } from '#routes/index.v'
+import { get_greeting, save_name } from '#routes/+page.v'
+import type { GetGreetingResult, SaveNameResult, SwelteRequest } from '#routes/+page.v'
 import { login } from '#routes/api/greet.v'
 import type { LoginArgs, Session } from '#routes/api/greet.v'
 import { hash_string } from '#lib/crypto/hash.v'

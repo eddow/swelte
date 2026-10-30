@@ -23,8 +23,12 @@ a named export. **Directory decides runtime; extension stays `.v`:**
 ```
 
 * `#routes/**/*.v` = **server call** (fetch to the V backend).
-  File path is the route, fn name goes in the body (`[@rpc]`)
-  or in `?fn=` (verb attributes).
+  File path is the route, fn name goes in the body (`[@rpc]`).
+  `+route.v` files are wrappers, not endpoints: their `@[before]` /
+  `@[after]` middleware runs for the subtree (roadmap §7); middleware
+  fns export nothing to TS, but the wrapper's `pub struct`s ARE
+  exported (wrapper is +layout-shaped: shared types flow to
+  `+page.svelte`).
 * `#lib/**/*.v` = **isomorphic lib** (local WASM call, works offline).
   No route, no fetch. Same V source compiles to native (server) +
   WASM (browser); TS import is always `async` to unify both.
@@ -38,10 +42,12 @@ package, no `*.rs` imports. Aliases follow SvelteKit: `#routes`, `#lib`.
 ## 2. File layout
 
 ```
-src/routes/index.svelte + src/routes/index.v      route `/`
+src/routes/+page.svelte + src/routes/+page.v      route `/`
 src/routes/about.svelte + src/routes/about.v      route `/about`
 src/routes/api/greet.v                            route `/api/greet`
 src/routes/api/admin/users.v                      route `/api/admin/users`
+src/routes/admin/+route.svelte + +route.v         wraps `/admin/*` + `/admin`'s `+page` (nav + @[before]/@[after]; roadmap §7)
+src/routes/admin/+page.svelte + +page.v           route `/admin` (folder-root leaf, ex-`index.*`)
 src/lib/crypto/hash.v                             isomorphic, no route
 src/lib/format.v                                  isomorphic, no route
 ```
@@ -54,11 +60,24 @@ Rules (`routeFor`, once in `vite.ts`, reused by V dispatcher gen):
   -> `/api/**` (same string, kept explicit so API files need no
   `.svelte` partner).
 * `index.v` -> `/` (or `/api/` under api — discouraged, warn).
+  Renamed per §7: the folder-root leaf is `+page.v`
+  (`foo/index.v` → `foo/+page.v`, `src/routes/index.v` →
+  `src/routes/+page.v`, same URL). Both spellings still accepted
+  (legacy back-compat); both present is a build error.
+* `+route.v` is a wrapper, not an endpoint: it declares `@[before]` /
+  `@[after]` middleware for its directory subtree (never a route of
+  its own; never exported as callables to TS, but its `pub struct`s
+  are — +layout-shaped shared types). `+route.svelte` is the matching
+  wrapper UI (`<slot/>`/`children` + chrome; manual composition until
+  a client router lands). Wrapping covers `foo/+page.*` and
+  `foo/**/*` — NOT the sibling `foo.svelte` / `foo.v` (same for UI).
+* Folder-root double-claim (`foo.v` + `foo/+page.v`, or `foo.svelte` +
+  `foo/+page.svelte`) is a **build error, unconditionally** — either
+  extension on either side (one file per URL, decided §7: guarded
+  URLs live inside their guard's directory).
 * Every routed `.v` must have either a `.svelte` partner (page) or
   live under `api/` (headless JSON). Orphan `routes/*.v` without a
   partner outside `api/` is a build warning (future: error).
-* Leaf-vs-index clash (`foo.v` + `foo/index.v`) is a build warning
-  with file+line.
 
 `src/routes/` is the rename of old `src/pages/`. `src/api/`
 (previous revision) and `src/ssapi/` (implemented) both move here:
@@ -95,10 +114,19 @@ WASM. One language, one file, two targets.
 
 ### Server (`#routes/`) — decided 2026-10-29
 
-Each verb attribute IS the HTTP verb. One default fn per verb per file;
-`fn` name never travels (no `?fn=`, no `"fn"` — those were the old model,
-removed). `@[rpc]` fns are the only named functions: many per file,
-`fn` in the JSON body.
+Each verb attribute IS the HTTP verb. One default fn per verb per file.
+`@[rpc]` fns are the only named functions: many per file,
+`fn` in the JSON body. Verbs dispatch by (method, qualifier) —
+default or `('q')` matched against `?q`. `@[before]` / `@[after]` are middleware, only in
+`+route.v` wrappers (middleware fns never exported to TS; the
+wrapper's `pub struct`s are): `@[before]` fns run
+root→leaf before the handler (`SwelteRequest -> !SwelteRequest`,
+transform-or-reject); `@[after]` fns run leaf→root after it
+(observe-or-replace the response). A rejected middleware
+(`return error('msg')`) short-circuits the chain with
+`400 {"error":"msg"}` naming the wrapper fn — the response is
+always JSON, even for `@[after]` (a non-2xx `code` returned by
+`@[after]` replaces the response as-is).
 
 | attribute | HTTP | carrier | routing |
 |---|---|---|---|

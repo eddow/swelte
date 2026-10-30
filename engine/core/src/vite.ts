@@ -35,7 +35,7 @@ interface RpcParam {
 
 interface RpcFn {
 	name: string
-	attr: 'get' | 'post' | 'rpc' | 'put' | 'delete' | 'patch'
+	attr: 'get' | 'post' | 'rpc' | 'put' | 'delete' | 'patch' | 'before' | 'after'
 	qualifier?: string
 	params: RpcParam[]
 	vret: string
@@ -66,14 +66,14 @@ export function parseVFile(src: string): RpcFn[] {
 	const structByName = new Map(structs.map((s) => [s.name, s]))
 	const fns: RpcFn[] = []
 	const re =
-		/@\[([^\]]*)\]\s*pub\s+fn\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(([^)]*)\)\s*([?!]?[A-Za-z_\][\w.[\]]*|\([^)]*\))?/g
+		/@\[([^\]]*)\]\s*pub\s+fn\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(([^)]*)\)\s*([?!]?(?:\([^)]*\)|[A-Za-z_\][\w.[\]]*))?/g
 	let m: RegExpExecArray | null
 	while ((m = re.exec(src)) !== null) {
 		const attrParts = splitTopLevel(m[1], ';')
 		const verbs: { verb: string; qualifier?: string }[] = []
 		for (const p of attrParts) {
 			const pm = /^\s*([A-Za-z_][A-Za-z0-9_]*)\s*(?:\(\s*'([A-Za-z_][A-Za-z0-9_]*)'\s*\))?\s*$/.exec(p)
-			if (pm && ['get', 'post', 'rpc', 'put', 'delete', 'patch'].includes(pm[1])) {
+			if (pm && ['get', 'post', 'rpc', 'put', 'delete', 'patch', 'before', 'after'].includes(pm[1])) {
 				verbs.push({ verb: pm[1], qualifier: pm[2] })
 			}
 		}
@@ -142,23 +142,31 @@ export function parseVFile(src: string): RpcFn[] {
 	return fns
 }
 
-function listVFiles(dir: string, base?: string): string[] {
+function listFilesWithExt(dir: string, ext: string, base?: string): string[] {
 	if (!existsSync(dir)) return []
 	const root = base ?? dir
 	const out: string[] = []
-	for (const e of readdirSync(dir)) {
+	// Sorted (byte order): readdir order is filesystem-dependent and made
+	// routeGen flip between runs (§7). Deterministic order, always.
+	for (const e of readdirSync(dir).sort()) {
 		const p = join(dir, e)
 		const st = statSync(p)
 		// Never scan our own output: the generated `routes/` dispatcher dir
-		// (sibling of server.v) plus anything under `.swelte/`.
-		const rel = relative(root, p).split(sep).join('/')
+		// (sibling of server.v) plus anything under `.swelte/`. Skip
+		// ONLY the output dir (a `routes/` dir whose parent holds
+		// `server.v`) — never the input tree (`src/routes/` lives
+		// under `src/`, whose parent has no `server.v`).
 		if (st.isDirectory()) {
-			if (rel === 'routes' || rel.startsWith('routes/')) continue
-			if (rel === '.swelte' || rel.startsWith('.swelte/')) continue
-			out.push(...listVFiles(p, root))
-		} else if (e.endsWith('.v')) out.push(p)
+			if (e === '.swelte') continue
+			if (e === 'routes' && existsSync(join(dir, 'server.v'))) continue
+			out.push(...listFilesWithExt(p, ext, root))
+		} else if (e.endsWith(ext)) out.push(p)
 	}
 	return out
+}
+
+function listVFiles(dir: string, base?: string): string[] {
+	return listFilesWithExt(dir, '.v', base)
 }
 
 /** Backend-only test (decided 2026-10-29): `backend/` dir segment at any
@@ -366,12 +374,110 @@ export function swelte(options: SweltePluginOptions = {}): Plugin {
 		}
 	}
 
+	/* Folder-root double-claim, unconditional (roadmap 7):
+	 * sibling foo.v/foo.svelte vs folder-root leaf foo/+page.* /
+	 * foo/index.* claim the same URL - build error, naming both.
+	 * One file per URL, so guarded URLs live inside their guard's
+	 * directory. Either extension counts on EITHER side: a .v-less
+	 * foo.svelte still owns the URL and collides with a foo/+page.v
+	 * leaf. +route.v/+route.svelte wrap, they don't compete, so they
+	 * never enter the check (no double-claim between sibling foo.v
+	 * and child foo/+route.v; +route covers foo/** plus the foo/+page
+	 * leaf - never the sibling). foo/+router.v (roadmap 8, not built)
+	 * will own foo/** - never foo itself - so it never collides. */
+	function relPosix(abs: string, f: string): string {
+		return f.slice(abs.length + 1).split(sep).join('/')
+	}
+	function doubleClaimCheck(routesAbs: string, routesDir: string, mod: string, rel: string): void {
+		const dirOf = (m: string) => (m.includes('/') ? m.slice(0, m.lastIndexOf('/')) : '')
+		const baseOf = (m: string) => (m.includes('/') ? m.slice(m.lastIndexOf('/') + 1) : m)
+		const d = dirOf(mod)
+		const b = baseOf(mod)
+		const inDir = (bm: string) => (d === '' ? bm : `${d}/${bm}`)
+		const pairs: string[][] = []
+		if (b === 'index' || b === '+page') {
+			const other = b === 'index' ? '+page' : 'index'
+			pairs.push([inDir(other) + '.v', inDir(other) + '.svelte'])
+			if (d !== '') pairs.push([d + '.v', d + '.svelte'])
+		} else {
+			pairs.push([inDir('index') + '.v', inDir('index') + '.svelte'])
+			pairs.push([inDir('+page') + '.v', inDir('+page') + '.svelte'])
+		}
+		const others: string[] = []
+		const selfV = mod + '.v'
+		const selfSvelte = mod + '.svelte'
+		for (const pr of pairs) {
+			const v = pr[0]
+			const st = pr[1]
+			// Either extension on either side counts, unconditionally:
+			// a `.v`-less `foo.svelte` still owns the URL and collides
+			// with a `foo/+page.v` leaf. Exclude only self's own files.
+			if (v !== selfV && existsSync(join(routesAbs, v))) others.push(routesDir + '/' + v)
+			if (routesDir + '/' + st !== routesDir + '/' + selfSvelte && existsSync(join(routesAbs, st))) {
+				others.push(routesDir + '/' + st)
+			}
+		}
+		if (others.length > 0) {
+			throw new Error(`[swelte] ${routesDir}/${rel} claims the same URL as ${others.join(' + ')} — one file per URL (guarded URLs live inside their guard's directory; keep the +page leaf).`)
+		}
+	}
+
+	/** Middleware shapes (§7). */
+	function validateMiddlewareFn(rel: string, m: RpcFn): void {
+		if (m.qualifier) throw new Error(
+			`[swelte] ${rel}: @[${m.attr}] ${m.name} takes no qualifier (wrappers run for the whole subtree, not one ?q).`,
+		)
+		if (m.attr === 'before') {
+			if (m.params.length !== 1 || m.params[0].vtype !== 'SwelteRequest')
+				throw new Error(`[swelte] ${rel}: @[before] ${m.name} must take exactly one SwelteRequest param.`)
+			if (m.vret !== 'SwelteRequest' || !m.fallible)
+				throw new Error(`[swelte] ${rel}: @[before] ${m.name} must return !SwelteRequest.`)
+		} else {
+			const pv = m.params.map((pp) => pp.vtype)
+			if (pv.length !== 3 || pv[0] !== 'SwelteRequest' || pv[1] !== 'int' || pv[2] !== 'string')
+				throw new Error(`[swelte] ${rel}: @[after] ${m.name} must take (SwelteRequest, int, string).`)
+			if (!/^\(\s*int\s*,\s*string\s*\)$/.test(m.vret) || !m.fallible)
+				throw new Error(`[swelte] ${rel}: @[after] ${m.name} must return !(int, string) (got ${m.fallible ? '!' : ''}${m.vret || 'none'}).`)
+		}
+	}
+
+	interface WrapperMw {
+		wmod: string
+		src: string
+		mws: { name: string; attr: 'before' | 'after' }[]
+	}
+
+	/** Ancestor dirs root-first for a leaf URL dir (§7). */
+	function ancestorDirs(leafDir: string): string[] {
+		const segs = leafDir === '' ? [] : leafDir.split('/')
+		const dirs: string[] = ['']
+		for (let i = 0; i < segs.length; i++) dirs.push(segs.slice(0, i + 1).join('/'))
+		return dirs
+	}
+
+	/** URL dir of a leaf mod (`admin/users` for the file serving /admin/users). */
+	function leafDirOf(m: string): string {
+		if (m === 'index' || m === '+page') return ''
+		if (m.endsWith('/index')) return m.slice(0, -'/index'.length)
+		if (m.endsWith('/+page')) return m.slice(0, -'/+page'.length)
+		return m.includes('/') ? m.slice(0, m.lastIndexOf('/')) : ''
+	}
+
 	/** Map a routes file to its URL path (spec v-imports.md §2). */
-	function routeFor(routesAbs: string, file: string): string {
+	function routeFor(routesAbs: string, file: string): string | null {
 		const mod = modulePath(routesAbs, file)
-		if (mod === 'index' || mod.endsWith('/index')) {
-			const base = mod === 'index' ? '' : mod.slice(0, -'/index'.length)
-			return base === '' || base === 'api' ? '/' : `/${base}`
+		if (mod === '+route' || mod.endsWith('/+route')) return null
+		const leaf = mod === 'index' || mod.endsWith('/index') || mod === '+page' || mod.endsWith('/+page')
+		if (leaf) {
+			// Folder-root leaf: strip the leaf segment (`+page` or legacy
+			// `index`) to get the directory, whose path is the URL.
+			// `+page` → `/`, `admin/+page` → `/admin`.
+			// NOTE: `+page.v` sorting — `+` (0x2B) sorts before letters,
+			// so `+page.v` may scan before `admin/`. Sort order of
+			// listVFiles is deterministic; route identity never depends
+			// on it (pure function of mod).
+			const dir = mod.includes('/') ? mod.slice(0, mod.lastIndexOf('/')) : ''
+			return dir === '' || dir === 'api' ? '/' : `/${dir}`
 		}
 		return `/${mod}`
 	}
@@ -381,7 +487,16 @@ export function swelte(options: SweltePluginOptions = {}): Plugin {
 	}
 
 	function vPrefix(mod: string): string {
-		return 'swelte_' + mod.replace(/[^A-Za-z0-9_]/g, '_')
+		return 'swelte_' + mod.replace(/[^A-Za-z0-9_]/g, '_') + '_'
+	}
+
+	/** Filesystem-safe generated name for a route mod. IDENTICAL to
+	 * the historical vSafe (flat `[^A-Za-z0-9_]` → `_`): `+page` →
+	 * `_page`, `admin/+page` → `admin__page`. Same leaf names as
+	 * before, so no new stems appear — byte-identical outputs when
+	 * no wrappers are present. */
+	function vFileSafe(mod: string): string {
+		return mod.replace(/[^A-Za-z0-9_]/g, '_')
 	}
 
 	function vType(base: string, mod: string): string {
@@ -392,6 +507,78 @@ export function swelte(options: SweltePluginOptions = {}): Plugin {
 			.map((s) => s[0].toUpperCase() + s.slice(1))
 			.join('')
 		return `${cap}_${base}`
+	}
+
+	/** §7: inline wrapper middleware fn sources into the leaf file
+	 * (module routes, V needs one file: prefix by owning wrapper mod).
+	 * Only middleware fns: skip structs — the leaf struct pass handles
+	 * declarations; references resolve via vType. */
+	function inlineWrapperFns(src: string, wmod: string, structNames: Set<string>): string[] {
+		const wprefix = vPrefix(wmod)
+		const out: string[] = []
+		const lines = src.split('\n')
+		let depth = 0
+		let keep = false
+		let buf: string[] = []
+		const flush = () => {
+			if (keep && buf.length > 0) {
+				const hi = buf.findIndex((b) => /^(\s*)pub\s+fn\s+([A-Za-z_][A-Za-z0-9_]*)/.test(b))
+				const fm = /^(\s*)pub\s+fn\s+([A-Za-z_][A-Za-z0-9_]*)/.exec(buf[hi < 0 ? 0 : hi] ?? '')
+				if (fm) {
+					buf[hi < 0 ? 0 : hi] = `${fm[1]}pub fn ${wprefix}${fm[2]}${(buf[hi < 0 ? 0 : hi]).slice(fm[0].length)}`
+					for (let i = 0; i < buf.length; i++) {
+						if (i === 0) {
+							const t0 = buf[0].trim()
+							if (/^(pub\s+)?struct\s/.test(t0)) continue
+						}
+						for (const sn of structNames) {
+							buf[i] = buf[i].split(sn).join(vType(sn, wmod))
+						}
+					}
+					for (const l of buf) out.push(l)
+				}
+			}
+			buf = []
+			keep = false
+		}
+		for (const line of lines) {
+			const t = line.trim()
+			if (depth === 0) {
+				if (/^module\s+\S+/.test(t)) continue
+				if (/^\s*import\s+/.test(line)) continue
+				const fnHere = /^\s*(pub\s+)?fn\s+[A-Za-z_][A-Za-z0-9_]*\s*\(/.test(line)
+				const attrHere = /@\[[^\]]*(before|after)/.test(line)
+				const bareAttr = /^\s*@\[/.test(line) && !fnHere
+				if (bareAttr) { buf.push(line); continue }
+				if (fnHere) {
+					keep = attrHere || buf.some((b) => /@\[[^\]]*(before|after)/.test(b))
+					buf.push(line)
+					depth += (line.match(/\{/g) || []).length - (line.match(/\}/g) || []).length
+					if (depth <= 0) {
+						depth = 0
+						flush()
+					}
+					continue
+				}
+				if (/^\s*@\[/.test(line)) {
+					buf.push(line)
+					continue
+				}
+				if (/^\s*(pub\s+)?struct\s+[A-Za-z_][A-Za-z0-9_]*\s*\{/.test(line)) {
+					depth += (line.match(/\{/g) || []).length - (line.match(/\}/g) || []).length
+					continue
+				}
+				continue
+			}
+			buf.push(line)
+			depth += (line.match(/\{/g) || []).length - (line.match(/\}/g) || []).length
+			if (depth <= 0) {
+				depth = 0
+				flush()
+			}
+		}
+		flush()
+		return out
 	}
 
 	function emitServerGen(dispatched: { route: string; mod: string; prefix: string }[]): string {
@@ -446,14 +633,14 @@ export function swelte(options: SweltePluginOptions = {}): Plugin {
 		return o.join('\n')
 	}
 
-	function emitRouteFile(mod: string, route: string, prefix: string, src: string, fns: RpcFn[]): string {
+	function emitRouteFile(mod: string, route: string, prefix: string, src: string, fns: RpcFn[], chain: WrapperMw[]): string {
 		const o: string[] = []
 		o.push('// Auto-generated by swelte from V signatures. Do not edit.')
 		o.push(`// Route: ${route} <- ${mod}.v`)
 		o.push('module routes')
 		o.push('')
 		const needRpc = fns.some((f) => f.attr === 'rpc')
-		const needVerb = fns.some((f) => f.attr !== 'rpc')
+		const needVerb = fns.some((f) => f.attr !== 'rpc' && f.attr !== 'before' && f.attr !== 'after')
 		// Only what this file's dispatch branch uses: rpc -> json+json2,
 		// verbs -> json+http. Never emit an unused import (V warns).
 		o.push('import json')
@@ -461,17 +648,26 @@ export function swelte(options: SweltePluginOptions = {}): Plugin {
 		if (needVerb) o.push('import net.http')
 		o.push('')
 		const seenImp = new Set<string>()
-		for (const m of src.matchAll(/^\s*import\s+(.+)$/gm)) {
-			const imp = m[1].trim()
-			const first = imp.split(/[\s,]/)[0]
-			if (!imp || first === 'routes' || first === 'json' || first === 'x.json2' || first === 'net.http' || seenImp.has(imp)) continue
-			seenImp.add(imp)
-			o.push(`import ${imp}`)
+		for (const impsrc of [src, ...chain.map((w) => w.src)]) {
+			for (const m of impsrc.matchAll(/^\s*import\s+(.+)$/gm)) {
+				const imp = m[1].trim()
+				const first = imp.split(/[\s,]/)[0]
+				if (!imp || first === 'routes' || first === 'json' || first === 'x.json2' || first === 'net.http' || seenImp.has(imp)) continue
+				seenImp.add(imp)
+				o.push(`import ${imp}`)
+			}
 		}
 		if (seenImp.size) o.push('')
 		// Shared structs: prefix to avoid duplicate-definition collisions
 		// when several per-file outputs share `module routes`.
 		const structNames = new Set(parseStructs(src).map((s) => s.name))
+		for (const w of chain) {
+			for (const st of parseStructs(w.src)) structNames.add(st.name)
+		}
+		for (const w of chain) {
+			for (const l of inlineWrapperFns(w.src, w.wmod, structNames)) o.push(l)
+		}
+		o.push('')
 		for (const line of src.split('\n')) {
 			const t = line.trim()
 			if (/^module\s+\S+/.test(t)) continue
@@ -486,7 +682,69 @@ export function swelte(options: SweltePluginOptions = {}): Plugin {
 			o.push(out)
 		}
 		o.push('')
+		// §7: middleware chain for this leaf. No wrappers → the public
+		// `dispatch` IS the verb/rpc body (byte-identical to today, via
+		// dispatchBody with sharedReq=null). With wrappers → `dispatch`
+		// runs @[before] root→leaf on a shared `swelte_req`, calls the
+		// inner verbs body, then runs @[after] leaf→root on (code, body).
+		const befores: string[] = []
+		const afters: string[] = []
+		for (const w of chain) {
+			for (const mw of w.mws) {
+				const call = `${vPrefix(w.wmod)}${mw.name}`
+				if (mw.attr === 'before') befores.push(call)
+				else afters.unshift(call)
+			}
+		}
+		if (befores.length === 0 && afters.length === 0) {
+			o.push(`pub fn ${prefix}dispatch(path string, method string, query map[string]string, headers map[string]string, cookies map[string]string, body string, content_type string, qualifier string) (int, string) {`)
+			o.push(...dispatchBody(prefix, mod, fns, null))
+			o.push('')
+			return o.join('\n')
+		}
 		o.push(`pub fn ${prefix}dispatch(path string, method string, query map[string]string, headers map[string]string, cookies map[string]string, body string, content_type string, qualifier string) (int, string) {`)
+		o.push(`\tmut form_before := map[string]string{}`)
+		o.push(`\tif content_type.contains('multipart/form-data') {`)
+		o.push(`\t\tmut boundary_before := ''`)
+		o.push(`\t\tfor part in content_type.split(';') {`)
+		o.push(`\t\t\tp_before := part.trim_space()`)
+		o.push(`\t\t\tif p_before.starts_with('boundary=') { boundary_before = p_before.all_after('boundary=').trim('"') }`)
+		o.push(`\t\t}`)
+		o.push(`\t\tif boundary_before != '' { form_before, _ = http.parse_multipart_form(body, boundary_before) }`)
+		o.push(`\t} else if content_type.contains('application/x-www-form-urlencoded') || body != '' {`)
+		o.push(`\t\tform_before = http.parse_form(body)`)
+		o.push(`\t}`)
+		o.push(`\tmut swelte_req := SwelteRequest{ query: query, form: form_before, headers: headers, cookies: cookies, method: method, path: path, qualifier: qualifier }`)
+		for (const b of befores) {
+			const bn = b.includes('_') ? b.slice(b.lastIndexOf('_') + 1) : b
+			o.push(`\tswelte_req = ${b}(swelte_req) or { return swelte_err_bad(path, '${bn}', err.msg()) }`)
+		}
+		o.push(`\tcode_before, body_before := ${prefix}dispatch_verbs(path, method, query, headers, cookies, body, content_type, qualifier, swelte_req)`)
+		o.push(`\tmut swelte_code := code_before`)
+		o.push(`\tmut swelte_body := body_before`)
+		for (const a of afters) {
+			const an = a.includes('_') ? a.slice(a.lastIndexOf('_') + 1) : a
+			o.push(`\tswelte_code, swelte_body = ${a}(swelte_req, swelte_code, swelte_body) or { return swelte_err_bad(path, '${an}', err.msg()) }`)
+		}
+		o.push(`\treturn swelte_code, swelte_body`)
+		o.push('}')
+		o.push('')
+		o.push(`fn ${prefix}dispatch_verbs(path string, method string, query map[string]string, headers map[string]string, cookies map[string]string, body string, content_type string, qualifier string, swelte_req SwelteRequest) (int, string) {`)
+		// `req` outlives the method arm (assigned per-arm below, read by
+		// handler calls): declare once at function scope.
+		o.push(`\tmut req := SwelteRequest{ query: query, form: map[string]string{}, headers: headers, cookies: cookies, method: method, path: path, qualifier: qualifier }`)
+		o.push(...dispatchBody(prefix, mod, fns, 'swelte_req'))
+		o.push('')
+		return o.join('\n')
+	}
+
+	/** Extracted verb/rpc body (unchanged semantics — moved verbatim out
+	 * of emitRouteFile so both chained and unchained leaves share it).
+	 * `sharedReq`: §7 pre-chain request (already @[before]-filtered) —
+	 * verb branches reuse it instead of building their own; null =
+	 * build locally (byte-identical to the old inline code). */
+	function dispatchBody(prefix: string, mod: string, fns: RpcFn[], sharedReq: string | null): string[] {
+		const o: string[] = []
 		const rpcFns = fns.filter((f) => f.attr === 'rpc')
 		if (rpcFns.length) {
 			const avail = '[' + rpcFns.map((f) => vJsonStr(f.name)).join(', ') + ']'
@@ -522,6 +780,9 @@ export function swelte(options: SweltePluginOptions = {}): Plugin {
 			o.push(`\t\treturn swelte_err_unknown(path, fn_name, ${avail})`)
 			o.push(`\t}`)
 		}
+		// §7: @[after] runs on the outcome: @[before] failures never reach
+		// the verbs body (they return 4xx from dispatch), so @[after]
+		// only observes real verb outcomes — no error attr possible here.
 		for (const vb of ['get', 'post', 'put', 'delete', 'patch']) {
 			const hs = fns.filter((f) => f.attr === vb)
 			if (!hs.length) continue
@@ -538,7 +799,16 @@ export function swelte(options: SweltePluginOptions = {}): Plugin {
 			o.push(`\t\t} else if content_type.contains('application/x-www-form-urlencoded') || body != '' {`)
 			o.push(`\t\t\tform = http.parse_form(body)`)
 			o.push(`\t\t}`)
-			o.push(`\t\treq := SwelteRequest{ query: query, form: form, headers: headers, cookies: cookies, method: '${vb.toUpperCase()}', path: path, qualifier: qualifier }`)
+			// §7: with @[before] wrappers the request already exists
+			// (pre-filtered `swelte_req`) — reuse it. V maps can't be
+			// assigned (`req.form = form` fails: use `.clone()`).
+			if (sharedReq) {
+				o.push(`\t\treq = ${sharedReq}`)
+				o.push(`\t\treq.form = form.clone()`)
+				o.push(`\t\treq.method = '${vb.toUpperCase()}'`)
+			} else {
+				o.push(`\t\tmut req := SwelteRequest{ query: query, form: form, headers: headers, cookies: cookies, method: '${vb.toUpperCase()}', path: path, qualifier: qualifier }`)
+			}
 			for (const h of hs) {
 				const cond = h.qualifier ? `qualifier == ${vJsonStr(h.qualifier)}` : `qualifier == ''`
 				const isReq = h.params.length === 1 && h.params[0].vtype === 'SwelteRequest'
@@ -565,7 +835,7 @@ export function swelte(options: SweltePluginOptions = {}): Plugin {
 		o.push(`\treturn 405, '{"error":"method not allowed"}'`)
 		o.push('}')
 		o.push('')
-		return o.join('\n')
+		return o
 	}
 
 	/** Codegen: fetch stub for a `#routes/*.v` file. */
@@ -621,7 +891,7 @@ export function swelte(options: SweltePluginOptions = {}): Plugin {
 		const dispatched: { route: string; mod: string; prefix: string }[] = []
 
 		function vSafe(mod: string): string {
-			return mod.replace(/[^A-Za-z0-9_]/g, '_')
+			return vFileSafe(mod)
 		}
 
 		function emitTypes(sub: string, mod: string, src: string, fns: RpcFn[]): string {
@@ -763,18 +1033,66 @@ export function swelte(options: SweltePluginOptions = {}): Plugin {
 		// the *.v resolveId/load below can re-export them 1:1.
 		const routesAbs = resolve(root, routesDir)
 		const libAbs = resolve(root, libDir)
+		// Deterministic input order: listVFiles sorts per-dir, but
+		// `dispatched` (hence server_gen route order) must be fully
+		// sorted by mod too — readdir order otherwise leaks into output.
+		const routeFiles = listVFiles(routesAbs).sort()
+		// Unconditional folder-root double-claim for UI-only pairs (§7):
+		// `foo.svelte` + `foo/+page.svelte` own the same URL even when
+		// NEITHER side has a `.v` file, and the loop below only visits
+		// `.v` inputs. Scan `.svelte` leaves directly: each
+		// `*/+page.svelte` (or legacy `*/index.svelte`) collides with a
+		// `*.svelte` sibling one level up, unless the sibling side is a
+		// `+route.svelte` wrapper.
+		for (const f of listFilesWithExt(routesAbs, '.svelte').sort()) {
+			const rel = relPosix(routesAbs, f)
+			const mod = rel.replace(/\.svelte$/, '')
+			const slash = mod.lastIndexOf('/')
+			const base = slash < 0 ? mod : mod.slice(slash + 1)
+			const dir = slash < 0 ? '' : mod.slice(0, slash)
+			if (base !== '+page' && base !== 'index') continue
+			if (dir === '') continue // root +page has no sibling to collide with
+			for (const sib of [`${dir}.svelte`, `${dir}.v`]) {
+				if (existsSync(join(routesAbs, sib))) {
+					throw new Error(
+						`[swelte] ${routesDir}/${sib} claims the same URL as ${routesDir}/${rel} — one file per URL (guarded URLs live inside their guard's directory; keep the +page leaf).`,
+					)
+				}
+			}
+		}
 		{
-			for (const f of listVFiles(routesAbs)) {
+			for (const f of routeFiles) {
 				const src = readFileSync(f, 'utf8')
-				const fns = parseVFile(src)
+				const allFns = parseVFile(src)
+				const mwFns = allFns.filter((x) => x.attr === 'before' || x.attr === 'after')
+				const fns = allFns.filter((x) => x.attr !== 'before' && x.attr !== 'after')
 				const rpcFns = fns.filter((x) => x.attr === 'rpc')
 				const verbFns = fns.filter((x) => x.attr !== 'rpc')
 				const mod = modulePath(routesAbs, f)
+				const rel = relPosix(routesAbs, f)
+				const isWrapper = mod === '+route' || mod.endsWith('/+route')
+				if (isWrapper) {
+					if (fns.length > 0) throw new Error(`[swelte] ${routesDir}/${rel}: @[rpc]/verb handlers are not allowed in +route.v (wrapper: @[before]/@[after] middleware only).`)
+					for (const m of mwFns) validateMiddlewareFn(`${routesDir}/${rel}`, m)
+					// Wrappers are +layout-shaped: no callable exports, but
+					// their `pub struct`s are shared with the client (e.g. a
+					// `load`-style shape read by +page.svelte). Emit types
+					// only — no fetch stub, no route.
+					emitTypes('routes', mod, src, [])
+					continue
+				}
+				// Log the file set ONCE per generate (debug): routeGen flip
+				// between `/x` and `/x/+page` diagnosis.
+				for (const m of mwFns) throw new Error(`[swelte] ${routesDir}/${rel}: @[${m.attr}] ${m.name} is only allowed in +route.v wrappers.`)
+				// +route.v wrappers claim no URL — they returned above, so
+				// every file reaching here competes for its URL.
+				doubleClaimCheck(routesAbs, routesDir, mod, rel)
 				// Orphan/leaf-index checks (spec §2): warn, don't fail.
-				if (mod !== 'index' && !mod.startsWith('api/')) {
+				if (mod !== 'index' && mod !== '+page' && !mod.startsWith('api/')) {
 					const sveltePartner = join(routesAbs, `${mod}.svelte`)
 					const svelteIndex = join(routesAbs, mod, 'index.svelte')
-					if (!existsSync(sveltePartner) && !existsSync(svelteIndex)) {
+					const sveltePage = join(routesAbs, mod, '+page.svelte')
+					if (!existsSync(sveltePartner) && !existsSync(svelteIndex) && !existsSync(sveltePage)) {
 						warnings.push(
 							`${routesDir}/${mod}.v: no .svelte partner (page) and not under api/ — orphan route file`
 						)
@@ -802,42 +1120,69 @@ export function swelte(options: SweltePluginOptions = {}): Plugin {
 						seen.set(h.qualifier, h.name)
 					}
 				}
+				const route = routeFor(routesAbs, f)
+				if (route === null) continue // wrapper-only (handled above); leaf always has a route
 				emitTypes('routes', mod, src, fns)
-				dispatched.push({ route: routeFor(routesAbs, f), mod, prefix: `${vPrefix(mod)}_` })
+				dispatched.push({ route, mod, prefix: vPrefix(mod) })
 				// Runtime fetch stub for the browser import (dev + build).
+				// Sorted by mod: readdir order is filesystem-dependent;
+				// the stubs land per-mod but keep them deterministic too.
 				const genModDir = join(genDir, 'generated', 'routes', mod.split('/').slice(0, -1).join('/'))
 				mkdirSync(genModDir, { recursive: true })
 				writeFileSync(
 					join(genModDir, `${mod.split('/').pop()}.js`),
-					jsFetchFor(routeFor(routesAbs, f), fns)
+					jsFetchFor(route, fns)
 				)
 			}
 			// Per-file dispatchers (roadmap item 1): one `module routes`
 			// file per routes file, sharing directory-mode `v run` with
 			// server.v (V requires directory name == module name).
+			// Naming (.v + flat stems like `_page.v`) collided when
+			// `+page` and `+route` flattened alike — vFileSafe maps `/`
+			// to `__` so leaf and wrapper names never collide.
 			const routesGenDir = resolve(root, 'routes')
-			// Track stale per-file outputs by rewriting the whole dir.
-			try {
-				readdirSync(routesGenDir)
-			} catch {
-				/* created below when needed */
-			}
 			const seenMods = new Set<string>()
+			// NOTE: `routes/` once held a file literally named `routes/`
+			// from an older flat scheme — wipe semantics: rewrite the
+			// whole dir (write fresh AFTER deleting stale), so renamed
+			// routes (index.v → +page.v) never leave ghosts.
 			for (const d of dispatched) {
 				if (seenMods.has(d.mod)) continue
 				seenMods.add(d.mod)
+				// Source of truth is ALWAYS src/routes (routesAbs) —
+				// never the generated output dir (same leaf names exist
+				// in both; reading output back as input made routeFor
+				// flip between `/x` and `/x/+page` on alternating runs).
 				const src = readFileSync(join(routesAbs, `${d.mod}.v`), 'utf8')
-				const fns = parseVFile(src)
+				// §7: per-leaf ancestor chain (ancestors' +route.v middleware,
+				// inlined by emitRouteFile). A leaf with no wrappers passes
+				// an empty chain (byte-identical output).
+				const leafDir = leafDirOf(d.mod)
+				const chain: WrapperMw[] = []
+				for (const dir of ancestorDirs(leafDir)) {
+					const wmod = dir === '' ? '+route' : `${dir}/+route`
+					if (wmod === d.mod) continue
+					const wf = join(routesAbs, ...wmod.split('/')) + '.v'
+					if (!existsSync(wf)) continue
+					const wsrc = readFileSync(wf, 'utf8')
+					const mws = parseVFile(wsrc).filter((x) => x.attr === 'before' || x.attr === 'after')
+					if (mws.length === 0) continue
+					chain.push({ wmod, src: wsrc, mws: mws.map((m) => ({ name: m.name, attr: m.attr as 'before' | 'after' })) })
+				}
+				const fns = parseVFile(src).filter((x) => x.attr !== 'before' && x.attr !== 'after')
 				mkdirSync(routesGenDir, { recursive: true })
-				writeFileSync(join(routesGenDir, `${vSafe(d.mod)}.v`), emitRouteFile(d.mod, d.route, d.prefix, src, fns))
+				writeFileSync(join(routesGenDir, `${vFileSafe(d.mod)}.v`), emitRouteFile(d.mod, d.route, d.prefix, src, fns, chain))
 			}
 			// Prune stale generated files (renamed/deleted routes).
+			// Compare against the CURRENT naming (vFileSafe) — and drop
+			// any legacy-named output (old `_x.v` flat stems) that no
+			// current mod maps to, so stale files never shadow fresh ones.
 			try {
 				for (const f of readdirSync(routesGenDir)) {
 					if (!f.endsWith('.v')) continue
 					const stem = f.slice(0, -2)
 					if (stem === 'server_gen') continue
-					if (![...seenMods].some((m) => vSafe(m) === stem)) {
+					if (![...seenMods].some((m) => vFileSafe(m) === stem)) {
 						try {
 							rmSync(join(routesGenDir, f))
 						} catch {
@@ -853,13 +1198,17 @@ export function swelte(options: SweltePluginOptions = {}): Plugin {
 				mkdirSync(routesGenDir, { recursive: true })
 				writeFileSync(join(routesGenDir, `server_gen.v`), emitServerGen(dispatched))
 			}
-			// Leaf-vs-index clash: foo.v + foo/index.v both exist.
+			// Leaf-vs-index clash: foo.v + foo/index.v (or +page.v) both exist.
+			// Warn-only here (the hard build error lives in the per-file
+			// loop above via doubleClaimCheck, which names both files).
 			const seen = new Set(listVFiles(routesAbs).map((f) => modulePath(routesAbs, f)))
 			for (const mod of seen) {
-				if (mod !== 'index' && seen.has(`${mod}/index`)) {
-					warnings.push(
-						`${routesDir}/${mod}.v clashes with ${routesDir}/${mod}/index.v — ambiguous route`
-					)
+				for (const leafName of ['index', '+page']) {
+					if (mod !== leafName && seen.has(`${mod}/${leafName}`)) {
+						warnings.push(
+							`${routesDir}/${mod}.v clashes with ${routesDir}/${mod}/${leafName}.v — ambiguous route`
+						)
+					}
 				}
 			}
 		}
@@ -887,8 +1236,11 @@ export function swelte(options: SweltePluginOptions = {}): Plugin {
 				// browser import — record types for V-to-V reference only.
 				if (isBackendMod(mod)) continue
 				const rpcFns = parseVFile(src).filter((x) => x.attr === 'rpc')
-				const verbFns = parseVFile(src).filter((x) => x.attr !== 'rpc')
-				for (const vf of verbFns) {
+				// §7: middleware/verbs are meaningless in #lib — keep the
+				// warn-and-expose-RPC behavior for verbs, extend it to
+				// @[before]/@[after].
+				const verbFns = parseVFile(src).filter((x) => x.attr !== 'rpc' && x.attr !== 'before' && x.attr !== 'after')
+				for (const vf of [...verbFns, ...parseVFile(src).filter((x) => x.attr === 'before' || x.attr === 'after')]) {
 					warnings.push(
 						`${libDir}/${mod}.v: @[${vf.attr}] on ${vf.name} is ignored in #lib — only @[rpc] exposes (still exported as RPC)`
 					)
@@ -1010,11 +1362,7 @@ export function swelte(options: SweltePluginOptions = {}): Plugin {
 		},
 		configResolved(config) {
 			activeRoot = config.root
-			try {
-				generate(config.root)
-			} catch {
-				/* dev continues */
-			}
+			generate(config.root)
 		},
 		buildStart() {
 			// Production builds must regenerate (configResolved may run in a
@@ -1151,9 +1499,18 @@ export function swelte(options: SweltePluginOptions = {}): Plugin {
 				return null
 			}
 			if (norm === routesNorm || norm.startsWith(`${routesNorm}/`)) {
-				const fns = parseVFile(src)
+				// §7: middleware is server-only — strip it from the browser
+				// stub (it has no client binding). +route.v wrappers expose
+				// nothing: importing one from the browser is a build error.
+				const route = routeFor(routesAbs, abs)
+				if (route === null) {
+					throw new Error(
+						`[swelte] ${abs} is a +route.v wrapper (@[before]/@[after] middleware only) and cannot be imported in browser code.`
+					)
+				}
+				const fns = parseVFile(src).filter((x) => x.attr !== 'before' && x.attr !== 'after')
 				if (fns.length === 0) return 'export {}; // swelte: no RPC fns in this .v file'
-				return jsFetchFor(routeFor(routesAbs, abs), fns)
+				return jsFetchFor(route, fns)
 			}
 			if (norm === libNorm || norm.startsWith(`${libNorm}/`)) {
 				const mod = modulePath(libAbs, abs)
@@ -1163,7 +1520,7 @@ export function swelte(options: SweltePluginOptions = {}): Plugin {
 					)
 				}
 				const rpcFns = parseVFile(src).filter((x) => x.attr === 'rpc')
-				const verbFns = parseVFile(src).filter((x) => x.attr !== 'rpc')
+				const verbFns = parseVFile(src).filter((x) => x.attr !== 'rpc' && x.attr !== 'before' && x.attr !== 'after')
 				const allFns = [...rpcFns, ...verbFns]
 				if (allFns.length === 0) return 'export {}; // swelte: no RPC fns in this .v file'
 				return jsWasmFor(root, mod, allFns)
