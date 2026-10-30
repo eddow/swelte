@@ -30,8 +30,9 @@ node engine/core/dist/cli.js dev --port 5174 --backend 8131 --root examples/some
 
 - `/` GET/POST (`get_greeting`/`save_name`), `/api/greet` GET + `login → Session{id,user,remember,expires_at}`,
   empty payload → 400, unknown fn → 404 + available, `vite build` green.
-- Page buttons: Greet / Save / Hash (`#lib` dev fallback) / Login.
-- `hash_string` returns `'hash(x)'` dev placeholder until `v -b wasm` lands.
+- Page buttons: Greet / Save / Hash (`#lib` real WASM) / Login.
+- `hash_string` compiles to real WASM (`v -b wasm -os browser`):
+  dev `.swelte/dev/crypto/hash.wasm` + prod `dist/assets/app_lib-*.wasm`.
 - Generated dispatcher proven: `routes/index.v` + `routes/api_greet.v` +
   `routes/server_gen.v` (`module routes`, `SwelteRequest` + `swelte_route`),
   one-default-per-verb + unique-qualifier enforced at generate time.
@@ -41,4 +42,5 @@ node engine/core/dist/cli.js dev --port 5174 --backend 8131 --root examples/some
 
 ## Stubs (see docs/specs/)
 
-WASM artifact not compiled yet (dev fallback).
+Dev `/@swelte-dev/<mod>.wasm` micro-modules; prod single bundle
+(`__swelteWasmCall` drives `memory` + `main.<fn>` directly).

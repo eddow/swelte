@@ -124,9 +124,9 @@ export async function __swelteFetch<TResult>(
 	return postForm<TResult>(base, fn, 'POST', qualifier, args)
 }
 
-// Dev fallback registry for `#lib/*.v` before `v -b wasm` artifacts exist.
-// Keyed by bare fn name (the stub passes a per-build wasmUrl that cannot
-// be known here). Production WASM modules bypass the registry entirely.
+// Dev fallback registry for `#lib/*.v` when a WASM artifact is missing
+// (uncompiled file, pruned module). Keyed by bare fn name. Production
+// WASM modules bypass the registry entirely.
 type LibHandler = (args: Record<string, unknown>) => unknown | Promise<unknown>
 const libFallbacks = new Map<string, LibHandler>()
 
@@ -139,86 +139,130 @@ function strArg(args: Record<string, unknown>, key: string): string {
 	return typeof v === 'string' ? v : String(v ?? '')
 }
 
-// Built-in dev fallbacks (mirror src/lib/**/*.v until `v -b wasm` lands).
+// Built-in dev fallback: hash_string mirrors src/lib/**/*.v so pages
+// render before `v -b wasm` runs (dev generate() compiles async-safe).
 __registerLibFallback('hash_string', (args) => `hash(${strArg(args, 'input')})`)
 
-const wasmInstances = new Map<string, Promise<Record<string, (argsJson: string) => unknown>>>()
+type WasmParam = { name: string; kind: 'string' | 'int' | 'bool' | 'unsupported'; vtype: string }
+type WasmExports = {
+	memory: WebAssembly.Memory
+	swelte_alloc: (n: number) => number
+	[k: string]: WebAssembly.ExportValue
+}
+const wasmInstances = new Map<string, Promise<WasmExports>>()
+
+function wasmEnv(memory: () => WebAssembly.Memory | undefined): WebAssembly.Imports {
+	return {
+		env: {
+			__panic_abort: (ptr: number, len: number) => {
+				const mem = memory()
+				const msg = mem ? new TextDecoder().decode(new Uint8Array(mem.buffer, ptr, len)) : 'wasm panic'
+				throw new Error(msg)
+			},
+			__writeln: () => { /* V println inside wasm — drop (no console spam) */ },
+		},
+	}
+}
+
+async function loadWasm(url: string): Promise<WasmExports> {
+	let inst = wasmInstances.get(url)
+	if (!inst) {
+		inst = (async () => {
+			let mem: WebAssembly.Memory | undefined
+			const res = await fetch(url)
+			if (!res.ok) throw new Error(`WASM fetch ${url}: HTTP ${res.status}`)
+			const { instance } = await WebAssembly.instantiateStreaming(res, wasmEnv(() => mem))
+			mem = instance.exports.memory as WebAssembly.Memory
+			if (!mem || typeof (instance.exports.swelte_alloc as unknown) !== 'function') {
+				throw new Error(`WASM ${url}: missing memory/swelte_alloc exports`)
+			}
+			return instance.exports as unknown as WasmExports
+		})()
+		wasmInstances.set(url, inst)
+	}
+	return inst
+}
 
 /**
  * Internal WASM caller for code-generated `#lib/*.v` stubs
- * (spec v-imports.md §4). JSON across the boundary; `!T` failure
- * rejects with SwelteRpcError(status 0). Falls back to the dev registry
- * when no artifact is present (migration step 3 compiles real WASM).
+ * (spec v-imports.md §4). Proven ABI (V 0.5.2, `v -b wasm -os browser`):
+ * numerics are i32 params/returns; strings marshal as `{data ptr, len
+ * i32}` structs — params as ONE i32 pointer to the struct, returns via
+ * a caller-allocated hidden out-pointer passed FIRST (`fn(rp, ...args)`
+ * → `undefined`, result read from `rp`). `!T`/`?T` cannot compile on
+ * the wasm backend (rejected at build); a wasm trap surfaces here as
+ * SwelteRpcError(status 0).
  */
 export async function __swelteWasmCall<TResult>(
 	wasmUrl: string,
 	fn: string,
-	args: object = {}
+	args: object = {},
+	params: WasmParam[] = [],
+	retKind: 'string' | 'int' | 'bool' | 'void' | 'unsupported' = 'unsupported'
 ): Promise<TResult> {
-	const fallback = libFallbacks.get(fn)
-	if (fallback) {
-		return Promise.resolve(fallback((args ?? {}) as Record<string, unknown>) as TResult)
-	}
-	if (wasmUrl.includes('.swelte/generated') || wasmUrl.endsWith('.wasm?url')) {
-		throw new SwelteRpcError(
-			wasmUrl,
-			fn,
-			0,
-			{
-				error: `WASM not compiled yet for ${fn} (migration step 3 wires v -b wasm)`,
-				fn,
-				path: wasmUrl,
-				available: [...libFallbacks.keys()],
-			},
-			''
-		)
-	}
-	let inst = wasmInstances.get(wasmUrl)
-	if (!inst) {
-		inst = (async () => {
-			const mod = (await import(/* @vite-ignore */ wasmUrl)) as {
-				default?: (opts?: unknown) => Promise<unknown>
-				[k: string]: unknown
-			}
-			if (typeof mod.default === 'function') await mod.default()
-			const fns: Record<string, (argsJson: string) => unknown> = {}
-			for (const [k, v] of Object.entries(mod)) {
-				if (k !== 'default' && typeof v === 'function') fns[k] = v as (argsJson: string) => unknown
-			}
-			return fns
-		})()
-		wasmInstances.set(wasmUrl, inst)
+	const bare = fn.includes('.') ? fn.split('.').pop() as string : fn
+	const fallback = libFallbacks.get(bare)
+	const fail = (detail: string): TResult => {
+		throw new SwelteRpcError(wasmUrl, bare, 0, { error: detail, fn: bare, path: wasmUrl }, '')
 	}
 	try {
-		const fns = await inst
-		const target = fns[fn]
-		if (!target) {
-			const available = Object.keys(fns)
-			throw new SwelteRpcError(
-				wasmUrl,
-				fn,
-				0,
-				{ error: 'unknown fn', fn, path: wasmUrl, available },
-				''
-			)
+		const ex = await loadWasm(wasmUrl)
+		const target = ex[fn] ?? ex[bare]
+		if (typeof target !== 'function') {
+			if (fallback) return Promise.resolve(fallback((args ?? {}) as Record<string, unknown>) as TResult)
+			const available = Object.keys(ex).filter((k) => k !== 'memory' && k !== 'swelte_alloc')
+			throw new SwelteRpcError(wasmUrl, bare, 0, { error: 'unknown fn', fn: bare, path: wasmUrl, available }, '')
 		}
-		const raw = target(JSON.stringify(args ?? {}))
-		const out = raw instanceof Promise ? await raw : raw
-		if (typeof out === 'string') {
-			try {
-				return JSON.parse(out) as TResult
-			} catch {
-				return out as TResult
-			}
+		const call = target as (...a: number[]) => number | undefined
+		const mem = () => new Uint8Array(ex.memory.buffer)
+		const dv = () => new DataView(ex.memory.buffer)
+		const enc = new TextEncoder()
+		const dec = new TextDecoder()
+		const allocStr = (s: string): number => {
+			const b = enc.encode(s)
+			const dp = ex.swelte_alloc(b.length || 1)
+			mem().set(b, dp)
+			const sp = ex.swelte_alloc(8)
+			dv().setInt32(sp, dp, true)
+			dv().setInt32(sp + 4, b.length, true)
+			return sp
 		}
-		return out as TResult
+		const argv: number[] = []
+		let rp = 0
+		if (retKind === 'string') {
+			rp = ex.swelte_alloc(8)
+			dv().setInt32(rp, 0, true)
+			dv().setInt32(rp + 4, 0, true)
+			argv.push(rp)
+		}
+		for (const p of params) {
+			const v = (args as Record<string, unknown>)[p.name]
+			if (p.kind === 'string') argv.push(allocStr(typeof v === 'string' ? v : String(v ?? '')))
+			else if (p.kind === 'int') argv.push(Number(v ?? 0) | 0)
+			else if (p.kind === 'bool') argv.push(v ? 1 : 0)
+			else return fail(`unsupported param ${p.name}: ${p.vtype}`)
+		}
+		const raw = call(...argv)
+		if (retKind === 'string') {
+			const rop = dv().getInt32(rp, true)
+			const rol = dv().getInt32(rp + 4, true)
+			if (rop <= 0 || rol < 0 || rol > 16 * 1024 * 1024) return fail(`bad string return (ptr=${rop} len=${rol})`)
+			return dec.decode(new Uint8Array(ex.memory.buffer, rop, rol)) as TResult
+		}
+		if (retKind === 'bool') return Boolean(raw) as TResult
+		if (retKind === 'int') return (typeof raw === 'number' ? raw | 0 : 0) as TResult
+		if (retKind === 'void') return undefined as TResult
+		return fail(`unsupported return kind for ${bare}`)
 	} catch (e) {
 		if (e instanceof SwelteRpcError) throw e
+		const bare2 = fn.includes('.') ? (fn.split('.').pop() as string) : fn
+		const fb = libFallbacks.get(bare2)
+		if (fb) return Promise.resolve(fb((args ?? {}) as Record<string, unknown>) as TResult)
 		throw new SwelteRpcError(
 			wasmUrl,
-			fn,
+			bare2,
 			0,
-			{ error: e instanceof Error ? e.message : String(e), fn, path: wasmUrl },
+			{ error: e instanceof Error ? e.message : String(e), fn: bare2, path: wasmUrl },
 			''
 		)
 	}

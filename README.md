@@ -42,4 +42,5 @@ toolchain — no manual install). `swelte build` typechecks, compiles
 - `docs/types.md` — V → TS projection, codegen (implemented)
 - `docs/errors.md` — error envelope, `SwelteRpcError`, SPA-first rule (implemented)
 - `docs/example.md` — the `something` example (implemented)
+- `docs/versus.md` — Swelte vs. other full-stack paradigms (positioning)
 - `docs/specs/` — everything not yet built (`v-imports.md` design, dispatcher, dev orchestration, WASM compile, streaming)

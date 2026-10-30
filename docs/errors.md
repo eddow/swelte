@@ -25,7 +25,8 @@ Every 4xx from the V backend is JSON:
 `fn`) + the internal `__swelteFetch` / `__swelteWasmCall` runtimes:
 `swelte: "nope_missing" on / failed (HTTP 404): unknown fn —
 available: save_name`. `#lib/` misses use the same shape with
-status 0 (WASM never touches HTTP).
+status 0 (WASM never touches HTTP) — e.g. `WASM compile failed`,
+`unknown fn` + available exports, `bad string return`, wasm traps.
 
 ## SPA-first proxy rule (vite.ts)
 

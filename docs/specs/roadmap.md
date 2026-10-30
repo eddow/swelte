@@ -6,9 +6,11 @@ not implemented; items leave this file when they land in `docs/`.
 The `.v`-import design rationale lives in `v-imports.md` (§1–§5 built,
 §6 decisions log).
 
-Items 1–5 (dispatcher, dev, build, preview, init), 15-part
+Items 1–6 (dispatcher, dev, build, preview, init, V-WASM), 15-part
 (one-default-per-verb + unique-qualifier as build errors), 18-part
-(`time.Time→number`), 22-part (parser + `__swelteFetch` + stubs accept
+(`time.Time→number`; allowlist enforced at build for `#lib/` WASM,
+runtime-warn remainder only for the known-broken wasm-backend stdlib),
+22-part (parser + `__swelteFetch` + stubs accept
 `put`/`delete`/`patch`) are built.
 Route params in `Request`, `swelte check` machine-readable output,
 and per-item remainders below are still open. Item 23 records the
@@ -111,23 +113,53 @@ smoke `page 200 + api ok`; `swelte preview --port 4175` → `/` HTML
 + `login` answer, asset `text/javascript`; no `vite` process owns
 the port (binary only).
 
-## 6. V-WASM real compile (`#lib/`, dual pipeline)
+## 6. V-WASM real compile (`#lib/`, dual pipeline) — built (2026-10-30)
 
 Dev: per-file micro-modules (`.swelte/dev/<mod>.wasm`), HMR-scoped
-rebuilds. Prod: single bundle (`dist/assets/app_lib.wasm`) from a
-generated entry importing all client-used `#lib/` files,
-`v -b wasm -prod` (LTO + DCE, <100KB target). Bridge
-(`__swelteWasmCall`) masks the difference; importers never change.
-First: one real `v -b wasm` proving (string/struct over the JSON
-boundary, `!T` surfacing, allowlist, size report). (Dev fallback
-works; no artifact compiled yet.)
+rebuilds (mtime-guarded; watcher invalidates the importing stub so
+Vite swaps only that module). Prod: single bundle
+(`dist/assets/app_lib-<hash>.wasm`, exactly one `*.wasm` in
+`dist/assets/`, 4.2KB for `hash_string`) compiled from a generated
+`module main` entry concatenating only the client-imported `#lib/`
+files (tree-shaking: every `.v` import resolved through the plugin
+is recorded; untouched helpers never enter the bundle),
+emitted via `generateBundle` + hashed-asset URL rewrite; stubs use
+`/assets/app_lib.wasm` which the hook rewrites to the hashed file.
+Bridge (`__swelteWasmCall`) drives `memory` + `main.<fn>` directly —
+no JS glue, no JSON: numerics are i32 params/returns, strings marshal
+as `{data ptr, len i32}` structs (params: ONE i32 pointer to the
+struct; returns: caller-allocated hidden out-pointer passed FIRST,
+`fn(rp, ...args)` → `undefined`). Each unit synthesizes `swelte_alloc`
+(a clamped `malloc` wrapper — `malloc(0)` panics on wasm so clamped
+to ≥1). Build errors with file+line: blocked imports (anything
+outside the portable subset — enforced at build, roadmap §18), `?T`/
+`!T` returns (wasm backend ICE), struct/array/map/i64/f64
+params/returns (v1: flat string/int/bool only), duplicate fn names
+across `#lib/` (one wasm namespace). Known V 0.5.2 backend gaps
+(`strings`/`math` array-`.len` lowering, `crypto/*` transitive `io`,
+C-backed `json`) are build errors too — surfaced as
+`WASM compile failed: src/lib/...` instead of silent fallback. The
+in-process `libFallbacks` registry remains only for
+`hash_string` (dev convenience); everything else throws
+`SwelteRpcError(status 0)`.
+`v -b wasm -prod` needs `wasm-opt` (absent here) so prod ships
+unoptimized — size target still met 20× over.
 
-Test (dev): edit `src/lib/crypto/hash.v`, save — Vite HMR swaps only
-that module (<10ms recompile, page state preserved);
-`.swelte/dev/crypto_hash.wasm` timestamp updates, others untouched.
-Test (prod): `swelte build` emits one `dist/assets/app_lib.wasm`
-(<100KB target); `ls dist/assets/*.wasm` shows exactly one file;
-cold load in a clean profile works with network throttled to 3G.
+Test (dev): `swelte dev` → page 200, `/api/greet` JSON ok,
+`/@swelte-dev/crypto/hash.wasm` 200 `application/wasm` 4208B;
+`WebAssembly.Module.exports()` on it shows only `memory`,
+`swelte_alloc`, `main.hash_string` (proves the real module, not the
+byte-identical dev fallback); `hash_string('world')` →
+`"hash(world)"`; `touch` the `.v` → micro-module timestamp updates,
+others untouched.
+Test (prod): `swelte build` → one `dist/assets/app_lib-*.wasm`
+(4208B, target <100KB); `ls dist/assets/*.wasm` shows exactly one
+file; an unimported `src/lib/crypto/unused.v` compiles to a dev
+micro-module but is absent from the bundle exports (`swelte_alloc`,
+`main.hash_string`, `memory` only); `GET /assets/…wasm` → 200 (V
+binary serves it —
+`server.v` maps `.wasm` → `application/wasm`); bundle call →
+`"hash(world)"`; smoke `page 200 + api ok`.
 
 ## 7. Layouts
 

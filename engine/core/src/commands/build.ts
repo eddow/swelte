@@ -1,11 +1,29 @@
 // `swelte build`: typecheck -> generate -> `vite build` -> `v -o` server binary.
 // The V binary serves dist/ + API (single artifact, no Node at runtime).
-// WASM step is a no-op until roadmap item 6 lands (dev fallback still in place).
+// Roadmap §6: prod WASM bundle compiles in the plugin's generateBundle
+// hook (`v -b wasm -os browser` → dist/assets/app_lib-*.wasm, exactly
+// one *.wasm in dist/assets/ — the [swelte] log line proves it).
 import { execFileSync, execSync, spawnSync } from 'node:child_process'
-import { existsSync, rmSync } from 'node:fs'
+import { existsSync, readdirSync, rmSync, statSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import type { Ctx } from './types.js'
 import { killPort, portFree, takePort, waitPort } from './dev.js'
+
+function listDevWasm(root: string): string[] {
+  try {
+    const devDir = join(root, '.swelte', 'dev')
+    const out: string[] = []
+    const walk = (dir: string) => {
+      for (const e of readdirSync(dir, { withFileTypes: true })) {
+        const q = join(dir, e.name)
+        if (e.isDirectory()) { walk(q); continue }
+        if (e.name.endsWith('.wasm')) out.push(q + ' (' + statSync(q).size + 'B)')
+      }
+    }
+    walk(devDir)
+    return out.length > 0 ? ['wasm dev: ' + out.join(', ')] : ['wasm dev: (no #lib/ modules)']
+  } catch { return ['wasm dev: (no #lib/ modules)'] }
+}
 
 export async function runBuild(ctx: Ctx): Promise<void> {
   const root = resolve(String(ctx.opts.root ?? process.cwd()))
@@ -32,8 +50,10 @@ export async function runBuild(ctx: Ctx): Promise<void> {
     throw new Error(`V typecheck failed:\n${check.stderr || check.stdout}`)
   }
   ctx.log('V typecheck: ok')
-  // 2. WASM (roadmap item 6): not compiled yet — dev fallback stays.
-  ctx.log('wasm: skipped (item 6 open — dev fallback in generated stubs)')
+  // 2. WASM (roadmap §6): compiled live by the plugin - the generate()
+  // above emits .swelte/dev/<mod>.wasm per file (mtime-guarded); the
+  // prod bundle compiles in generateBundle during vite build below.
+  for (const line of listDevWasm(root)) ctx.log(line)
   // 3. vite build FIRST (it wipes dist/, incl. any binary inside it).
   const res = spawnSync('npx', ['vite', 'build'], { cwd: root, encoding: 'utf8' })
   if (res.status !== 0) throw new Error(`vite build failed:\n${res.stderr || res.stdout}`)

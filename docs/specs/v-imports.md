@@ -173,7 +173,7 @@ export function login(args) {
 `rpc` -> `POST base {fn,args}` JSON; `get` -> `GET base?fn=&...args`;
 `post` -> form `POST base?fn=`. Rejects with `SwelteRpcError`.
 
-### `#lib/*.v` -> WASM stub (dual pipeline, decided 2026-10-29)
+### `#lib/*.v` -> WASM stub (dual pipeline, built 2026-10-30)
 
 Runtime `.swelte/generated/lib/<mod>.js` (same shape both modes —
 the bridge masks the difference, importers never change):
@@ -181,32 +181,38 @@ the bridge masks the difference, importers never change):
 ```js
 // auto-generated from src/lib/crypto/hash.v — do not edit
 import { __swelteWasmCall } from '@swelte/core';
-const wasmUrl = "<project>/.swelte/generated/lib/crypto/hash.wasm?url";
+const wasmUrl = "/@swelte-dev/crypto/hash.wasm"; // dev — prod: "/assets/app_lib.wasm"
+const hash_string_params = [{"name":"input","kind":"string","vtype":"string"}];
 export function hash_string(args) {
-  return __swelteWasmCall(wasmUrl, "hash_string", args);
+  return __swelteWasmCall(wasmUrl, 'main.hash_string', args, hash_string_params, "string");
 }
 ```
 
-Dev fallback today: no artifact yet -> in-process registry fallback +
-clear `SwelteRpcError(0)` (never a build-breaking dynamic import).
-
 | mode | WASM output | why |
 |---|---|---|
-| `vite dev` | per-file micro-module (`.swelte/dev/<mod>.wasm`) | HMR: editing `crypto/hash.v` recompiles only that file (ms), Vite swaps the module, rest of the app untouched; untouched utils stay cached |
-| `vite build` | single bundle (`dist/assets/app_lib.wasm`, via a generated entry importing all client-used `#lib/` files, `v -b wasm -prod`) | LTO + dead-code elimination across files (<100KB target); one runtime/memory overhead; one `compileStreaming()` on cold start |
+| `swelte dev` | per-file micro-module (`.swelte/dev/<mod>.wasm`, mtime-guarded; served at `/@swelte-dev/<mod>.wasm` as `application/wasm`) | HMR: editing `crypto/hash.v` recompiles only that file (~40ms), the watcher invalidates the stub, Vite swaps the module, rest of the app untouched; untouched utils stay cached |
+| `swelte build` | single bundle (`dist/assets/app_lib-<hash>.wasm` via `generateBundle`, exactly one `*.wasm` in `dist/assets/`) — only client-imported `#lib/` files (recorded in `resolveId`; untouched helpers excluded) | one runtime/memory overhead; one `instantiateStreaming()` on cold start (4.2KB for `hash_string`, target <100KB) |
 
-The plugin branches on `command === 'serve'` vs `'build'`. `buildStart`
-collects the client-imported `#lib/` set for the bundle entry; dev
-compiles per-file on change.
+`__swelteWasmCall(url, fn, args, params, retKind)` (internal, in
+`sdk.ts`) drives `memory` + `main.<fn>` directly — no JS glue, no
+JSON: numerics are i32 params/returns, strings marshal as `{data
+ptr, len i32}` structs (params: ONE i32 pointer to the struct;
+returns: caller-allocated hidden out-pointer passed FIRST). A wasm
+trap rejects with `SwelteRpcError(status 0)`. Same class as server
+errors, one `catch` handles either.
+Prod dispatch: the consolidated bundle exposes `main.<fn>` per fn
+(duplicate fn names across `#lib/` are build errors — one wasm
+namespace); per-file stubs resolve their call into it (same
+`__swelteWasmCall` signature — dev per-file URL vs prod bundle URL
++ fn name).
 
-* Args cross the boundary as JSON (`json.encode`/`decode` both sides),
-  never as raw linear-memory structs in v1 — same trick that dodges
-  string-alloc-across-boundary pain.
-* `!T` failure -> rejects with `SwelteRpcError(status 0)`.
-  Same class as server errors, one `catch` handles either.
-* Prod dispatch: the consolidated bundle exposes one dispatcher;
-  per-file stubs resolve their call into it (same `__swelteWasmCall`
-  signature — dev per-file URL vs prod bundle URL + fn name).
+* v1 boundary: flat string/int/bool params and string/int/bool/void
+  returns only. Struct/array/map/i64/f64 params, non-void fallible
+  returns (`?T`/`!T` — wasm backend ICE), and blocked imports are
+  build errors with file+line. Known V 0.5.2 backend gaps
+  (`strings`/`math` array-`.len` lowering, `crypto/*` transitive
+  `io`, C-backed `json`) are build errors too.
+* `#lib/backend/` is exempt (never compiled to WASM).
 
 ### Shared machinery
 

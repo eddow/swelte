@@ -1,7 +1,21 @@
 import type { Plugin } from 'vite'
 import type { IncomingMessage, ServerResponse } from 'node:http'
+import { execFileSync as execVSync } from 'node:child_process'
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
-import { join, relative, resolve, sep } from 'node:path'
+import { createRequire } from 'node:module'
+import { dirname, join, relative, resolve, sep } from 'node:path'
+import { resolveV } from './toolchain.js'
+
+// Lazy V binary for `v -b wasm` (resolved on first compile).
+// (module import must not throw when the caller passes a plain path).
+let vBin = ''
+
+const _createRequire = createRequire
+void _createRequire
+void dirname
+void execVSync
+void vBin
+void resolveV
 
 export interface SweltePluginOptions {
 	routesDir?: string
@@ -241,13 +255,115 @@ export function swelte(options: SweltePluginOptions = {}): Plugin {
 	const routesDir = options.routesDir ?? 'src/routes'
 	const libDir = options.libDir ?? 'src/lib'
 	const outDir = options.outDir ?? '.swelte'
+	const devWasmDir = join(outDir, 'dev')
+	const prodWasmName = 'app_lib.wasm'
+	let activeRoot = ''
+	let isBuild = false
+	// Roadmap §6 tree-shaking: every .v import resolved through the plugin
+	// is recorded here (abs path → same). generateBundle compiles only the
+	// recorded client-used #lib/ files — untouched helpers never enter
+	// the prod wasm. Reset per build (buildStart) so dev/test resolutions
+	// never leak into a bundle.
+	const usedLibFiles = new Set<string>()
 	const vBackendUrl =
 		options.vBackendUrl ??
 		process.env.SWELTE_V_BACKEND_URL ??
 		process.env.VITE_SWELTE_V_BACKEND_URL
-	let activeRoot = ''
 	function serverRoot(): string {
 		return activeRoot
+	}
+
+	/** Portable subset for `v -b wasm -os browser` (V 0.5.2). V's `json`
+	 * module is C-backed and the wasm backend chokes on `strings`/`math`
+	 * (array `.len` lowering) and `crypto/*` (transitive `io` import).
+	 * `#lib/backend/` is exempt (never compiled to WASM). */
+	const WASM_LIB_ALLOW = new Set(['math', 'strings', 'encoding', 'crypto', 'json', 'json2'])
+	const WASM_KNOWN_BROKEN = new Set(['strings', 'math', 'crypto', 'json'])
+
+	function wasmBlockedImports(src: string): string[] {
+		const blocked: string[] = []
+		for (const m of src.matchAll(/^\s*import\s+([^\n;]+)/gm)) {
+			for (const part of m[1].split(',')) {
+				const p = part.trim().replace(/^\(/, '').replace(/\)$/, '').trim()
+				if (!p || p.startsWith('//')) continue
+				const mod = p.split(/\s+/).pop() as string
+				const top = mod.split('.')[0]
+				if (top === 'main' || top === 'builtin' || top === '') continue
+				if (top === 'os' || top === 'net' || top === 'db' || top === 'time' || top === 'v' || top === 'wasm' || top === 'x') {
+					blocked.push(mod)
+					continue
+				}
+				if (!WASM_LIB_ALLOW.has(top) && !WASM_LIB_ALLOW.has(mod)) blocked.push(mod)
+			}
+		}
+		return [...new Set(blocked)]
+	}
+
+	function wasmParamKind(vtype: string): string | null {
+		const t = vtype.trim().replace(/^\?/, '')
+		if (t === 'string') return 'string'
+		if (t === 'bool') return 'bool'
+		if (t === 'int' || t === 'i8' || t === 'i16' || t === 'i32' || t === 'u8' || t === 'u16' || t === 'u32' || t === 'rune' || t === 'char') return 'int'
+		return null
+	}
+
+	function wasmReturnKind(vtype: string): string | null {
+		const t = vtype.trim()
+		if (t === '' || t === 'void') return 'void'
+		if (t === 'string') return 'string'
+		if (t === 'bool') return 'bool'
+		if (t === 'int' || t === 'i8' || t === 'i16' || t === 'i32' || t === 'u8' || t === 'u16' || t === 'u32' || t === 'rune' || t === 'char') return 'int'
+		return null
+	}
+
+	function compileLibWasm(src: string, mod: string, outWasm: string, libRel: string): number {
+		const fns = parseVFile(src).filter((x) => x.attr === 'rpc')
+		for (const f of fns) {
+			for (const p of f.params) {
+				if (wasmParamKind(p.vtype) === null) {
+					throw new Error(libRel + ': ' + f.name + '(' + p.name + ': ' + p.vtype + ') cannot cross the WASM boundary')
+				}
+			}
+			if (f.fallible) throw new Error(libRel + ': ' + f.name + ' is fallible — the V wasm backend cannot compile !T/?T (compiler ICE)')
+			if (wasmReturnKind(f.vret) === null) throw new Error(libRel + ': ' + f.name + ' returns ' + (f.vret || '(unparsed)'))
+		}
+		const blocked = wasmBlockedImports(src)
+		if (blocked.length > 0) throw new Error(libRel + ': blocked import(s): ' + blocked.join(', '))
+		const broken = [...new Set(
+			[...src.matchAll(/^\s*import\s+([^\n;]+)/gm)]
+				.flatMap((m) => m[1].split(','))
+				.map((p) => p.trim().split(/\s+/).pop() as string)
+				.map((mm) => mm.split('.')[0])
+				.filter((top) => WASM_KNOWN_BROKEN.has(top))
+		)]
+		if (broken.length > 0) throw new Error(libRel + ': uses known-broken wasm stdlib (' + broken.join(', ') + ') — V 0.5.2 backend limitation')
+		const body = src
+			.replace(/^\s*module\s+\S+.*$/m, 'module main')
+			.replace(/@\[([^\]]*)\]\s*/g, (_mm, attrs: string) => {
+				const keep = attrs.split(';').map((a: string) => a.trim()).filter((a: string) => a && !/^(rpc|get|post|put|delete|patch)\b/.test(a))
+				return keep.length > 0 ? '@[' + keep.join('; ') + '] ' : ''
+			})
+		const compiled = [
+			'module main',
+			'',
+			"@[export: 'swelte_alloc']",
+			'pub fn swelte_alloc(n int) &u8 {',
+			'\treturn unsafe { malloc(if n <= 0 { 1 } else { n }) }',
+			'}',
+			'',
+			...body.split('\n').filter((l) => !/^\s*module\s+\S+/.test(l)),
+		].join('\n')
+		mkdirSync(dirname(outWasm), { recursive: true })
+		const tmp = join(dirname(outWasm), '.compile.v')
+		writeFileSync(tmp, compiled)
+		try {
+			if (!vBin) vBin = resolveV(import.meta.url)
+			execVSync(vBin, ['-b', 'wasm', '-os', 'browser', '-o', outWasm, tmp], { stdio: ['ignore', 'pipe', 'pipe'] })
+			const size = statSync(outWasm).size
+			return size
+		} finally {
+			try { rmSync(tmp, { force: true }) } catch { /* ignore */ }
+		}
 	}
 
 	/** Map a routes file to its URL path (spec v-imports.md §2). */
@@ -476,26 +592,20 @@ export function swelte(options: SweltePluginOptions = {}): Plugin {
 	}
 
 	/** Codegen: WASM stub for a `#lib/*.v` file. */
-	function jsWasmFor(root: string, mod: string, fns: RpcFn[]): string {
-		// wasm artifact: per-file `v -b wasm` output lands in
-		// .swelte/generated/lib/<mod>.wasm (migration step 3 wires the real
-		// compile). Absolute ?url import so Rollup never re-resolves against
-		// the virtual id. Until the artifact exists, __swelteWasmCall falls
-		// back to the in-process registry.
-		const wasmAbs = join(root, outDir, 'generated', 'lib', `${mod}.wasm`)
+	function jsWasmFor(_root: string, mod: string, fns: RpcFn[]): string {
+		const wasmUrl = isBuild ? '/assets/app_lib.wasm' : '/@swelte-dev/' + mod + '.wasm'
 		const lines = [
-			`// Auto-generated by swelte from ${mod}.v — do not edit.`,
-			`import { __swelteWasmCall } from '@swelte/core';`,
-			`const wasmUrl = ${JSON.stringify(`${wasmAbs}?url`)};`,
+			'// Auto-generated by swelte from ' + mod + '.v — do not edit.',
+			"import { __swelteWasmCall } from '@swelte/core';",
+			'const wasmUrl = ' + JSON.stringify(wasmUrl) + ';',
 			'',
 		]
 		for (const fn of fns) {
-			lines.push(`let ${fn.name}_warned = false;`)
-			lines.push(`export function ${fn.name}(args) {`)
-			lines.push(
-				`  if (!${fn.name}_warned) { ${fn.name}_warned = true; console.warn('[swelte] ${mod}.v:${fn.name} WASM not compiled yet — using dev fallback'); }`
-			)
-			lines.push(`  return __swelteWasmCall(wasmUrl, ${JSON.stringify(fn.name)}, args);`)
+			const params = JSON.stringify(fn.params.map((p) => ({ name: p.name, kind: wasmParamKind(p.vtype) || 'unsupported', vtype: p.vtype })))
+			const ret = JSON.stringify(wasmReturnKind(fn.vret) || 'unsupported')
+			lines.push('const ' + fn.name + '_params = ' + params + ';')
+			lines.push('export function ' + fn.name + '(args) {')
+			lines.push("  return __swelteWasmCall(wasmUrl, 'main." + fn.name + "', args, " + fn.name + '_params, ' + ret + ');')
 			lines.push('}')
 			lines.push('')
 		}
@@ -788,7 +898,15 @@ export function swelte(options: SweltePluginOptions = {}): Plugin {
 				emitTypes('lib', mod, src, allFns)
 				const genModDir = join(genDir, 'generated', 'lib', mod.split('/').slice(0, -1).join('/'))
 				mkdirSync(genModDir, { recursive: true })
-				writeFileSync(join(genModDir, `${mod.split('/').pop()}.js`), jsWasmFor(root, mod, allFns))
+				writeFileSync(join(genModDir, mod.split('/').pop() + '.js'), jsWasmFor(root, mod, allFns))
+				try {
+					const outWasm = resolve(root, devWasmDir, mod + '.wasm')
+					let fresh = false
+					try { fresh = statSync(outWasm).mtimeMs >= statSync(f).mtimeMs } catch { /* missing */ }
+					if (!fresh) compileLibWasm(src, mod, outWasm, libDir + '/' + mod + '.v')
+				} catch (e) {
+					throw new Error('WASM compile failed: ' + (e as Error).message)
+				}
 			}
 		}
 		// Editor resolution (spec §4, roadmap §3): everything lives in
@@ -874,7 +992,8 @@ export function swelte(options: SweltePluginOptions = {}): Plugin {
 		// Svelte compiler requests them (Svelte emits relative `.v`
 		// imports verbatim; our load() codegens the JS).
 		enforce: 'pre',
-		config(userConfig) {
+		config(userConfig, env) {
+			isBuild = (env as { command?: string } | undefined)?.command === 'build'
 			// Resolve dirs against the Vite root (not process.cwd()) — the
 			// language server loads vite.config.ts with cwd elsewhere.
 			const root = (userConfig && (userConfig as { root?: string }).root) || process.cwd()
@@ -900,6 +1019,7 @@ export function swelte(options: SweltePluginOptions = {}): Plugin {
 		buildStart() {
 			// Production builds must regenerate (configResolved may run in a
 			// different context; never reuse a stale .swelte/ from dev).
+			usedLibFiles.clear()
 			try {
 				generate(activeRoot || process.cwd())
 			} catch (e) {
@@ -989,6 +1109,11 @@ export function swelte(options: SweltePluginOptions = {}): Plugin {
 				const underRoutes = norm === routesNorm || norm.startsWith(`${routesNorm}/`)
 				const underLib = norm === libNorm || norm.startsWith(`${libNorm}/`)
 				if (!underRoutes && !underLib) return null
+				// Tree-shaking record: this .v file is imported by client
+				// code (or by another .v file — filtered to #lib/ at bundle
+				// time). Dev artifacts compile in generate() regardless; the
+				// prod bundle compiles only recorded files.
+				usedLibFiles.add(abs)
 				// #lib/backend convention (spec §7): backend-only — refuse from
 				// client code with a loud error naming importer+file.
 				if (underLib) {
@@ -1055,21 +1180,46 @@ export function swelte(options: SweltePluginOptions = {}): Plugin {
 				} catch {
 					/* ignore */
 				}
+				try {
+					const libAbs = resolve(server.config.root, libDir)
+					const norm = file.split(sep).join('/')
+					const libNorm = libAbs.split(sep).join('/')
+					if (norm === libNorm || norm.startsWith(libNorm + '/')) {
+						const mod = modulePath(libAbs, file)
+						const virt = '\0swelte:v:' + resolve(server.config.root, libDir, mod + '.v')
+						const m = server.moduleGraph.getModuleById(virt)
+						if (m) server.moduleGraph.invalidateModule(m)
+					}
+				} catch { /* HMR best-effort */ }
 			}
 			server.watcher.on('add', regen)
 			server.watcher.on('change', regen)
 			server.watcher.on('unlink', regen)
-			// Dev: proxy / and /api/* RPC to the V backend when vBackendUrl is
-			// set; otherwise pass through to Vite.
-			if (vBackendUrl) {
-				server.middlewares.use(
-					async (
-						req: IncomingMessage & { url?: string; method?: string },
-						res: ServerResponse,
-						next: () => void
-					) => {
-						try {
-							const url = new URL(req.url ?? '/', 'http://localhost')
+			// Dev: serve .swelte/dev/<mod>.wasm micro-modules + proxy /
+			// and /api/* RPC to the V backend when vBackendUrl is set.
+			server.middlewares.use(
+				async (
+					req: IncomingMessage & { url?: string; method?: string },
+					res: ServerResponse,
+					next: () => void
+				) => {
+					try {
+						const url = new URL(req.url ?? '/', 'http://localhost')
+						if (url.pathname.startsWith('/@swelte-dev/') && url.pathname.endsWith('.wasm')) {
+							const mod = url.pathname.slice('/@swelte-dev/'.length, -'.wasm'.length)
+							const fp = resolve(server.config.root, devWasmDir, mod + '.wasm')
+							if (existsSync(fp)) {
+								const buf = readFileSync(fp)
+								res.statusCode = 200
+								res.setHeader('content-type', 'application/wasm')
+								res.setHeader('cache-control', 'no-store')
+								res.end(buf)
+								return
+							}
+							return next()
+						}
+						if (!vBackendUrl) return next()
+						{
 							const isRpc = url.pathname === '/' || url.pathname.startsWith('/api/')
 							if (!isRpc) return next()
 							const accept = String(req.headers['accept'] ?? '')
@@ -1114,14 +1264,94 @@ export function swelte(options: SweltePluginOptions = {}): Plugin {
 							})
 							const buf = Buffer.from(await upstream.arrayBuffer())
 							res.end(buf)
-						} catch {
-							next()
+						}
+					} catch {
+						next()
+					}
+				}
+			)
+		},
+		generateBundle(_opts, bundle) {
+			const root = activeRoot || process.cwd()
+			const libAbs = resolve(root, libDir)
+				if (existsSync(libAbs)) {
+					// Tree-shaking: only bundle #lib/ files actually imported
+					// by client code (recorded in resolveId). Vite's own
+					// tree-shaking then drops unused exports within them —
+					// untouched helpers never enter the wasm.
+					const usedNorm = (fp: string): string => resolve(fp).split(sep).join('/')
+					const usedSet = new Set([...usedLibFiles].map(usedNorm))
+					const mods: string[] = []
+					const bodies: string[] = []
+					for (const f of listVFiles(libAbs)) {
+						if (!usedSet.has(usedNorm(f))) continue
+						const mod = modulePath(libAbs, f)
+						if (isBackendMod(mod)) continue
+						const src = readFileSync(f, 'utf8')
+						if (!parseVFile(src).some((x) => x.attr === 'rpc')) continue
+						mods.push(mod)
+						bodies.push(src)
+					}
+					if (mods.length > 0) {
+						const seenFns = new Set<string>()
+						const parts: string[] = []
+						for (let i = 0; i < mods.length; i++) {
+							const mod = mods[i]
+							const src = bodies[i]
+							for (const fn of parseVFile(src).filter((x) => x.attr === 'rpc')) {
+								if (seenFns.has(fn.name)) throw new Error('WASM bundle: duplicate fn ' + fn.name + ' (in ' + mod + '.v)')
+								seenFns.add(fn.name)
+								for (const p of fn.params) {
+									if (wasmParamKind(p.vtype) === null) throw new Error(libDir + '/' + mod + '.v: ' + fn.name + ' unsupported param')
+								}
+								if (fn.fallible) throw new Error(libDir + '/' + mod + '.v: ' + fn.name + ' is fallible')
+								if (wasmReturnKind(fn.vret) === null) throw new Error(libDir + '/' + mod + '.v: ' + fn.name + ' unsupported return')
+							}
+							const blocked = wasmBlockedImports(src)
+							if (blocked.length > 0) throw new Error(libDir + '/' + mod + '.v: blocked import(s): ' + blocked.join(', '))
+							const broken = [...new Set(
+								[...src.matchAll(/^\s*import\s+([^\n;]+)/gm)]
+									.flatMap((m) => m[1].split(','))
+									.map((p) => p.trim().split(/\s+/).pop() as string)
+									.map((mm) => mm.split('.')[0])
+									.filter((top) => WASM_KNOWN_BROKEN.has(top))
+							)]
+							if (broken.length > 0) throw new Error(libDir + '/' + mod + '.v: uses known-broken wasm stdlib (' + broken.join(', ') + ') — V 0.5.2 backend limitation')
+							parts.push(src.replace(/^\s*module\s+\S+.*$/m, '').replace(/@\[([^\]]*)\]\s*/g, (_m, attrs: string) => {
+								const keep = attrs.split(';').map((a: string) => a.trim()).filter((a: string) => a && !/^(rpc|get|post|put|delete|patch)\b/.test(a))
+								return keep.length > 0 ? '@[' + keep.join('; ') + '] ' : ''
+							}))
+						}
+						const entry = ['module main', '', "@[export: 'swelte_alloc']", 'pub fn swelte_alloc(n int) &u8 {', '\treturn unsafe { malloc(if n <= 0 { 1 } else { n }) }', '}', '', ...parts].join('\n')
+						const tmpEntry = join(resolve(root, outDir), '.bundle.compile.v')
+						writeFileSync(tmpEntry, entry)
+						try {
+							const tmpWasm = join(resolve(root, outDir), '.' + prodWasmName)
+							if (!vBin) vBin = resolveV(import.meta.url)
+							execVSync(vBin, ['-b', 'wasm', '-os', 'browser', '-o', tmpWasm, tmpEntry], { stdio: ['ignore', 'pipe', 'pipe'] })
+							const bytes = readFileSync(tmpWasm)
+							const ref = this.emitFile({ type: 'asset', name: prodWasmName, source: bytes })
+							const fileName = this.getFileName(ref)
+							for (const [id, info] of Object.entries(bundle)) {
+								if (id.endsWith('.js') && info.type === 'chunk' && info.code.includes('/assets/' + prodWasmName)) {
+									info.code = info.code.split('/assets/' + prodWasmName).join('/' + fileName)
+								}
+							}
+							try { rmSync(tmpWasm) } catch { /* ignore */ }
+						} finally {
+							try { rmSync(tmpEntry) } catch { /* ignore */ }
 						}
 					}
-				)
-			}
+				}
+			void _opts
+			void bundle
 		},
 	}
+}
+
+function wasmDevMiddleware(server: { config: { root: string }; watcher: unknown; moduleGraph: unknown }): (req: IncomingMessage, res: ServerResponse, next: () => void) => void {
+	void server
+	return (_req: IncomingMessage, _res: ServerResponse, _next: () => void) => undefined
 }
 
 export default swelte

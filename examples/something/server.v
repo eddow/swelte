@@ -9,6 +9,9 @@ import routes
 struct Hand {}
 
 fn mime_for(path string) string {
+	if path.to_lower().ends_with('.wasm') {
+		return 'application/wasm'
+	}
 	ext := path.all_after_last('.').to_lower()
 	if ext == '' {
 		return 'application/octet-stream'
