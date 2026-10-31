@@ -3,9 +3,9 @@ import { tick } from 'svelte'
 import { get_greeting, save_name } from '#routes/+page.v'
 import type { GetGreetingResult, SaveNameResult, SwelteRequest } from '#routes/+page.v'
 import { login, tick_stream } from '#routes/api/greet.v'
-import type { LoginArgs, Session } from '#routes/api/greet.v'
+import type { Session } from '#routes/api/greet.v'
 import { hash_string } from '#lib/crypto/hash.v'
-import type { HashArgs, HashStringResult } from '#lib/crypto/hash.v'
+import type { HashStringResult } from '#lib/crypto/hash.v'
 import { SwelteRpcError } from '@swelte/core'
 
 let name = $state('world')
@@ -43,8 +43,7 @@ async function saveName() {
 async function hashName() {
 	lastError = ''
 	try {
-		const args: HashArgs = { input: name }
-		hashed = await hash_string(args)
+		hashed = await hash_string({ input: name })
 	} catch (e) {
 		showError(e)
 	}
@@ -52,8 +51,7 @@ async function hashName() {
 async function doLogin() {
 	lastError = ''
 	try {
-		const args: LoginArgs = { payload: name }
-		session = await login(args)
+		session = await login({ payload: name })
 	} catch (e) {
 		showError(e)
 	}

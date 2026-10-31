@@ -11,10 +11,7 @@ import type { Ctx } from './types.js'
 
 function templatesRoot(): string {
 	const here = dirname(fileURLToPath(import.meta.url))
-	const candidates = [
-		join(here, '..', '..', 'templates'),
-		join(here, '..', 'templates'),
-	]
+	const candidates = [join(here, '..', '..', 'templates'), join(here, '..', 'templates')]
 	for (const c of candidates) {
 		if (existsSync(join(c, 'base', 'svelte.config.js'))) return c
 	}
@@ -64,7 +61,14 @@ export async function runInit(ctx: Ctx): Promise<void> {
 	cpSync(join(templates, 'base'), root, { recursive: true })
 	if (wantSample) cpSync(join(templates, 'sample', 'src'), join(root, 'src'), { recursive: true })
 	// Only placeholder: project name.
-	for (const rel of ['package.json', 'svelte.config.js', 'index.html', 'src/app.html', 'src/routes/+page.svelte', 'src/routes/+page.v']) {
+	for (const rel of [
+		'package.json',
+		'svelte.config.js',
+		'index.html',
+		'src/app.html',
+		'src/routes/+page.svelte',
+		'src/routes/+page.v',
+	]) {
 		const abs = join(root, rel)
 		if (!existsSync(abs)) continue
 		writeFileSync(abs, readFileSync(abs, 'utf8').split('__NAME__').join(name))

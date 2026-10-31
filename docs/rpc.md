@@ -89,7 +89,10 @@ pub fn delete_account(req Request) ! { ... }
 ```
 
 `@[rpc]` fns take one args-struct (`pub fn f(args Args)`); TS sends
-`{...}`. Verb handlers take the framework `Request` (query, form,
+`{...}` projected inline (`args: { payload: string }`, retrievable via
+`Parameters<typeof f>[0]` — the args struct stays V-side, only the
+inline literal and the result interface project to TS). Verb handlers
+take the framework `Request` (query, form,
 files, headers, cookies, route params — exact shape with the
 dispatcher, roadmap item 1). `@[sse]` fns take the framework `Request`
 like verbs in two shapes: list mode returns `[]string`, emit mode

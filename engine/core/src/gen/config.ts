@@ -54,7 +54,11 @@ function normalize(raw: SwelteOptions | null | undefined): Required<SwelteOption
  *  `<root>/swelte.config.ts` default export during migration. */
 export async function loadConfig(root: string): Promise<Required<SwelteOptions>> {
 	const dir = resolve(root)
-	const files = [join(dir, 'svelte.config.js'), join(dir, 'svelte.config.ts'), join(dir, 'swelte.config.ts')]
+	const files = [
+		join(dir, 'svelte.config.js'),
+		join(dir, 'svelte.config.ts'),
+		join(dir, 'swelte.config.ts'),
+	]
 	for (const file of files) {
 		if (!existsSync(file)) continue
 		try {

@@ -21,8 +21,12 @@ outside `+route.v`) fail the build with file+line.
 (verb attributes take an optional `('qualifier')`; `@[sse]` is GET+`Accept: text/event-stream`, same qualifier rules) +
 `parseStructs` extracts `pub struct` fields. `@[rpc]` fns keep the
 single-args-struct rule (fn taking one struct param expands to that
-struct's fields in TS); verb handlers take the framework `Request`
-(shape with the dispatcher, roadmap item 1); `@[before]`/`@[after]`
+struct's fields, projected inline as an anonymous literal —
+`Parameters<typeof fn>[0]`-retrievable, no named import needed; the
+args struct is V-side only, not re-exported to TS); verb handlers
+take the framework `Request` (shape with the dispatcher, roadmap
+item 1) or narrow params (`(name string, age int)` → inline literal
+with `number` coercion server-side); `@[before]`/`@[after]`
 middleware (`+route.v` only, roadmap §7) exports no callables to TS —
 but the wrapper's `pub struct`s are still projected (wrapper is
 +layout-shaped, shared types flow to `+page.svelte`).
@@ -49,9 +53,10 @@ pub struct Session { pub: id string ... }
 generates `.swelte/types/routes/api/greet.d.ts`:
 
 ```ts
-export interface LoginArgs { payload: string; }
 export interface Session { id: string; user: string; remember: boolean; expires_at: number; }
 export type LoginResult = Session; // !T: may reject with SwelteRpcError
+export function login(args: { payload: string }): Promise<LoginResult>; // V LoginArgs
+type A = Parameters<typeof login>[0]; // { payload: string }
 ```
 
 Consumed per-importer (no `sdk.*`, no `$types`):
@@ -59,9 +64,9 @@ Consumed per-importer (no `sdk.*`, no `$types`):
 ```svelte
 <script lang="ts">
   import { login } from '#routes/api/greet.v';
-  import type { LoginArgs, Session } from '#routes/api/greet.v';
-  const args: LoginArgs = { payload: name };
-  const s: Session = await login(args);
+  import type { Session } from '#routes/api/greet.v';
+  const s: Session = await login({ payload: name });
+  type LoginA = Parameters<typeof login>[0]; // { payload: string }
 </script>
 ```
 

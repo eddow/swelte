@@ -2,7 +2,14 @@
 // `.v` files (codegen calls __swelteFetch / __swelteWasmCall).
 // Direct sdk.post/get/worker usage was removed with self/$ssapi/$csapi.
 
-export type Args = Record<string, unknown>
+export type ArgValue =
+	| string
+	| number
+	| boolean
+	| File
+	| Blob
+	| Array<string | number | boolean | File | Blob>
+export type Args = Record<string, ArgValue>
 
 export interface SwelteErrorShape {
 	error: string

@@ -234,7 +234,10 @@ also resolve narrow args from `form → query → params`. TS side:
 interpolate path params into the URL (`__swelteUrl`, params stripped
 from the payload, missing param throws client-side); `.d.ts` types
 dynamic params as required (`args: { id: string } &
-Record<string, string>`).
+SwelteFields`), narrow verb params inline (`(name string, age int)` →
+`args: { name: string; age: number }`, server coerces `?age=42` → `42`),
+loose verbs as `SwelteFields` (`string | number | boolean | File |
+Blob | [...]`, runtime JSON-strings non-strings).
 
 Build errors (file+line): malformed brackets, non-final catch-all,
 duplicate param in one path, same normalized shape across files —
