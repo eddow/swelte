@@ -1,7 +1,6 @@
 # build outputs — never commit
 .svelte/
-# generated V dispatcher (generate() -> routes/*.v at the PROJECT ROOT;
-# see roadmap item 1) — NOT src/routes/, which holds hand-written sources
+# legacy generated V dispatcher dir (pre-.swelte layout) — must stay empty
 /routes/
 dist/
 # compiled dev binary (`v -o server` / `v run` output)

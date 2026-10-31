@@ -74,9 +74,12 @@ export async function runDev(ctx: Ctx): Promise<void> {
 	const port = takePort(ctx.opts.port, 5174)
 	const backend = takePort(ctx.opts.backend, 8131)
 	const { resolveV, vVersion } = await import('../toolchain.js')
+	const { loadConfig } = await import('../gen/config.js')
 	const v = resolveV(import.meta.url)
 	ctx.log(`V toolchain: ${vVersion(v)} (${v})`)
 	ctx.log(`root ${root}`)
+	const cfg = await loadConfig(root)
+	const genAbs = join(root, cfg.outDir)
 	await killPort(port, ctx.log)
 	await killPort(backend, ctx.log)
 	const viteConfig = findViteConfig(root)
@@ -133,7 +136,9 @@ export async function runDev(ctx: Ctx): Promise<void> {
 		})
 	const spawnBackend = () => {
 		if (stopping) return
-		vChild = spawn(v, ['run', '.'], {
+		// Run the harness FILE: `v run .swelte/server.v` — V resolves
+		// `routes/` relative to it (dir target fails on dotted dirs).
+		vChild = spawn(v, ['run', join(genAbs, 'server.v')], {
 			cwd: root,
 			env: { ...process.env, PORT: String(backend) },
 			stdio: ['ignore', 'pipe', 'pipe'],
@@ -146,12 +151,16 @@ export async function runDev(ctx: Ctx): Promise<void> {
 		})
 	}
 	// `generate()` runs in Vite's configResolved — but `swelte dev` starts
-	// the V backend *before* Vite. Run it once here so `routes/` exists.
+	// the V backend *before* Vite. Run it once here so `.swelte/` exists.
 	try {
 		const { swelte } = await import('../vite.js')
-		const plug = swelte({}) as unknown as { configResolved?: (c: { root: string }) => void }
+		const plug = swelte({}) as unknown as {
+			buildStart?: () => Promise<void> | void
+			configResolved?: (c: { root: string }) => void
+		}
 		plug.configResolved?.({ root })
-		ctx.log('generated routes/ + .swelte/ (pre-Vite)')
+		await plug.buildStart?.()
+		ctx.log('generated .swelte/ (pre-Vite)')
 	} catch (e) {
 		ctx.log(`warning: pre-generate failed: ${(e as Error).message}`)
 	}

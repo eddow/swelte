@@ -34,22 +34,34 @@ export async function runBuild(ctx: Ctx): Promise<void> {
 	const root = resolve(String(ctx.opts.root ?? process.cwd()))
 	const outBinary = String(ctx.opts.output ?? join(root, 'dist', 'server'))
 	const { resolveV, vVersion } = await import('../toolchain.js')
+	const { loadConfig } = await import('../gen/config.js')
 	const v = resolveV(import.meta.url)
 	ctx.log(`V toolchain: ${vVersion(v)} (${v})`)
 	ctx.log(`root ${root}`)
-	// 1. v check: compile-check the project (server.v + generated routes/).
+	const cfg = await loadConfig(root)
+	const genAbs = join(root, cfg.outDir)
+	// 1. generate into .swelte/ (routes/*.v + server_gen.v + server.v harness).
 	try {
 		const { swelte } = await import('../vite.js')
-		const plug = swelte({}) as unknown as { configResolved?: (c: { root: string }) => void }
+		const plug = swelte({}) as unknown as {
+			buildStart?: () => Promise<void> | void
+			configResolved?: (c: { root: string }) => void
+		}
 		plug.configResolved?.({ root })
-		ctx.log('generated routes/ + .swelte/')
+		await plug.buildStart?.()
+		ctx.log('generated .swelte/')
 	} catch (e) {
 		throw new Error(`codegen failed: ${(e as Error).message}`)
 	}
-	// `v -o <tmp> .` typechecks (0.5.2 has no `v check`); /dev/null is not
-	// writable for V's output checks, so use a temp file and remove it.
-	const typecheckBin = join(root, '.swelte', 'typecheck')
-	const check = spawnSync(v, ['-o', typecheckBin, '.'], { cwd: root, encoding: 'utf8' })
+	// `v -o <tmp> <file>` typechecks (0.5.2 has no `v check`); /dev/null is
+	// not writable for V's output checks, so use a temp file and remove it.
+	// Target the harness FILE (`.swelte/server.v`): V resolves `routes/`
+	// relative to it. Targeting the dir fails — V skips dotted dirs.
+	const typecheckBin = join(genAbs, 'typecheck')
+	const check = spawnSync(v, ['-o', typecheckBin, join(genAbs, 'server.v')], {
+		cwd: root,
+		encoding: 'utf8',
+	})
 	try {
 		rmSync(typecheckBin, { force: true })
 	} catch {
@@ -68,9 +80,12 @@ export async function runBuild(ctx: Ctx): Promise<void> {
 	if (res.status !== 0) throw new Error(`vite build failed:\n${res.stderr || res.stdout}`)
 	ctx.log('vite build: ok')
 	// 4. `v -o` the server binary into dist/ AFTER the wipe (dist-adjacent,
-	// never the project root).
+	// never the project root). Target the harness file (see typecheck).
 	try {
-		execFileSync(v, ['-o', outBinary, '.'], { cwd: root, stdio: ['ignore', 'pipe', 'pipe'] })
+		execFileSync(v, ['-o', outBinary, join(genAbs, 'server.v')], {
+			cwd: root,
+			stdio: ['ignore', 'pipe', 'pipe'],
+		})
 	} catch (e) {
 		const err = e as { stderr?: Buffer; message?: string }
 		throw new Error(`v -o failed: ${err.stderr?.toString() ?? err.message}`)

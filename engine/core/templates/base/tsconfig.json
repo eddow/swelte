@@ -1,0 +1,21 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "strict": true,
+    "skipLibCheck": true,
+    "allowJs": true,
+    "checkJs": false,
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
+    "types": ["vite/client", "svelte"],
+    "paths": {
+      "#routes/*.v": ["./.swelte/types/routes/*.d.ts"],
+      "#lib/*.v": ["./.swelte/types/lib/*.d.ts"],
+      "#routes/*": ["./src/routes/*"],
+      "#lib/*": ["./src/lib/*"]
+    }
+  },
+  "include": ["src", "vite.config.ts", ".swelte/types", ".swelte/v-shim.d.ts"]
+}

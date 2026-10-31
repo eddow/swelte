@@ -1,5 +1,6 @@
 {
 	"npm.exclude": [
+		"**/templates/**",
 		"**/versions/**"
 	],
 	"cSpell.words": [

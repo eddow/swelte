@@ -8,14 +8,16 @@
   "exports": {
     ".": "./dist/index.js",
     "./vite": "./dist/vite.js",
-    "./cli": "./dist/cli.js"
+    "./cli": "./dist/cli.js",
+    "./config": "./dist/gen/config.js"
   },
   "bin": {
     "swelte": "./bin/swelte.js"
   },
   "files": [
     "dist",
-    "bin"
+    "bin",
+    "templates"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.json",

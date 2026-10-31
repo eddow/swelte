@@ -47,10 +47,13 @@ const previewCmd: Command = {
 
 const initCmd: Command = {
 	name: 'init',
-	summary: 'Scaffold a new Swelte project in <dir> (default my-swelte-app).',
+	summary: 'Scaffold a new Swelte project in <dir> (default my-swelte-app). Empty skeleton unless --sample.',
 	args: [
 		{ name: 'root', help: 'Parent dir for the scaffold', value: 'string' },
 		{ name: 'dir', help: 'Target directory name', value: 'string' },
+		{ name: 'sample', help: 'Include sample routes (demo api/admin/files/users)', value: 'boolean' },
+		{ name: 'empty', help: 'Empty skeleton only (no prompt)', value: 'boolean' },
+		{ name: 'template', help: 'Template to use: empty | sample', value: 'string' },
 	],
 	async run(ctx: Ctx) {
 		await runInit(ctx)
