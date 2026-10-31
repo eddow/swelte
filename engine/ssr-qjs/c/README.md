@@ -6,6 +6,9 @@
   https://bellard.org/quickjs/quickjs-2026-06-04.tar.xz
 - **License:** MIT (Fabrice Bellard / Charlie Gordon) — see upstream
   `LICENSE` in the tarball. Vendored files carry their upstream headers.
+  `swelte_qjs.*` additionally uses `js_free_rt` (declared in
+  `quickjs.h:417`, the runtime-allocator free) for bytecode copies that
+  outlive the compile runtime — same allocator family, not a private API.
 - **Upgrade:** re-download the tarball, copy the same file list below,
   rebuild. The glue (`swelte_qjs.*`) depends only on the public
   `quickjs.h` API (`JS_Eval`, `JS_EvalFunction` path via the module

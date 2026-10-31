@@ -47,7 +47,8 @@ int swelte_qjs_new_runtime(void);
 void swelte_qjs_free_runtime(int handle);
 
 // Render into the caller buffer. Returns needed length (>=0, excl. NUL),
-// or negative on failure (-1 js/timeout/mem, -2 no export, -3 load).
+// or negative on failure (-1 js/timeout/mem, -2 no export, -3 load,
+// -4 empty body: rendered, nothing inside — caller keeps the SPA shell).
 // `out_buf` always NUL-terminated when out_cap > 0 (possibly truncated).
 int swelte_qjs_render(int rt_handle, const char *mod_src, int mod_len,
                       const char *route, int route_len, const char *props,

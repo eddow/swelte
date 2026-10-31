@@ -65,18 +65,6 @@ export function whichCC(): string {
 	return ''
 }
 
-export function whichQjsc(): string {
-	try {
-		const probe = process.platform === 'win32' ? 'where' : 'which'
-		return execSync(`${probe} qjsc`, { stdio: ['ignore', 'pipe', 'ignore'] })
-			.toString()
-			.trim()
-			.split('\n')[0] as string
-	} catch {
-		return ''
-	}
-}
-
 export interface QjsProdOut {
 	lib: string
 	bridge: string
@@ -132,7 +120,19 @@ export function buildQjsProd(opts: {
 			const o = join(qjsDir, f.replace(/\.c$/, '.o'))
 			execFileSync(
 				cc,
-				['-O2', '-D_GNU_SOURCE', '-DCONFIG_VERSION="2026-06-04"', '-fwrapv', '-fPIC', '-I', cDir, '-c', join(cDir, f), '-o', o],
+				[
+					'-O2',
+					'-D_GNU_SOURCE',
+					'-DCONFIG_VERSION="2026-06-04"',
+					'-fwrapv',
+					'-fPIC',
+					'-I',
+					cDir,
+					'-c',
+					join(cDir, f),
+					'-o',
+					o,
+				],
 				{ stdio: ['ignore', 'pipe', 'pipe'], env: ccEnv }
 			)
 			objs.push(o)
@@ -142,12 +142,7 @@ export function buildQjsProd(opts: {
 	const timeoutMs = opts.timeoutMs ?? 50
 	const memoryMB = opts.memoryMB ?? 16
 	const bridge = join(genAbs, 'routes', 'swelte_qjs_bridge.v')
-	const raw = bridgeSrc(lib, cDir, timeoutMs, memoryMB)
-	const fixed = raw
-		.replace(/XXMUTXX buf := /g, 'mut buf := ')
-		.replace(/XXMUTXX big := /g, 'mut big := ')
-		.replace(/buf_cap := 64 \* 1024\n\tbig_cap := 1024 \* 1024\n\t/g, '')
-	writeFileSync(bridge, fixed)
+	writeFileSync(bridge, bridgeSrc(lib, cDir, timeoutMs, memoryMB))
 	const flags = `-I ${cDir} -L ${qjsDir} -lqjs -lm -lpthread -ldl`
 	return {
 		lib,
@@ -163,9 +158,10 @@ function bridgeSrc(lib: string, cDir: string, timeoutMs: number, memoryMB: numbe
 // from SWELTE_DIST (mtime-guarded cache), 50ms/16MB guards.
 //
 // OWNERSHIP: the glue never returns malloc'd pointers (V 0.5.2 autofree
-// would double-free them). V passes a fixed stack buffer; C copies the
-// HTML in and reports the needed length. Grow once (64KB→1MB), else SPA
-// fallback. Runtimes are C-side ints (V truncates u64 C values to 32b).
+// would double-free them). V passes a heap buffer; C copies the HTML in
+// and reports the needed length. Grow once (64KB→1MB), else SPA
+// fallback (-4 empty body → SPA shell, see swelte_qjs.h). Runtimes are
+// C-side ints (V truncates u64 C values to 32b).
 module routes
 
 import os
@@ -218,21 +214,26 @@ pub fn swelte_qjs_render_page(route string, props_json string) (string, bool) {
 	if src == '' || src.len <= 0 || src.len > 16 * 1024 * 1024 {
 		return '', false
 	}
-	buf_cap := 64 * 1024
-	big_cap := 1024 * 1024
-	XXMUTXX buf := [65536]u8{}
+	// Heap buffers ([]u8, not fixed arrays — 1MB of stack overflows
+	// constrained threads). &buf[0] requires V 0.5.x unsafe blocks.
+	mut buf := []u8{len: 65536}
 	mut rt := C.swelte_qjs_new_runtime()
 	if rt == 0 {
 		return '', false
 	}
-	mut need := C.swelte_qjs_render(rt, src.str, src.len, route.str, route.len, props_json.str, props_json.len, &char(&buf[0]), buf.len, swelte_qjs_timeout_ms(), swelte_qjs_mem_cap_mb())
+	mut need := 0
+	unsafe {
+		need = C.swelte_qjs_render(rt, src.str, src.len, route.str, route.len, props_json.str, props_json.len, &char(&buf[0]), buf.len, swelte_qjs_timeout_ms(), swelte_qjs_mem_cap_mb())
+	}
 	if need > buf.len - 1 {
 		if need > 1024 * 1024 {
 			C.swelte_qjs_free_runtime(rt)
 			return '', false
 		}
-		XXMUTXX big := [1048576]u8{}
-		need = C.swelte_qjs_render(rt, src.str, src.len, route.str, route.len, props_json.str, props_json.len, &char(&big[0]), big.len, swelte_qjs_timeout_ms(), swelte_qjs_mem_cap_mb())
+		mut big := []u8{len: 1048576}
+		unsafe {
+			need = C.swelte_qjs_render(rt, src.str, src.len, route.str, route.len, props_json.str, props_json.len, &char(&big[0]), big.len, swelte_qjs_timeout_ms(), swelte_qjs_mem_cap_mb())
+		}
 		if need > big.len - 1 || need < 0 {
 			C.swelte_qjs_free_runtime(rt)
 			return '', false
@@ -240,6 +241,11 @@ pub fn swelte_qjs_render_page(route string, props_json string) (string, bool) {
 		s := unsafe { (&char(&big[0])).vstring_with_len(need) }.clone()
 		C.swelte_qjs_free_runtime(rt)
 		return s, true
+	}
+	if need == -4 {
+		// Rendered but empty: keep the SPA shell (don't escalate to +error).
+		C.swelte_qjs_free_runtime(rt)
+		return '', true
 	}
 	if need < 0 {
 		C.swelte_qjs_free_runtime(rt)
@@ -249,5 +255,6 @@ pub fn swelte_qjs_render_page(route string, props_json string) (string, bool) {
 	C.swelte_qjs_free_runtime(rt)
 	return s, true
 }
+
 `
 }

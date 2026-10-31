@@ -1,17 +1,29 @@
 // SSR compiler (adapter-owned: core never imports svelte/compiler).
 // For each manifest route: compile the .svelte with `generate: 'server'`,
 // stub SDK imports (#routes → props, loadPage → identity), bundle the
-// route subtree with Rollup to a single IIFE. Tree-shaking drops the
+// route subtree with Rollup to a single ESM module. Tree-shaking drops the
 // async branch (verified: no `node:` strings survive for sync components).
 // Emits `dist/ssr/render.js` exporting
 // `renderRoute(route, props_json) -> { head, body }`.
 //
 // Guards (build errors with file+line):
 // - SDK imports (#routes/#lib, loadPage) in SSR-compiled components
-// - `node:` externals in the final bundle
-// - `fetch(` / top-level `await` (QJS-compat: pure-sync renderer)
+// - `node:` externals in the final bundle (+ dynamic import)
+// - top-level `fetch(` / top-level `await` in component sources
+//   (QJS-compat: pure-sync renderer; fetch inside handlers is fine)
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
-import { dirname, join, resolve } from 'node:path'
+import { dirname, join, resolve, sep } from 'node:path'
+import { posix } from 'node:path'
+
+/** posix-normalize a relative import against a `./`-relative module key. */
+function posixNormalize(fromKey: string, id: string): string {
+	return posix.normalize(posix.join(posix.dirname(fromKey), id))
+}
+
+/** Re-prefix a normalized key with `./` (`+error.svelte` → `./+error.svelte`). */
+function withDot(p: string): string {
+	return p.startsWith('./') || p.startsWith('/') ? p : './' + p
+}
 
 export interface SsrComposeOptions {
 	root: string
@@ -28,29 +40,207 @@ export interface SsrManifest {
 	wrappers: string[]
 }
 
-/** Build guard: node: externals, fetch, top-level await.
+/** Strip comments + string literals so the QJS-compat scan doesn't flag
+ * `// fetch(` in a comment or `"fetch("` inside a template. Line numbers
+ * are preserved (every char maps 1:1, newlines kept). With `keepStrings`
+ * the contents of string literals survive (newlines inside them kept) —
+ * used by assertNoNodeExternals, which looks *for* a string (`'node:…'`). */
+function stripForScan(
+	src: string,
+	keepStrings = false
+): { code: string; lineOf: (idx: number) => number } {
+	const lineStarts: number[] = [0]
+	for (let i = 0; i < src.length; i++) if (src[i] === '\n') lineStarts.push(i + 1)
+	const lineOf = (idx: number): number => {
+		let lo = 0
+		let hi = lineStarts.length - 1
+		while (lo < hi) {
+			const mid = (lo + hi + 1) >> 1
+			if (lineStarts[mid] <= idx) lo = mid
+			else hi = mid - 1
+		}
+		return lo + 1
+	}
+	let out = ''
+	let i = 0
+	let quote: string | null = null
+	while (i < src.length) {
+		const c = src[i]
+		const two = src.slice(i, i + 2)
+		if (quote) {
+			if (c === '\\') {
+				out += keepStrings ? src.slice(i, i + 2) : '  '
+				i += 2
+				continue
+			}
+			if (c === quote) {
+				quote = null
+				out += keepStrings ? c : ' '
+				i++
+				continue
+			}
+			out += c === '\n' ? '\n' : keepStrings ? c : ' '
+			i++
+			continue
+		}
+		if (two === '//') {
+			while (i < src.length && src[i] !== '\n') {
+				out += ' '
+				i++
+			}
+			continue
+		}
+		if (two === '/*') {
+			while (i < src.length && src.slice(i, i + 2) !== '*/') {
+				out += src[i] === '\n' ? '\n' : ' '
+				i++
+			}
+			out += '  '
+			i += 2
+			continue
+		}
+		if (c === '"' || c === "'" || c === '`') {
+			quote = c
+			out += keepStrings ? c : ' '
+			i++
+			continue
+		}
+		out += c
+		i++
+	}
+	return { code: out, lineOf }
+}
+
+/** Build guard: node: externals, top-level fetch, top-level await.
  * SDK *calls* at top level are checked separately (assertNoTopLevelStubCalls):
- * imports are fine; handler/lifecycle calls are fine. */
+ * imports are fine; handler/lifecycle calls are fine. `fetch(` nested inside
+ * a handler is allowed (it never runs during SSR) — only a top-level call
+ * would fire during render, so only that is rejected here. */
 export function assertQjsCompatible(file: string, src: string): void {
-	const lines = src.split('\n')
-	for (let i = 0; i < lines.length; i++) {
-		const line = lines[i]
-		if (/\bfrom\s+['"]node:/.test(line) || /\brequire\s*\(\s*['"]node:/.test(line)) {
+	const { code, lineOf } = stripForScan(src)
+	const at = (idx: number) => `${file}:${lineOf(idx)}`
+	for (const m of code.matchAll(/\bfrom\s+['"]node:/g)) {
+		throw new Error(
+			`[swelte:ssr-qjs] ${at(m.index ?? 0)}: node: externals are forbidden in SSR render.js (QJS has no node:)`
+		)
+	}
+	for (const m of code.matchAll(/\brequire\s*\(\s*['"]node:/g)) {
+		throw new Error(
+			`[swelte:ssr-qjs] ${at(m.index ?? 0)}: node: externals are forbidden in SSR render.js (QJS has no node:)`
+		)
+	}
+	for (const m of code.matchAll(/(^|[^A-Za-z0-9_$])fetch\s*\(/gm)) {
+		if (isTopLevelCall(code, (m.index ?? 0) + m[0].length)) {
 			throw new Error(
-				`[swelte:ssr-qjs] ${file}:${i + 1}: node: externals are forbidden in SSR render.js (QJS has no node:)`
+				`[swelte:ssr-qjs] ${at(m.index ?? 0)}: top-level fetch() is forbidden in SSR components (QuickJS-compat: JS stays pure-sync, load() lives in V; fetch inside handlers is fine)`
 			)
 		}
-		if (/(^|[^A-Za-z0-9_$])fetch\s*\(/.test(line)) {
-			throw new Error(
-				`[swelte:ssr-qjs] ${file}:${i + 1}: fetch() is forbidden in SSR components (QuickJS-compat: JS stays pure-sync, load() lives in V)`
-			)
+	}
+	// Top-level await: only Svelte component sources are scanned for this
+	// (bundle output is compiler-generated ESM — never has user TLA).
+	if (file.endsWith('.svelte')) {
+		for (const m of code.matchAll(/\bawait\s+/g)) {
+			const idStart = m.index ?? 0
+			if (isTopLevelAwait(code, idStart)) {
+				throw new Error(
+					`[swelte:ssr-qjs] ${at(idStart)}: top-level await is forbidden in SSR render.js (QuickJS-compat: pure-sync renderer)`
+				)
+			}
 		}
-		if (/^await\s+/m.test(src)) {
-			const idx = lines.findIndex((l) => /^await\s+/.test(l))
-			throw new Error(
-				`[swelte:ssr-qjs] ${file}:${idx + 1}: top-level await is forbidden in SSR render.js (QuickJS-compat: pure-sync renderer)`
-			)
+	}
+}
+
+/** True when the `fetch` call ending at `callEnd` sits at module top level
+ * (not nested in any function body). Assumes comments/strings stripped.
+ * Backward brace walk from the call: `}`/`{` and `)`/`(` adjust depth.
+ * A `{` that closes to depth 0 *before* reaching the statement start
+ * means the call is inside a block — then check whether that block
+ * belongs to a function/arrow (search the 200 chars before it for
+ * `function`, `=>`, or ` class `). Plain `{ if… }` blocks without a
+ * function opener still count as top-level (they run during SSR). */
+function isTopLevelCall(code: string, callEnd: number): boolean {
+	// Find enclosing block openers by walking back with depth.
+	let depth = 0
+	for (let j = callEnd - 1; j >= 0; j--) {
+		const c = code[j]
+		if (c === '}' || c === ')') depth++
+		else if (c === '{' || c === '(') {
+			if (depth > 0) {
+				depth--
+				continue
+			}
+			// depth 0 opener at j: does a function/arrow own this block?
+			const before = code.slice(Math.max(0, j - 200), j)
+			if (/\bfunction\b|=>|\bclass\b/.test(before.split(';').pop() ?? '')) return false
+			// Plain block (if/for/bare): keep walking outward.
+			continue
+		} else if (c === ';' && depth === 0) {
+			// Statement boundary without crossing a block: check the head.
+			const head = code.slice(j + 1, callEnd)
+			if (/\bfunction\b|\bclass\b/.test(head)) return false
+			return !/=>/.test(head)
 		}
+		if (j === 0) {
+			const head = code.slice(0, callEnd)
+			if (/\bfunction\b|\bclass\b/.test(head)) return false
+			return !/=>/.test(head)
+		}
+	}
+	return true
+}
+
+/** True when `await` at `idx` is not inside a function body (module TLA).
+ * Same backward-walk as isTopLevelCall: block openers checked for a
+ * function/arrow owner, statement heads for `function`/`class`/`=>`. */
+function isTopLevelAwait(code: string, idx: number): boolean {
+	let depth = 0
+	for (let j = idx - 1; j >= 0; j--) {
+		const c = code[j]
+		if (c === '}' || c === ')') depth++
+		else if (c === '{' || c === '(') {
+			if (depth > 0) {
+				depth--
+				continue
+			}
+			const before = code.slice(Math.max(0, j - 200), j)
+			if (/\bfunction\b|=>|\bclass\b/.test(before.split(';').pop() ?? '')) return false
+			continue
+		} else if (c === ';' && depth === 0) {
+			const head = code.slice(j + 1, idx)
+			if (/\bfunction\b|\bclass\b/.test(head)) return false
+			return !/=>/.test(head)
+		}
+		if (j === 0) {
+			const head = code.slice(0, idx)
+			if (/\bfunction\b|\bclass\b/.test(head)) return false
+			return !/=>/.test(head)
+		}
+	}
+	return true
+}
+
+/** node: externals only (bundle backstop; the full compat scan runs per
+ * component source where handler-vs-setup scope is knowable). Also catches
+ * dynamic `import("node:…")` that the source scan's static regexes miss. */
+export function assertNoNodeExternals(file: string, src: string): void {
+	// keepStrings: the specifier IS the signal — but comments still strip,
+	// so `// import x from 'node:fs'` (commented out) stays allowed.
+	const { code, lineOf } = stripForScan(src, true)
+	const at = (idx: number) => `${file}:${lineOf(idx)}`
+	for (const m of code.matchAll(/\bfrom\s+['"]node:/g)) {
+		throw new Error(
+			`[swelte:ssr-qjs] ${at(m.index ?? 0)}: node: externals are forbidden in SSR render.js (QJS has no node:)`
+		)
+	}
+	for (const m of code.matchAll(/\brequire\s*\(\s*['"]node:/g)) {
+		throw new Error(
+			`[swelte:ssr-qjs] ${at(m.index ?? 0)}: node: externals are forbidden in SSR render.js (QJS has no node:)`
+		)
+	}
+	for (const m of code.matchAll(/\bimport\s*\(\s*['"]node:/g)) {
+		throw new Error(
+			`[swelte:ssr-qjs] ${at(m.index ?? 0)}: node: externals are forbidden in SSR render.js (QJS has no node:)`
+		)
 	}
 }
 
@@ -90,7 +280,13 @@ function stubSdkImports(code: string, relFile: string): string {
 			const nm = (bits[bits.length - 1] as string).trim()
 			if (!nm || !/^[A-Za-z_$][A-Za-z0-9_$]*$/.test(nm) || nm === 'type') continue
 			defs.push(
-				'const ' + nm + " = () => { throw new Error('[swelte:ssr-qjs] " + relFile + ': ' + nm + "() called during SSR render'); };"
+				'const ' +
+					nm +
+					" = () => { throw new Error('[swelte:ssr-qjs] " +
+					relFile +
+					': ' +
+					nm +
+					"() called during SSR render'); };"
 			)
 		}
 		out.push(defs.join('\n'))
@@ -100,7 +296,7 @@ function stubSdkImports(code: string, relFile: string): string {
 	return out.join('')
 }
 
-/** Bundle compiled route modules + svelte runtime into one IIFE. */
+/** Bundle compiled route modules + svelte runtime into one ESM module. */
 export async function bundleSsr(modules: Map<string, string>, entry: string): Promise<string> {
 	const { rollup } = (await import('rollup')) as typeof import('rollup')
 	// svelte resolves from the adapter's own install (peer dep), falling
@@ -184,9 +380,21 @@ export async function bundleSsr(modules: Map<string, string>, entry: string): Pr
 			}
 			if (id.startsWith('.') && importer) {
 				const full = resolve(dirname(importer), id)
-				for (const cand of [full, `${full}.js`]) {
+				for (const cand of [full, `${full}.js`, `${full}.svelte`]) {
 					if (modules.has(cand)) return cand
 					if (existsSync(cand)) return cand
+				}
+				// Compiled-module keys are `./`-relative posix paths, keyed
+				// off the importer when it is one of them; the loader then
+				// serves the compiled source (raw .svelte never hits disk).
+				if (modules.has(importer)) {
+					const { posix, sep: psep } = await import('node:path')
+					const impDir = posix.dirname(importer)
+					const norm = posix.normalize(posix.join(impDir, id))
+					if (modules.has(norm)) return norm
+					// OS-sep variant (windows importer form).
+					const alt = norm.split(posix.sep).join(psep)
+					if (modules.has(alt)) return alt
 				}
 			}
 			return null
@@ -199,11 +407,18 @@ export async function bundleSsr(modules: Map<string, string>, entry: string): Pr
 	const { output } = await bundle.generate({ format: 'esm' })
 	await bundle.close()
 	const code = output[0].code
-	assertQjsCompatible('dist/ssr/render.js (bundle)', code)
+	// Bundle-level guard: node: externals only. fetch/top-level-await are
+	// checked per-component-source (assertQjsCompatible runs in
+	// compileSsrComponent) where handler-vs-setup scope is knowable;
+	// the bundle is compiler-generated ESM and handler fetch() calls in
+	// it are unreachable during SSR (only renderRoute runs).
+	assertNoNodeExternals('dist/ssr/render.js (bundle)', code)
 	return code
 }
 
-/** Full pipeline: manifest → per-route compile → bundle → IIFE string. */
+/** Full pipeline: manifest → per-route compile → bundle → ESM string.
+ * Module keys are `./`-relative posix paths (no build-machine absolutes
+ * leak into the bundle); the resolver maps them back to compiled sources. */
 export async function composeRenderJs(
 	manifest: SsrManifest,
 	opts: SsrComposeOptions
@@ -214,27 +429,48 @@ export async function composeRenderJs(
 
 	const compileFile = async (rel: string): Promise<string> => {
 		const abs = join(root, routesDir, rel)
-		if (modules.has(abs)) return abs
-		modules.set(abs, await compileSsrComponent(abs, `${routesDir}/${rel}`))
-		return abs
+		// Module keys are `./`-prefixed posix paths (`./+error.svelte`):
+		// posixNormalize('./admin/+page.svelte', '../+error.svelte')
+		// yields `+error.svelte` (no `./`), so re-prefix here.
+		const key = './' + rel.split(sep).join('/').replace(/^\.\//, '')
+		if (modules.has(key)) return key
+		// Normalize nested relative imports to module keys at compile time:
+		// `import ErrorPage from '../+error.svelte'` inside
+		// `./admin/+page.svelte` must resolve to `./+error.svelte` (the key
+		// form), not the raw relative id Rollup would hand the resolver.
+		// Order matters: error + wrappers first so every forward reference
+		// already has a key when a page is compiled.
+		let code = await compileSsrComponent(abs, `${routesDir}/${rel}`)
+		code = code.replace(/from\s*(['"])(\.[^'"]*)\1/g, (full, q: string, id: string) => {
+			const norm = withDot(posixNormalize(key, id))
+			if (modules.has(norm) || norm.endsWith('.svelte')) return `from ${q}${norm}${q}`
+			return full
+		})
+		modules.set(key, code)
+		return key
 	}
 
-	for (const r of manifest.routes) await compileFile(r.svelte)
-	for (const w of manifest.wrappers) await compileFile(w)
+	// Error page + wrappers first: pages import them relatively (`../+error`),
+	// so their keys must exist before page sources are normalized above.
 	if (manifest.error) await compileFile(manifest.error)
+	for (const w of manifest.wrappers) await compileFile(w)
+	for (const r of manifest.routes) await compileFile(r.svelte)
 
 	const table = manifest.routes
-		.map((r) => `  ${JSON.stringify(r.route)}: ${JSON.stringify(join(root, routesDir, r.svelte))},`)
+		.map(
+			(r) =>
+				`  ${JSON.stringify(r.route)}: ${JSON.stringify(withDot(r.svelte.split('/').join('/')))},`
+		)
 		.join('\n')
 	const entrySrc = `import { render } from 'svelte/internal/server';
-${[...modules.keys()].map((abs, i) => `import C${i} from ${JSON.stringify(abs)};`).join('\n')}
+${[...modules.keys()].map((key, i) => `import C${i} from ${JSON.stringify(key)};`).join('\n')}
 const PAGES = {
-${[...modules.keys()].map((abs, i) => `  ${JSON.stringify(abs)}: C${i},`).join('\n')}
+${[...modules.keys()].map((key, i) => `  ${JSON.stringify(key)}: C${i},`).join('\n')}
 };
 const ROUTES = {
 ${table}
 };
-const ERROR = ${manifest.error ? JSON.stringify(join(root, routesDir, manifest.error)) : 'null'};
+const ERROR = ${manifest.error ? JSON.stringify(withDot(manifest.error.split('/').join('/'))) : 'null'};
 function run(Component, props) {
   const out = render(Component, { props });
   return { head: out.head, body: '<div data-swelte-ssr="1">' + out.body + '</div>' };
@@ -262,15 +498,28 @@ export function renderRoute(route, props_json) {
 	return bundleSsr(modules, entryAbs)
 }
 
-/** Write `dist/ssr/render.js` (prod) or `.swelte/dev/render.js` (dev). */
+/** Write `dist/ssr/render.js` (prod) or `<outDir>/dev/render.js` (dev).
+ * Cleans `dist/ssr/` first in prod so a stale second file can't trip the
+ * single-artifact gate. */
 export async function emitRenderJs(
 	manifest: SsrManifest,
 	opts: SsrComposeOptions & { prod: boolean }
 ): Promise<string> {
 	const code = await composeRenderJs(manifest, opts)
+	const root = resolve(opts.root)
+	const defaultProd = join(root, 'dist/ssr/render.js')
+	if (opts.prod && !opts.outFile) {
+		try {
+			const { rmSync, readdirSync } = await import('node:fs')
+			for (const f of readdirSync(join(root, 'dist', 'ssr'))) {
+				if (f !== 'render.js') rmSync(join(root, 'dist', 'ssr', f))
+			}
+		} catch {
+			/* dist/ssr absent — mkdir below creates it */
+		}
+	}
 	const outFile =
-		opts.outFile ??
-		join(resolve(opts.root), opts.prod ? 'dist/ssr/render.js' : '.swelte/dev/render.js')
+		opts.outFile ?? (opts.prod ? defaultProd : join(root, '.swelte', 'dev', 'render.js'))
 	mkdirSync(dirname(outFile), { recursive: true })
 	writeFileSync(outFile, code)
 	return outFile

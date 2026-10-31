@@ -29,9 +29,7 @@ export async function runPreview(ctx: Ctx): Promise<void> {
 	let extra: Record<string, string> = {}
 	try {
 		if (!process.env.SWELTE_SSR && !process.env.SWELTE_SSR_URL) {
-			const { readdirSync } = await import('node:fs')
-			const routesDir = join(root, '.swelte', 'routes')
-			if (readdirSync(routesDir).some((f) => f === 'swelte_qjs_bridge.v')) {
+			if (existsSync(join(root, '.swelte', 'routes', 'swelte_qjs_bridge.v'))) {
 				extra = { SWELTE_SSR: '1' }
 				ctx.log('SSR: embedded QJS (SWELTE_SSR=1, bridge present)')
 			}

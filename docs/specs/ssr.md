@@ -22,16 +22,19 @@ This file keeps the binding constraints + what remains open.
 
 ## Open
 
-1. **QJS bytecode cache (done).** Runtime `JS_WriteObject` /
-   `JS_ReadObject` in the glue — no `qjsc` binary needed. One artifact
-   in `dist/ssr/` either way; 20× repeat-render in the gate.
+1. **`<svelte:head>` passthrough.** The glue copies only `body`; head
+   travels as `''` (`swelte_page_head` stub). For SEO/meta (the main SSR
+   use case) the bundle's `head` must reach `<!--ssr-head-->` — either
+   extend the C buffer contract to `head\0body` or add a second call.
+   Tracked, not yet implemented.
 2. **Dev auto-sidecar UX.** `runSsrDev` works; open is whether `swelte
    dev` should auto-boot it. Do not put engine startup in core.
 3. **`ssr-bun` (opt-in).** Same `POST {route, props} → {html, head}`
    protocol against `SWELTE_SSR_URL`. Async/streaming/Suspense, npm
    compat, opts out of single-artifact.
 4. **§5 gate as CI.** `runSsrCheck` covers sidecar + sidecar-via-Hand
-   + prod-binary + 20× repeat-render halves; remaining: `!T` → 500 HTML + server up,
+   + prod-binary + 20× repeat-render halves (marker-only assertions,
+   no `<main>` assumption); remaining: `!T` → 500 HTML + server up,
    bare-machine single artifact, HMR no-restart proof, bun streaming.
 
 ## Protocol (for implementers)

@@ -12,15 +12,17 @@
     "./cli": "./dist/cli.js",
     "./qjs": "./dist/qjs.js"
   },
-  "files": ["dist"],
+  "files": ["dist", "c", "shims"],
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "dev": "tsc -p tsconfig.json --watch"
+    "dev": "tsc -p tsconfig.json --watch",
+    "prepublishOnly": "npm run build"
   },
   "peerDependencies": {
     "@swelte/core": "^0.1.0",
     "svelte": "^5.0.0",
-    "vite": "^6.0.0"
+    "vite": "^6.0.0",
+    "rollup": "^4.0.0"
   },
   "devDependencies": {
     "@types/node": "^26.6.6",

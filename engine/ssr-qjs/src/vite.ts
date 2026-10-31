@@ -1,7 +1,7 @@
 // `swelte()` adapter wrapper: re-exports core's plugin, adds SSR build.
 // Extends `@swelte/core/vite`: same options pass through
-// (`vBackendUrl, routesDir, libDir`), engine behavior augments via
-// `generateBundle` (emit `dist/ssr/render.js`).
+// (`vBackendUrl, routesDir, libDir, outDir`), engine behavior augments via
+// `generateBundle` (emit `dist/ssr/render.js` + QJS link).
 //
 // Core remains completely clean — this module owns the dynamic imports
 // and build augmentation.

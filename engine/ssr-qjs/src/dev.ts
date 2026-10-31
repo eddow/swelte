@@ -15,14 +15,22 @@ export interface SsrDevOptions {
 	root: string
 	renderFile: string
 	port: number
+	/** Per-render budget in ms (default 50, 0 = none). Races the bundle call. */
+	renderTimeoutMs?: number
+	/** Max JSON body in bytes (default 1MB). Larger → 413, never buffered. */
+	maxBodyBytes?: number
 }
 
 export async function startSsrDevServer(opts: SsrDevOptions) {
-	const { root, renderFile } = opts
+	const { root } = opts
+	const renderFile = opts.renderFile
 	let mod: {
 		renderRoute: (route: string, props_json: string) => { head: string; body: string }
 	} | null = null
 	let mtime = 0
+	// Budget per render (dev-only parity with prod's ~50ms guard): slow
+	// renders race a timer; the loser is ignored and the caller gets 500
+	// → SPA fallback, so a stuck bundle can't hang Hand.
 
 	async function load() {
 		try {
@@ -41,10 +49,13 @@ export async function startSsrDevServer(opts: SsrDevOptions) {
 			if (typeof file === 'string' && file.endsWith('.svelte')) {
 				mtime = 0
 			}
-		})
+		}).unref?.()
 	} catch {
 		/* best-effort */
 	}
+
+	const renderTimeoutMs = opts.renderTimeoutMs ?? 50
+	const maxBodyBytes = opts.maxBodyBytes ?? 1024 * 1024
 
 	const server = createServer(async (req: IncomingMessage, res: ServerResponse) => {
 		if (req.method !== 'POST' || req.url !== '/') {
@@ -53,7 +64,24 @@ export async function startSsrDevServer(opts: SsrDevOptions) {
 			return
 		}
 		let raw = ''
-		for await (const chunk of req) raw += chunk
+		let tooBig = false
+		for await (const chunk of req) {
+			raw += chunk
+			if (raw.length > maxBodyBytes) {
+				tooBig = true
+				break
+			}
+		}
+		if (tooBig) {
+			res.writeHead(413, { 'content-type': 'application/json' })
+			res.end('{"error":"body too large"}')
+			try {
+				req.socket.destroy()
+			} catch {
+				/* ignore */
+			}
+			return
+		}
 		let route = ''
 		let props = '{}'
 		try {
@@ -72,7 +100,16 @@ export async function startSsrDevServer(opts: SsrDevOptions) {
 			return
 		}
 		try {
-			const out = mod.renderRoute(route, props)
+			const renderP = Promise.resolve().then(() => mod!.renderRoute(route, props))
+			const out =
+				renderTimeoutMs > 0
+					? await Promise.race([
+							renderP,
+							new Promise<never>((_, rej) =>
+								setTimeout(() => rej(new Error('render timeout')), renderTimeoutMs)
+							),
+						])
+					: await renderP
 			res.writeHead(200, { 'content-type': 'application/json' })
 			res.end(JSON.stringify({ html: out.body, head: out.head ?? '' }))
 		} catch (e) {
@@ -101,8 +138,13 @@ export function defaultSsrDevPort(): number {
 	return 8132
 }
 
-export function renderFileFor(root: string, outDir: string): string {
+export function renderFileFor(root: string, outDir: string, preferProd = true): string {
+	const dev = join(resolve(root), outDir, 'dev', 'render.js')
+	// Dev sidecars must read the dev bundle (HMR); prod (embedded QJS,
+	// SWELTE_SSR=1) reads dist/ssr/render.js itself. Preferring prod here
+	// would silently pin dev to a stale build after one `swelte build`.
+	if (!preferProd && existsSync(dev)) return dev
 	const prod = join(resolve(root), 'dist', 'ssr', 'render.js')
-	if (existsSync(prod)) return prod
-	return join(resolve(root), outDir, 'dev', 'render.js')
+	if (preferProd && existsSync(prod)) return prod
+	return dev
 }

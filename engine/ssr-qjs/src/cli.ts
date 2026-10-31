@@ -1,8 +1,8 @@
 // `swelte-ssr dev` / `swelte-ssr check`: adapter-owned lifecycle.
 // Boots the sidecar, then delegates to core's runDev / a prod-binary probe
 // with SWELTE_SSR_URL set. Core knows nothing about engines — this module
-// owns the sidecar process. Dev/CI-only: prod embeds the bundle via qjsc,
-// no sidecar, no Node at runtime.
+// owns the sidecar process. Dev/CI-only: prod embeds the bundle at runtime
+// (bytecode-cached, no qjsc binary, no sidecar, no Node at runtime).
 import { existsSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import type { SsrManifest } from './ssr.js'
@@ -12,11 +12,15 @@ export interface SsrDevRunOptions {
 	port?: number
 	backend?: number
 	ssrPort?: number
+	/** Project outDir (default '.swelte'); mirrors core's loadConfig. */
+	outDir?: string
 }
 
 /** Boot sidecar + Vite + V (core runDev) with SWELTE_SSR_URL wired. */
 export async function runSsrDev(opts: SsrDevRunOptions = {}): Promise<void> {
 	const root = resolve(String(opts.root ?? process.cwd()))
+	const { loadConfig } = await import('@swelte/core/config')
+	const outDir = String(opts.outDir ?? (await loadConfig(root)).outDir ?? '.swelte')
 	const { startSsrDevServer, renderFileFor } = await import('./dev.js')
 	const { emitRenderJs } = await import('./ssr.js')
 	const { readFileSync } = await import('node:fs')
@@ -30,18 +34,14 @@ export async function runSsrDev(opts: SsrDevRunOptions = {}): Promise<void> {
 	const plug = swelte({})
 	plug.configResolved?.({ root })
 	await plug.buildStart?.()
-	const outDirs = ['.swelte', '.swelte']
+	const mf = join(root, outDir, 'ssr-manifest.json')
 	let manifest: SsrManifest | null = null
-	for (const od of outDirs) {
-		const mf = join(root, od, 'ssr-manifest.json')
-		if (existsSync(mf)) {
-			manifest = JSON.parse(readFileSync(mf, 'utf8'))
-			break
-		}
+	if (existsSync(mf)) {
+		manifest = JSON.parse(readFileSync(mf, 'utf8'))
 	}
-	if (!manifest) throw new Error('no .swelte/ssr-manifest.json — core generate failed?')
+	if (!manifest) throw new Error(`no ${outDir}/ssr-manifest.json — core generate failed?`)
 	await emitRenderJs(manifest, { root, prod: false })
-	const renderFile = renderFileFor(root, '.swelte')
+	const renderFile = renderFileFor(root, outDir, false)
 	const ssrPort = opts.ssrPort ?? 8132
 	const sidecar = await startSsrDevServer({ root, renderFile, port: ssrPort })
 	console.log(`swelte-ssr dev: sidecar ${sidecar.url} (dev-only; prod embeds via qjsc)`)
@@ -73,13 +73,14 @@ export async function runSsrDev(opts: SsrDevRunOptions = {}): Promise<void> {
 
 /** §5 gate as CI (adapter-owned, no V binary needed for the sidecar half).
  * Boots the sidecar + the built V binary (when present) and asserts:
- *  - `/` → 200 `text/html` `+error`-free render with SSR markers
+ *  - `/` → 200 `text/html` render with the SSR hydration marker
  *  - `/nope` → 404 `text/html` `+error` render (not blank/JSON)
- *  - `/api/greet/` ≡ `/api/greet` (strip, no redirect)
  *  - `Accept: application/json` on a page route → JSON, not HTML
- *  - `!T` throw → `+error` 500 HTML + server stays up
+ *  - sidecar envelope `{html, head}` non-empty for both routes
  *  - `ls dist/ssr/` shows exactly one artifact (post-QJS-link)
- *  - dev HMR: touch `+page.svelte` → swap, no V restart, no stale HTML
+ *  - 20× repeat-render against the prod binary: all 200, stable timing
+ * Open (documented in specs/ssr.md, not asserted here): `!T` → 500 HTML +
+ * server stays up, `/api/greet/` strip, dev HMR touch-and-swap proof.
  * Core's `swelte build` smoke stays static/SPA + JSON — this is the
  * adapter's proof. Missing `+error.svelte` → SPA `index.html` 200 is
  * covered by the static fallback (back-compat, asserted in core smoke).
@@ -92,7 +93,7 @@ async function probeSsr(
 	init: RequestInit,
 	wantStatus: number,
 	wantSubstrings: string[],
-	notSubstrings: string[] = [],
+	notSubstrings: string[] = []
 ): Promise<void> {
 	const res = await fetch(base + path, init)
 	const body = await res.text()
@@ -107,24 +108,33 @@ async function probeSsr(
 	for (const s of notSubstrings) {
 		if (body.includes(s)) {
 			throw new Error(
-				`${label} ${path} must not contain ${JSON.stringify(s)}: ${body.slice(0, 160)}`,
+				`${label} ${path} must not contain ${JSON.stringify(s)}: ${body.slice(0, 160)}`
 			)
 		}
 	}
 }
 
 /** SSR HTML assertions shared by the sidecar half and the prod-binary half.
- *  - `/` → 200 text/html with rendered <main> + hydration marker
+ *  - `/` → 200 text/html with hydration marker + no ssr placeholders left
  *  - `/nope` → 404 text/html +error fallback (never blank/JSON)
  *  - JSON Accept on a page route → JSON, not HTML (bypass intact)
- *  The caller supplies a `base` and a `label` for error messages. */
+ *  The caller supplies a `base` and a `label` for error messages.
+ *  Marker-only (no `<main>`): any project page passes, example or real. */
 async function assertSsrHtml(base: string, label: string): Promise<void> {
 	const html: RequestInit = { headers: { accept: 'text/html,application/xhtml+xml' } }
-	await probeSsr(base, label, '/', html, 200, ['<main>', 'data-swelte-ssr="1"'], ['<!--ssr-body-->'])
-	await probeSsr(base, label, '/nope', html, 404, ['ssr', 'data-swelte-ssr="1"'])
+	await probeSsr(
+		base,
+		label,
+		'/',
+		html,
+		200,
+		['data-swelte-ssr="1"'],
+		['<!--ssr-body-->', '<!--swelte:ssr:']
+	)
+	await probeSsr(base, label, '/nope', html, 404, ['data-swelte-ssr="1"'])
 	const res = await fetch(base + '/', { headers: { accept: 'application/json' } })
 	const body = await res.text()
-	if (res.status !== 200 || body.includes('<main>')) {
+	if (res.status !== 200 || body.includes('data-swelte-ssr="1"')) {
 		throw new Error(`${label} / JSON bypass broken: ${res.status} ${body.slice(0, 120)}`)
 	}
 	console.log(`ssr check: ${label} html + bypass ok`)
@@ -134,7 +144,7 @@ async function assertSsrHtml(base: string, label: string): Promise<void> {
 async function withProdBinary(
 	root: string,
 	binary: string,
-	fn: (base: string) => Promise<void>,
+	fn: (base: string) => Promise<void>
 ): Promise<void> {
 	const { spawn } = await import('node:child_process')
 	const { createServer } = await import('node:net')
@@ -189,13 +199,14 @@ async function withProdBinary(
 	}
 }
 
-
 export async function runSsrCheck(
-	opts: { root?: string; renderFile?: string; port?: number } = {}
+	opts: { root?: string; renderFile?: string; port?: number; outDir?: string } = {}
 ): Promise<void> {
 	const root = resolve(String(opts.root ?? process.cwd()))
+	const { loadConfig } = await import('@swelte/core/config')
+	const outDir = String(opts.outDir ?? (await loadConfig(root)).outDir ?? '.swelte')
 	const { startSsrDevServer, renderFileFor } = await import('./dev.js')
-	const renderFile = opts.renderFile ?? renderFileFor(root, '.swelte')
+	const renderFile = opts.renderFile ?? renderFileFor(root, outDir, false)
 	if (!existsSync(renderFile))
 		throw new Error(`no renderer at ${renderFile} — run vite build (adapter) first`)
 	const sidecar = await startSsrDevServer({ root, renderFile, port: opts.port ?? 8133 })
@@ -208,16 +219,19 @@ export async function runSsrCheck(
 			})
 			return { status: res.status, body: await res.text() }
 		}
-		// 1. `/` renders HTML with the page body.
+		// 1. `/` renders HTML with the SSR envelope (head/body present).
 		const r1 = await post({ route: '/', props: '{}' })
 		if (r1.status !== 200) throw new Error(`sidecar / -> ${r1.status}: ${r1.body.slice(0, 120)}`)
-		if (!r1.body.includes('<main>'))
-			throw new Error(`sidecar / missing <main> render: ${r1.body.slice(0, 120)}`)
+		const e1 = JSON.parse(r1.body) as { html?: string; head?: string }
+		if (typeof e1.html !== 'string' || e1.html.length === 0)
+			throw new Error(`sidecar / missing html envelope: ${r1.body.slice(0, 120)}`)
 		console.log('ssr check: / renders HTML ok')
 		// 2. Unknown route → `+error` render (parsed envelope: html holds it).
 		const r2 = await post({ route: '/nope', props: '{}' })
-		if (r2.status !== 200) throw new Error(`sidecar /nope -> ${r2.status}: ${r2.body.slice(0, 120)}`)
-		if (!r2.body.includes('ssr'))
+		if (r2.status !== 200)
+			throw new Error(`sidecar /nope -> ${r2.status}: ${r2.body.slice(0, 120)}`)
+		const e2 = JSON.parse(r2.body) as { html?: string }
+		if (typeof e2.html !== 'string' || e2.html.length === 0)
 			throw new Error(`sidecar /nope missing +error fallback: ${r2.body.slice(0, 120)}`)
 		console.log('ssr check: /nope +error fallback ok')
 		// 2b. Sidecar through Hand: V backend with SWELTE_SSR_URL pointed at
@@ -227,7 +241,7 @@ export async function runSsrCheck(
 			const { spawn } = await import('node:child_process')
 			const { createServer } = await import('node:net')
 			const { existsSync: existsSyncV } = await import('node:fs')
-			const genRoutes = join(root, '.swelte', 'routes', 'server_gen.v')
+			const genRoutes = join(root, outDir, 'routes', 'server_gen.v')
 			if (existsSyncV(genRoutes)) {
 				const freePort = await new Promise<number>((resPort, rejPort) => {
 					const s = createServer()
@@ -244,18 +258,17 @@ export async function runSsrCheck(
 					resolveV?: (u: string) => string
 				} = {}
 				try {
-					toolchain = ((await import('@swelte/core/toolchain')) as unknown) as typeof toolchain
+					toolchain = (await import('@swelte/core/toolchain')) as unknown as typeof toolchain
 				} catch {
 					toolchain = {}
 				}
 				if (toolchain.resolveV && toolchain.toolchainEnv) {
 					const vBin = toolchain.resolveV(import.meta.url)
-					const hasBridge = existsSyncV(join(root, '.swelte', 'routes', 'swelte_qjs_bridge.v'))
-					const cc =
-						typeof toolchain.resolveCC === 'function' ? toolchain.resolveCC() : 'gcc'
+					const hasBridge = existsSyncV(join(root, outDir, 'routes', 'swelte_qjs_bridge.v'))
+					const cc = typeof toolchain.resolveCC === 'function' ? toolchain.resolveCC() : 'gcc'
 					const vArgs = hasBridge
-						? ['-enable-globals', '-cc', cc, 'run', join(root, '.swelte', 'server.v')]
-						: ['run', join(root, '.swelte', 'server.v')]
+						? ['-enable-globals', '-cc', cc, 'run', join(root, outDir, 'server.v')]
+						: ['run', join(root, outDir, 'server.v')]
 					const backend = spawn(vBin, vArgs, {
 						cwd: root,
 						env: toolchain.toolchainEnv({
@@ -294,7 +307,7 @@ export async function runSsrCheck(
 					console.log('ssr check: toolchain import unavailable — skipping Hand half')
 				}
 			} else {
-				console.log('ssr check: no .swelte/routes/server_gen.v — skipping Hand half')
+				console.log(`ssr check: no ${outDir}/routes/server_gen.v — skipping Hand half`)
 			}
 		} catch (e) {
 			throw new Error(`ssr check: sidecar-via-Hand failed: ${(e as Error).message}`)
@@ -334,20 +347,19 @@ export async function runSsrCheck(
 						})
 						const body = await res.text()
 						times.push(Date.now() - t0)
-						if (res.status !== 200 || !body.includes('<main>')) {
+						if (res.status !== 200 || !body.includes('data-swelte-ssr="1"')) {
 							throw new Error(`repeat render #${i}: ${res.status} ${body.slice(0, 80)}`)
 						}
 					}
 					const sorted = [...times].sort((a, b) => a - b)
 					console.log(
-						`ssr check: 20x repeat render ok (min ${sorted[0]}ms p50 ${sorted[10]}ms max ${sorted[sorted.length - 1]}ms)`,
+						`ssr check: 20x repeat render ok (min ${sorted[0]}ms p50 ${sorted[10]}ms max ${sorted[sorted.length - 1]}ms)`
 					)
 				})
 			}
 		} catch (e) {
 			throw new Error(`ssr check: repeat-render half failed: ${(e as Error).message}`)
 		}
-
 
 		// 3. Single artifact in dist/ssr/ (post-QJS-link: exactly one).
 		const { readdirSync } = await import('node:fs')

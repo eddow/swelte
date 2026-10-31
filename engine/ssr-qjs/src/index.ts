@@ -10,6 +10,7 @@ export * from '@swelte/core'
 export { VERSION } from '@swelte/core'
 export { swelte } from './vite.js'
 export {
+	assertNoNodeExternals,
 	assertNoTopLevelStubCalls,
 	assertQjsCompatible,
 	bundleSsr,
@@ -27,6 +28,5 @@ export {
 	buildQjsProd,
 	qjsCDir,
 	whichCC,
-	whichQjsc,
 	type QjsProdOut,
 } from './qjs.js'

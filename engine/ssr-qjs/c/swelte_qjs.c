@@ -5,24 +5,31 @@
 #include <string.h>
 #include <time.h>
 
+#include <pthread.h>
+
 #include "quickjs.h"
 #include "swelte_qjs.h"
 
 #define SWELTE_QJS_MAX_RUNTIMES 64
 
 /* Bytecode cache: one compiled module per distinct bundle, shared by all
- * runtimes. The bundle is keyed by FNV-1a hash of its bytes + length, so a
+ * runtimes. The bundle is keyed by FNV-1a hash + length + full byte compare
+ * on hit (hash collision would otherwise serve a stale bundle), so a
  * redeploy (mtime change → new bytes) compiles once and the old entry is
  * replaced. Guarded budgets stay per-render: the cache only skips the
  * per-runtime *parse* (~2ms of the 3–12ms wall); each render still gets a
  * fresh JSContext, interrupt handler, and memory limit.
- * Single-threaded V (`--threads` aside): no lock. Node sidecars aside,
- * the V binary runs renders on one thread at a time here. */
+ * V's veb serves requests on a thread pool, so the table, its ring cursor,
+ * and the runtime handle table are guarded by a mutex. Bytecode blobs are
+ * immutable once published; the loader only reads under the same mutex. */
 #define SWELTE_QJS_MAX_CACHED 4
+
+static pthread_mutex_t swelte_qjs_mu = PTHREAD_MUTEX_INITIALIZER;
 
 typedef struct {
     uint64_t hash;
     size_t len;
+    char *src;
     uint8_t *bc;
     size_t bc_len;
 } swelte_qjs_cached;
@@ -41,11 +48,12 @@ static uint64_t swelte_qjs_hash(const char *s, int len) {
     return h;
 }
 
-static swelte_qjs_cached *swelte_qjs_cache_lookup(const char *s, int len) {
-    uint64_t h = swelte_qjs_hash(s, len);
+static swelte_qjs_cached *swelte_qjs_cache_lookup_locked(const char *s, int len) {
+    uint64_t h = swelte_qjs_hash(s, (size_t)len);
     for (int i = 0; i < SWELTE_QJS_MAX_CACHED; i++) {
         if (swelte_qjs_cache_tbl[i].bc && swelte_qjs_cache_tbl[i].hash == h &&
-            swelte_qjs_cache_tbl[i].len == (size_t)len) {
+            swelte_qjs_cache_tbl[i].len == (size_t)len &&
+            memcmp(swelte_qjs_cache_tbl[i].src, s, (size_t)len) == 0) {
             return &swelte_qjs_cache_tbl[i];
         }
     }
@@ -56,26 +64,36 @@ static JSRuntime *swelte_qjs_rts[SWELTE_QJS_MAX_RUNTIMES];
 static int swelte_qjs_rt_used[SWELTE_QJS_MAX_RUNTIMES];
 
 int swelte_qjs_new_runtime(void) {
+    pthread_mutex_lock(&swelte_qjs_mu);
     for (int i = 0; i < SWELTE_QJS_MAX_RUNTIMES; i++) {
         if (!swelte_qjs_rt_used[i]) {
             JSRuntime *rt = JS_NewRuntime();
-            if (!rt)
+            if (!rt) {
+                pthread_mutex_unlock(&swelte_qjs_mu);
                 return 0;
+            }
             swelte_qjs_rts[i] = rt;
             swelte_qjs_rt_used[i] = 1;
+            pthread_mutex_unlock(&swelte_qjs_mu);
             return i + 1;
         }
     }
+    pthread_mutex_unlock(&swelte_qjs_mu);
     return 0;
 }
 
 void swelte_qjs_free_runtime(int handle) {
+    pthread_mutex_lock(&swelte_qjs_mu);
     int i = handle - 1;
-    if (i < 0 || i >= SWELTE_QJS_MAX_RUNTIMES || !swelte_qjs_rt_used[i])
+    if (i < 0 || i >= SWELTE_QJS_MAX_RUNTIMES || !swelte_qjs_rt_used[i]) {
+        pthread_mutex_unlock(&swelte_qjs_mu);
         return;
+    }
     swelte_qjs_rt_used[i] = 0;
-    JS_FreeRuntime(swelte_qjs_rts[i]);
+    JSRuntime *rt = swelte_qjs_rts[i];
     swelte_qjs_rts[i] = NULL;
+    pthread_mutex_unlock(&swelte_qjs_mu);
+    JS_FreeRuntime(rt);
 }
 
 typedef struct {
@@ -133,9 +151,14 @@ static JSModuleDef *swelte_qjs_loader(JSContext *ctx, const char *name, void *op
 /* Compile the source bundle to bytecode once (per distinct bytes) and pin
  * it in the cache table (ring of 4). Returns the cache entry, or NULL on
  * compile failure (caller falls back to the source path). A throwaway
- * runtime+context does the compile so the render runtime is untouched. */
+ * runtime+context does the compile so the render runtime is untouched.
+ * Thread-safe: hit check + publish under the mutex; the compile itself
+ * runs unlocked. A second thread racing the same bundle dedupes on
+ * publish (lookup before insert); the loser's copy is freed. */
 static swelte_qjs_cached *swelte_qjs_ensure_bytecode(const char *src, int len) {
-    swelte_qjs_cached *hit = swelte_qjs_cache_lookup(src, len);
+    pthread_mutex_lock(&swelte_qjs_mu);
+    swelte_qjs_cached *hit = swelte_qjs_cache_lookup_locked(src, len);
+    pthread_mutex_unlock(&swelte_qjs_mu);
     if (hit)
         return hit;
     JSRuntime *rt = JS_NewRuntime();
@@ -146,7 +169,6 @@ static swelte_qjs_cached *swelte_qjs_ensure_bytecode(const char *src, int len) {
         JS_FreeRuntime(rt);
         return NULL;
     }
-    swelte_qjs_cached *slot = NULL;
     JSValue mod = JS_Eval(ctx, src, (size_t)len, "render.js",
                            JS_EVAL_TYPE_MODULE | JS_EVAL_FLAG_COMPILE_ONLY);
     if (JS_IsException(mod)) {
@@ -165,25 +187,39 @@ static swelte_qjs_cached *swelte_qjs_ensure_bytecode(const char *src, int len) {
     /* Malloc-copy BEFORE freeing the compile runtime: bc lives in the
      * runtime's allocator and dies with it. js_free_rt while rt is alive. */
     uint8_t *copy = (uint8_t *)malloc(bc_len ? bc_len : 1);
-    if (!copy) {
+    char *srccopy = (char *)malloc((size_t)len ? (size_t)len : 1);
+    if (!copy || !srccopy) {
+        free(copy);
+        free(srccopy);
         js_free_rt(rt, bc);
         JS_FreeContext(ctx);
         JS_FreeRuntime(rt);
         return NULL;
     }
     memcpy(copy, bc, bc_len);
+    memcpy(srccopy, src, (size_t)len);
     js_free_rt(rt, bc);
     JS_FreeContext(ctx);
     JS_FreeRuntime(rt);
-    /* Ring-replace the oldest entry. */
-    slot = &swelte_qjs_cache_tbl[swelte_qjs_cache_next];
+    /* Publish under the lock; dedupe a racy twin insert. */
+    pthread_mutex_lock(&swelte_qjs_mu);
+    hit = swelte_qjs_cache_lookup_locked(srccopy, len);
+    if (hit) {
+        pthread_mutex_unlock(&swelte_qjs_mu);
+        free(copy);
+        free(srccopy);
+        return hit;
+    }
+    swelte_qjs_cached *slot = &swelte_qjs_cache_tbl[swelte_qjs_cache_next];
     swelte_qjs_cache_next = (swelte_qjs_cache_next + 1) % SWELTE_QJS_MAX_CACHED;
-    if (slot->bc)
-        free(slot->bc);
-    slot->hash = swelte_qjs_hash(src, len);
+    free(slot->src);
+    free(slot->bc);
+    slot->hash = swelte_qjs_hash(srccopy, len);
     slot->len = (size_t)len;
+    slot->src = srccopy;
     slot->bc = copy;
     slot->bc_len = bc_len;
+    pthread_mutex_unlock(&swelte_qjs_mu);
     return slot;
 }
 
@@ -193,10 +229,13 @@ int swelte_qjs_render(int rt_handle, const char *mod_src, int mod_len,
                       int timeout_ms, unsigned mem_cap_mb) {
     if (out_cap > 0 && out_buf)
         out_buf[0] = 0;
+    pthread_mutex_lock(&swelte_qjs_mu);
     int i = rt_handle - 1;
-    if (i < 0 || i >= SWELTE_QJS_MAX_RUNTIMES || !swelte_qjs_rt_used[i])
+    int valid = (i >= 0 && i < SWELTE_QJS_MAX_RUNTIMES && swelte_qjs_rt_used[i]);
+    JSRuntime *rt = valid ? swelte_qjs_rts[i] : NULL;
+    pthread_mutex_unlock(&swelte_qjs_mu);
+    if (!valid || !rt)
         return -3;
-    JSRuntime *rt = swelte_qjs_rts[i];
     if (!mod_src || mod_len <= 0 || !route || !props || !out_buf || out_cap <= 1)
         return -3;
     if (mem_cap_mb > 0)
@@ -211,30 +250,62 @@ int swelte_qjs_render(int rt_handle, const char *mod_src, int mod_len,
     holder.len = mod_len;
     holder.bc = NULL;
     holder.bc_len = 0;
-    /* Prefer cached bytecode (compile once per bundle bytes, reuse across
-     * renders); miss or compile failure → source path in the loader. */
+    /* Snapshot the cached bytecode pointer under the lock: the ring may
+     * evict this entry while we compile the driver on our own runtime.
+     * Refcount by malloc-copy (small, ~bytes of the bundle's compiled
+     * form is KBs, not the source) so the entry can rotate freely. */
+    const uint8_t *use_bc = NULL;
+    size_t use_bc_len = 0;
+    uint8_t *bc_snap = NULL;
     swelte_qjs_cached *cached = swelte_qjs_ensure_bytecode(mod_src, mod_len);
+    pthread_mutex_lock(&swelte_qjs_mu);
     if (cached && cached->bc && cached->bc_len > 0) {
-        holder.bc = cached->bc;
-        holder.bc_len = cached->bc_len;
+        bc_snap = (uint8_t *)malloc(cached->bc_len ? cached->bc_len : 1);
+        if (bc_snap) {
+            memcpy(bc_snap, cached->bc, cached->bc_len);
+            use_bc = bc_snap;
+            use_bc_len = cached->bc_len;
+        }
     }
+    pthread_mutex_unlock(&swelte_qjs_mu);
+    holder.bc = use_bc;
+    holder.bc_len = use_bc_len;
     JS_SetModuleLoaderFunc(rt, NULL, swelte_qjs_loader, &holder);
     JSContext *ctx = JS_NewContext(rt);
-    if (!ctx)
+    if (!ctx) {
+        free(bc_snap);
         return -3;
+    }
     int rc = -3;
     char rbuf[4096];
-    char pbuf[65536];
-    if (route_len >= (int)sizeof(rbuf) - 1 || props_len >= (int)sizeof(pbuf) - 1) {
+    /* Route/props cross as length-delimited C strings; allocate by length
+     * (props routinely exceed the old 64KB stack slot on data-heavy
+     * @[load] pages). Oversize-but-sane inputs render; absurd ones (>1MB
+     * props) fall back to SPA with -3 rather than OOMing the render. */
+    char *rdup = NULL;
+    char *pdup = NULL;
+    if (route_len < 0 || props_len < 0 || route_len >= 65536 || props_len >= 1024 * 1024) {
+        free(bc_snap);
         JS_FreeContext(ctx);
         if (timeout_ms > 0)
             JS_SetInterruptHandler(rt, NULL, NULL);
         return -3;
     }
-    memcpy(rbuf, route, (size_t)route_len);
-    rbuf[route_len] = 0;
-    memcpy(pbuf, props, (size_t)props_len);
-    pbuf[props_len] = 0;
+    rdup = (char *)malloc((size_t)route_len + 1);
+    pdup = (char *)malloc((size_t)props_len + 1);
+    if (!rdup || !pdup) {
+        free(rdup);
+        free(pdup);
+        free(bc_snap);
+        JS_FreeContext(ctx);
+        if (timeout_ms > 0)
+            JS_SetInterruptHandler(rt, NULL, NULL);
+        return -3;
+    }
+    memcpy(rdup, route, (size_t)route_len);
+    rdup[route_len] = 0;
+    memcpy(pdup, props, (size_t)props_len);
+    pdup[props_len] = 0;
     static const char drv[] = "import { renderRoute } from 'render.js'; globalThis.__rr = renderRoute;";
     JSValue v = JS_Eval(ctx, drv, sizeof(drv) - 1, "<swelte-drv>", JS_EVAL_TYPE_MODULE);
     if (JS_IsException(v))
@@ -254,8 +325,8 @@ int swelte_qjs_render(int rt_handle, const char *mod_src, int mod_len,
         rc = -2;
         goto done;
     }
-    JSValue js_route = JS_NewString(ctx, rbuf);
-    JSValue js_props = JS_NewString(ctx, pbuf);
+    JSValue js_route = JS_NewString(ctx, rdup);
+    JSValue js_props = JS_NewString(ctx, pdup);
     JSValue argv[2] = { js_route, js_props };
     JSValue ret = JS_Call(ctx, fn, g, 2, argv);
     JS_FreeValue(ctx, js_route);
@@ -284,7 +355,10 @@ int swelte_qjs_render(int rt_handle, const char *mod_src, int mod_len,
     }
     if (blen == 0) {
         JS_FreeCString(ctx, bs);
-        rc = -2;
+        /* Empty body ≠ missing export: <0 would force a +error render.
+         * -4 tells the V caller "rendered, nothing inside" so it keeps
+         * the static SPA shell instead of escalating to +error. */
+        rc = -4;
         goto done;
     }
     {
@@ -295,6 +369,9 @@ int swelte_qjs_render(int rt_handle, const char *mod_src, int mod_len,
         rc = (int)blen;
     }
 done:
+    free(rdup);
+    free(pdup);
+    free(bc_snap);
     JS_FreeContext(ctx);
     if (timeout_ms > 0)
         JS_SetInterruptHandler(rt, NULL, NULL);

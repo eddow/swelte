@@ -20,9 +20,8 @@ src/
   vite.ts     swelte() wrapper: core plugin + generateBundle → dist/ssr/render.js + QJS link
   ssr.ts      composeRenderJs() + assertQjsCompatible() build guard
   qjs.ts      buildQjsProd(): vendored QJS → libqjs.a + routes/swelte_qjs_bridge.v
-  dev.ts      dev sidecar (SWELTE_SSR_URL) + HMR guard
+  dev.ts      dev sidecar (SWELTE_SSR_URL, 50ms budget, 1MB cap) + HMR guard
   cli.ts      runSsrDev / runSsrCheck (§5 gate as CI)
-  v-shim.v    legacy stub (superseded by the generated bridge)
 c/            vendored QuickJS 2026-06-04 (see c/README.md) + swelte_qjs.* glue
 ```
 
@@ -43,10 +42,12 @@ c/            vendored QuickJS 2026-06-04 (see c/README.md) + swelte_qjs.* glue
       markers, `/nope` 404 `+error` HTML, `/admin` 400 `+error` HTML,
       JSON bypass intact, server stays up. Design constraints (V 0.5.2):
       glue never returns malloc'd pointers (autofree double-frees) — V
-      passes a 64KB→1MB stack buffer, C copies the body HTML in and
-      reports the needed length; runtimes are C-side int handles (V
+      passes a 64KB→1MB heap buffer, C copies the body HTML in and
+      reports the needed length (grow once, else SPA; empty body -4 →
+      SPA shell); runtimes are C-side int handles (V
       truncates u64 C values to 32 bits); `free()` always from C, never
-      `C.free()` from V. Binary delta: +~1MB (5.1MB → 6.1MB).
+      `C.free()` from V. Bytecode cache is mutex-guarded (veb thread
+      pool) + byte-compared on hit. Binary delta: +~1MB (5.1MB → 6.1MB).
       Budgets (73KB bundle): `renderRoute` ~0.012ms in-process;
       browser `GET /` ~3–12ms wall; timeout 50ms ≈ 4–15× p-cold;
       16MB cap ≈ 200× bundle.
@@ -54,11 +55,12 @@ c/            vendored QuickJS 2026-06-04 (see c/README.md) + swelte_qjs.* glue
       bytes (`JS_WriteObject`), reuse across renders (`JS_ReadObject`);
       miss → source path. 20× repeat-render in `runSsrCheck`.
 - [x] **`§5 gate as CI` (`§4 done`)**: `runSsrCheck` asserts `/` HTML +
-      markers, `/nope` +error fallback, single `dist/ssr/` artifact,
-      20× repeat-render (bytecode cache) —
+      hydration marker, `/nope` +error fallback, JSON bypass,
+      single `dist/ssr/` artifact, 20× repeat-render (bytecode cache) —
       three halves: sidecar direct, sidecar-via-Hand (V backend +
       `SWELTE_SSR_URL`), prod binary (`SWELTE_SSR=1` embedded QJS,
-      the `swelte preview` path).
+      the `swelte preview` path). Marker-only assertions (any project
+      passes, not just the `<main>` example).
       Core smoke stays static/SPA + JSON (no Accept) — SSR bytes only
       flow on real browser Accepts (`text/html`), so curl probes and the
       core build smoke never see SSR output.
