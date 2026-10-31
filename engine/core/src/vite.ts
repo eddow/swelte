@@ -2733,10 +2733,20 @@ export function hydrateSwelteRoute(target, pathname, errorProps) {
 			// user-owned shim for eject/custom setups — the framework never
 			// requires editing it. Only rewrites the canonical /src/main.ts
 			// reference; custom entries are left alone.
-			if (html.includes('/src/main.ts')) {
-				return html.replaceAll('/src/main.ts', '/.swelte/entry-main.ts')
+			let out = html
+			if (out.includes('/src/main.ts')) {
+				out = out.replaceAll('/src/main.ts', '/.swelte/entry-main.ts')
 			}
-			return html
+			// SSR markers: Hand fills <!--ssr-head-->/<!--ssr-body--> when a
+			// renderer answers. Inject them into the #app host when absent
+			// (built dist/index.html has no markers — source app.html does).
+			if (!out.includes('<!--ssr-body-->') && out.includes('<div id="app">')) {
+				out = out.replace('<div id="app">', '<div id="app"><!--ssr-body-->')
+			}
+			if (!out.includes('<!--ssr-head-->') && out.includes('</head>')) {
+				out = out.replace('</head>', '<!--ssr-head--></head>')
+			}
+			return out
 		},
 		async resolveId(source, importer, _opts) {
 			if (!importer) return null

@@ -9,4 +9,17 @@
 export * from '@swelte/core'
 export { VERSION } from '@swelte/core'
 export { swelte } from './vite.js'
-export { composeRenderJs, type SsrComposeOptions } from './ssr.js'
+export {
+	assertNoTopLevelStubCalls,
+	assertQjsCompatible,
+	bundleSsr,
+	compileSsrComponent,
+	composeRenderJs,
+	emitRenderJs,
+	type SsrComposeOptions,
+	type SsrManifest,
+} from './ssr.js'
+export { defaultSsrDevPort, renderFileFor, startSsrDevServer } from './dev.js'
+export type { SsrDevOptions } from './dev.js'
+export { runSsrCheck, runSsrDev } from './cli.js'
+export type { SsrDevRunOptions } from './cli.js'

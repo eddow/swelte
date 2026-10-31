@@ -17,22 +17,29 @@ single-artifact `dist/` + binary proof; `+route.svelte` client router
 HMR routes-stub + importer invalidation. `docs/` describes built behavior;
 `.v`-import rationale in `v-imports.md`.
 
-## 9 / SSR. Engines (`specs/ssr.md` — dispatcher conventions built)
+## 9 / SSR. Engines (adapter-owned; core provides manifest + Hand hook)
 
 Built: slash strip, `GET /api/*` JSON 404, nested `*/+error.svelte` build error.
 Phase 1 (core, engine-agnostic): `.svelte` route manifest (`svelteRouteFor` /
 `collectSvelteManifest` → `.swelte/ssr-manifest.json`), cross-extension
 double-claim (`foo.svelte` vs `foo/+page.*`), `routes.js` union (svelte-only
-entries + `hydrateSwelteRoute`), `Hand` SSR hook stub (`SWELTE_SSR=1` gate,
-default SPA fallback), `app.html` SSR placeholders + hydrate-first `main.ts`,
-`swelte check` parity (union clash + nested `+error` warn).
-Phase 2 scaffold: `@swelte/ssr-qjs` package (re-exports core, manifest
-composer, QJS-compat guard, `swelte()` wrapper, V shim stub).
-Open: `generate: 'server'` compilation spike, dev disk-read bridge, `qjsc`
-prod link, `ssr-bun` sidecar, `Hand` full chain.
+entries + `hydrateSwelteRoute`), `Hand` SSR hook (`SWELTE_SSR`/`SWELTE_SSR_URL`
+gate, default SPA fallback), marker injection in `transformIndexHtml`,
+generated client entry (`.swelte/entry-main.ts`), `swelte check` parity
+(union clash + nested `+error` warn).
+Phase 2 (`@swelte/ssr-qjs`): real SSR compiler (per-route `generate: 'server'`
++ Rollup bundle, `node:`-free verified), QJS-compat + top-level stub-call
+guards (AST, file+line), SDK-import throw-stubs, two runtime shims,
+`emitRenderJs` (dev + prod), dev sidecar + `runSsrDev`/`runSsrCheck`,
+`swelte()` wrapper emitting `dist/ssr/render.js` in `generateBundle`.
+Phase 3 (`@[load]` cascade): typed `parent` threading, chain validation,
+wrapper struct decls, sandbox demo, documented in `rpc.md`.
+Open: `qjsc` bytecode + V C-interop link + timeout/mem caps, dev `swelte dev`
+auto-sidecar UX, `ssr-bun` sidecar, §5 gate as CI.
 
-Test: per `ssr.md` §5 (404 `+error` HTML, strip parity, `!T` → 500 HTML, bare-machine
-single artifact, HMR swap, bun streaming).
+Test: per-adapter `runSsrCheck` (HTML render + markers); full §5 (404 HTML,
+strip parity, `!T` → 500, bare-machine single artifact, HMR no-restart,
+bun streaming) at QJS-link time.
 
 ## 23. V runtime as static vlib (deferred, post-freeze)
 

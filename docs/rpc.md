@@ -76,6 +76,14 @@ JSON body. No `?fn=` anywhere (removed with the old model).
   subtree middleware, never exported as callables to TS (but the
   wrapper's `pub struct`s are — +layout-shaped shared types).
   `+route.v` files declare no `@[rpc]`/verb endpoints of their own.
+- SSR component rule (enforced by `@swelte/ssr-qjs` at build time):
+  SDK imports (`#routes/*`, `#lib/*`, `loadPage`) are allowed in `.svelte`
+  files — interaction handlers (`onclick`, `onMount`, plain functions) keep
+  working after hydration. But a stub *called* at component top level fires
+  during SSR render (no fetch in QuickJS) → build error naming the stub.
+  Move load-time data into `$props()` (supplied by `@[load]` via `Hand`);
+  keep the stub for handlers. Top-level `await` is rejected by the Svelte
+  compiler itself (both modes).
 
 ```v
 module greet

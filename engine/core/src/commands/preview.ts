@@ -18,9 +18,16 @@ export async function runPreview(ctx: Ctx): Promise<void> {
 	}
 	await killPort(port, ctx.log)
 	ctx.log(`starting ${binary} on :${port} (dist/ + API, no Vite)`)
+	// Engine-agnostic: SWELTE_SSR_URL comes from the environment when the
+	// user (or an adapter wrapper) runs a renderer beside the binary.
+	// Core starts nothing — static/SPA/JSON when unset.
 	let child: ChildProcess | null = spawn(binary, [], {
 		cwd: root,
-		env: { ...process.env, PORT: String(port), SWELTE_DIST: 'dist' },
+		env: {
+			...process.env,
+			PORT: String(port),
+			SWELTE_DIST: 'dist',
+		},
 		stdio: ['ignore', 'pipe', 'pipe'],
 	})
 	child.stdout?.on('data', (d: Buffer) => process.stdout.write(`[preview:${port}] ${d}`))

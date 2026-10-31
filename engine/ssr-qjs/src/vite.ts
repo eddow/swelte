@@ -32,8 +32,9 @@ export function swelte(options: SsrQjsOptions = {}): Plugin[] {
 		name: 'swelte:ssr-qjs',
 		enforce: 'post',
 		async generateBundle() {
-			// Compose dist/ssr/render.js from .swelte/ssr-manifest.json.
-			const { readFileSync, existsSync, mkdirSync, writeFileSync } = await import('node:fs')
+			// Real SSR compile: manifest → per-route generate:'server' →
+			// Rollup IIFE → dist/ssr/render.js (+ .swelte/dev/render.js).
+			const { readFileSync, existsSync } = await import('node:fs')
 			const { join } = await import('node:path')
 			const root: string =
 				(this as unknown as { environment?: { config?: { root?: string } } }).environment?.config
@@ -42,9 +43,12 @@ export function swelte(options: SsrQjsOptions = {}): Plugin[] {
 			const manifestFile = join(root, outDir, 'ssr-manifest.json')
 			if (!existsSync(manifestFile)) return
 			const manifest = JSON.parse(readFileSync(manifestFile, 'utf8'))
-			const renderJs = composeRenderJs(manifest, { root })
-			mkdirSync(join(root, 'dist', 'ssr'), { recursive: true })
-			writeFileSync(join(root, 'dist', 'ssr', 'render.js'), renderJs)
+			const { emitRenderJs } = await import('./ssr.js')
+			await emitRenderJs(manifest, {
+				root,
+				routesDir: String(options.routesDir ?? 'src/routes'),
+				prod: true,
+			})
 		},
 	}
 

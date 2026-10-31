@@ -1,6 +1,6 @@
 import { defineConfig } from 'vite';
 import { svelte } from '@sveltejs/vite-plugin-svelte';
-import { swelte } from '@swelte/core/vite';
+import { swelte } from '@swelte/ssr-qjs';
 import svelteConfig from './svelte.config.js';
 
 const vBackendUrl =

@@ -7,7 +7,8 @@
   "types": "./dist/index.d.ts",
   "exports": {
     ".": "./dist/index.js",
-    "./vite": "./dist/vite.js"
+    "./vite": "./dist/vite.js",
+    "./dev": "./dist/dev.js"
   },
   "files": ["dist"],
   "scripts": {

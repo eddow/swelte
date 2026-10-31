@@ -171,6 +171,9 @@ export async function runDev(ctx: Ctx): Promise<void> {
 	} catch (e) {
 		ctx.log(`warning: pre-generate failed: ${(e as Error).message}`)
 	}
+	// Engine-agnostic: SWELTE_SSR_URL comes from the environment when the
+	// user (or an adapter wrapper) runs a renderer beside the V backend.
+	// Core starts nothing — static/SPA/JSON when unset.
 	spawnBackend()
 	const backendUp = await waitPort(backend, 30000)
 	if (!backendUp) {

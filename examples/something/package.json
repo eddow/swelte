@@ -10,7 +10,8 @@
   },
   "dependencies": {
     "svelte": "^5.0.0",
-    "@swelte/core": "^0.1.0"
+    "@swelte/core": "^0.1.0",
+    "@swelte/ssr-qjs": "^0.1.0"
   },
   "devDependencies": {
     "@sveltejs/vite-plugin-svelte": "^5.0.0",

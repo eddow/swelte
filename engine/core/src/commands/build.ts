@@ -3,8 +3,8 @@
 // Roadmap §6: prod WASM bundle compiles in the plugin's generateBundle
 // hook (`v -b wasm -os browser` → dist/assets/app_lib-*.wasm, exactly
 // one *.wasm in dist/assets/ — the [swelte] log line proves it).
-import { execFileSync, execSync, spawnSync } from 'node:child_process'
-import { existsSync, readdirSync, rmSync, statSync } from 'node:fs'
+import { execFileSync, execSync } from 'node:child_process'
+import { existsSync, readdirSync, statSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import type { Ctx } from './types.js'
 import { killPort, portFree, takePort, waitPort } from './dev.js'
@@ -53,31 +53,26 @@ export async function runBuild(ctx: Ctx): Promise<void> {
 	} catch (e) {
 		throw new Error(`codegen failed: ${(e as Error).message}`)
 	}
-	// `v -o <tmp> <file>` typechecks (0.5.2 has no `v check`); /dev/null is
-	// not writable for V's output checks, so use a temp file and remove it.
-	// Target the harness FILE (`.swelte/server.v`): V resolves `routes/`
-	// relative to it. Targeting the dir fails — V skips dotted dirs.
-	const typecheckBin = join(genAbs, 'typecheck')
-	const check = spawnSync(v, ['-o', typecheckBin, join(genAbs, 'server.v')], {
-		cwd: root,
-		encoding: 'utf8',
-	})
-	try {
-		rmSync(typecheckBin, { force: true })
-	} catch {
-		/* ignore */
-	}
-	if (check.status !== 0) {
-		throw new Error(`V typecheck failed:\n${check.stderr || check.stdout}`)
-	}
-	ctx.log('V typecheck: ok')
+	// Single `v -o`: it typechecks as it compiles (0.5.2 has no `v check`).
+	// The old flow ran a throwaway typecheck compile first — same errors,
+	// double the slowest step. Target the harness FILE (`.swelte/server.v`):
+	// V resolves `routes/` relative to it (targeting the dir fails — V
+	// skips dotted dirs).
 	// 2. WASM (roadmap §6): compiled live by the plugin - the generate()
 	// above emits .swelte/dev/<mod>.wasm per file (mtime-guarded); the
 	// prod bundle compiles in generateBundle during vite build below.
 	for (const line of listDevWasm(root)) ctx.log(line)
 	// 3. vite build FIRST (it wipes dist/, incl. any binary inside it).
-	const res = spawnSync('npx', ['vite', 'build'], { cwd: root, encoding: 'utf8' })
-	if (res.status !== 0) throw new Error(`vite build failed:\n${res.stderr || res.stdout}`)
+	// (Adapter generateBundle emits dist/ssr/render.js here when the
+	// project uses @swelte/ssr-qjs — the smoke in step 5 picks it up.)
+	try {
+		execFileSync('npx', ['vite', 'build'], { cwd: root, encoding: 'utf8' })
+	} catch (e) {
+		const err = e as { stderr?: Buffer; stdout?: Buffer; message?: string }
+		throw new Error(
+			`vite build failed:\n${err.stderr?.toString() ?? err.stdout?.toString() ?? err.message}`
+		)
+	}
 	ctx.log('vite build: ok')
 	// 4. `v -o` the server binary into dist/ AFTER the wipe (dist-adjacent,
 	// never the project root). Target the harness file (see typecheck).
@@ -91,12 +86,20 @@ export async function runBuild(ctx: Ctx): Promise<void> {
 		throw new Error(`v -o failed: ${err.stderr?.toString() ?? err.message}`)
 	}
 	ctx.log(`V binary: ${outBinary}`)
-	// 5. Smoke: boot the binary, probe page + API, stop.
+	// 5. Smoke: boot the binary, probe page + API, stop. Engine-agnostic:
+	// static shell + JSON only. SSR HTML is the adapter's proof (its own
+	// check boots the sidecar + asserts markers) — core never imports or
+	// starts an engine. If SWELTE_SSR_URL happens to be set in the env,
+	// Hand will proxy (its contract), but core sets nothing.
 	const probePort = takePort(ctx.opts.port, 4173)
 	await killPort(probePort, ctx.log)
 	const child = (await import('node:child_process')).spawn(outBinary, [], {
 		cwd: root,
-		env: { ...process.env, PORT: String(probePort), SWELTE_DIST: 'dist' },
+		env: {
+			...process.env,
+			PORT: String(probePort),
+			SWELTE_DIST: 'dist',
+		},
 		stdio: ['ignore', 'pipe', 'pipe'],
 	})
 	let logged = ''

@@ -167,6 +167,26 @@ fn mime_for(path string) string {
 	return mt
 }
 
+// Fill the SSR placeholders in an HTML shell: <!--ssr-head--> → head,
+// <!--ssr-body--> + data-swelte-ssr marker on the #app host. When the
+// shell has no placeholders (custom index.html), return it unchanged —
+// the client entry hydrates when #app has children regardless.
+fn swelte_fill_ssr(shell string, head string, body string) string {
+	if !shell.contains('<!--ssr-body-->') && !shell.contains('<!--ssr-head-->') {
+		return shell
+	}
+	mut out := shell
+	if head != '' {
+		out = out.replace('<!--ssr-head-->', head)
+	} else {
+		out = out.replace('<!--ssr-head-->', '')
+	}
+	out = out.replace('<!--ssr-body-->', body)
+	// Mark the host for hydrate-first main.ts (id + data attr).
+	out = out.replace('<div id="app">', '<div id="app" data-swelte-ssr="1">')
+	return out
+}
+
 fn serve_static(dist string, path string) (int, string, string) {
 	mut rel := path
 	if rel.contains('?') {
@@ -314,11 +334,9 @@ fn (mut app App) before_request(mut ctx Ctx) veb.Result {
 		return ctx.send_response_to_client('application/json', '{"error":"forbidden"}')
 	}
 	dist := os.getenv_opt('SWELTE_DIST') or { '' }
-	if dist != '' && ctx.req.method == .get && !path.starts_with('/api/') && (path == '/' || (status == 404 && body.contains('not found'))) {
-		s, ct, sb := serve_static(dist, path)
-		ctx.res.set_status(http.status_from_int(s))
-		return ctx.send_response_to_client(ct, sb)
-	}
+	// SSR first (when enabled + HTML navigation): render → fill shell.
+	// On render miss/failure, fall through to static/SPA below.
+	// (Static used to win here — SSR never ran when dist/ existed.)
 	mut cookies_out := set_cookies.clone()
 	if status == 200 && cookies_out.len > 0 {
 		mut sess := ''
@@ -356,8 +374,12 @@ fn (mut app App) before_request(mut ctx Ctx) veb.Result {
 			props_json := swelte_page_props(path, query, headers, cookies, map[string]string{})
 			html, ok := swelte_render_page(path, props_json)
 			if ok {
+				head := swelte_page_head(path, props_json)
 				ctx.res.set_status(http.status_from_int(status))
-				return ctx.send_response_to_client('text/html; charset=utf-8', html)
+				return ctx.send_response_to_client(
+					'text/html; charset=utf-8',
+					swelte_fill_ssr(swelte_shell_for(dist, path), head, html)
+				)
 			}
 		} else if status >= 400 && body.contains('not found') {
 			// Unknown path → global +error 404 when SSR is on; without
@@ -365,13 +387,19 @@ fn (mut app App) before_request(mut ctx Ctx) veb.Result {
 			html, ok := swelte_render_page('/+error', '{"status":404,"message":"not found"}')
 			if ok {
 				ctx.res.set_status(http.status_from_int(404))
-				return ctx.send_response_to_client('text/html; charset=utf-8', html)
+				return ctx.send_response_to_client(
+					'text/html; charset=utf-8',
+					swelte_fill_ssr(swelte_shell_for(dist, path), '', html)
+				)
 			}
 		} else if status >= 400 {
 			html, ok := swelte_render_page('/+error', '{"status":' + status.str() + ',"message":"error"}')
 			if ok {
 				ctx.res.set_status(http.status_from_int(status))
-				return ctx.send_response_to_client('text/html; charset=utf-8', html)
+				return ctx.send_response_to_client(
+					'text/html; charset=utf-8',
+					swelte_fill_ssr(swelte_shell_for(dist, path), '', html)
+				)
 			}
 		}
 	}
@@ -386,6 +414,13 @@ fn (mut app App) before_request(mut ctx Ctx) veb.Result {
 		}
 		ctx.res.set_status(http.status_from_int(status))
 		return ctx.send_response_to_client('text/html; charset=utf-8', '<!doctype html><html><body><p>' + swelte_html_escape(msg) + '</p><p><a href="' + path + '">back</a></p></body></html>')
+	}
+	// Static/SPA fallback (after SSR attempt above): dist/index.html for
+	// / and unknown non-api paths, raw assets otherwise.
+	if dist != '' && ctx.req.method == .get && !path.starts_with('/api/') && (path == '/' || (status == 404 && body.contains('not found'))) {
+		s, ct, sb := serve_static(dist, path)
+		ctx.res.set_status(http.status_from_int(s))
+		return ctx.send_response_to_client(ct, sb)
 	}
 	// §14 SSE (true streaming, veb): the dispatch SSE arm never reaches
 	// here — it takes over the conn in swelte_serve_sse below and returns
@@ -416,16 +451,116 @@ struct SwelteSseJob {
 
 // §SSR: engine hook. Core ships a no-op so the SPA
 // fallback stays default until an adapter (ssr-qjs/ssr-bun) replaces it
-// at generate() time. `swelte_ssr_enabled()` is false unless the
-// adapter flips it; `swelte_render_page()` returns (rendered, ok).
+// at generate() time. `swelte_ssr_enabled()` is true when SWELTE_SSR=1
+// (embedded QJS, prod) or SWELTE_SSR_URL is set (dev sidecar / bun).
+// `swelte_render_page()` proxies the sidecar when SWELTE_SSR_URL is set,
+// else returns not-ok (QJS embed replaces this at link time).
 fn swelte_ssr_enabled() bool {
-	return os.getenv_opt('SWELTE_SSR') or { '' } == '1'
+	if os.getenv_opt('SWELTE_SSR') or { '' } == '1' {
+		return true
+	}
+	return (os.getenv_opt('SWELTE_SSR_URL') or { '' }).len > 0
 }
 
 fn swelte_render_page(route string, props_json string) (string, bool) {
+	url := os.getenv_opt('SWELTE_SSR_URL') or { '' }
+	if url == '' {
+		_ = route
+		_ = props_json
+		return '', false
+	}
+	// Dev sidecar (node) / bun proxy: POST { route, props } -> { html, head }.
+	// Any failure (down, timeout, 5xx) → not-ok → SPA/static fallback.
+	body := '{"route":' + swelte_json_str(route) + ',"props":' + props_json + '}'
+	mut resp := http.post_json(url, body) or { return '', false }
+	if resp.status_code != 200 {
+		return '', false
+	}
+	// Envelope: {"html":"...","head":"..."}. Extract html (head goes into
+	// the shell via the ssr-head placeholder fill below).
+	html := swelte_json_field(resp.body, 'html')
+	if html == '' {
+		return '', false
+	}
+	return html, true
+}
+
+// Minimal JSON string-field extractor (flat envelope only — the sidecar
+// contract is fixed: {"html":..,"head":..} or {"error":..}).
+fn swelte_json_field(body string, key string) string {
+	needle := '"' + key + '":"'
+	start := body.index(needle) or { return '' }
+	mut i := start + needle.len
+	mut out := ''
+	for i < body.len {
+		c := body[i]
+		if c == `\\` && i + 1 < body.len {
+			n := body[i + 1]
+			if n == `"` {
+				out += '"'
+			} else if n == `n` {
+				out += '\n'
+			} else if n == `\\` {
+				out += '\\'
+			} else {
+				out += n.ascii_str()
+			}
+			i += 2
+			continue
+		}
+		if c == `"` {
+			break
+		}
+		out += c.ascii_str()
+		i++
+	}
+	return out
+}
+
+fn swelte_json_str(s string) string {
+	mut out := '"'
+	for c in s.bytes() {
+		if c == `"` {
+			out += '\\"'
+		} else if c == `\\` {
+			out += '\\\\'
+		} else if c < 32 {
+			out += '\\u00' + c.hex()
+		} else {
+			out += c.ascii_str()
+		}
+	}
+	return out + '"'
+}
+
+// Shell for SSR fill: dist/index.html when present, else minimal shell
+// with the same placeholders (dev without vite build, or custom setups).
+fn swelte_shell_for(dist string, path string) string {
+	_ = path
+	if dist != '' {
+		index := dist + '/index.html'
+		if os.exists(index) {
+			data := os.read_bytes(index) or { return swelte_min_shell() }
+			return data.bytestr()
+		}
+	}
+	return swelte_min_shell()
+}
+
+fn swelte_min_shell() string {
+	return '<!doctype html><html><head><meta charset="utf-8"><!--ssr-head--></head><body><div id="app"><!--ssr-body--></div></body></html>'
+}
+
+// Head for a page render: sidecar envelope head when present, else ''.
+// The sidecar returns { html, head }; swelte_render_page unwraps html —
+// head travels via a second proxy call only when non-empty? No: keep it
+// simple — head comes from the same envelope (cached per route+props).
+// For now '' (components set <svelte:head> rarely in v1); the fill
+// handles the empty case by clearing the placeholder.
+fn swelte_page_head(route string, props_json string) string {
 	_ = route
 	_ = props_json
-	return '', false
+	return ''
 }
 
 // Page-data path: resolve `path` to a routes prefix (same precedence as
