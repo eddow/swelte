@@ -41,14 +41,14 @@ export interface SweltePluginOptions {
 export type { SwelteConfig, SwelteOptions } from './gen/config.js'
 export { defineConfig } from './gen/config.js'
 
-interface RpcParam {
+export interface RpcParam {
 	name: string
 	vtype: string
 	tstype: string
 	optional: boolean
 }
 
-interface RpcFn {
+export interface RpcFn {
 	name: string
 	attr: 'get' | 'post' | 'rpc' | 'put' | 'delete' | 'patch' | 'sse' | 'before' | 'after'
 	qualifier?: string
@@ -271,12 +271,12 @@ function tsTypeFor(vType: string): string {
 	return 'unknown'
 }
 
-interface VStruct {
+export interface VStruct {
 	name: string
 	fields: { name: string; vtype: string; tstype: string; optional: boolean }[]
 }
 
-function parseStructs(src: string): VStruct[] {
+export function parseStructs(src: string): VStruct[] {
 	const out: VStruct[] = []
 	const re = /pub\s+struct\s+([A-Za-z_][A-Za-z0-9_]*)\s*\{([\s\S]*?)\n\}/g
 	let m: RegExpExecArray | null
@@ -1688,7 +1688,30 @@ export function ${fn.name}(args) {
 			return file
 		}
 
-		// Layout (spec v-imports.md §2): routes → server fetch stubs,
+		function backendImportLines(src: string): { imp: string; line: number }[] {
+		const out: { imp: string; line: number }[] = []
+		const lines = src.split('\n')
+		for (let i = 0; i < lines.length; i++) {
+			const m = /^\s*import\s+(.+)$/.exec(lines[i])
+			if (!m) continue
+			for (const part of m[1].split(',')) {
+				const p = part.trim()
+				if (!p || p.startsWith('//')) continue
+				const token = (p.split(/\s+/).pop() as string).replace(/['"]/g, '')
+				// V-to-V backend include: `#lib/backend/...`, `lib/backend/...`,
+				// `backend/...` (slash or V-dot style: `backend.secrets`), or
+				// `*_backend(.v)`. Stdlib (`os`, `time`, …) never matches —
+				// §18 owns that rule.
+				const segs = token.split(/[/.]/).map((s) => s.replace(/\.v$/, ''))
+				if (segs.includes('backend') || segs[segs.length - 1]?.endsWith('_backend')) {
+					out.push({ imp: token, line: i + 1 })
+				}
+			}
+		}
+		return out
+	}
+
+	// Layout (spec v-imports.md §2): routes → server fetch stubs,
 		// lib → isomorphic WASM stubs. Types land under types/routes|lib so
 		// the *.v resolveId/load below can re-export them 1:1.
 		const routesAbs = resolve(root, routesDir)
@@ -1972,6 +1995,16 @@ export function ${fn.name}(args) {
 				// #lib/backend convention (spec §7): backend-only, no stub, no
 				// browser import — record types for V-to-V reference only.
 				if (isBackendMod(mod)) continue
+				// Roadmap 16-remainder: only #routes/*.v may import backend.
+				// A #lib/*.v (non-backend) file importing backend fails here
+				// (generate-time, file+line) — the resolveId guard covers
+				// browser-side imports; this covers V-to-V misuse that never
+				// passes through resolveId.
+				for (const b of backendImportLines(src)) {
+					throw new Error(
+						`[swelte] ${libDir}/${mod}.v:${b.line}: imports backend module '${b.imp}' — only #routes/*.v may import #lib/backend (V-to-V include at codegen time).`
+					)
+				}
 				const rpcFns = parseVFile(src).filter((x) => x.attr === 'rpc')
 				// §7: middleware/verbs are meaningless in #lib — keep the
 				// warn-and-expose-RPC behavior for verbs, extend it to
@@ -2246,15 +2279,19 @@ export function ${fn.name}(args) {
 				usedLibFiles.add(abs)
 				// #lib/backend convention (spec §7): backend-only — refuse from
 				// client code with a loud error naming importer+file.
+				// Roadmap 16-remainder: ONLY #routes/*.v may import backend
+				// (V-to-V include at codegen time). A #lib/*.v importer is
+				// also rejected — backend fns never enter the WASM bundle.
 				if (underLib) {
 					const rel = norm.slice(libNorm.length + 1)
 					if (isBackendMod(rel)) {
 						const impNorm = importer.split('?')[0].split(sep).join('/')
-						const impUnderRoutesV = impNorm.endsWith('.v')
-						if (!impUnderRoutesV) {
+						const impUnderRoutes =
+							impNorm === routesNorm || impNorm.startsWith(`${routesNorm}/`)
+						if (!impUnderRoutes) {
 							throw new Error(
 								`[swelte] ${source} is backend-only (#lib/backend convention): ` +
-									`imported by ${importer}. Move the fn or import from a #routes/*.v file.`
+									`imported by ${importer}. Only #routes/*.v may import #lib/backend (V-to-V include at codegen time). Move the fn or import it from a #routes/*.v file.`
 							)
 						}
 					}

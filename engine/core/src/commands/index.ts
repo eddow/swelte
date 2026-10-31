@@ -67,10 +67,25 @@ const initCmd: Command = {
 
 const checkCmd: Command = {
 	name: 'check',
-	summary: 'Validate .v files without a browser (stub: orphans, clashes, verb dups).',
-	args: [{ name: 'root', help: 'Project root', value: 'string' }],
+	summary: 'Validate .v files: warnings as text or --format json (roadmap item 15).',
+	args: [
+		{ name: 'root', help: 'Project root', value: 'string' },
+		{ name: 'format', help: 'Output format: text | json', value: 'string' },
+	],
 	async run(ctx: Ctx) {
-		ctx.log('check: stub — validation strictness is roadmap item 15.')
+		const { resolve } = await import('node:path')
+		const root = resolve(String(ctx.opts.root ?? process.cwd()))
+		const { collectDiagnostics } = await import('../gen/diagnostics.js')
+		const diags = await collectDiagnostics(root)
+		const fmt = String(ctx.opts.format ?? 'text')
+		if (fmt !== 'text' && fmt !== 'json') throw new Error('--format must be text or json (got ' + fmt + ')')
+		if (fmt === 'json') {
+			console.log(JSON.stringify(diags, null, 2))
+		} else if (diags.length === 0) {
+			ctx.log('check: no warnings')
+		} else {
+			for (const d of diags) ctx.log(d.file + ':' + d.line + ' [' + d.kind + '] ' + d.message)
+		}
 	},
 }
 
