@@ -13,8 +13,11 @@ import {
 import { createRequire } from 'node:module'
 import { dirname, join, relative, resolve, sep } from 'node:path'
 import { loadConfig, renderHarness } from './gen/config.js'
-import { list, v } from './gen/tmpl.js'
 import { resolveV } from './toolchain.js'
+
+function list<T>(collection: readonly T[], fn: (item: T, i: number) => unknown): string {
+	return collection.map(fn).join('')
+}
 
 // Lazy V binary for `v -b wasm` (resolved on first compile).
 // (module import must not throw when the caller passes a plain path).
@@ -819,12 +822,6 @@ export function swelte(options: SweltePluginOptions = {}): Plugin {
 		return out
 	}
 
-	/** Push only non-empty strings (map/join over an empty route set
-	 * yields '' — the old for-loop pushed nothing in that case). */
-	function pushNonEmpty(arr: string[], s: string): void {
-		if (s !== '') arr.push(s)
-	}
-
 	function emitServerGen(
 		dispatched: { route: string; mod: string; prefix: string }[],
 		sseMods: Set<string> = new Set()
@@ -832,7 +829,7 @@ export function swelte(options: SweltePluginOptions = {}): Plugin {
 		/** Dynamic route arms (section 8): static beats dynamic; among dynamics,
 		 * fewer [segs] first, [...rest] catch-all last (stable sort). */
 		function dynSorted() {
-			return [...dispatched]
+			return dispatched
 				.filter((x) => x.route.includes('['))
 				.sort((a, b) => {
 					const ca = a.route.includes('[...') ? 1 : 0
@@ -957,36 +954,35 @@ pub fn swelte_route(path string, method string, query map[string]string, headers
 				.filter((x) => !x.route.includes('['))
 				.map(
 					(d) =>
-						v`\tif norm_path == ${vJsonStr(d.route)} { return ${d.prefix}dispatch(norm_path, method, query, map[string]string{}, headers, cookies, body, content_type, qualifier) }`
+						`\tif norm_path == ${vJsonStr(d.route)} { return ${d.prefix}dispatch(norm_path, method, query, map[string]string{}, headers, cookies, body, content_type, qualifier) }`
 				),
 			// Dynamic arms (section 8) after exact arms: static beats dynamic; among
 			// dynamics, fewer [segs] first, [...rest] catch-all last (stable sort).
 			...dynSorted().map(
 				(d) =>
-					v`\t${d.prefix}matched, ${d.prefix}params := swelte_match_route(${vJsonStr(d.route)}, norm_path)\n\tif ${d.prefix}matched { return ${d.prefix}dispatch(norm_path, method, query, ${d.prefix}params, headers, cookies, body, content_type, qualifier) }`
+					`\t${d.prefix}matched, ${d.prefix}params := swelte_match_route(${vJsonStr(d.route)}, norm_path)\n\tif ${d.prefix}matched { return ${d.prefix}dispatch(norm_path, method, query, ${d.prefix}params, headers, cookies, body, content_type, qualifier) }`
 			),
-			v`\treturn 404, '{"error":"not found"}', []string{}\n}\n`,
+			`\treturn 404, '{"error":"not found"}', []string{}\n}\n`,
 			// SSE route predicate (§14, true streaming via veb).
 			// `before_request` (which owns `ctx`) calls this FIRST: on a
 			// GET+Accept match on an SSE route it takes over + streams and
 			// never reaches dispatch. Returns the dispatch prefix for the
 			// matched file (whose `sse_events` accessor yields the list),
 			// or '' when this request is not an SSE stream.
-			v`pub fn swelte_sse_route(path string, method string, query map[string]string, headers map[string]string, qualifier string) (string, map[string]string) {\n\tmut accept := headers['Accept'] or { headers['accept'] or { '' } }\n\tif method != 'GET' || !accept.contains('text/event-stream') { return '', map[string]string{} }\n\tnorm_path := swelte_normalize_path(path)`,
+			`pub fn swelte_sse_route(path string, method string, query map[string]string, headers map[string]string, qualifier string) (string, map[string]string) {\n\tmut accept := headers['Accept'] or { headers['accept'] or { '' } }\n\tif method != 'GET' || !accept.contains('text/event-stream') { return '', map[string]string{} }\n\tnorm_path := swelte_normalize_path(path)`,
 			...dispatched
 				.filter((x) => !x.route.includes('['))
 				.filter((d) => sseMods.has(d.mod))
 				.map(
 					(d) =>
-						v`\tif norm_path == ${vJsonStr(d.route)} { return ${vJsonStr(d.prefix)}, map[string]string{} }`
+						`\tif norm_path == ${vJsonStr(d.route)} { return ${vJsonStr(d.prefix)}, map[string]string{} }`
 				),
 			...dynSorted()
 				.filter((d) => sseMods.has(d.mod))
 				.map(
 					(d) =>
-						v`\t${d.prefix}matched, ${d.prefix}params := swelte_match_route(${vJsonStr(d.route)}, norm_path)\n\tif ${d.prefix}matched { return ${vJsonStr(d.prefix)}, ${d.prefix}params }`
-				)
-				.join('\n'),
+						`\t${d.prefix}matched, ${d.prefix}params := swelte_match_route(${vJsonStr(d.route)}, norm_path)\n\tif ${d.prefix}matched { return ${vJsonStr(d.prefix)}, ${d.prefix}params }`
+				),
 			`\treturn '', map[string]string{}\n}\n`,
 			// SSE events fan-out (§14): `before_request` resolves the route
 			// to a dispatch prefix; this maps prefix → per-file accessor.
@@ -998,14 +994,13 @@ pub fn swelte_route(path string, method string, query map[string]string, headers
 				.filter((d) => sseMods.has(d.mod))
 				.map(
 					(d) =>
-						v`\tif prefix == ${vJsonStr(d.prefix)} { return ${d.prefix}sse_events(qualifier, req) }`
+						`\tif prefix == ${vJsonStr(d.prefix)} { return ${d.prefix}sse_events(qualifier, req) }`
 				),
 			`\treturn error('no sse route for prefix: ' + prefix)\n}\n`,
 			'pub fn swelte_sse_is_emit(prefix string) bool {',
 			...dispatched
 				.filter((d) => sseMods.has(d.mod))
-				.map((d) => v`\tif prefix == ${vJsonStr(d.prefix)} { return ${d.prefix}sse_is_emit() }`)
-				.join('\n'),
+				.map((d) => `\tif prefix == ${vJsonStr(d.prefix)} { return ${d.prefix}sse_is_emit() }`),
 			'\treturn false\n}\n',
 			'pub fn swelte_sse_check_qual(prefix string, qualifier string) ! {',
 			...dispatched
@@ -1035,19 +1030,16 @@ pub fn swelte_route(path string, method string, query map[string]string, headers
 		fns: RpcFn[],
 		chain: WrapperMw[]
 	): string {
-		const o: string[] = []
-		o.push('// Auto-generated by swelte from V signatures. Do not edit.')
-		o.push(`// Route: ${route} <- ${mod}.v`)
-		o.push('module routes')
-		o.push('')
 		const needRpc = fns.some((f) => f.attr === 'rpc')
 		const needVerb = fns.some((f) => f.attr !== 'rpc' && f.attr !== 'before' && f.attr !== 'after')
 		// Only what this file's dispatch branch uses: rpc -> json+json2,
 		// verbs -> json+http. Never emit an unused import (V warns).
-		o.push('import json')
-		if (needRpc) o.push('import x.json2')
-		if (needVerb) o.push('import net.http')
-		o.push('')
+		const baseImports = [
+			'import json',
+			...(needRpc ? ['import x.json2'] : []),
+			...(needVerb ? ['import net.http'] : []),
+			'',
+		]
 		const seenImp = new Set<string>()
 		for (const impsrc of [src, ...chain.map((w) => w.src)]) {
 			for (const m of impsrc.matchAll(/^\s*import\s+(.+)$/gm)) {
@@ -1063,47 +1055,36 @@ pub fn swelte_route(path string, method string, query map[string]string, headers
 				)
 					continue
 				seenImp.add(imp)
-				o.push(`import ${imp}`)
 			}
 		}
-		if (seenImp.size) o.push('')
 		// §10: per-fn Set-Cookie emitters live in the same `module routes`
 		// file as the dispatcher that calls them (V: same-module call).
 		// EVERY dispatch success path calls swelte_set_cookies_for_<fn>(),
 		// so every rpc/verb fn gets an emitter: flagged fns return the
 		// sess cookie template (placeholder replaced by Hand), unflagged
 		// fns return []string{}.
-		for (const fn of fns) {
-			if (
-				fn.attr !== 'rpc' &&
-				fn.attr !== 'before' &&
-				fn.attr !== 'after' &&
-				!['get', 'post', 'put', 'delete', 'patch', 'sse'].includes(fn.attr)
-			)
-				continue
-			o.push(`fn swelte_set_cookies_for_${prefix}${fn.name}() []string {`)
-			if (fn.setsCookie) {
-				o.push(`\treturn ['sess=__SWELTE_SESS__; Path=/; HttpOnly; SameSite=Lax; Max-Age=604800']`)
-			} else {
-				o.push(`\treturn []string{}`)
-			}
-			o.push(`}`)
-			o.push('')
-		}
+		const cookieEmitters = list(
+			fns.filter(
+				(fn) =>
+					fn.attr === 'rpc' || ['get', 'post', 'put', 'delete', 'patch', 'sse'].includes(fn.attr)
+			),
+			(fn) => `fn swelte_set_cookies_for_${prefix}${fn.name}() []string {
+${fn.setsCookie ? `\treturn ['sess=__SWELTE_SESS__; Path=/; HttpOnly; SameSite=Lax; Max-Age=604800']` : `\treturn []string{}`}
+}
+
+`
+		)
 		// Shared structs: prefix to avoid duplicate-definition collisions
 		// when several per-file outputs share `module routes`.
 		const structNames = new Set(parseStructs(src).map((s) => s.name))
 		for (const w of chain) {
 			for (const st of parseStructs(w.src)) structNames.add(st.name)
 		}
-		for (const w of chain) {
-			for (const l of inlineWrapperFns(w.src, w.wmod, structNames)) o.push(l)
-		}
-		o.push('')
-		for (const line of src.split('\n')) {
+		const wrapperLines = chain.flatMap((w) => inlineWrapperFns(w.src, w.wmod, structNames))
+		const srcLines = src.split('\n').flatMap((line) => {
 			const t = line.trim()
-			if (/^module\s+\S+/.test(t)) continue
-			if (/^\s*import\s+/.test(line)) continue
+			if (/^module\s+\S+/.test(t)) return []
+			if (/^\s*import\s+/.test(line)) return []
 			let out = line.replace(/^(\s*)pub\s+fn\s+([A-Za-z_][A-Za-z0-9_]*)/, `$1pub fn ${prefix}$2`)
 			out = out.replace(
 				/^(\s*)(pub\s+struct\s+)([A-Za-z_][A-Za-z0-9_]*)/,
@@ -1115,61 +1096,68 @@ pub fn swelte_route(path string, method string, query map[string]string, headers
 				if (new RegExp(`^\\s*(pub\\s+)?struct\\s+${sn}\\b`).test(t)) continue
 				out = out.replace(new RegExp(`\\b${sn}\\b`, 'g'), vType(sn, mod))
 			}
-			o.push(out)
-		}
-		o.push('')
+			return [out]
+		})
+		const o: string[] = [
+			'// Auto-generated by swelte from V signatures. Do not edit.',
+			`// Route: ${route} <- ${mod}.v`,
+			'module routes',
+			'',
+			// Only what this file's dispatch branch uses: rpc -> json+json2,
+			// verbs -> json+http. Never emit an unused import (V warns).
+			...baseImports,
+			...[...seenImp].map((imp) => `import ${imp}`),
+			...(seenImp.size ? [''] : []),
+			cookieEmitters,
+			...wrapperLines,
+			'',
+			...srcLines,
+			'',
+		]
 		// §7: middleware chain for this leaf. No wrappers → the public
 		// `dispatch` IS the verb/rpc body (byte-identical to today, via
 		// dispatchBody with sharedReq=null). With wrappers → `dispatch`
 		// runs @[before] root→leaf on a shared `swelte_req`, calls the
 		// inner verbs body, then runs @[after] leaf→root on (code, body).
-		const befores: string[] = []
-		const afters: string[] = []
-		for (const w of chain) {
-			for (const mw of w.mws) {
-				const call = `${vPrefix(w.wmod)}${mw.name}`
-				if (mw.attr === 'before') befores.push(call)
-				else afters.unshift(call)
-			}
-		}
-		if (befores.length === 0 && afters.length === 0) {
-			o.push(
-				`pub fn ${prefix}dispatch(path string, method string, query map[string]string, params map[string]string, headers map[string]string, cookies map[string]string, body string, content_type string, qualifier string) (int, string, []string) {`,
-				...dispatchBody(prefix, mod, fns, null),
-				'',
-				...emitSseEvents(prefix, mod, fns)
-			)
-			return o.join('\n')
-		}
-		o.push(
-			v`pub fn ${prefix}dispatch(path string, method string, query map[string]string, params map[string]string, headers map[string]string, cookies map[string]string, body string, content_type string, qualifier string) (int, string, []string) {\n\tmut form_before := map[string]string{}\n\tmut files_before := map[string]string{}\n\tif content_type.contains('multipart/form-data') {\n\t\tmut boundary_before := ''\n\t\tfor part in content_type.split(';') {\n\t\t\tp_before := part.trim_space()\n\t\t\tif p_before.starts_with('boundary=') { boundary_before = p_before.all_after('boundary=').trim('"') }\n\t\t}\n\t\tmut swelte_raw_before := map[string][]http.FileData{}\n\t\tif boundary_before != '' { form_before, swelte_raw_before = http.parse_multipart_form(body, boundary_before) }\n\t\tfor k, fs in swelte_raw_before {\n\t\t\tmut swelte_names := []string{}\n\t\t\tfor f in fs { swelte_names << f.filename }\n\t\t\tfiles_before[k] = swelte_names.join(';')\n\t\t}\n\t} else if content_type.contains('application/x-www-form-urlencoded') || body != '' {\n\t\tform_before = http.parse_form(body)\n\t}\n\tmut swelte_req := SwelteRequest{ query: query, form: form_before, files: files_before, headers: headers, cookies: cookies, params: params, method: method, path: path, qualifier: qualifier }`
+		const befores = chain.flatMap((w) =>
+			w.mws.filter((mw) => mw.attr === 'before').map((mw) => `${vPrefix(w.wmod)}${mw.name}`)
 		)
-		for (const b of befores) {
+		const afters = chain.flatMap((w) =>
+			w.mws.filter((mw) => mw.attr === 'after').map((mw) => `${vPrefix(w.wmod)}${mw.name}`)
+		)
+		const aftersLeafFirst = [...afters].reverse()
+		const beforeCalls = list(befores, (b) => {
 			const bn = b.includes('_') ? b.slice(b.lastIndexOf('_') + 1) : b
-			o.push(
-				`\tswelte_req = ${b}(swelte_req) or { return swelte_err_bad_cookies(path, '${bn}', err.msg()) }`
-			)
-		}
-		o.push(
-			v`\tmut swelte_cookies := []string{}\n\tcode_before, body_before, verbs_cookies := ${prefix}dispatch_verbs(path, method, query, params, headers, cookies, body, content_type, qualifier, swelte_req)\n\tswelte_cookies << verbs_cookies\n\tmut swelte_code := code_before\n\tmut swelte_body := body_before`
-		)
-		for (const a of afters) {
+			return `\tswelte_req = ${b}(swelte_req) or { return swelte_err_bad_cookies(path, '${bn}', err.msg()) }\n`
+		})
+		const afterCalls = list(aftersLeafFirst, (a) => {
 			const an = a.includes('_') ? a.slice(a.lastIndexOf('_') + 1) : a
-			o.push(
-				`\tswelte_code, swelte_body = ${a}(swelte_req, swelte_code, swelte_body) or { return swelte_err_bad_cookies(path, '${an}', err.msg()) }`
-			)
+			return `\tswelte_code, swelte_body = ${a}(swelte_req, swelte_code, swelte_body) or { return swelte_err_bad_cookies(path, '${an}', err.msg()) }\n`
+		})
+		if (befores.length === 0 && afters.length === 0) {
+			return [
+				...o,
+				`pub fn ${prefix}dispatch(path string, method string, query map[string]string, params map[string]string, headers map[string]string, cookies map[string]string, body string, content_type string, qualifier string) (int, string, []string) {`,
+				dispatchBody(prefix, mod, fns, null),
+				'',
+				...emitSseEvents(prefix, mod, fns),
+			].join('\n')
 		}
-		o.push(
+		return [
+			...o,
+			`pub fn ${prefix}dispatch(path string, method string, query map[string]string, params map[string]string, headers map[string]string, cookies map[string]string, body string, content_type string, qualifier string) (int, string, []string) {\n\tmut form_before := map[string]string{}\n\tmut files_before := map[string]string{}\n\tif content_type.contains('multipart/form-data') {\n\t\tmut boundary_before := ''\n\t\tfor part in content_type.split(';') {\n\t\t\tp_before := part.trim_space()\n\t\t\tif p_before.starts_with('boundary=') { boundary_before = p_before.all_after('boundary=').trim('"') }\n\t\t}\n\t\tmut swelte_raw_before := map[string][]http.FileData{}\n\t\tif boundary_before != '' { form_before, swelte_raw_before = http.parse_multipart_form(body, boundary_before) }\n\t\tfor k, fs in swelte_raw_before {\n\t\t\tmut swelte_names := []string{}\n\t\t\tfor f in fs { swelte_names << f.filename }\n\t\t\tfiles_before[k] = swelte_names.join(';')\n\t\t}\n\t} else if content_type.contains('application/x-www-form-urlencoded') || body != '' {\n\t\tform_before = http.parse_form(body)\n\t}\n\tmut swelte_req := SwelteRequest{ query: query, form: form_before, files: files_before, headers: headers, cookies: cookies, params: params, method: method, path: path, qualifier: qualifier }`,
+			beforeCalls,
+			`\tmut swelte_cookies := []string{}\n\tcode_before, body_before, verbs_cookies := ${prefix}dispatch_verbs(path, method, query, params, headers, cookies, body, content_type, qualifier, swelte_req)\n\tswelte_cookies << verbs_cookies\n\tmut swelte_code := code_before\n\tmut swelte_body := body_before`,
+			afterCalls,
 			'\treturn swelte_code, swelte_body, swelte_cookies\n}\n',
 			`fn ${prefix}dispatch_verbs(path string, method string, query map[string]string, params map[string]string, headers map[string]string, cookies map[string]string, body string, content_type string, qualifier string, swelte_req SwelteRequest) (int, string, []string) {`,
 			// `req` outlives the method arm (assigned per-arm below, read by
 			// handler calls): declare once at function scope.
 			'\t_ = body\n\t_ = content_type\n\tmut req := SwelteRequest{ query: query, form: map[string]string{}, files: map[string]string{}, headers: headers, cookies: cookies, params: params, method: method, path: path, qualifier: qualifier }',
-			...dispatchBody(prefix, mod, fns, 'swelte_req'),
+			dispatchBody(prefix, mod, fns, 'swelte_req'),
 			'',
-			...emitSseEvents(prefix, mod, fns)
-		)
-		return o.join('\n')
+			...emitSseEvents(prefix, mod, fns),
+		].join('\n')
 	}
 
 	/** SSE events accessor (§14, true streaming via veb). Per file with
@@ -1201,10 +1189,10 @@ pub fn swelte_route(path string, method string, query map[string]string, headers
 				const vc = verbCall(h)
 				const pre = vc.pre.map((st) => `\t\t${st}`).join('\n')
 				const ret = h.fallible ? `\t\treturn ${vc.call} or { return err }` : `\t\treturn ${vc.call}`
-				return v`\tif ${condFor(h)} {\n${pre ? pre + '\n' : ''}${ret}\n\t}`
+				return `\tif ${condFor(h)} {\n${pre ? pre + '\n' : ''}${ret}\n\t}`
 			}
 		)
-		const checkArms = list(sseFns, (h) => v`\tif ${condFor(h)} { return }`)
+		const checkArms = list(sseFns, (h) => `\tif ${condFor(h)} { return }`)
 		const emitArms = list(
 			sseFns.filter((h) => isEmitFn(h)),
 			(h) => {
@@ -1217,14 +1205,14 @@ pub fn swelte_route(path string, method string, query map[string]string, headers
 				const run = h.fallible
 					? `\t\t${prefix}${h.name}(${callArgs}) or { return err }`
 					: `\t\t${prefix}${h.name}(${callArgs})`
-				return v`\tif ${condFor(h)} {\n${pre}${run}\n\t\treturn\n\t}`
+				return `\tif ${condFor(h)} {\n${pre}${run}\n\t\treturn\n\t}`
 			}
 		)
 		return [
-			v`pub fn ${prefix}sse_events(qualifier string, req SwelteRequest) ![]string {\n${arm(eventsArms, qualErr)}\n}\n`,
-			v`pub fn ${prefix}sse_is_emit() bool {\n\treturn ${sseFns.some((h) => isEmitFn(h))}\n}\n`,
-			v`pub fn ${prefix}sse_check_qual(qualifier string) ! {\n${arm(checkArms, qualErr)}\n}\n`,
-			v`pub fn ${prefix}sse_emit(qualifier string, req SwelteRequest, emit fn (string) bool) ! {\n${arm(emitArms, qualErr)}\n}\n`,
+			`pub fn ${prefix}sse_events(qualifier string, req SwelteRequest) ![]string {\n${arm(eventsArms, qualErr)}\n}\n`,
+			`pub fn ${prefix}sse_is_emit() bool {\n\treturn ${sseFns.some((h) => isEmitFn(h))}\n}\n`,
+			`pub fn ${prefix}sse_check_qual(qualifier string) ! {\n${arm(checkArms, qualErr)}\n}\n`,
+			`pub fn ${prefix}sse_emit(qualifier string, req SwelteRequest, emit fn (string) bool) ! {\n${arm(emitArms, qualErr)}\n}\n`,
 		]
 	}
 
@@ -1238,42 +1226,30 @@ pub fn swelte_route(path string, method string, query map[string]string, headers
 		mod: string,
 		fns: RpcFn[],
 		sharedReq: string | null
-	): string[] {
-		const o: string[] = []
+	): string {
+		// Shared prelude + arms per transport: RPC decodes the JSON envelope once;
+		// verbs branch per method arm. Each arm is a self-contained string —
+		// no `o.push` scaffolding, joined once at the end like emitServerGen.
 		const rpcFns = fns.filter((f) => f.attr === 'rpc')
-		if (rpcFns.length) {
-			const avail = '[' + rpcFns.map((f) => vJsonStr(f.name)).join(', ') + ']'
-			o.push(
-				v`\tif method == 'POST' && (content_type.contains('application/json') || content_type == '') {\n\t\tparsed := json2.decode[map[string]json2.Any](body) or {\n\t\t\treturn swelte_err_bad_cookies(path, '', 'bad json body')\n\t\t}\n\t\tfn_any := parsed['fn'] or {\n\t\t\treturn swelte_err_bad_cookies(path, '', 'missing fn')\n\t\t}\n\t\tfn_name := fn_any.str().trim('"')\n\t\targs_any := parsed['args'] or { json2.Any(json2.null) }\n\t\targs_json := json2.encode(args_any)`
-			)
-			for (const fn of rpcFns) {
-				const rs = fn.singleArgsStruct ? vType(fn.singleArgsStruct, mod) : null
-				const dec = rs
-					? `json.decode(${rs}, args_json) or { return swelte_err_bad_cookies(path, fn_name, 'bad args') }`
-					: `args_json`
-				const call = `${prefix}${fn.name}(${dec})`
-				const ck = `swelte_set_cookies_for_${prefix}${fn.name}()`
-				o.push(`\t\tif fn_name == ${vJsonStr(fn.name)} {`)
-				if (fn.fallible) {
-					o.push(
-						`\t\t\tres := ${call} or { return swelte_err_bad_cookies(path, fn_name, err.msg()) }`
-					)
-					o.push(
-						fn.vret === 'void'
-							? `\t\t\treturn 200, '{}', ${ck}`
-							: `\t\t\treturn 200, json.encode(res), ${ck}`
-					)
-				} else if (fn.vret === 'void') {
-					o.push(v`\t\t\t${call}\n\t\t\treturn 200, '{}', ${ck}`)
-				} else {
-					o.push(`\t\t\treturn 200, json.encode(${call}), ${ck}`)
-				}
-				o.push(`\t\t}`)
-			}
-			o.push(
-				v`\t\tif fn_name == '' {\n\t\t\treturn swelte_err_bad_cookies(path, fn_name, 'missing fn')\n\t\t}\n\t\treturn swelte_err_unknown_cookies(path, fn_name, ${avail})\n\t}`
-			)
+		const sseFns = fns.filter((f) => f.attr === 'sse')
+		const rpcArm = (fn: RpcFn): string => {
+			const rs = fn.singleArgsStruct ? vType(fn.singleArgsStruct, mod) : null
+			const dec = rs
+				? `json.decode(${rs}, args_json) or { return swelte_err_bad_cookies(path, fn_name, 'bad args') }`
+				: `args_json`
+			const call = `${prefix}${fn.name}(${dec})`
+			const ck = `swelte_set_cookies_for_${prefix}${fn.name}()`
+			const body = fn.fallible
+				? `\t\t\tres := ${call} or { return swelte_err_bad_cookies(path, fn_name, err.msg()) }\n${fn.vret === 'void' ? `\t\t\treturn 200, '{}', ${ck}` : `\t\t\treturn 200, json.encode(res), ${ck}`}`
+				: fn.vret === 'void'
+					? `\t\t\t${call}\n\t\t\treturn 200, '{}', ${ck}`
+					: `\t\t\treturn 200, json.encode(${call}), ${ck}`
+			return `\t\tif fn_name == ${vJsonStr(fn.name)} {\n${body}\n\t\t}`
 		}
+		const avail = '[' + rpcFns.map((f) => vJsonStr(f.name)).join(', ') + ']'
+		const rpcHead = `\tif method == 'POST' && (content_type.contains('application/json') || content_type == '') {\n\t\tparsed := json2.decode[map[string]json2.Any](body) or {\n\t\t\treturn swelte_err_bad_cookies(path, '', 'bad json body')\n\t\t}\n\t\tfn_any := parsed['fn'] or {\n\t\t\treturn swelte_err_bad_cookies(path, '', 'missing fn')\n\t\t}\n\t\tfn_name := fn_any.str().trim('"')\n\t\targs_any := parsed['args'] or { json2.Any(json2.null) }\n\t\targs_json := json2.encode(args_any)`
+		const rpcTail = `\t\tif fn_name == '' {\n\t\t\treturn swelte_err_bad_cookies(path, fn_name, 'missing fn')\n\t\t}\n\t\treturn swelte_err_unknown_cookies(path, fn_name, ${avail})\n\t}`
+		const rpcBlock = rpcFns.length === 0 ? '' : [rpcHead, list(rpcFns, rpcArm), rpcTail].join('\n')
 		// §7: @[after] runs on the outcome: @[before] failures never reach
 		// the verbs body (they return 4xx from dispatch), so @[after]
 		// only observes real verb outcomes — no error attr possible here.
@@ -1292,77 +1268,65 @@ pub fn swelte_route(path string, method string, query map[string]string, headers
 		// stays pure (status/body/cookies) for the JSON watchdog path.
 		// This arm only validates qualifiers for SSE routes so direct
 		// dispatch calls still 404 unknown qualifiers correctly.
-		const sseFns = fns.filter((f) => f.attr === 'sse')
-		if (sseFns.length) {
-			o.push(
-				`\tif method == 'GET' && headers['Accept'] or { headers['accept'] or { '' } }.contains('text/event-stream') {`
-			)
-			const sseQuals = sseFns.filter((h) => h.qualifier).map((h) => h.qualifier as string)
-			if (sseQuals.length) {
-				o.push(
-					`\t\tif qualifier != '' && qualifier !in [${sseQuals.map((q) => vJsonStr(q)).join(', ')}] { return swelte_err_unknown_qual_cookies(path, [${sseQuals.map((q) => vJsonStr(q)).join(', ')}]) }`
-				)
-			} else {
-				o.push(`\t\tif qualifier != '' { return swelte_err_unknown_qual_cookies(path, []) }`)
-			}
-			o.push(v`\t\treturn swelte_err_bad_cookies(path, '', 'sse handled in before_request')\n\t}`)
-		}
-		for (const vb of ['get', 'post', 'put', 'delete', 'patch']) {
+		const sseQuals = sseFns.filter((h) => h.qualifier).map((h) => h.qualifier as string)
+		const sseCheck =
+			sseQuals.length === 0
+				? `\t\tif qualifier != '' { return swelte_err_unknown_qual_cookies(path, []) }`
+				: `\t\tif qualifier != '' && qualifier !in [${sseQuals.map((q) => vJsonStr(q)).join(', ')}] { return swelte_err_unknown_qual_cookies(path, [${sseQuals.map((q) => vJsonStr(q)).join(', ')}]) }`
+		const sseArm =
+			sseFns.length === 0
+				? ''
+				: `\tif method == 'GET' && headers['Accept'] or { headers['accept'] or { '' } }.contains('text/event-stream') {\n${sseCheck}\n\t\treturn swelte_err_bad_cookies(path, '', 'sse handled in before_request')\n\t}`
+		// §13: with @[before] wrappers the request already exists
+		// (pre-filtered `swelte_req`, parsed once in dispatch) — reuse
+		// it directly, no second multipart parse. Unchained leaves
+		// parse here (form/files declared only in that branch).
+		const reqHead = (vb: string): string =>
+			sharedReq != null
+				? `\t\treq = ${sharedReq}\n\t\treq.method = '${vb.toUpperCase()}'`
+				: `\t\tmut form := map[string]string{}\n\t\tmut files := map[string]string{}\n\t\tif content_type.contains('multipart/form-data') {\n\t\t\tmut boundary := ''\n\t\t\tfor part in content_type.split(';') {\n\t\t\t\tp := part.trim_space()\n\t\t\t\tif p.starts_with('boundary=') { boundary = p.all_after('boundary=').trim('"') }\n\t\t\t}\n\t\t\tmut swelte_raw_files := map[string][]http.FileData{}\n\t\t\tif boundary != '' { form, swelte_raw_files = http.parse_multipart_form(body, boundary) }\n\t\t\tfor k, fs in swelte_raw_files {\n\t\t\t\tmut swelte_names := []string{}\n\t\t\t\tfor f in fs { swelte_names << f.filename }\n\t\t\t\tfiles[k] = swelte_names.join(';')\n\t\t}\n\t\t} else if content_type.contains('application/x-www-form-urlencoded') || body != '' {\n\t\t\tform = http.parse_form(body)\n\t\t}\n\t\tmut req := SwelteRequest{ query: query, form: form, files: files, headers: headers, cookies: cookies, params: params, method: '${vb.toUpperCase()}', path: path, qualifier: qualifier }`
+		const verbArm = (vb: string): string => {
 			const hs = fns.filter((f) => f.attr === vb)
-			if (!hs.length) continue
+			if (hs.length === 0) return ''
 			const quals = hs.filter((h) => h.qualifier).map((h) => h.qualifier as string)
-			o.push(`\tif method == '${vb.toUpperCase()}' {`)
-			// §13: with @[before] wrappers the request already exists
-			// (pre-filtered `swelte_req`, parsed once in dispatch) — reuse
-			// it directly, no second multipart parse. Unchained leaves
-			// parse here (form/files declared only in that branch).
-			if (sharedReq) {
-				o.push(v`\t\treq = ${sharedReq}\n\t\treq.method = '${vb.toUpperCase()}'`)
-			} else {
-				o.push(
-					v`\t\tmut form := map[string]string{}\n\t\tmut files := map[string]string{}\n\t\tif content_type.contains('multipart/form-data') {\n\t\t\tmut boundary := ''\n\t\t\tfor part in content_type.split(';') {\n\t\t\t\tp := part.trim_space()\n\t\t\t\tif p.starts_with('boundary=') { boundary = p.all_after('boundary=').trim('"') }\n\t\t\t}\n\t\t\tmut swelte_raw_files := map[string][]http.FileData{}\n\t\t\tif boundary != '' { form, swelte_raw_files = http.parse_multipart_form(body, boundary) }\n\t\t\tfor k, fs in swelte_raw_files {\n\t\t\t\tmut swelte_names := []string{}\n\t\t\t\tfor f in fs { swelte_names << f.filename }\n\t\t\t\tfiles[k] = swelte_names.join(';')\n\t\t\t}\n\t\t} else if content_type.contains('application/x-www-form-urlencoded') || body != '' {\n\t\t\tform = http.parse_form(body)\n\t\t}\n\t\tmut req := SwelteRequest{ query: query, form: form, files: files, headers: headers, cookies: cookies, params: params, method: '${vb.toUpperCase()}', path: path, qualifier: qualifier }`
-				)
-			}
-			for (const h of hs) {
-				const cond = h.qualifier ? `qualifier == ${vJsonStr(h.qualifier)}` : `qualifier == ''`
-				const isReq = h.params.length === 1 && h.params[0].vtype === 'SwelteRequest'
-				const built = isReq ? null : narrowCall(`${prefix}${h.name}`, h.params)
-				const call = isReq ? `${prefix}${h.name}(req)` : built!.call
-				const ck = `swelte_set_cookies_for_${prefix}${h.name}()`
-				o.push(`\t\tif ${cond} {`)
-				for (const st of built?.stmts ?? []) o.push(`\t\t\t${st}`)
-				if (h.fallible) {
-					o.push(
-						`\t\t\tres := ${call} or { return swelte_err_bad_cookies(path, ${vJsonStr(h.name)}, err.msg()) }`
-					)
-					o.push(
-						h.vret === 'void'
-							? `\t\t\treturn 200, '{}', ${ck}`
-							: `\t\t\treturn 200, json.encode(res), ${ck}`
-					)
-				} else if (h.vret === 'void') {
-					o.push(v`\t\t\t${call}\n\t\t\treturn 200, '{}', ${ck}`)
-				} else {
-					o.push(`\t\t\treturn 200, json.encode(${call}), ${ck}`)
-				}
-				o.push(`\t\t}`)
-			}
-			if (quals.length) {
-				o.push(
-					`\t\treturn swelte_err_unknown_qual_cookies(path, [${quals.map((q) => vJsonStr(q)).join(', ')}])`
-				)
-			} else {
-				o.push(`\t\treturn swelte_err_bad_cookies(path, '', 'missing qualifier')`)
-			}
-			o.push(`\t}`)
+			const tail = quals.length
+				? `\t\treturn swelte_err_unknown_qual_cookies(path, [${quals.map((q) => vJsonStr(q)).join(', ')}])`
+				: `\t\treturn swelte_err_bad_cookies(path, '', 'missing qualifier')`
+			return [
+				`\tif method == '${vb.toUpperCase()}' {`,
+				reqHead(vb),
+				list(hs, verbBranch),
+				tail,
+				`\t}`,
+			].join('\n')
 		}
-		if (sharedReq == null && fns.some((f) => f.attr === 'get')) {
-			o.push(`\treturn swelte_method_not_allowed()`)
-		} else {
-			o.push(`\treturn ${methodGate}`)
+		const verbBranch = (h: RpcFn): string => {
+			const cond = h.qualifier ? `qualifier == ${vJsonStr(h.qualifier)}` : `qualifier == ''`
+			const isReq = h.params.length === 1 && h.params[0].vtype === 'SwelteRequest'
+			const built = isReq ? null : narrowCall(`${prefix}${h.name}`, h.params)
+			const call = isReq ? `${prefix}${h.name}(req)` : built!.call
+			const ck = `swelte_set_cookies_for_${prefix}${h.name}()`
+			const stmts = list(built?.stmts ?? [], (st) => `\t\t\t${st}\n`)
+			const body = h.fallible
+				? `\t\t\tres := ${call} or { return swelte_err_bad_cookies(path, ${vJsonStr(h.name)}, err.msg()) }\n${h.vret === 'void' ? `\t\t\treturn 200, '{}', ${ck}` : `\t\t\treturn 200, json.encode(res), ${ck}`}`
+				: h.vret === 'void'
+					? `\t\t\t${call}\n\t\t\treturn 200, '{}', ${ck}`
+					: `\t\t\treturn 200, json.encode(${call}), ${ck}`
+			return `\t\tif ${cond} {\n${stmts}${body}\n\t\t}`
 		}
-		o.push(v`}\n`)
-		return o
+		const tail =
+			sharedReq == null && fns.some((f) => f.attr === 'get')
+				? `\treturn swelte_method_not_allowed()`
+				: `\treturn ${methodGate}`
+		return [
+			rpcBlock,
+			sseArm,
+			...['get', 'post', 'put', 'delete', 'patch'].map(verbArm),
+			tail,
+			`}\n`,
+		]
+			.filter((s) => s !== '')
+			.join('\n')
 	}
 
 	/** Codegen: fetch stub for a `#routes/*.v` file. Big `v` template -
@@ -1371,7 +1335,7 @@ pub fn swelte_route(path string, method string, query map[string]string, headers
 		const hasDyn = route.includes('[')
 		const dynSeg = /\[\.\.\.([A-Za-z_][A-Za-z0-9_]*)\]|\[([A-Za-z_][A-Za-z0-9_]*)\]/
 		const dynHelper = hasDyn
-			? v`
+			? `
 const __swelteBase = ${JSON.stringify(route)}
 function __swelteUrl(args = {}) {
 	let u = __swelteBase
@@ -1386,7 +1350,7 @@ function __swelteUrl(args = {}) {
 }
 `
 			: ''
-		const stripCall = (call: string) => v`
+		const stripCall = (call: string) => `
 	const { __swelteRest, ...__swelteArgs } = (() => {
 		const c = { ...(args ?? {}) }
     for (const m of __swelteBase.matchAll(${dynSeg.source}/g)) delete c[m[1] ?? m[2]];
@@ -1395,7 +1359,7 @@ function __swelteUrl(args = {}) {
 	void __swelteRest
   ${call}
 `
-		return v`// Auto-generated by swelte from V signatures. Do not edit.
+		return `// Auto-generated by swelte from V signatures. Do not edit.
 import { __swelteFetch${fns.some((f) => f.attr === 'sse') ? ', __swelteStream' : ''} } from '@swelte/core'
 
 ${dynHelper}${list(fns, (fn) => {
@@ -1404,18 +1368,18 @@ ${dynHelper}${list(fns, (fn) => {
 	const nm = JSON.stringify(fn.name)
 	const attr = JSON.stringify(fn.attr)
 	if (hasDyn && fn.attr === 'sse')
-		return v`export ${kind} ${fn.name}(args = {}) {${stripCall(`yield* __swelteStream(__swelteUrl(args), ${nm}, __swelteArgs, ${q})`)}}
+		return `export ${kind} ${fn.name}(args = {}) {${stripCall(`yield* __swelteStream(__swelteUrl(args), ${nm}, __swelteArgs, ${q})`)}}
 `
 	if (fn.attr === 'sse')
-		return v`export ${kind} ${fn.name}(args = {}) {
+		return `export ${kind} ${fn.name}(args = {}) {
 	yield* __swelteStream(${JSON.stringify(route)}, ${nm}, args, ${q})
 }
 
 `
 	if (hasDyn)
-		return v`export ${kind} ${fn.name}(args = {}) {${stripCall(`return __swelteFetch(__swelteUrl(args), ${nm}, ${attr}, __swelteArgs, ${q})`)}}
+		return `export ${kind} ${fn.name}(args = {}) {${stripCall(`return __swelteFetch(__swelteUrl(args), ${nm}, ${attr}, __swelteArgs, ${q})`)}}
 `
-	return v`export ${kind} ${fn.name}(args = {}) {
+	return `export ${kind} ${fn.name}(args = {}) {
 	return __swelteFetch(${JSON.stringify(route)}, ${nm}, ${attr}, args, ${q})
 }
 
@@ -1426,7 +1390,7 @@ ${dynHelper}${list(fns, (fn) => {
 	/** Codegen: WASM stub for a `#lib/*.v` file. Big `v` template. */
 	function jsWasmFor(_root: string, mod: string, fns: RpcFn[]): string {
 		const wasmUrl = isBuild ? '/assets/app_lib.wasm' : '/@swelte-dev/' + mod + '.wasm'
-		return v`// Auto-generated by swelte from ${mod}.v \u2014 do not edit.
+		return `// Auto-generated by swelte from ${mod}.v \u2014 do not edit.
 import { __swelteWasmCall } from '@swelte/core'
 const wasmUrl = ${JSON.stringify(wasmUrl)}
 
@@ -1439,7 +1403,7 @@ ${list(fns, (fn) => {
 		}))
 	)
 	const ret = JSON.stringify(wasmReturnKind(fn.vret) || 'unsupported')
-	return v`const ${fn.name}_params = ${params}
+	return `const ${fn.name}_params = ${params}
 export function ${fn.name}(args) {
 	return __swelteWasmCall(wasmUrl, 'main.${fn.name}', args, ${fn.name}_params, ${ret})
 }
@@ -1480,30 +1444,59 @@ export function ${fn.name}(args) {
 				const file = join(dir, `${base}.d.ts`)
 				const out: string[] = ['// Auto-generated by swelte from V signatures. Do not edit.', '']
 				if (fns.some((f) => f.attr !== 'rpc')) {
-					out.push('export interface SwelteRequest {')
-					out.push('\tquery: Record<string, string>')
-					out.push('\tform: Record<string, string>')
-					out.push('\tfiles: Record<string, string>')
-					out.push('\theaders: Record<string, string>')
-					out.push('\tcookies: Record<string, string>')
-					out.push('\tparams: Record<string, string>')
-					out.push('\tmethod: string')
-					out.push('\tpath: string')
-					out.push('\tqualifier: string')
-					out.push('}')
-					out.push('')
+					out.push(`export interface SwelteRequest {
+	query: Record<string, string>
+	form: Record<string, string>
+	files: Record<string, string>
+	headers: Record<string, string>
+	cookies: Record<string, string>
+	params: Record<string, string>
+	method: string
+	path: string
+	qualifier: string
+}
+`)
 				}
-				for (const st of parseStructs(src)) {
-					out.push(`export interface ${st.name} {`)
+				const structBlock = (st: VStruct): string => {
 					for (const fld of st.fields) {
 						if (fld.tstype === 'unknown')
 							warnings.push(
 								`${sub}/${mod}.${st.name}.${fld.name}: unknown V type '${fld.vtype}' → unknown`
 							)
-						out.push(`\t${fld.name}${fld.optional ? '?' : ''}: ${fld.tstype} // ${fld.vtype}`)
 					}
-					out.push('}')
-					out.push('')
+					return `export interface ${st.name} {
+${list(st.fields, (fld) => `\t${fld.name}${fld.optional ? '?' : ''}: ${fld.tstype} // ${fld.vtype}\n`)}}
+`
+				}
+				for (const st of parseStructs(src)) out.push(structBlock(st))
+				const resAlias = (fn: RpcFn): string => {
+					const Res = `${pascal(fn.name)}Result`
+					const fallible = fn.fallible ? ' // !T: may reject with SwelteRpcError' : ''
+					const ret = fn.tsret === 'void' ? 'void' : fn.tsret
+					if (fn.tsret === 'unknown' && fn.vret !== 'unknown')
+						warnings.push(`${sub}/${mod}.${fn.name} return: unknown V type '${fn.vret}' → unknown`)
+					if (/^[A-Z][A-Za-z0-9_]*$/.test(fn.vret))
+						return `export type ${Res} = ${fn.vret}${fallible}`
+					if (
+						/^[a-z][A-Za-z0-9_]*$/.test(fn.vret) &&
+						fn.vret !== 'void' &&
+						fn.vret !== 'string' &&
+						fn.vret !== 'number' &&
+						fn.vret !== 'boolean'
+					)
+						return `// ${fn.name} returns V builtin ${fn.vret} (see above).\nexport type ${Res} = unknown`
+					return `export type ${Res} = ${ret}${fallible}`
+				}
+				const argsBlock = (fn: RpcFn, params: RpcParam[], Arg: string): string => {
+					for (const p of params) {
+						if (p.tstype === 'unknown')
+							warnings.push(
+								`${sub}/${mod}.${fn.name} param ${p.name}: unknown V type '${p.vtype}' → unknown`
+							)
+					}
+					return `export interface ${Arg} {
+${list(params, (p) => `\t${p.name}${p.optional ? '?' : ''}: ${p.tstype}\n`)}}
+`
 				}
 				for (const fn of fns) {
 					const isVerb = fn.attr !== 'rpc'
@@ -1520,30 +1513,23 @@ export function ${fn.name}(args) {
 						const isReq =
 							(fn.params.length === 1 && fn.params[0].vtype === 'SwelteRequest') ||
 							(fn.params.length === 1 && fn.params[0].name === 'req')
+						const fallibleCmt = fn.fallible ? ' // !T: may reject with SwelteRpcError' : ''
 						const ret = fn.tsret === 'void' ? 'void' : fn.tsret
 						if (fn.tsret === 'unknown' && fn.vret !== 'unknown')
 							warnings.push(
 								`${sub}/${mod}.${fn.name} return: unknown V type '${fn.vret}' → unknown`
 							)
 						const Res = `${pascal(fn.name)}Result`
-						if (/^[A-Z][A-Za-z0-9_]*$/.test(fn.vret)) {
-							out.push(
-								`export type ${Res} = ${fn.vret}${fn.fallible ? ' // !T: may reject with SwelteRpcError' : ''}`
-							)
-						} else if (
-							/^[a-z][A-Za-z0-9_]*$/.test(fn.vret) &&
-							fn.vret !== 'void' &&
-							fn.vret !== 'string' &&
-							fn.vret !== 'number' &&
-							fn.vret !== 'boolean'
-						) {
-							out.push(`// ${fn.name} returns V builtin ${fn.vret} (see above).`)
-							out.push(`export type ${Res} = unknown`)
-						} else {
-							out.push(
-								`export type ${Res} = ${ret}${fn.fallible ? ' // !T: may reject with SwelteRpcError' : ''}`
-							)
-						}
+						const resAlias = /^[A-Z][A-Za-z0-9_]*$/.test(fn.vret)
+							? `export type ${Res} = ${fn.vret}${fallibleCmt}`
+							: /^[a-z][A-Za-z0-9_]*$/.test(fn.vret) &&
+									fn.vret !== 'void' &&
+									fn.vret !== 'string' &&
+									fn.vret !== 'number' &&
+									fn.vret !== 'boolean'
+								? `// ${fn.name} returns V builtin ${fn.vret} (see above).\nexport type ${Res} = unknown`
+								: `export type ${Res} = ${ret}${fallibleCmt}`
+						out.push(resAlias)
 						if (fn.attr === 'sse') {
 							// SSE (roadmap §14, true streaming via veb): two shapes.
 							// List mode: fn returns `[]string` (event list, streamed
@@ -2134,12 +2120,12 @@ export function ${fn.name}(args) {
 						decls.push('')
 					}
 				}
-				decls.push(`// Fallback for unknown .v files only.`)
-				decls.push(`declare module '*.v' {`)
-				decls.push(`\tconst __swelte_untyped: any`)
-				decls.push(`\texport default __swelte_untyped`)
-				decls.push(`}`)
-				decls.push('')
+				decls.push(`// Fallback for unknown .v files only.
+declare module '*.v' {
+	const __swelte_untyped: any
+	export default __swelte_untyped
+}
+`)
 				writeFileSync(join(genDir, 'v-shim.d.ts'), decls.join('\n'))
 			}
 			for (const w of warnings) console.warn(`[swelte] ${w}`)
@@ -2183,66 +2169,57 @@ export function ${fn.name}(args) {
 				} catch {
 					/* no error page */
 				}
-				o.push('')
-				o.push("import { mount, createRawSnippet } from 'svelte'")
-				o.push('')
-				o.push('function matchSegs(pattern, pathname) {')
-				o.push("\tconst pat = pattern.split('/').filter((s) => s !== '')")
-				o.push("\tconst got = pathname.split('/').filter((s) => s !== '')")
-				o.push('\tconst params = {}')
-				o.push('\tlet gi = 0')
-				o.push('\tfor (let pi = 0; pi < pat.length; pi++) {')
-				o.push('\t\tconst seg = pat[pi]')
-				o.push(
-					"\t\tif (seg.startsWith('[...') && seg.endsWith(']')) { params[seg.slice(4, -1)] = got.slice(gi).map(decodeURIComponent).join('/'); gi = got.length; break }"
-				)
-				o.push(
-					"\t\tif (seg.startsWith('[') && seg.endsWith(']')) { if (gi >= got.length || !got[gi]) return null; params[seg.slice(1, -1)] = decodeURIComponent(got[gi++]); continue }"
-				)
-				o.push('\t\tif (got[gi++] !== seg) return null')
-				o.push('\t}')
-				o.push('\treturn gi === got.length ? params : null')
-				o.push('}')
-				o.push('')
-				o.push('export const ROUTES = [')
+				o.push(`
+import { mount, createRawSnippet } from 'svelte'
+
+function matchSegs(pattern, pathname) {
+	const pat = pattern.split('/').filter((s) => s !== '')
+	const got = pathname.split('/').filter((s) => s !== '')
+	const params = {}
+	let gi = 0
+	for (let pi = 0; pi < pat.length; pi++) {
+		const seg = pat[pi]
+		if (seg.startsWith('[...') && seg.endsWith(']')) { params[seg.slice(4, -1)] = got.slice(gi).map(decodeURIComponent).join('/'); gi = got.length; break }
+		if (seg.startsWith('[') && seg.endsWith(']')) { if (gi >= got.length || !got[gi]) return null; params[seg.slice(1, -1)] = decodeURIComponent(got[gi++]); continue }
+		if (got[gi++] !== seg) return null
+	}
+	return gi === got.length ? params : null
+}
+
+export const ROUTES = [
+`)
 				for (const e of entries) {
 					const wraps = e.wrappers.map((w) => sym(w, '_Wrap')).join(', ')
 					o.push(
 						`\t{ path: ${JSON.stringify(e.route)}, page: ${sym(e.mod, '_Page')}, wrappers: [${wraps}] },`
 					)
 				}
-				o.push(']')
-				o.push('')
-				o.push('export function mountSwelteRoute(target, pathname, errorProps) {')
-				o.push(
-					"\tconst path = pathname !== '/' && pathname.endsWith('/') ? pathname.slice(0, -1) : pathname"
-				)
-				o.push('\tfor (const r of ROUTES) {')
-				o.push('\t\tconst params = matchSegs(r.path, path)')
-				o.push('\t\tif (!params) continue')
-				o.push('\t\t// Leaf-first: page mounts into host[0]; each wrapper mounts with `children`')
-				o.push('\t\t// as a Snippet appending the inner host — leaf renders inside wrapper')
-				o.push('\t\t// nav/chrome with no manual import in +page.svelte.')
-				o.push("\t\tconst hosts = [document.createElement('div')]")
-				o.push('\t\tmount(r.page, { target: hosts[0], props: { params } })')
-				o.push('\t\tfor (let i = r.wrappers.length - 1; i >= 0; i--) {')
-				o.push("\t\t\tconst host = document.createElement('div')")
-				o.push('\t\t\tconst inner = hosts[hosts.length - 1]')
-				o.push(
-					'\t\t\tconst snip = createRawSnippet(() => ({ render: () => \`\`, setup: (el) => { el.appendChild(inner) } }))'
-				)
-				o.push('\t\t\tmount(r.wrappers[i], { target: host, props: { params, children: snip } })')
-				o.push('\t\t\thosts.push(host)')
-				o.push('\t\t}')
-				o.push('\t\ttarget.appendChild(hosts[hosts.length - 1])')
-				o.push('\t\treturn { params, path: r.path }')
-				o.push('\t}')
-				o.push(
-					"\tif (typeof SwelteErrorPage !== 'undefined') { mount(SwelteErrorPage, { target, props: errorProps ?? { status: 404, message: 'not found' } }); return { params: {}, path: null } }"
-				)
-				o.push("\tthrow new Error('swelte: no route for ' + pathname)")
-				o.push('}')
-				o.push('')
+				o.push(`]
+
+export function mountSwelteRoute(target, pathname, errorProps) {
+	const path = pathname !== '/' && pathname.endsWith('/') ? pathname.slice(0, -1) : pathname
+	for (const r of ROUTES) {
+		const params = matchSegs(r.path, path)
+		if (!params) continue
+		// Leaf-first: page mounts into host[0]; each wrapper mounts with \`children\`
+		// as a Snippet appending the inner host — leaf renders inside wrapper
+		// nav/chrome with no manual import in +page.svelte.
+		const hosts = [document.createElement('div')]
+		mount(r.page, { target: hosts[0], props: { params } })
+		for (let i = r.wrappers.length - 1; i >= 0; i--) {
+			const host = document.createElement('div')
+			const inner = hosts[hosts.length - 1]
+			const snip = createRawSnippet(() => ({ render: () => \`\`, setup: (el) => { el.appendChild(inner) } }))
+			mount(r.wrappers[i], { target: host, props: { params, children: snip } })
+			hosts.push(host)
+		}
+		target.appendChild(hosts[hosts.length - 1])
+		return { params, path: r.path }
+	}
+	if (typeof SwelteErrorPage !== 'undefined') { mount(SwelteErrorPage, { target, props: errorProps ?? { status: 404, message: 'not found' } }); return { params: {}, path: null } }
+	throw new Error('swelte: no route for ' + pathname)
+}
+`)
 				writeFileSync(join(genDir, 'routes.js'), o.join('\n'))
 			} catch {
 				/* routes.js best-effort */
@@ -2657,13 +2634,13 @@ export function ${fn.name}(args) {
 						)
 					}
 					const entry = [
-						'module main',
-						'',
-						"@[export: 'swelte_alloc']",
-						'pub fn swelte_alloc(n int) &u8 {',
-						'\treturn unsafe { malloc(if n <= 0 { 1 } else { n }) }',
-						'}',
-						'',
+    `module main
+
+@[export: 'swelte_alloc']
+pub fn swelte_alloc(n int) &u8 {
+	return unsafe { malloc(if n <= 0 { 1 } else { n }) }
+}
+`,
 						...parts,
 					].join('\n')
 					const tmpEntry = join(resolve(root, outDir), '.bundle.compile.v')
