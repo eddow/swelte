@@ -146,8 +146,7 @@ export async function runDev(ctx: Ctx): Promise<void> {
 				// Dev same-origin: Vite (:port) POSTs through the proxy with
 				// `Origin: http://localhost:<port>` — opt it in so the §10
 				// CSRF guard (403 on foreign non-GET/HEAD) lets it through.
-				SWELTE_CORS_ORIGIN:
-					process.env.SWELTE_CORS_ORIGIN ?? `http://localhost:${port}`,
+				SWELTE_CORS_ORIGIN: process.env.SWELTE_CORS_ORIGIN ?? `http://localhost:${port}`,
 			},
 			stdio: ['ignore', 'pipe', 'pipe'],
 		})

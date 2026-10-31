@@ -1,7 +1,12 @@
 <script lang="ts">
 import { tick } from 'svelte'
 import { get_greeting, save_name, greet_narrow } from '#routes/+page.v'
-import type { GetGreetingResult, SaveNameResult, GreetNarrowResult, SwelteRequest } from '#routes/+page.v'
+import type {
+	GetGreetingResult,
+	SaveNameResult,
+	GreetNarrowResult,
+	SwelteRequest,
+} from '#routes/+page.v'
 import { login, tick_stream } from '#routes/api/greet.v'
 import type { Session } from '#routes/api/greet.v'
 import { hash_string } from '#lib/crypto/hash.v'

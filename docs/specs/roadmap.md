@@ -11,15 +11,11 @@ no-JS `303` / HTML errors; multipart filenames; SSE (`@[sse]`, veb streaming);
 `#lib/backend` guard + `#routes/*.v`-only import (generate-time file+line);
 unique-basename `./x.v` aliases; `#lib/` allowlist
 as generate-time error; six verbs live-proven; `swelte check` (text + `--format json`);
-single-artifact `dist/` + binary proof. `docs/` describes built behavior;
+single-artifact `dist/` + binary proof; `+route.svelte` client router
+(`.swelte/routes.js` + `mountSwelteRoute`, no manual imports);
+`swelte test` (V tests + stub-match + snapshot drift + tsc);
+HMR routes-stub + importer invalidation. `docs/` describes built behavior;
 `.v`-import rationale in `v-imports.md`.
-
-## 7-remainder. `+route.svelte` UI composition (V half built)
-
-V chain built; UI nesting is manual (leaf imports nothing from wrapper) until a
-client router lands.
-
-Test: leaf renders inside wrapper nav/chrome with no manual import.
 
 ## 9 / SSR. Engines (`specs/ssr.md` — dispatcher conventions built)
 
@@ -29,18 +25,6 @@ Open: `ssr-qjs` (default) + `ssr-bun` (opt-in) adapters, `hydrate()` template,
 
 Test: per `ssr.md` §5 (404 `+error` HTML, strip parity, `!T` → 500 HTML, bare-machine
 single artifact, HMR swap, bun streaming).
-
-## 20. Testing story
-
-`v test` for `.v` fns + TS contract tests against generated `.d.ts`.
-
-Test: `v test src/lib/` passes; break a V return type → TS contract test fails pre-browser.
-
-## 21. HMR for `.v` signature changes
-
-Regen watches `.v`; Svelte remount on signature change unproven.
-
-Test: with dev running, change a fn return type → browser remounts, no restart/stale stub.
 
 ## 23. V runtime as static vlib (deferred, post-freeze)
 

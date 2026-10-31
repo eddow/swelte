@@ -3,6 +3,7 @@ import { runDev } from './dev.js'
 import { runBuild } from './build.js'
 import { runPreview } from './preview.js'
 import { runInit } from './init.js'
+import { runTest } from './test.js'
 
 export const VERSION = '0.1.0'
 
@@ -78,7 +79,8 @@ const checkCmd: Command = {
 		const { collectDiagnostics } = await import('../gen/diagnostics.js')
 		const diags = await collectDiagnostics(root)
 		const fmt = String(ctx.opts.format ?? 'text')
-		if (fmt !== 'text' && fmt !== 'json') throw new Error('--format must be text or json (got ' + fmt + ')')
+		if (fmt !== 'text' && fmt !== 'json')
+			throw new Error('--format must be text or json (got ' + fmt + ')')
 		if (fmt === 'json') {
 			console.log(JSON.stringify(diags, null, 2))
 		} else if (diags.length === 0) {
@@ -89,7 +91,16 @@ const checkCmd: Command = {
 	},
 }
 
-export const COMMANDS: Command[] = [devCmd, buildCmd, previewCmd, initCmd, checkCmd]
+const testCmd: Command = {
+	name: 'test',
+	summary: 'V tests (v test) + TS contract check (stubs match projected types).',
+	args: [{ name: 'root', help: 'Project root', value: 'string' }],
+	async run(ctx: Ctx) {
+		await runTest(ctx)
+	},
+}
+
+export const COMMANDS: Command[] = [devCmd, buildCmd, previewCmd, initCmd, checkCmd, testCmd]
 
 export function findCommand(name: string): Command | undefined {
 	return COMMANDS.find((c) => c.name === name)

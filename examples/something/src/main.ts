@@ -1,4 +1,5 @@
-import { mount } from 'svelte'
-import Index from './routes/+page.svelte'
+// Swelte client entry: route through .swelte/routes.js so +route.svelte
+// wrappers nest automatically (no manual import in +page.svelte).
+import { mountSwelteRoute } from '../.swelte/routes.js'
 
-mount(Index, { target: document.getElementById('app')! })
+mountSwelteRoute(document.getElementById('app')!, location.pathname)
