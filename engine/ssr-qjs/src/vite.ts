@@ -44,11 +44,29 @@ export function swelte(options: SsrQjsOptions = {}): Plugin[] {
 			if (!existsSync(manifestFile)) return
 			const manifest = JSON.parse(readFileSync(manifestFile, 'utf8'))
 			const { emitRenderJs } = await import('./ssr.js')
-			await emitRenderJs(manifest, {
+			const outFile = await emitRenderJs(manifest, {
 				root,
 				routesDir: String(options.routesDir ?? 'src/routes'),
 				prod: true,
 			})
+			// QJS prod link (adapter-owned): vendored QuickJS → libqjs.a +
+			// routes/swelte_qjs_bridge.v (generate() picks it up next run;
+			// `swelte build` runs generate→vite→v-o, so the bridge compiles
+			// into the binary on the following build — see buildQjsProd).
+			try {
+				const { buildQjsProd } = await import('./qjs.js')
+				const prod = buildQjsProd({
+					root,
+					renderJs: outFile,
+					outDir,
+					timeoutMs: options.renderTimeoutMs,
+					memoryMB: options.renderMemoryMB,
+				})
+				console.log(`[swelte:ssr-qjs] QJS bridge: ${prod.bridge}`)
+				if (prod.qjscNote) console.log(`[swelte:ssr-qjs] ${prod.qjscNote}`)
+			} catch (e) {
+				console.warn(`[swelte:ssr-qjs] QJS link skipped: ${(e as Error).message}`)
+			}
 		},
 	}
 

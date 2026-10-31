@@ -8,7 +8,9 @@
   "exports": {
     ".": "./dist/index.js",
     "./vite": "./dist/vite.js",
-    "./dev": "./dist/dev.js"
+    "./dev": "./dist/dev.js",
+    "./cli": "./dist/cli.js",
+    "./qjs": "./dist/qjs.js"
   },
   "files": ["dist"],
   "scripts": {

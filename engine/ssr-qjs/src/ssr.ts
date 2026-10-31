@@ -247,7 +247,11 @@ export function renderRoute(route, props_json) {
     try { return run(PAGES[abs], props); } catch (e) { /* fall to +error */ }
   }
   if (ERROR && PAGES[ERROR]) {
-    try { return run(PAGES[ERROR], { status: 500, message: 'render failed' }); }
+    try {
+      const st = (props && typeof props.status === 'number') ? props.status : 500;
+      const msg = (props && typeof props.message === 'string') ? props.message : 'render failed';
+      return run(PAGES[ERROR], { status: st, message: msg });
+    }
     catch (e) { /* fall through */ }
   }
   return { head: '', body: '<!--swelte:ssr:' + route + '-->' };

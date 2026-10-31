@@ -23,3 +23,10 @@ export { defaultSsrDevPort, renderFileFor, startSsrDevServer } from './dev.js'
 export type { SsrDevOptions } from './dev.js'
 export { runSsrCheck, runSsrDev } from './cli.js'
 export type { SsrDevRunOptions } from './cli.js'
+export {
+	buildQjsProd,
+	qjsCDir,
+	whichCC,
+	whichQjsc,
+	type QjsProdOut,
+} from './qjs.js'

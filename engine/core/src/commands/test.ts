@@ -31,7 +31,7 @@ function listVFiles(dir: string): string[] {
 
 export async function runTest(ctx: Ctx): Promise<void> {
 	const root = resolve(String(ctx.opts.root ?? process.cwd()))
-	const { resolveV, vVersion } = await import('../toolchain.js')
+	const { resolveV, vVersion, toolchainEnv } = await import('../toolchain.js')
 	const { loadConfig } = await import('../gen/config.js')
 	const v = resolveV(import.meta.url)
 	ctx.log(`V toolchain: ${vVersion(v)} (${v})`)
@@ -66,7 +66,7 @@ export async function runTest(ctx: Ctx): Promise<void> {
 	let vTested = 0
 	for (const dir of [...dirs].sort()) {
 		try {
-			execFileSync(v, ['test', dir], { cwd: root, stdio: ['ignore', 'pipe', 'pipe'] })
+			execFileSync(v, ['test', dir], { cwd: root, stdio: ['ignore', 'pipe', 'pipe'], env: toolchainEnv() })
 			vTested++
 		} catch (e) {
 			const err = e as { stderr?: Buffer; stdout?: Buffer; message?: string }
@@ -201,6 +201,7 @@ export async function runTest(ctx: Ctx): Promise<void> {
 		execFileSync('npx', ['tsc', '--noEmit', '-p', 'tsconfig.json'], {
 			cwd: root,
 			stdio: ['ignore', 'pipe', 'pipe'],
+			env: toolchainEnv(),
 		})
 	} catch (e) {
 		const err = e as { stderr?: Buffer; stdout?: Buffer; message?: string }

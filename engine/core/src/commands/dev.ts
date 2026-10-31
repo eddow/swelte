@@ -73,7 +73,7 @@ export async function runDev(ctx: Ctx): Promise<void> {
 	const root = resolve(String(ctx.opts.root ?? process.cwd()))
 	const port = takePort(ctx.opts.port, 5174)
 	const backend = takePort(ctx.opts.backend, 8131)
-	const { resolveV, vVersion } = await import('../toolchain.js')
+	const { resolveV, vVersion, toolchainEnv, resolveCC } = await import('../toolchain.js')
 	const { loadConfig } = await import('../gen/config.js')
 	const v = resolveV(import.meta.url)
 	ctx.log(`V toolchain: ${vVersion(v)} (${v})`)
@@ -138,16 +138,28 @@ export async function runDev(ctx: Ctx): Promise<void> {
 		if (stopping) return
 		// Run the harness FILE: `v run .swelte/server.v` — V resolves
 		// `routes/` relative to it (dir target fails on dotted dirs).
-		vChild = spawn(v, ['run', join(genAbs, 'server.v')], {
+		// Compiler flags go BEFORE `run` (after it they reach the program
+		// as argv — hence `v expects that -enable-globals exists`).
+		// Bridge pass: the QJS bridge uses __global, so dev needs the same
+		// `-enable-globals -cc <abs>` pair the build uses when it exists.
+		let vArgs: string[] = ['run', join(genAbs, 'server.v')]
+		try {
+			if (existsSync(join(genAbs, 'routes', 'swelte_qjs_bridge.v'))) {
+				vArgs = ['-enable-globals', '-cc', resolveCC(), 'run', join(genAbs, 'server.v')]
+				ctx.log(`QJS embed: -enable-globals -cc ${vArgs[2]} (bridge present)`)
+			}
+		} catch {
+			/* core-only */
+		}
+		vChild = spawn(v, vArgs, {
 			cwd: root,
-			env: {
-				...process.env,
+			env: toolchainEnv({
 				PORT: String(backend),
 				// Dev same-origin: Vite (:port) POSTs through the proxy with
 				// `Origin: http://localhost:<port>` — opt it in so the §10
 				// CSRF guard (403 on foreign non-GET/HEAD) lets it through.
 				SWELTE_CORS_ORIGIN: process.env.SWELTE_CORS_ORIGIN ?? `http://localhost:${port}`,
-			},
+			}),
 			stdio: ['ignore', 'pipe', 'pipe'],
 		})
 		vChild.stdout?.on('data', (d: Buffer) => process.stdout.write(`[v:${backend}] ${d}`))
@@ -188,12 +200,11 @@ export async function runDev(ctx: Ctx): Promise<void> {
 		if (stopping) return
 		viteChild = spawn('npx', ['vite', '--port', String(port), '--strictPort'], {
 			cwd: root,
-			env: {
-				...process.env,
+			env: toolchainEnv({
 				PORT: String(port),
 				SWELTE_V_BACKEND_URL: `http://localhost:${backend}`,
 				VITE_SWELTE_V_BACKEND_URL: `http://localhost:${backend}`,
-			},
+			}),
 			stdio: ['ignore', 'pipe', 'pipe'],
 		})
 		viteChild.stdout?.on('data', (d: Buffer) => process.stdout.write(`[vite:${port}] ${d}`))

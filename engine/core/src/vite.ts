@@ -13,7 +13,7 @@ import {
 import { createRequire } from 'node:module'
 import { dirname, join, relative, resolve, sep } from 'node:path'
 import { loadConfig, renderClientEntry, renderHarness } from './gen/config.js'
-import { resolveV } from './toolchain.js'
+import { resolveV, toolchainEnv } from './toolchain.js'
 
 function list<T>(collection: readonly T[], fn: (item: T, i: number) => unknown): string {
 	return collection.map(fn).join('')
@@ -661,6 +661,7 @@ pub fn swelte_alloc(n int) &u8 {
 			if (!vBin) vBin = resolveV(import.meta.url)
 			execVSync(vBin, ['-b', 'wasm', '-os', 'browser', '-o', outWasm, tmp], {
 				stdio: ['ignore', 'pipe', 'pipe'],
+				env: toolchainEnv(),
 			})
 			const size = statSync(outWasm).size
 			return size
@@ -2253,11 +2254,18 @@ ${list(params, (p) => `\t${p.name}${p.optional ? '?' : ''}: ${p.tstype}\n`)}}
 					// Compare against the CURRENT naming (vFileSafe) — and drop
 					// any legacy-named output (old `_x.v` flat stems) that no
 					// current mod maps to, so stale files never shadow fresh ones.
+					// Adapter-owned bridges (swelte_qjs_bridge.v) are NEVER
+					// pruned: the adapter emits them between generate() runs
+					// (generateBundle), core must not delete them. Core emits
+					// only dispatched leaf files + server_gen.v — everything
+					// else (bridges, manual shims) survives regeneration.
+					const ADAPTER_OWNED = new Set(['swelte_qjs_bridge'])
 					try {
 						for (const f of readdirSync(routesGenDir)) {
 							if (!f.endsWith('.v')) continue
 							const stem = f.slice(0, -2)
 							if (stem === 'server_gen') continue
+							if (ADAPTER_OWNED.has(stem)) continue
 							if (![...seenMods].some((m) => vFileSafe(m) === stem)) {
 								try {
 									rmSync(join(routesGenDir, f))

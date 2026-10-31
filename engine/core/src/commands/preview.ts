@@ -21,12 +21,31 @@ export async function runPreview(ctx: Ctx): Promise<void> {
 	// Engine-agnostic: SWELTE_SSR_URL comes from the environment when the
 	// user (or an adapter wrapper) runs a renderer beside the binary.
 	// Core starts nothing — static/SPA/JSON when unset.
+	// Embedded QJS (prod): the adapter build compiles the bridge into the
+	// binary, but it only renders when SWELTE_SSR=1. `swelte build` smoke
+	// probes without it (bare curl, static/SPA assertions); `preview` is
+	// the human path (browser Accept) and must show SSR when the binary
+	// has it. Detect via the build artifact — never start an engine here.
+	let extra: Record<string, string> = {}
+	try {
+		if (!process.env.SWELTE_SSR && !process.env.SWELTE_SSR_URL) {
+			const { readdirSync } = await import('node:fs')
+			const routesDir = join(root, '.swelte', 'routes')
+			if (readdirSync(routesDir).some((f) => f === 'swelte_qjs_bridge.v')) {
+				extra = { SWELTE_SSR: '1' }
+				ctx.log('SSR: embedded QJS (SWELTE_SSR=1, bridge present)')
+			}
+		}
+	} catch {
+		/* no .swelte/routes — plain static/SPA preview */
+	}
 	let child: ChildProcess | null = spawn(binary, [], {
 		cwd: root,
 		env: {
 			...process.env,
 			PORT: String(port),
 			SWELTE_DIST: 'dist',
+			...extra,
 		},
 		stdio: ['ignore', 'pipe', 'pipe'],
 	})

@@ -335,8 +335,12 @@ fn (mut app App) before_request(mut ctx Ctx) veb.Result {
 	}
 	dist := os.getenv_opt('SWELTE_DIST') or { '' }
 	// SSR first (when enabled + HTML navigation): render → fill shell.
-	// On render miss/failure, fall through to static/SPA below.
+	// On render miss/failure, fall through to no-JS/static/SPA below.
 	// (Static used to win here — SSR never ran when dist/ existed.)
+	// NOTE: `wants_html` without an explicit `text/html` (curl, health
+	// probes) is NOT an HTML navigation — those keep JSON/static behavior.
+	// Only a real browser Accept (contains text/html, no application/json)
+	// enters the SSR chain. This also preserves §12 no-JS form redirects.
 	mut cookies_out := set_cookies.clone()
 	if status == 200 && cookies_out.len > 0 {
 		mut sess := ''
@@ -355,8 +359,12 @@ fn (mut app App) before_request(mut ctx Ctx) veb.Result {
 	// §12 No-JS forms: browser navigations (Accept: text/html, no JSON)
 	// get a redirect on success / server-rendered error page on failure
 	// instead of JSON. Fetch stubs (Accept: application/json) keep JSON.
-	wants_html := headers['Accept'] or { headers['accept'] or { '' } }.contains('text/html')
-		&& !(headers['Accept'] or { headers['accept'] or { '' } }.contains('application/json'))
+	// NOTE: the SSR chain below also gates on `text/html`. A page route hit
+	// via bare curl (no Accept, or */*) keeps the OLD behavior — JSON body
+	// for API-ish hits, static/SPA shell for pages — so probes and the
+	// `swelte build` smoke (curl without Accept) never see SSR bytes.
+	accept := headers['Accept'] or { headers['accept'] or { '' } }
+	wants_html := accept.contains('text/html') && !accept.contains('application/json')
 	wants_json := (headers['Accept'] or { headers['accept'] or { '' } }).contains('application/json')
 	for c in cookies_out {
 		ctx.res.header.add(.set_cookie, c)
@@ -369,6 +377,9 @@ fn (mut app App) before_request(mut ctx Ctx) veb.Result {
 	// (unchanged); `swelte_load_for()` is the page-data path.
 	// Any load throw → +error props with the mapped status.
 	// No loads on the route → '{}' (static shell, hydrates, client fetches).
+	// `accept.contains('text/html')` (in `wants_html`): only a real browser
+	// Accept enters SSR. Bare curl (no Accept, or */*) keeps the old
+	// JSON/static paths — including the §12 no-JS form redirect chain.
 	if wants_html && !wants_json && swelte_ssr_enabled() {
 		if status == 200 {
 			props_json := swelte_page_props(path, query, headers, cookies, map[string]string{})
@@ -403,7 +414,7 @@ fn (mut app App) before_request(mut ctx Ctx) veb.Result {
 			}
 		}
 	}
-	if wants_html && status == 200 {
+	if wants_html && status == 200 && ctx.req.method != .get {
 		ctx.res.set_status(.see_other)
 		return ctx.redirect(path, typ: .see_other)
 	}
@@ -449,12 +460,11 @@ struct SwelteSseJob {
 	pch       chan string
 }
 
-// §SSR: engine hook. Core ships a no-op so the SPA
-// fallback stays default until an adapter (ssr-qjs/ssr-bun) replaces it
-// at generate() time. `swelte_ssr_enabled()` is true when SWELTE_SSR=1
-// (embedded QJS, prod) or SWELTE_SSR_URL is set (dev sidecar / bun).
-// `swelte_render_page()` proxies the sidecar when SWELTE_SSR_URL is set,
-// else returns not-ok (QJS embed replaces this at link time).
+// §SSR: engine hook. Core ships the sidecar proxy (SWELTE_SSR_URL);
+// the QJS prod embed replaces this file's other half at generate() time:
+// when routes/swelte_qjs_bridge.v exists (adapter build), SWELTE_SSR=1
+// routes here first (embedded QuickJS, no sidecar), else the URL proxy.
+// Default (neither): not-ok → Hand's SPA/static fallback.
 fn swelte_ssr_enabled() bool {
 	if os.getenv_opt('SWELTE_SSR') or { '' } == '1' {
 		return true
@@ -463,6 +473,17 @@ fn swelte_ssr_enabled() bool {
 }
 
 fn swelte_render_page(route string, props_json string) (string, bool) {
+	// Embedded QJS first (prod): the adapter's bridge (routes module)
+	// compiles in only when `swelte build` ran with @swelte/ssr-qjs.
+	// SWELTE_SSR=1 without an adapter build fails the V compile (missing
+	// symbol) — CORRECT: loud config error, not a silent SPA fallback.
+	// So: SWELTE_SSR=1 → embedded; else URL proxy; else not-ok.
+	// The bridge returns BARE html (not the sidecar envelope): the glue
+	// copies only `body` into the V buffer. Keep it that way — head stays
+	// '' via swelte_page_head (components set <svelte:head> rarely in v1).
+	if os.getenv_opt('SWELTE_SSR') or { '' } == '1' {
+		return routes.swelte_qjs_render_page(route, props_json)
+	}
 	url := os.getenv_opt('SWELTE_SSR_URL') or { '' }
 	if url == '' {
 		_ = route

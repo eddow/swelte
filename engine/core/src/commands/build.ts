@@ -33,7 +33,7 @@ function listDevWasm(root: string): string[] {
 export async function runBuild(ctx: Ctx): Promise<void> {
 	const root = resolve(String(ctx.opts.root ?? process.cwd()))
 	const outBinary = String(ctx.opts.output ?? join(root, 'dist', 'server'))
-	const { resolveV, vVersion } = await import('../toolchain.js')
+	const { resolveV, vVersion, toolchainEnv, resolveCC } = await import('../toolchain.js')
 	const { loadConfig } = await import('../gen/config.js')
 	const v = resolveV(import.meta.url)
 	ctx.log(`V toolchain: ${vVersion(v)} (${v})`)
@@ -63,10 +63,11 @@ export async function runBuild(ctx: Ctx): Promise<void> {
 	// prod bundle compiles in generateBundle during vite build below.
 	for (const line of listDevWasm(root)) ctx.log(line)
 	// 3. vite build FIRST (it wipes dist/, incl. any binary inside it).
-	// (Adapter generateBundle emits dist/ssr/render.js here when the
-	// project uses @swelte/ssr-qjs — the smoke in step 5 picks it up.)
+	// (Adapter generateBundle emits dist/ssr/render.js + the QJS bridge
+	// here when the project uses @swelte/ssr-qjs — the smoke in step 5
+	// picks it up.)
 	try {
-		execFileSync('npx', ['vite', 'build'], { cwd: root, encoding: 'utf8' })
+		execFileSync('npx', ['vite', 'build'], { cwd: root, encoding: 'utf8', env: toolchainEnv() })
 	} catch (e) {
 		const err = e as { stderr?: Buffer; stdout?: Buffer; message?: string }
 		throw new Error(
@@ -74,16 +75,53 @@ export async function runBuild(ctx: Ctx): Promise<void> {
 		)
 	}
 	ctx.log('vite build: ok')
+	// 3b. QJS prod link, second generate pass (adapter-owned): the bridge
+	// (routes/swelte_qjs_bridge.v) did not exist during step 1 (it is
+	// emitted by generateBundle above) — regenerate so server_gen.v +
+	// server.v compile against it. Core-only projects: generate() is
+	// idempotent, no bridge, no QJS. Then rebuild libqjs.a (mtime-guarded).
+	try {
+		const { swelte } = await import('../vite.js')
+		const plug = swelte({}) as unknown as {
+			buildStart?: () => Promise<void> | void
+			configResolved?: (c: { root: string }) => void
+		}
+		plug.configResolved?.({ root })
+		await plug.buildStart?.()
+		ctx.log('regenerated .swelte/ (QJS bridge pass)')
+	} catch (e) {
+		throw new Error(`codegen (QJS pass) failed: ${(e as Error).message}`)
+	}
 	// 4. `v -o` the server binary into dist/ AFTER the wipe (dist-adjacent,
 	// never the project root). Target the harness file (see typecheck).
+	// QJS projects need -enable-globals (bridge cache) + system cc (V's
+	// bundled tcc cannot compile quickjs.c — but we link the prebuilt
+	// .a, so any cc works; gcc preferred).
+	// Conda-safe: absolute cc path + conda-free PATH (conda's ld shadows
+	// the system linker and breaks every V C-link step).
+	// Detect: bridge file present → QJS flags.
+	let vExtra: string[] = []
 	try {
-		execFileSync(v, ['-o', outBinary, join(genAbs, 'server.v')], {
+		const { existsSync } = await import('node:fs')
+		if (existsSync(join(genAbs, 'routes', 'swelte_qjs_bridge.v'))) {
+			vExtra = ['-enable-globals', '-cc', resolveCC()]
+			ctx.log(`QJS embed: -enable-globals -cc ${vExtra[vExtra.length - 1]} (bridge present)`)
+		}
+	} catch {
+		/* core-only */
+	}
+	try {
+		execFileSync(v, ['-o', outBinary, ...vExtra, join(genAbs, 'server.v')], {
 			cwd: root,
 			stdio: ['ignore', 'pipe', 'pipe'],
+			env: toolchainEnv(),
 		})
 	} catch (e) {
-		const err = e as { stderr?: Buffer; message?: string }
-		throw new Error(`v -o failed: ${err.stderr?.toString() ?? err.message}`)
+		const err = e as { stderr?: Buffer; stdout?: Buffer; message?: string }
+		throw new Error(
+			`v -o failed: ${err.stderr?.toString() ?? err.stdout?.toString() ?? err.message}` +
+				`\n(hint: conda on PATH ships a conflicting ld — build strips conda dirs; if this persists, run with a clean PATH or conda deactivate)`
+		)
 	}
 	ctx.log(`V binary: ${outBinary}`)
 	// 5. Smoke: boot the binary, probe page + API, stop. Engine-agnostic:
