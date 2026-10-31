@@ -20,8 +20,16 @@ HMR routes-stub + importer invalidation. `docs/` describes built behavior;
 ## 9 / SSR. Engines (`specs/ssr.md` — dispatcher conventions built)
 
 Built: slash strip, `GET /api/*` JSON 404, nested `*/+error.svelte` build error.
-Open: `ssr-qjs` (default) + `ssr-bun` (opt-in) adapters, `hydrate()` template,
-`Hand` SSR-or-static-or-SPA chain, `+error` HTML renders.
+Phase 1 (core, engine-agnostic): `.svelte` route manifest (`svelteRouteFor` /
+`collectSvelteManifest` → `.swelte/ssr-manifest.json`), cross-extension
+double-claim (`foo.svelte` vs `foo/+page.*`), `routes.js` union (svelte-only
+entries + `hydrateSwelteRoute`), `Hand` SSR hook stub (`SWELTE_SSR=1` gate,
+default SPA fallback), `app.html` SSR placeholders + hydrate-first `main.ts`,
+`swelte check` parity (union clash + nested `+error` warn).
+Phase 2 scaffold: `@swelte/ssr-qjs` package (re-exports core, manifest
+composer, QJS-compat guard, `swelte()` wrapper, V shim stub).
+Open: `generate: 'server'` compilation spike, dev disk-read bridge, `qjsc`
+prod link, `ssr-bun` sidecar, `Hand` full chain.
 
 Test: per `ssr.md` §5 (404 `+error` HTML, strip parity, `!T` → 500 HTML, bare-machine
 single artifact, HMR swap, bun streaming).

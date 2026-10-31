@@ -339,10 +339,42 @@ fn (mut app App) before_request(mut ctx Ctx) veb.Result {
 	// instead of JSON. Fetch stubs (Accept: application/json) keep JSON.
 	wants_html := headers['Accept'] or { headers['accept'] or { '' } }.contains('text/html')
 		&& !(headers['Accept'] or { headers['accept'] or { '' } }.contains('application/json'))
+	wants_json := (headers['Accept'] or { headers['accept'] or { '' } }).contains('application/json')
 	for c in cookies_out {
 		ctx.res.header.add(.set_cookie, c)
 	}
 	set_cors(mut ctx, cors_ok, cors_origin, origin)
+	// Load cascade → SSR props. On HTML navigations (never fetch), resolve
+	// the page route, run ancestor +route `@[load]` fns root-first (leaf
+	// merges parent + own data), and hand the resulting JSON to the SSR
+	// renderer as props_json. `swelte_route()` stays the API dispatch
+	// (unchanged); `swelte_load_for()` is the page-data path.
+	// Any load throw → +error props with the mapped status.
+	// No loads on the route → '{}' (static shell, hydrates, client fetches).
+	if wants_html && !wants_json && swelte_ssr_enabled() {
+		if status == 200 {
+			props_json := swelte_page_props(path, query, headers, cookies, map[string]string{})
+			html, ok := swelte_render_page(path, props_json)
+			if ok {
+				ctx.res.set_status(http.status_from_int(status))
+				return ctx.send_response_to_client('text/html; charset=utf-8', html)
+			}
+		} else if status >= 400 && body.contains('not found') {
+			// Unknown path → global +error 404 when SSR is on; without
+			// +error.svelte the static/SPA fallback below still applies.
+			html, ok := swelte_render_page('/+error', '{"status":404,"message":"not found"}')
+			if ok {
+				ctx.res.set_status(http.status_from_int(404))
+				return ctx.send_response_to_client('text/html; charset=utf-8', html)
+			}
+		} else if status >= 400 {
+			html, ok := swelte_render_page('/+error', '{"status":' + status.str() + ',"message":"error"}')
+			if ok {
+				ctx.res.set_status(http.status_from_int(status))
+				return ctx.send_response_to_client('text/html; charset=utf-8', html)
+			}
+		}
+	}
 	if wants_html && status == 200 {
 		ctx.res.set_status(.see_other)
 		return ctx.redirect(path, typ: .see_other)
@@ -380,6 +412,51 @@ struct SwelteSseJob {
 	qualifier string
 	req       routes.SwelteRequest
 	pch       chan string
+}
+
+// §SSR: engine hook. Core ships a no-op so the SPA
+// fallback stays default until an adapter (ssr-qjs/ssr-bun) replaces it
+// at generate() time. `swelte_ssr_enabled()` is false unless the
+// adapter flips it; `swelte_render_page()` returns (rendered, ok).
+fn swelte_ssr_enabled() bool {
+	return os.getenv_opt('SWELTE_SSR') or { '' } == '1'
+}
+
+fn swelte_render_page(route string, props_json string) (string, bool) {
+	_ = route
+	_ = props_json
+	return '', false
+}
+
+// Page-data path: resolve `path` to a routes prefix (same precedence as
+// swelte_route), build a SwelteRequest, run the load cascade.
+// Any throw → '{}' (renderer falls back to +error via its own path);
+// route miss → '{}' (static shell).
+fn swelte_page_props(
+	path string
+	query map[string]string
+	headers map[string]string
+	cookies map[string]string
+	params_hint map[string]string
+) string {
+	_ = params_hint
+	prefix, params := routes.swelte_load_route(path)
+	if prefix == '' {
+		return '{}'
+	}
+	req := routes.SwelteRequest{
+		query: query
+		form: map[string]string{}
+		files: map[string]string{}
+		headers: headers
+		cookies: cookies
+		params: params
+		method: 'GET'
+		path: path
+		qualifier: ''
+	}
+	props := routes.swelte_load_for(prefix, req) or { return '{}' }
+	return props
 }
 
 fn swelte_sse_produce(job SwelteSseJob) {

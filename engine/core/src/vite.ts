@@ -12,7 +12,7 @@ import {
 } from 'node:fs'
 import { createRequire } from 'node:module'
 import { dirname, join, relative, resolve, sep } from 'node:path'
-import { loadConfig, renderHarness } from './gen/config.js'
+import { loadConfig, renderClientEntry, renderHarness } from './gen/config.js'
 import { resolveV } from './toolchain.js'
 
 function list<T>(collection: readonly T[], fn: (item: T, i: number) => unknown): string {
@@ -53,7 +53,7 @@ export interface RpcParam {
 
 export interface RpcFn {
 	name: string
-	attr: 'get' | 'post' | 'rpc' | 'put' | 'delete' | 'patch' | 'sse' | 'before' | 'after'
+	attr: 'get' | 'post' | 'rpc' | 'put' | 'delete' | 'patch' | 'sse' | 'before' | 'after' | 'load'
 	qualifier?: string
 	params: RpcParam[]
 	vret: string
@@ -61,6 +61,12 @@ export interface RpcFn {
 	fallible: boolean
 	singleArgsStruct?: string
 	setsCookie: boolean
+}
+
+/** A `@[load]` page-data loader with its source file for error messages. */
+export interface LoadFn extends RpcFn {
+	mod: string
+	file: string
 }
 
 function splitTopLevel(s: string, sep: string): string[] {
@@ -132,7 +138,9 @@ export function parseVFile(src: string): RpcFn[] {
 			}
 			if (
 				pm &&
-				['get', 'post', 'rpc', 'put', 'delete', 'patch', 'sse', 'before', 'after'].includes(pm[1])
+				['get', 'post', 'rpc', 'put', 'delete', 'patch', 'sse', 'before', 'after', 'load'].includes(
+					pm[1]
+				)
 			) {
 				verbs.push({ verb: pm[1], qualifier: pm[2] })
 			}
@@ -237,6 +245,112 @@ function isBackendMod(mod: string): boolean {
 	if (parts.includes('backend')) return true
 	const stem = (parts.pop() ?? '').replace(/\.v$/, '')
 	return stem.endsWith('_backend')
+}
+
+export function svelteModKind(mod: string): 'page' | 'wrapper' | 'error' | 'plain' | null {
+	const base = mod.includes('/') ? mod.slice(mod.lastIndexOf('/') + 1) : mod
+	if (base === '+page' || base === 'index') return 'page'
+	if (base === '+route') return 'wrapper'
+	if (base === '+error') return 'error'
+	if (base.startsWith('+')) return null
+	return 'plain'
+}
+
+/** URL pattern for a `.svelte` mod (mirrors routeFor leaf/dir rules).
+ * Returns null for wrappers (+route) and unknown +-files. */
+export function svelteRouteFor(mod: string): string | null {
+	const kind = svelteModKind(mod)
+	if (kind === null || kind === 'wrapper' || kind === 'error') return null
+	if (kind === 'page') {
+		const dir = mod.includes('/') ? mod.slice(0, mod.lastIndexOf('/')) : ''
+		return dir === '' || dir === 'api' ? '/' : `/${dir}`
+	}
+	return `/${mod}`
+}
+
+/** SSR manifest entry: route → svelte file + data pairing.
+ * Engine-agnostic JSON — adapters (ssr-qjs/ssr-bun) consume it; core
+ * never imports svelte/compiler, quickjs, or bun. */
+export interface SvelteRouteEntry {
+	route: string
+	svelte: string
+	kind: 'page' | 'plain' | 'error' | 'wrapper'
+	hasData: boolean
+}
+
+function relPosixTop(abs: string, f: string): string {
+	return f
+		.slice(abs.length + 1)
+		.split(sep)
+		.join('/')
+}
+
+/** Collect `.svelte` siblings under routesAbs into a URL manifest.
+ * Dynamic segments pass through verbatim ([id]/[...rest]). */
+export function collectSvelteManifest(
+	routesAbs: string,
+	routesDir: string,
+	vMods: Set<string>
+): { entries: SvelteRouteEntry[]; hasError: boolean } {
+	const entries: SvelteRouteEntry[] = []
+	let hasError = false
+	let files: string[] = []
+	try {
+		files = listFilesWithExt(routesAbs, '.svelte')
+	} catch {
+		return { entries, hasError }
+	}
+	for (const f of files.sort()) {
+		const rel = relPosixTop(routesAbs, f)
+		const mod = rel.replace(/\.svelte$/, '')
+		const kind = svelteModKind(mod)
+		if (kind === null) continue
+		if (kind === 'error') {
+			const dir = mod.includes('/') ? mod.slice(0, mod.lastIndexOf('/')) : ''
+			if (dir !== '') {
+				throw new Error(
+					`[swelte] ${routesDir}/${rel} is not allowed — only src/routes/+error.svelte exists (single global error boundary, no per-directory inheritance).`
+				)
+			}
+			hasError = true
+			entries.push({ route: '/+error', svelte: rel, kind: 'error', hasData: false })
+			continue
+		}
+		if (kind === 'wrapper') {
+			entries.push({
+				route: svelteRouteFor(mod) ?? `/${mod}`,
+				svelte: rel,
+				kind: 'wrapper',
+				hasData: vMods.has(mod),
+			})
+			continue
+		}
+		const route = svelteRouteFor(mod)
+		if (route === null) continue
+		// Static .svelte sibling (no .v) must carry no @[...] attrs:
+		// it ships zero JS either way (pure static HTML/JS, no data channel).
+		if (!vMods.has(mod)) {
+			let src = ''
+			try {
+				src = readFileSync(f, 'utf8')
+			} catch {
+				src = ''
+			}
+			const badAttr = /@\[(get|post|put|delete|patch|rpc|sse|before|after)\b/.exec(src)
+			if (badAttr) {
+				throw new Error(
+					`[swelte] ${routesDir}/${rel}: @[${badAttr[1]}] on a .svelte file with no .v partner does nothing — add ${routesDir}/${mod}.v or remove the attribute.`
+				)
+			}
+		}
+		entries.push({
+			route,
+			svelte: rel,
+			kind: kind as 'page' | 'plain',
+			hasData: vMods.has(mod),
+		})
+	}
+	return { entries, hasError }
 }
 
 function modulePath(root: string, file: string): string {
@@ -387,6 +501,10 @@ export function swelte(options: SweltePluginOptions = {}): Plugin {
 	const prodWasmName = 'app_lib.wasm'
 	let activeRoot = ''
 	let isBuild = false
+	// Serialize generate(): configResolved fires a void generate() while
+	// buildStart runs another — concurrent runs interleave file writes
+	// (stale routes.js wins the race). Chain on the in-flight promise.
+	let genChain: Promise<void> = Promise.resolve()
 	// Roadmap §6 tree-shaking: every .v import resolved through the plugin
 	// is recorded here (abs path → same). generateBundle compiles only the
 	// recorded client-used #lib/ files — untouched helpers never enter
@@ -565,7 +683,9 @@ pub fn swelte_alloc(n int) &u8 {
 	 * never enter the check (no double-claim between sibling foo.v
 	 * and child foo/+route.v; +route covers foo/** plus the foo/+page
 	 * leaf - never the sibling). foo/+router.v (roadmap 8, not built)
-	 * will own foo/** - never foo itself - so it never collides. */
+	 * will own foo/** - never foo itself - so it never collides.
+	 * SSR: .svelte siblings participate via the same
+	 * rule — foo.svelte vs foo/+page.v collide on either extension. */
 	function relPosix(abs: string, f: string): string {
 		return f
 			.slice(abs.length + 1)
@@ -635,6 +755,43 @@ pub fn swelte_alloc(n int) &u8 {
 					`[swelte] ${rel}: @[after] ${m.name} must return !(int, string) (got ${m.fallible ? '!' : ''}${m.vret || 'none'}).`
 				)
 		}
+	}
+
+	/** Loader shape: `@[load] name(req SwelteRequest[, parent T]) !R`.
+	 * Level 0 (no ancestor load): exactly one param (SwelteRequest).
+	 * Deeper levels: `(SwelteRequest, parent T)` where T is the previous
+	 * level's return struct (prefixed name, same merged file — no import).
+	 * Mismatch → build error (the layout contract, enforced).
+	 * Returns the page-data value for this level — any JSON-able V value.
+	 * No qualifier (loaders run for the whole page, not one ?q).
+	 * Throw → +error props. */
+	function validateLoadFn(rel: string, m: RpcFn, parentRet: string | null): void {
+		if (m.qualifier)
+			throw new Error(
+				`[swelte] ${rel}: @[load] ${m.name} takes no qualifier (loaders run for the whole page, not one ?q).`
+			)
+		if (m.vret === '' || m.vret === 'unknown')
+			throw new Error(`[swelte] ${rel}: @[load] ${m.name} must return a value (the level's page data).`)
+		if (parentRet === null) {
+			if (m.params.length !== 1 || m.params[0].vtype !== 'SwelteRequest')
+				throw new Error(
+					`[swelte] ${rel}: @[load] ${m.name} is the first loader — it takes exactly one SwelteRequest param (no parent at root).`
+				)
+			return
+		}
+		if (m.params.length !== 2 || m.params[0].vtype !== 'SwelteRequest')
+			throw new Error(
+				`[swelte] ${rel}: @[load] ${m.name} must take (SwelteRequest, parent ${parentRet}) — parent is the previous level's value, already built.`
+			)
+		const got = m.params[1].vtype
+		// Ancestor return may be written short (AdminLayout) or vType-
+		// prefixed (AdminRoute_AdminLayout) — codegen merges both into one
+		// file. Accept either spelling; the cascade calls under owning prefixes.
+		const short = parentRet.includes('_') ? parentRet.split('_').pop()! : parentRet
+		if (got !== parentRet && got !== short)
+			throw new Error(
+				`[swelte] ${rel}: @[load] ${m.name} parent is ${got}, want ${parentRet} (previous level's return — typed, already built).`
+			)
 	}
 
 	interface WrapperMw {
@@ -785,14 +942,14 @@ pub fn swelte_alloc(n int) &u8 {
 				if (/^module\s+\S+/.test(t)) continue
 				if (/^\s*import\s+/.test(line)) continue
 				const fnHere = /^\s*(pub\s+)?fn\s+[A-Za-z_][A-Za-z0-9_]*\s*\(/.test(line)
-				const attrHere = /@\[[^\]]*(before|after)/.test(line)
+				const attrHere = /@\[[^\]]*(before|after|load)/.test(line)
 				const bareAttr = /^\s*@\[/.test(line) && !fnHere
 				if (bareAttr) {
 					buf.push(line)
 					continue
 				}
 				if (fnHere) {
-					keep = attrHere || buf.some((b) => /@\[[^\]]*(before|after)/.test(b))
+					keep = attrHere || buf.some((b) => /@\[[^\]]*(before|after|load)/.test(b))
 					buf.push(line)
 					depth += (line.match(/\{/g) || []).length - (line.match(/\}/g) || []).length
 					if (depth <= 0) {
@@ -870,7 +1027,8 @@ fn swelte_normalize_path(path string) string {
 	if path.len > 1 && path.ends_with('/') { return path[..path.len - 1] }
 	return path
 }
-
+`,
+		`
 pub struct SwelteRequest {
 pub mut:
 	query map[string]string
@@ -1035,6 +1193,39 @@ pub fn swelte_sse_emit_for(prefix string, qualifier string, req SwelteRequest, e
 			`\treturn error('no sse route for prefix: ' + prefix)
 }
 `,
+			// Loader fan-out: `before_request` resolves the page route to a
+			// dispatch prefix; this maps prefix → per-file `swelte_load`.
+			// Any throw → error (caller maps to +error props). No loads
+			// on the file → its `swelte_load` returns '{}'.
+			`pub fn swelte_load_for(prefix string, req SwelteRequest) !string {`,
+			...dispatched.map(
+				(d) => `\tif prefix == ${vJsonStr(d.prefix)} { return ${d.prefix}swelte_load(req) }`
+			),
+			`\treturn error('no load route for prefix: ' + prefix)
+}
+`,
+			// Page-route resolver for the load path: path → (prefix, params),
+			// same precedence as swelte_route (static-first, dynamics sorted).
+			// Only non-api routes resolve (api/* never has page data).
+			// Miss → ('', {}) so the harness falls back to '{}'/static.
+			`pub fn swelte_load_route(path string) (string, map[string]string) {
+\tnorm_path := swelte_normalize_path(path)`,
+			...dispatched
+				.filter((x) => !x.route.includes('[') && !x.route.startsWith('/api/'))
+				.map(
+					(d) =>
+						`\tif norm_path == ${vJsonStr(d.route)} { return ${vJsonStr(d.prefix)}, map[string]string{} }`
+				),
+			...dynSorted()
+				.filter((d) => !d.route.startsWith('/api/'))
+				.map(
+					(d) =>
+						`\t${d.prefix}matched, ${d.prefix}params := swelte_match_route(${vJsonStr(d.route)}, norm_path)
+\tif ${d.prefix}matched { return ${vJsonStr(d.prefix)}, ${d.prefix}params }`
+				),
+			`\treturn '', map[string]string{}
+}
+`,
 		]
 		return o.join('\n')
 	}
@@ -1045,10 +1236,13 @@ pub fn swelte_sse_emit_for(prefix string, qualifier string, req SwelteRequest, e
 		prefix: string,
 		src: string,
 		fns: RpcFn[],
-		chain: WrapperMw[]
+		chain: WrapperMw[],
+		loads: LoadFn[]
 	): string {
 		const needRpc = fns.some((f) => f.attr === 'rpc')
-		const needVerb = fns.some((f) => f.attr !== 'rpc' && f.attr !== 'before' && f.attr !== 'after')
+		const needVerb = fns.some(
+			(f) => f.attr !== 'rpc' && f.attr !== 'before' && f.attr !== 'after' && f.attr !== 'load'
+		)
 		// Only what this file's dispatch branch uses: rpc -> json+json2,
 		// verbs -> json+http. Never emit an unused import (V warns).
 		const baseImports = [
@@ -1086,7 +1280,7 @@ pub fn swelte_sse_emit_for(prefix string, qualifier string, req SwelteRequest, e
 					fn.attr === 'rpc' || ['get', 'post', 'put', 'delete', 'patch', 'sse'].includes(fn.attr)
 			),
 			(fn) => `fn swelte_set_cookies_for_${prefix}${fn.name}() []string {
-${fn.setsCookie ? `\treturn ['sess=__SWELTE_SESS__; Path=/; HttpOnly; SameSite=Lax; Max-Age=604800']` : `\treturn []string{}`}
+	return ${fn.setsCookie ? `['sess=__SWELTE_SESS__; Path=/; HttpOnly; SameSite=Lax; Max-Age=604800']` : `[]string{}`}
 }
 
 `
@@ -1098,6 +1292,18 @@ ${fn.setsCookie ? `\treturn ['sess=__SWELTE_SESS__; Path=/; HttpOnly; SameSite=L
 			for (const st of parseStructs(w.src)) structNames.add(st.name)
 		}
 		const wrapperLines = chain.flatMap((w) => inlineWrapperFns(w.src, w.wmod, structNames))
+		// Wrapper struct decls: inlineWrapperFns skips them (fn-only inline),
+		// so emit them here under the wrapper's prefixed name. Leaf decls
+		// flow through srcLines below; skip any the leaf redefines.
+		const leafStructs = new Set(parseStructs(src).map((s) => s.name))
+		const wrapperStructDecls = chain.flatMap((w) =>
+			parseStructs(w.src)
+				.filter((st) => !leafStructs.has(st.name))
+				.map(
+					(st) =>
+						`pub struct ${vType(st.name, w.wmod)} {\npub:\n${st.fields.map((f) => `\t${f.name} ${f.vtype}`).join('\n')}\n}`
+				)
+		)
 		const srcLines = src.split('\n').flatMap((line) => {
 			const t = line.trim()
 			if (/^module\s+\S+/.test(t)) return []
@@ -1127,6 +1333,7 @@ module routes
 			...(seenImp.size ? [''] : []),
 			cookieEmitters,
 			...wrapperLines,
+			...(wrapperStructDecls.length ? ['', ...wrapperStructDecls] : []),
 			'',
 			...srcLines,
 			'',
@@ -1158,6 +1365,7 @@ module routes
 				dispatchBody(prefix, mod, fns, null),
 				'',
 				emitSseEvents(prefix, mod, fns),
+				emitLoadCascade(prefix, loads),
 			].join('\n')
 		}
 		return [
@@ -1200,6 +1408,7 @@ fn ${prefix}dispatch_verbs(path string, method string, query map[string]string, 
 	mut req := SwelteRequest{ query: query, form: map[string]string{}, files: map[string]string{}, headers: headers, cookies: cookies, params: params, method: method, path: path, qualifier: qualifier }`,
 			dispatchBody(prefix, mod, fns, 'swelte_req'),
 			emitSseEvents(prefix, mod, fns),
+			emitLoadCascade(prefix, loads),
 		].join('\n')
 	}
 
@@ -1266,6 +1475,39 @@ ${arm(checkArms, qualErr)}
 
 pub fn ${prefix}sse_emit(qualifier string, req SwelteRequest, emit fn (string) bool) ! {
 ${arm(emitArms, qualErr)}
+}
+`
+	}
+
+	/** Loader cascade: `swelte_load(req)` runs ancestor +route `@[load]`
+	 * fns root-first; each level returns its typed value (struct, map,
+	 * string, array — any JSON-able V type). The cascade threads values:
+	 * level N receives level N-1's return as `parent` (typed, already
+	 * built — no decode, no JSON in `.v` files). The leaf's return is
+	 * `json.encode`d once at the edge → page props.
+	 * No loads anywhere → `'{}'`. Any throw → error (caller maps to +error).
+	 * Each load is called under its OWNING file's prefix (wrappers are
+	 * inlined under the wrapper prefix — same as @[before]/@[after]). */
+	function emitLoadCascade(prefix: string, loads: LoadFn[]): string {
+		if (loads.length === 0)
+			return `
+pub fn ${prefix}swelte_load(req SwelteRequest) !string {
+\treturn '{}'
+}
+`
+		const fnPrefix = (l: LoadFn): string => vPrefix(l.mod)
+		const chained = loads
+			.map((l, i) =>
+				i === 0
+					? `\tmut frag_${i} := ${fnPrefix(l)}${l.name}(req) or { return err }`
+					: `\tmut frag_${i} := ${fnPrefix(l)}${l.name}(req, frag_${i - 1}) or { return err }`
+			)
+			.join('\n')
+		const leaf = loads.length - 1
+		return `
+pub fn ${prefix}swelte_load(req SwelteRequest) !string {
+${chained}
+\treturn json.encode(frag_${leaf})
 }
 `
 	}
@@ -1471,38 +1713,45 @@ export function ${fn.name}(args) {
 	}
 
 	function generate(root: string): Promise<void> {
-		return (async () => {
-			// Unified config is the source of truth: unspecified plugin
-			// options fall back to the `swelte` key in svelte.config.js.
-			// Explicit plugin options always win (back-compat).
-			try {
-				const { loadConfig } = await import('./gen/config.js')
-				const cfg = await loadConfig(root)
-				if (options.routesDir === undefined) routesDir = cfg.routesDir
-				if (options.libDir === undefined) libDir = cfg.libDir
-				if (options.outDir === undefined) outDir = cfg.outDir
-			} catch {
-				/* defaults stand */
-			}
-			const genDir = resolve(root, outDir)
-			const typesDir = join(genDir, 'types')
-			mkdirSync(genDir, { recursive: true })
-			mkdirSync(typesDir, { recursive: true })
-			const warnings: string[] = []
-			const dispatched: { route: string; mod: string; prefix: string }[] = []
+		const run = genChain.then(() =>
+			(async () => {
+				// Unified config is the source of truth: unspecified plugin
+				// options fall back to the `swelte` key in svelte.config.js.
+				// Explicit plugin options always win (back-compat).
+				try {
+					const { loadConfig } = await import('./gen/config.js')
+					const cfg = await loadConfig(root)
+					if (options.routesDir === undefined) routesDir = cfg.routesDir
+					if (options.libDir === undefined) libDir = cfg.libDir
+					if (options.outDir === undefined) outDir = cfg.outDir
+				} catch {
+					/* defaults stand */
+				}
+				const genDir = resolve(root, outDir)
+				const typesDir = join(genDir, 'types')
+				mkdirSync(genDir, { recursive: true })
+				mkdirSync(typesDir, { recursive: true })
+				const warnings: string[] = []
+				const dispatched: { route: string; mod: string; prefix: string }[] = []
 
-			function vSafe(mod: string): string {
-				return vFileSafe(mod)
-			}
+				function vSafe(mod: string): string {
+					return vFileSafe(mod)
+				}
 
-			function emitTypes(sub: string, mod: string, src: string, fns: RpcFn[], route = ''): string {
-				const dir = join(typesDir, sub, mod.split('/').slice(0, -1).join('/'))
-				mkdirSync(dir, { recursive: true })
-				const base = mod.split('/').pop() || 'index'
-				const file = join(dir, `${base}.d.ts`)
-				const out: string[] = ['// Auto-generated by swelte from V signatures. Do not edit.', '']
-				if (fns.some((f) => f.attr !== 'rpc')) {
-					out.push(`export interface SwelteRequest {
+				function emitTypes(
+					sub: string,
+					mod: string,
+					src: string,
+					fns: RpcFn[],
+					route = ''
+				): string {
+					const dir = join(typesDir, sub, mod.split('/').slice(0, -1).join('/'))
+					mkdirSync(dir, { recursive: true })
+					const base = mod.split('/').pop() || 'index'
+					const file = join(dir, `${base}.d.ts`)
+					const out: string[] = ['// Auto-generated by swelte from V signatures. Do not edit.', '']
+					if (fns.some((f) => f.attr !== 'rpc')) {
+						out.push(`export interface SwelteRequest {
 	query: Record<string, string>
 	form: Record<string, string>
 	files: Record<string, string>
@@ -1514,113 +1763,150 @@ export function ${fn.name}(args) {
 	qualifier: string
 }
 `)
-				}
-				const structBlock = (st: VStruct): string => {
-					for (const fld of st.fields) {
-						if (fld.tstype === 'unknown')
-							warnings.push(
-								`${sub}/${mod}.${st.name}.${fld.name}: unknown V type '${fld.vtype}' → unknown`
-							)
 					}
-					return `export interface ${st.name} {
+					const structBlock = (st: VStruct): string => {
+						for (const fld of st.fields) {
+							if (fld.tstype === 'unknown')
+								warnings.push(
+									`${sub}/${mod}.${st.name}.${fld.name}: unknown V type '${fld.vtype}' → unknown`
+								)
+						}
+						return `export interface ${st.name} {
 ${list(st.fields, (fld) => `\t${fld.name}${fld.optional ? '?' : ''}: ${fld.tstype} // ${fld.vtype}\n`)}}
 `
-				}
-				for (const st of parseStructs(src)) out.push(structBlock(st))
-				const resAlias = (fn: RpcFn): string => {
-					const Res = `${pascal(fn.name)}Result`
-					const fallible = fn.fallible ? ' // !T: may reject with SwelteRpcError' : ''
-					const ret = fn.tsret === 'void' ? 'void' : fn.tsret
-					if (fn.tsret === 'unknown' && fn.vret !== 'unknown')
-						warnings.push(`${sub}/${mod}.${fn.name} return: unknown V type '${fn.vret}' → unknown`)
-					if (/^[A-Z][A-Za-z0-9_]*$/.test(fn.vret))
-						return `export type ${Res} = ${fn.vret}${fallible}`
-					if (
-						/^[a-z][A-Za-z0-9_]*$/.test(fn.vret) &&
-						fn.vret !== 'void' &&
-						fn.vret !== 'string' &&
-						fn.vret !== 'number' &&
-						fn.vret !== 'boolean'
-					)
-						return `// ${fn.name} returns V builtin ${fn.vret} (see above).\nexport type ${Res} = unknown`
-					return `export type ${Res} = ${ret}${fallible}`
-				}
-				const argsBlock = (fn: RpcFn, params: RpcParam[], Arg: string): string => {
-					for (const p of params) {
-						if (p.tstype === 'unknown')
-							warnings.push(
-								`${sub}/${mod}.${fn.name} param ${p.name}: unknown V type '${p.vtype}' → unknown`
-							)
 					}
-					return `export interface ${Arg} {
-${list(params, (p) => `\t${p.name}${p.optional ? '?' : ''}: ${p.tstype}\n`)}}
-`
-				}
-				for (const fn of fns) {
-					const isVerb = fn.attr !== 'rpc'
-					// Verb handlers take the framework SwelteRequest (query, form,
-					// headers, cookies, method, path, qualifier) and return a
-					// response value. @[rpc] fns take one args-struct (free-form
-					// args/return) and return the projected type.
-					if (isVerb) {
-						// Request-shaped verb fn: (req SwelteRequest) or bare.
-						// Optional client args object → query (GET/DELETE) or
-						// form (POST/PUT/PATCH) fields. No Args interface is
-						// EVER synthesized for Request fns: the `req` param is
-						// server-built, not caller-supplied.
-						const isReq =
-							(fn.params.length === 1 && fn.params[0].vtype === 'SwelteRequest') ||
-							(fn.params.length === 1 && fn.params[0].name === 'req')
-						const fallibleCmt = fn.fallible ? ' // !T: may reject with SwelteRpcError' : ''
+					for (const st of parseStructs(src)) out.push(structBlock(st))
+					const resAlias = (fn: RpcFn): string => {
+						const Res = `${pascal(fn.name)}Result`
+						const fallible = fn.fallible ? ' // !T: may reject with SwelteRpcError' : ''
 						const ret = fn.tsret === 'void' ? 'void' : fn.tsret
 						if (fn.tsret === 'unknown' && fn.vret !== 'unknown')
 							warnings.push(
 								`${sub}/${mod}.${fn.name} return: unknown V type '${fn.vret}' → unknown`
 							)
-						const Res = `${pascal(fn.name)}Result`
-						const resAlias = /^[A-Z][A-Za-z0-9_]*$/.test(fn.vret)
-							? `export type ${Res} = ${fn.vret}${fallibleCmt}`
-							: /^[a-z][A-Za-z0-9_]*$/.test(fn.vret) &&
-									fn.vret !== 'void' &&
-									fn.vret !== 'string' &&
-									fn.vret !== 'number' &&
-									fn.vret !== 'boolean'
-								? `// ${fn.name} returns V builtin ${fn.vret} (see above).\nexport type ${Res} = unknown`
-								: `export type ${Res} = ${ret}${fallibleCmt}`
-						out.push(resAlias)
-						if (fn.attr === 'sse') {
-							// SSE (roadmap §14, true streaming via veb): two shapes.
-							// List mode: fn returns `[]string` (event list, streamed
-							// per-event). Emit mode: fn takes a trailing
-							// `emit fn (string) bool` param and returns void/`!void`;
-							// each `emit(e)` flushes one frame NOW (`if !emit(e) {
-							// return }` on disconnect). Emit and list are exclusive.
-							const emitParam = fn.params.length > 0 ? fn.params[fn.params.length - 1] : null
-							const isEmit =
-								emitParam !== null &&
-								/^fn\s*\(\s*string\s*\)(\s*bool)?$/.test(emitParam.vtype.trim())
-							if (isEmit) {
-								if (fn.vret !== 'void') {
-									const msg = `[swelte] ${sub}/${mod}.v: @[sse] ${fn.name} with emit param must return void (emit flushes per-event; got ${fn.vret || 'none'})`
+						if (/^[A-Z][A-Za-z0-9_]*$/.test(fn.vret))
+							return `export type ${Res} = ${fn.vret}${fallible}`
+						if (
+							/^[a-z][A-Za-z0-9_]*$/.test(fn.vret) &&
+							fn.vret !== 'void' &&
+							fn.vret !== 'string' &&
+							fn.vret !== 'number' &&
+							fn.vret !== 'boolean'
+						)
+							return `// ${fn.name} returns V builtin ${fn.vret} (see above).\nexport type ${Res} = unknown`
+						return `export type ${Res} = ${ret}${fallible}`
+					}
+					const argsBlock = (fn: RpcFn, params: RpcParam[], Arg: string): string => {
+						for (const p of params) {
+							if (p.tstype === 'unknown')
+								warnings.push(
+									`${sub}/${mod}.${fn.name} param ${p.name}: unknown V type '${p.vtype}' → unknown`
+								)
+						}
+						return `export interface ${Arg} {
+${list(params, (p) => `\t${p.name}${p.optional ? '?' : ''}: ${p.tstype}\n`)}}
+`
+					}
+					for (const fn of fns) {
+						const isVerb = fn.attr !== 'rpc'
+						// Verb handlers take the framework SwelteRequest (query, form,
+						// headers, cookies, method, path, qualifier) and return a
+						// response value. @[rpc] fns take one args-struct (free-form
+						// args/return) and return the projected type.
+						if (isVerb) {
+							// Request-shaped verb fn: (req SwelteRequest) or bare.
+							// Optional client args object → query (GET/DELETE) or
+							// form (POST/PUT/PATCH) fields. No Args interface is
+							// EVER synthesized for Request fns: the `req` param is
+							// server-built, not caller-supplied.
+							const isReq =
+								(fn.params.length === 1 && fn.params[0].vtype === 'SwelteRequest') ||
+								(fn.params.length === 1 && fn.params[0].name === 'req')
+							const fallibleCmt = fn.fallible ? ' // !T: may reject with SwelteRpcError' : ''
+							const ret = fn.tsret === 'void' ? 'void' : fn.tsret
+							if (fn.tsret === 'unknown' && fn.vret !== 'unknown')
+								warnings.push(
+									`${sub}/${mod}.${fn.name} return: unknown V type '${fn.vret}' → unknown`
+								)
+							const Res = `${pascal(fn.name)}Result`
+							const resAlias = /^[A-Z][A-Za-z0-9_]*$/.test(fn.vret)
+								? `export type ${Res} = ${fn.vret}${fallibleCmt}`
+								: /^[a-z][A-Za-z0-9_]*$/.test(fn.vret) &&
+										fn.vret !== 'void' &&
+										fn.vret !== 'string' &&
+										fn.vret !== 'number' &&
+										fn.vret !== 'boolean'
+									? `// ${fn.name} returns V builtin ${fn.vret} (see above).\nexport type ${Res} = unknown`
+									: `export type ${Res} = ${ret}${fallibleCmt}`
+							out.push(resAlias)
+							if (fn.attr === 'sse') {
+								// SSE (roadmap §14, true streaming via veb): two shapes.
+								// List mode: fn returns `[]string` (event list, streamed
+								// per-event). Emit mode: fn takes a trailing
+								// `emit fn (string) bool` param and returns void/`!void`;
+								// each `emit(e)` flushes one frame NOW (`if !emit(e) {
+								// return }` on disconnect). Emit and list are exclusive.
+								const emitParam = fn.params.length > 0 ? fn.params[fn.params.length - 1] : null
+								const isEmit =
+									emitParam !== null &&
+									/^fn\s*\(\s*string\s*\)(\s*bool)?$/.test(emitParam.vtype.trim())
+								if (isEmit) {
+									if (fn.vret !== 'void') {
+										const msg = `[swelte] ${sub}/${mod}.v: @[sse] ${fn.name} with emit param must return void (emit flushes per-event; got ${fn.vret || 'none'})`
+										warnings.push(msg)
+										throw new Error(msg)
+									}
+								} else if (fn.vret !== '[]string') {
+									const msg = `[swelte] ${sub}/${mod}.v: @[sse] ${fn.name} must return []string (event list) or take a trailing emit fn (string) bool param (got ${fn.vret || 'none'})`
 									warnings.push(msg)
 									throw new Error(msg)
 								}
-							} else if (fn.vret !== '[]string') {
-								const msg = `[swelte] ${sub}/${mod}.v: @[sse] ${fn.name} must return []string (event list) or take a trailing emit fn (string) bool param (got ${fn.vret || 'none'})`
-								warnings.push(msg)
-								throw new Error(msg)
+								// Emit param is harness-injected (never client-supplied):
+								// strip it from the Args interface. `isReq` covers the
+								// (req) and (req, emit) shapes; bare multi-param fns
+								// keep their narrow args minus emit.
+								const clientParams = isEmit ? fn.params.slice(0, -1) : fn.params
+								const clientIsReq =
+									(clientParams.length === 1 && clientParams[0].vtype === 'SwelteRequest') ||
+									(clientParams.length === 1 && clientParams[0].name === 'req')
+								if (!clientIsReq && clientParams.length) {
+									out.push(`export interface ${pascal(fn.name)}Args {`)
+									for (const p of clientParams) {
+										if (p.tstype === 'unknown')
+											warnings.push(
+												`${sub}/${mod}.${fn.name} param ${p.name}: unknown V type '${p.vtype}' → unknown`
+											)
+										out.push(`\t${p.name}${p.optional ? '?' : ''}: ${p.tstype}`)
+									}
+									out.push('}')
+									out.push(
+										`export function ${fn.name}(args: ${pascal(fn.name)}Args): AsyncGenerator<string, void, void>${fn.fallible ? ' // !T: may reject with SwelteRpcError' : ''}`
+									)
+								} else if (clientIsReq) {
+									const dynPs = routeParams(route)
+									if (dynPs.length) {
+										out.push(
+											`export function ${fn.name}(args: { ${dynPs.map((n) => `${n}: string`).join(', ')} } & Record<string, string>): AsyncGenerator<string, void, void>${fn.fallible ? ' // !T: may reject with SwelteRpcError' : ''}`
+										)
+									} else {
+										out.push(
+											`export function ${fn.name}(args?: Record<string, string>): AsyncGenerator<string, void, void>${fn.fallible ? ' // !T: may reject with SwelteRpcError' : ''}`
+										)
+									}
+								} else {
+									out.push(`// ${fn.name} takes no args (SSE handler without params).`)
+									out.push(`export function ${fn.name}(): AsyncGenerator<string, void, void>`)
+								}
+								out.push('')
+								continue
 							}
-							// Emit param is harness-injected (never client-supplied):
-							// strip it from the Args interface. `isReq` covers the
-							// (req) and (req, emit) shapes; bare multi-param fns
-							// keep their narrow args minus emit.
-							const clientParams = isEmit ? fn.params.slice(0, -1) : fn.params
-							const clientIsReq =
-								(clientParams.length === 1 && clientParams[0].vtype === 'SwelteRequest') ||
-								(clientParams.length === 1 && clientParams[0].name === 'req')
-							if (!clientIsReq && clientParams.length) {
+							if (
+								!isReq &&
+								fn.params.length &&
+								!(fn.params.length === 1 && fn.params[0].name === 'req')
+							) {
 								out.push(`export interface ${pascal(fn.name)}Args {`)
-								for (const p of clientParams) {
+								for (const p of fn.params) {
 									if (p.tstype === 'unknown')
 										warnings.push(
 											`${sub}/${mod}.${fn.name} param ${p.name}: unknown V type '${p.vtype}' → unknown`
@@ -1629,32 +1915,29 @@ ${list(params, (p) => `\t${p.name}${p.optional ? '?' : ''}: ${p.tstype}\n`)}}
 								}
 								out.push('}')
 								out.push(
-									`export function ${fn.name}(args: ${pascal(fn.name)}Args): AsyncGenerator<string, void, void>${fn.fallible ? ' // !T: may reject with SwelteRpcError' : ''}`
+									`export function ${fn.name}(args: ${pascal(fn.name)}Args): Promise<${Res}>`
 								)
-							} else if (clientIsReq) {
+							} else if (isReq) {
 								const dynPs = routeParams(route)
 								if (dynPs.length) {
 									out.push(
-										`export function ${fn.name}(args: { ${dynPs.map((n) => `${n}: string`).join(', ')} } & Record<string, string>): AsyncGenerator<string, void, void>${fn.fallible ? ' // !T: may reject with SwelteRpcError' : ''}`
+										`export function ${fn.name}(args: { ${dynPs.map((n) => `${n}: string`).join(', ')} } & Record<string, string>): Promise<${Res}>`
 									)
 								} else {
 									out.push(
-										`export function ${fn.name}(args?: Record<string, string>): AsyncGenerator<string, void, void>${fn.fallible ? ' // !T: may reject with SwelteRpcError' : ''}`
+										`export function ${fn.name}(args?: Record<string, string>): Promise<${Res}>`
 									)
 								}
 							} else {
-								out.push(`// ${fn.name} takes no args (SSE handler without params).`)
-								out.push(`export function ${fn.name}(): AsyncGenerator<string, void, void>`)
+								out.push(`// ${fn.name} takes no args (verb handler without params).`)
+								out.push(`export function ${fn.name}(): Promise<${Res}>`)
 							}
 							out.push('')
 							continue
 						}
-						if (
-							!isReq &&
-							fn.params.length &&
-							!(fn.params.length === 1 && fn.params[0].name === 'req')
-						) {
-							out.push(`export interface ${pascal(fn.name)}Args {`)
+						const Arg = fn.singleArgsStruct ?? `${pascal(fn.name)}Args`
+						if (!fn.singleArgsStruct) {
+							out.push(`export interface ${Arg} {`)
 							for (const p of fn.params) {
 								if (p.tstype === 'unknown')
 									warnings.push(
@@ -1663,572 +1946,621 @@ ${list(params, (p) => `\t${p.name}${p.optional ? '?' : ''}: ${p.tstype}\n`)}}
 								out.push(`\t${p.name}${p.optional ? '?' : ''}: ${p.tstype}`)
 							}
 							out.push('}')
-							out.push(`export function ${fn.name}(args: ${pascal(fn.name)}Args): Promise<${Res}>`)
-						} else if (isReq) {
-							const dynPs = routeParams(route)
-							if (dynPs.length) {
-								out.push(
-									`export function ${fn.name}(args: { ${dynPs.map((n) => `${n}: string`).join(', ')} } & Record<string, string>): Promise<${Res}>`
-								)
-							} else {
-								out.push(
-									`export function ${fn.name}(args?: Record<string, string>): Promise<${Res}>`
-								)
-							}
 						} else {
-							out.push(`// ${fn.name} takes no args (verb handler without params).`)
-							out.push(`export function ${fn.name}(): Promise<${Res}>`)
+							out.push(`// ${fn.name} args: see interface ${Arg} above (V single-args-struct).`)
 						}
-						out.push('')
-						continue
-					}
-					const Arg = fn.singleArgsStruct ?? `${pascal(fn.name)}Args`
-					if (!fn.singleArgsStruct) {
-						out.push(`export interface ${Arg} {`)
-						for (const p of fn.params) {
-							if (p.tstype === 'unknown')
-								warnings.push(
-									`${sub}/${mod}.${fn.name} param ${p.name}: unknown V type '${p.vtype}' → unknown`
-								)
-							out.push(`\t${p.name}${p.optional ? '?' : ''}: ${p.tstype}`)
-						}
-						out.push('}')
-					} else {
-						out.push(`// ${fn.name} args: see interface ${Arg} above (V single-args-struct).`)
-					}
-					const ret = fn.tsret === 'void' ? 'void' : fn.tsret
-					if (fn.tsret === 'unknown' && fn.vret !== 'unknown')
-						warnings.push(`${sub}/${mod}.${fn.name} return: unknown V type '${fn.vret}' → unknown`)
-					const Res = `${pascal(fn.name)}Result`
-					if (/^[A-Z][A-Za-z0-9_]*$/.test(fn.vret)) {
-						out.push(
-							`export type ${Res} = ${fn.vret}${fn.fallible ? ' // !T: may reject with SwelteRpcError' : ''}`
-						)
-					} else if (
-						/^[a-z][A-Za-z0-9_]*$/.test(fn.vret) &&
-						fn.vret !== 'void' &&
-						fn.vret !== 'string' &&
-						fn.vret !== 'number' &&
-						fn.vret !== 'boolean'
-					) {
-						out.push(`// ${fn.name} returns V builtin ${fn.vret} (see above).`)
-						out.push(`export type ${Res} = unknown`)
-					} else {
-						out.push(
-							`export type ${Res} = ${ret}${fn.fallible ? ' // !T: may reject with SwelteRpcError' : ''}`
-						)
-					}
-					// Value signature: `import { fn } from '#…/x.v'` typechecks without a value shim.
-					// Args are always the single args-struct (or the synthesized Args interface).
-					out.push(`export function ${fn.name}(args: ${Arg}): Promise<${Res}>`)
-					out.push('')
-				}
-				writeFileSync(file, out.join('\n'))
-				return file
-			}
-
-			function backendImportLines(src: string): { imp: string; line: number }[] {
-				const out: { imp: string; line: number }[] = []
-				const lines = src.split('\n')
-				for (let i = 0; i < lines.length; i++) {
-					const m = /^\s*import\s+(.+)$/.exec(lines[i])
-					if (!m) continue
-					for (const part of m[1].split(',')) {
-						const p = part.trim()
-						if (!p || p.startsWith('//')) continue
-						const token = (p.split(/\s+/).pop() as string).replace(/['"]/g, '')
-						// V-to-V backend include: `#lib/backend/...`, `lib/backend/...`,
-						// `backend/...` (slash or V-dot style: `backend.secrets`), or
-						// `*_backend(.v)`. Stdlib (`os`, `time`, …) never matches —
-						// §18 owns that rule.
-						const segs = token.split(/[/.]/).map((s) => s.replace(/\.v$/, ''))
-						if (segs.includes('backend') || segs[segs.length - 1]?.endsWith('_backend')) {
-							out.push({ imp: token, line: i + 1 })
-						}
-					}
-				}
-				return out
-			}
-
-			// Layout (spec v-imports.md §2): routes → server fetch stubs,
-			// lib → isomorphic WASM stubs. Types land under types/routes|lib so
-			// the *.v resolveId/load below can re-export them 1:1.
-			const routesAbs = resolve(root, routesDir)
-			const libAbs = resolve(root, libDir)
-			// Deterministic input order: listVFiles sorts per-dir, but
-			// `dispatched` (hence server_gen route order) must be fully
-			// sorted by mod too — readdir order otherwise leaks into output.
-			const routeFiles = listVFiles(routesAbs).sort()
-			// Unconditional folder-root double-claim for UI-only pairs (§7):
-			// `foo.svelte` + `foo/+page.svelte` own the same URL even when
-			// NEITHER side has a `.v` file, and the loop below only visits
-			// `.v` inputs. Scan `.svelte` leaves directly: each
-			// `*/+page.svelte` (or legacy `*/index.svelte`) collides with a
-			// `*.svelte` sibling one level up, unless the sibling side is a
-			// `+route.svelte` wrapper.
-			for (const f of listFilesWithExt(routesAbs, '.svelte').sort()) {
-				const rel = relPosix(routesAbs, f)
-				const mod = rel.replace(/\.svelte$/, '')
-				const slash = mod.lastIndexOf('/')
-				const base = slash < 0 ? mod : mod.slice(slash + 1)
-				const dir = slash < 0 ? '' : mod.slice(0, slash)
-				// Single-global +error (roadmap §9): only src/routes/+error.svelte
-				// is recognized — nested */+error.svelte is a build error.
-				if (base === '+error' && dir !== '') {
-					throw new Error(
-						`[swelte] ${routesDir}/${rel} is not allowed — only src/routes/+error.svelte exists (single global error boundary, no per-directory inheritance).`
-					)
-				}
-				if (base !== '+page' && base !== 'index') continue
-				if (dir === '') continue // root +page has no sibling to collide with
-				for (const sib of [`${dir}.svelte`, `${dir}.v`]) {
-					if (existsSync(join(routesAbs, sib))) {
-						throw new Error(
-							`[swelte] ${routesDir}/${sib} claims the same URL as ${routesDir}/${rel} — one file per URL (guarded URLs live inside their guard's directory; keep the +page leaf).`
-						)
-					}
-				}
-			}
-			{
-				for (const f of routeFiles) {
-					const src = readFileSync(f, 'utf8')
-					const allFns = parseVFile(src)
-					const mwFns = allFns.filter((x) => x.attr === 'before' || x.attr === 'after')
-					const fns = allFns.filter((x) => x.attr !== 'before' && x.attr !== 'after')
-					const rpcFns = fns.filter((x) => x.attr === 'rpc')
-					const verbFns = fns.filter((x) => x.attr !== 'rpc')
-					const mod = modulePath(routesAbs, f)
-					const rel = relPosix(routesAbs, f)
-					const isWrapper = mod === '+route' || mod.endsWith('/+route')
-					if (isWrapper) {
-						if (fns.length > 0)
-							throw new Error(
-								`[swelte] ${routesDir}/${rel}: @[rpc]/verb handlers are not allowed in +route.v (wrapper: @[before]/@[after] middleware only).`
+						const ret = fn.tsret === 'void' ? 'void' : fn.tsret
+						if (fn.tsret === 'unknown' && fn.vret !== 'unknown')
+							warnings.push(
+								`${sub}/${mod}.${fn.name} return: unknown V type '${fn.vret}' → unknown`
 							)
-						for (const m of mwFns) validateMiddlewareFn(`${routesDir}/${rel}`, m)
-						// Wrappers are +layout-shaped: no callable exports, but
-						// their `pub struct`s are shared with the client (e.g. a
-						// `load`-style shape read by +page.svelte). Emit types
-						// only — no fetch stub, no route.
-						emitTypes('routes', mod, src, [])
-						continue
+						const Res = `${pascal(fn.name)}Result`
+						if (/^[A-Z][A-Za-z0-9_]*$/.test(fn.vret)) {
+							out.push(
+								`export type ${Res} = ${fn.vret}${fn.fallible ? ' // !T: may reject with SwelteRpcError' : ''}`
+							)
+						} else if (
+							/^[a-z][A-Za-z0-9_]*$/.test(fn.vret) &&
+							fn.vret !== 'void' &&
+							fn.vret !== 'string' &&
+							fn.vret !== 'number' &&
+							fn.vret !== 'boolean'
+						) {
+							out.push(`// ${fn.name} returns V builtin ${fn.vret} (see above).`)
+							out.push(`export type ${Res} = unknown`)
+						} else {
+							out.push(
+								`export type ${Res} = ${ret}${fn.fallible ? ' // !T: may reject with SwelteRpcError' : ''}`
+							)
+						}
+						// Value signature: `import { fn } from '#…/x.v'` typechecks without a value shim.
+						// Args are always the single args-struct (or the synthesized Args interface).
+						out.push(`export function ${fn.name}(args: ${Arg}): Promise<${Res}>`)
+						out.push('')
 					}
-					// Log the file set ONCE per generate (debug): routeGen flip
-					// between `/x` and `/x/+page` diagnosis.
-					for (const m of mwFns)
-						throw new Error(
-							`[swelte] ${routesDir}/${rel}: @[${m.attr}] ${m.name} is only allowed in +route.v wrappers.`
-						)
-					// +route.v wrappers claim no URL — they returned above, so
-					// every file reaching here competes for its URL.
-					doubleClaimCheck(routesAbs, routesDir, mod, rel)
-					// Orphan/leaf-index checks (spec §2): warn, don't fail.
-					if (mod !== 'index' && mod !== '+page' && !mod.startsWith('api/')) {
-						const sveltePartner = join(routesAbs, `${mod}.svelte`)
-						const svelteIndex = join(routesAbs, mod, 'index.svelte')
-						const sveltePage = join(routesAbs, mod, '+page.svelte')
-						/* Really noisy and useless warning
+					writeFileSync(file, out.join('\n'))
+					return file
+				}
+
+				function backendImportLines(src: string): { imp: string; line: number }[] {
+					const out: { imp: string; line: number }[] = []
+					const lines = src.split('\n')
+					for (let i = 0; i < lines.length; i++) {
+						const m = /^\s*import\s+(.+)$/.exec(lines[i])
+						if (!m) continue
+						for (const part of m[1].split(',')) {
+							const p = part.trim()
+							if (!p || p.startsWith('//')) continue
+							const token = (p.split(/\s+/).pop() as string).replace(/['"]/g, '')
+							// V-to-V backend include: `#lib/backend/...`, `lib/backend/...`,
+							// `backend/...` (slash or V-dot style: `backend.secrets`), or
+							// `*_backend(.v)`. Stdlib (`os`, `time`, …) never matches —
+							// §18 owns that rule.
+							const segs = token.split(/[/.]/).map((s) => s.replace(/\.v$/, ''))
+							if (segs.includes('backend') || segs[segs.length - 1]?.endsWith('_backend')) {
+								out.push({ imp: token, line: i + 1 })
+							}
+						}
+					}
+					return out
+				}
+
+				// Layout (spec v-imports.md §2): routes → server fetch stubs,
+				// lib → isomorphic WASM stubs. Types land under types/routes|lib so
+				// the *.v resolveId/load below can re-export them 1:1.
+				const routesAbs = resolve(root, routesDir)
+				const libAbs = resolve(root, libDir)
+				// Deterministic input order: listVFiles sorts per-dir, but
+				// `dispatched` (hence server_gen route order) must be fully
+				// sorted by mod too — readdir order otherwise leaks into output.
+				const routeFiles = listVFiles(routesAbs).sort()
+				const vMods = new Set(routeFiles.map((f) => modulePath(routesAbs, f)))
+				// Unconditional folder-root double-claim, EITHER extension on
+				// EITHER side: `foo.svelte` vs `foo/+page.*`
+				// collide even when only one side has a `.v` file. Scan `.v`
+				// leaves AND `.svelte` leaves directly.
+				for (const f of [...routeFiles, ...listFilesWithExt(routesAbs, '.svelte')].sort()) {
+					const rel = relPosix(routesAbs, f)
+					const mod = f.endsWith('.svelte')
+						? rel.replace(/\.svelte$/, '')
+						: modulePath(routesAbs, f)
+					const slash = mod.lastIndexOf('/')
+					const base = slash < 0 ? mod : mod.slice(slash + 1)
+					const dir = slash < 0 ? '' : mod.slice(0, slash)
+					if (base !== '+page' && base !== 'index') continue
+					if (dir === '') continue // root +page has no sibling to collide with
+					// +route wrappers never compete (checked before this loop
+					// for .v; .svelte wrappers can't be leaves here by kind).
+					if (svelteModKind(mod) === 'wrapper') continue
+					for (const sib of [`${dir}.svelte`, `${dir}.v`]) {
+						if (existsSync(join(routesAbs, sib))) {
+							throw new Error(
+								`[swelte] ${routesDir}/${sib} claims the same URL as ${routesDir}/${rel} — one file per URL (guarded URLs live inside their guard's directory; keep the +page leaf).`
+							)
+						}
+					}
+				}
+				{
+					for (const f of routeFiles) {
+						const src = readFileSync(f, 'utf8')
+						const allFns = parseVFile(src)
+						const mwFns = allFns.filter((x) => x.attr === 'before' || x.attr === 'after')
+						const fns = allFns.filter((x) => x.attr !== 'before' && x.attr !== 'after')
+						const rpcFns = fns.filter((x) => x.attr === 'rpc')
+						const verbFns = fns.filter((x) => x.attr !== 'rpc')
+						const mod = modulePath(routesAbs, f)
+						const rel = relPosix(routesAbs, f)
+						const isWrapper = mod === '+route' || mod.endsWith('/+route')
+						if (isWrapper) {
+							const loads = allFns.filter((x) => x.attr === 'load')
+							if (loads.length > 1)
+								throw new Error(
+									`[swelte] ${routesDir}/${rel}: two @[load] fns (${loads.map((l) => l.name).join(', ')}) — one loader per file (each +route level aggregates its own, leaf merges all).`
+								)
+							const endpoints = fns.filter((x) => x.attr !== 'load')
+							if (endpoints.length > 0)
+								throw new Error(
+									`[swelte] ${routesDir}/${rel}: @[rpc]/verb handlers are not allowed in +route.v (wrapper: @[before]/@[after]/@[load] only).`
+								)
+							for (const m of mwFns) validateMiddlewareFn(`${routesDir}/${rel}`, m)
+							// chain types validated at emit site (loads assembled per-leaf below).
+							// Wrappers are +layout-shaped: no callable exports, but
+							// their `pub struct`s are shared with the client.
+							// Emit types only — no fetch stub, no route.
+							emitTypes('routes', mod, src, [])
+							continue
+						}
+						// Log the file set ONCE per generate (debug): routeGen flip
+						// between `/x` and `/x/+page` diagnosis.
+						for (const m of mwFns)
+							throw new Error(
+								`[swelte] ${routesDir}/${rel}: @[${m.attr}] ${m.name} is only allowed in +route.v wrappers.`
+							)
+						// +route.v wrappers claim no URL — they returned above, so
+						// every file reaching here competes for its URL.
+						doubleClaimCheck(routesAbs, routesDir, mod, rel)
+						// Orphan/leaf-index checks (spec §2): warn, don't fail.
+						if (mod !== 'index' && mod !== '+page' && !mod.startsWith('api/')) {
+							const sveltePartner = join(routesAbs, `${mod}.svelte`)
+							const svelteIndex = join(routesAbs, mod, 'index.svelte')
+							const sveltePage = join(routesAbs, mod, '+page.svelte')
+							/* Really noisy and useless warning
 					if (!existsSync(sveltePartner) && !existsSync(svelteIndex) && !existsSync(sveltePage)) {
 						warnings.push(
 							`${routesDir}/${mod}.v: no .svelte partner (page) and not under api/ — orphan route file`
 						)
 					}*/
-					}
-					if (rpcFns.length === 0 && verbFns.length === 0 && fns.every((x) => x.attr !== 'sse'))
-						continue
-					// One-default-per-verb + unique qualifier: build error
-					// (ambiguous routing — roadmap item 15). SSE mirrors the
-					// verb rules (default or ('q'), unique per file) but is
-					// GET+Accept-gated, so an `@[sse]` default coexists with an
-					// `@[get]` default on the same file (§14). Stacking `@[sse]`
-					// with a verb (`@[get; sse]`, `@[rpc; sse]`) on one fn is a
-					// build error — parseVFile fans stacked attrs out to one
-					// RpcFn per verb, so the same name shows up twice.
-					for (const m of allFns.filter((x) => x.attr === 'sse')) {
-						const clash = allFns.find((x) => x.name === m.name && x.attr !== 'sse')
-						if (clash)
-							throw new Error(
-								`[swelte] ${routesDir}/${rel}: @[sse] on ${m.name} cannot stack with @[${clash.attr}] — one transport per fn (SSE is GET+Accept-gated, verbs are method-gated). Split into two fns.`
-							)
-					}
-					for (const vb of ['get', 'post', 'put', 'delete', 'patch', 'sse']) {
-						const hs = fns.filter((x) => x.attr === vb)
-						const defaults = hs.filter((x) => !x.qualifier)
-						if (defaults.length > 1) {
-							const msg = `[swelte] ${routesDir}/${mod}.v: two @[${vb}] defaults (${defaults.map((d) => d.name).join(', ')}) — one default per verb per file`
-							warnings.push(msg)
-							throw new Error(msg)
 						}
-						const seen = new Map<string, string>()
-						for (const h of hs) {
-							if (!h.qualifier) continue
-							if (seen.has(h.qualifier)) {
-								const msg = `[swelte] ${routesDir}/${mod}.v: duplicate @[${vb}('${h.qualifier}')] on ${seen.get(h.qualifier)} and ${h.name}`
+						if (rpcFns.length === 0 && verbFns.length === 0 && fns.every((x) => x.attr !== 'sse'))
+							continue
+						// @[load]: at most one per leaf file; never stacked with
+						// a verb/rpc/sse on the same fn (one transport per fn).
+						// Signature: (SwelteRequest, parent string) — parent is
+						// the aggregated JSON from ancestor +route loads
+						// (root-first). Leaf merges and returns the page props.
+						const loads = fns.filter((x) => x.attr === 'load')
+						if (loads.length > 1)
+							throw new Error(
+								`[swelte] ${routesDir}/${rel}: two @[load] fns (${loads.map((l) => l.name).join(', ')}) — one loader per file.`
+							)
+						for (const l of loads) {
+							// chain types validated at emit site (loads assembled per-leaf below).
+							const clash = allFns.find((x) => x.name === l.name && x.attr !== 'load')
+							if (clash)
+								throw new Error(
+									`[swelte] ${routesDir}/${rel}: @[load] on ${l.name} cannot stack with @[${clash.attr}] — one transport per fn. Split into two fns.`
+								)
+						}
+						// One-default-per-verb + unique qualifier: build error
+						// (ambiguous routing — roadmap item 15). SSE mirrors the
+						// verb rules (default or ('q'), unique per file) but is
+						// GET+Accept-gated, so an `@[sse]` default coexists with an
+						// `@[get]` default on the same file (§14). Stacking `@[sse]`
+						// with a verb (`@[get; sse]`, `@[rpc; sse]`) on one fn is a
+						// build error — parseVFile fans stacked attrs out to one
+						// RpcFn per verb, so the same name shows up twice.
+						for (const m of allFns.filter((x) => x.attr === 'sse')) {
+							const clash = allFns.find((x) => x.name === m.name && x.attr !== 'sse')
+							if (clash)
+								throw new Error(
+									`[swelte] ${routesDir}/${rel}: @[sse] on ${m.name} cannot stack with @[${clash.attr}] — one transport per fn (SSE is GET+Accept-gated, verbs are method-gated). Split into two fns.`
+								)
+						}
+						for (const vb of ['get', 'post', 'put', 'delete', 'patch', 'sse']) {
+							const hs = fns.filter((x) => x.attr === vb)
+							const defaults = hs.filter((x) => !x.qualifier)
+							if (defaults.length > 1) {
+								const msg = `[swelte] ${routesDir}/${mod}.v: two @[${vb}] defaults (${defaults.map((d) => d.name).join(', ')}) — one default per verb per file`
 								warnings.push(msg)
 								throw new Error(msg)
 							}
-							seen.set(h.qualifier, h.name)
+							const seen = new Map<string, string>()
+							for (const h of hs) {
+								if (!h.qualifier) continue
+								if (seen.has(h.qualifier)) {
+									const msg = `[swelte] ${routesDir}/${mod}.v: duplicate @[${vb}('${h.qualifier}')] on ${seen.get(h.qualifier)} and ${h.name}`
+									warnings.push(msg)
+									throw new Error(msg)
+								}
+								seen.set(h.qualifier, h.name)
+							}
 						}
+						const route = routeFor(routesAbs, f)
+						if (route === null) continue // wrapper-only (handled above); leaf always has a route
+						emitTypes('routes', mod, src, fns, route)
+						// Dynamic-shape clash (section 8): two files normalizing to the
+						// same shape (`users/[id]` vs `users/[slug]`) are ambiguous —
+						// build error naming both files.
+						for (const d of dispatched) {
+							const shA = d.route.replace(/\[\.\.\.[^\]]+\]/g, '...').replace(/\[[^\]]+\]/g, '[]')
+							const shB = (route as string)
+								.replace(/\[\.\.\.[^\]]+\]/g, '...')
+								.replace(/\[[^\]]+\]/g, '[]')
+							if (route.includes('[') && shA === shB)
+								throw new Error(
+									`[swelte] ${routesDir}/${rel} has the same dynamic shape as ${routesDir}/${d.mod}.v (${shB}) — rename one file.`
+								)
+						}
+						// §10: @[sets_cookie] only on @[rpc]/verb fns; never on
+						// @[before]/@[after] middleware or +route.v wrapper endpoints
+						// (wrappers declare no endpoints of their own, §7). The
+						// multi-attr form is @[rpc; sets_cookie] on one fn.
+						for (const fn of allFns) {
+							if (fn.setsCookie && (fn.attr === 'before' || fn.attr === 'after'))
+								throw new Error(
+									`[swelte] ${routesDir}/${rel}: @[sets_cookie] on ${fn.name} — middleware (@[before]/@[after]) cannot set cookies; put it on an @[rpc]/verb handler.`
+								)
+						}
+						dispatched.push({ route, mod, prefix: vPrefix(mod) })
+						// Runtime fetch stub for the browser import (dev + build).
+						// Sorted by mod: readdir order is filesystem-dependent;
+						// the stubs land per-mod but keep them deterministic too.
+						const genModDir = join(
+							genDir,
+							'generated',
+							'routes',
+							mod.split('/').slice(0, -1).join('/')
+						)
+						mkdirSync(genModDir, { recursive: true })
+						writeFileSync(join(genModDir, `${mod.split('/').pop()}.js`), jsFetchFor(route, fns))
 					}
-					const route = routeFor(routesAbs, f)
-					if (route === null) continue // wrapper-only (handled above); leaf always has a route
-					emitTypes('routes', mod, src, fns, route)
-					// Dynamic-shape clash (section 8): two files normalizing to the
-					// same shape (`users/[id]` vs `users/[slug]`) are ambiguous —
-					// build error naming both files.
+					// Per-file dispatchers: one `module routes` file per routes file,
+					// all under `.swelte/routes/` (never the project root). The v
+					// toolchain compiles `.swelte/` as one unit (harness + routes).
+					// Naming (.v + flat stems like `_page.v`) collided when
+					// `+page` and `+route` flattened alike — vFileSafe maps `/`
+					// to `__` so leaf and wrapper names never collide.
+					const routesGenDir = join(genDir, 'routes')
+					const seenMods = new Set<string>()
+					// NOTE: `routes/` once held a file literally named `routes/`
+					// from an older flat scheme — wipe semantics: rewrite the
+					// whole dir (write fresh AFTER deleting stale), so renamed
+					// routes (index.v → +page.v) never leave ghosts.
 					for (const d of dispatched) {
-						const shA = d.route.replace(/\[\.\.\.[^\]]+\]/g, '...').replace(/\[[^\]]+\]/g, '[]')
-						const shB = (route as string)
-							.replace(/\[\.\.\.[^\]]+\]/g, '...')
-							.replace(/\[[^\]]+\]/g, '[]')
-						if (route.includes('[') && shA === shB)
-							throw new Error(
-								`[swelte] ${routesDir}/${rel} has the same dynamic shape as ${routesDir}/${d.mod}.v (${shB}) — rename one file.`
-							)
+						if (seenMods.has(d.mod)) continue
+						seenMods.add(d.mod)
+						// Source of truth is ALWAYS src/routes (routesAbs) —
+						// never the generated output dir (same leaf names exist
+						// in both; reading output back as input made routeFor
+						// flip between `/x` and `/x/+page` on alternating runs).
+						const src = readFileSync(join(routesAbs, `${d.mod}.v`), 'utf8')
+						// §7: per-leaf ancestor chain (ancestors' +route.v middleware,
+						// inlined by emitRouteFile). A leaf with no wrappers passes
+						// an empty chain (byte-identical output).
+						const leafDir = leafDirOf(d.mod)
+						const chain: WrapperMw[] = []
+						const loads: LoadFn[] = []
+						for (const dir of ancestorDirs(leafDir)) {
+							const wmod = dir === '' ? '+route' : `${dir}/+route`
+							if (wmod === d.mod) continue
+							const wf = join(routesAbs, ...wmod.split('/')) + '.v'
+							if (!existsSync(wf)) continue
+							const wsrc = readFileSync(wf, 'utf8')
+							const mws = parseVFile(wsrc).filter((x) => x.attr === 'before' || x.attr === 'after')
+							const lds = parseVFile(wsrc).filter((x) => x.attr === 'load')
+							if (mws.length === 0 && lds.length === 0) continue
+							chain.push({
+								wmod,
+								src: wsrc,
+								mws: mws.map((m) => ({ name: m.name, attr: m.attr as 'before' | 'after' })),
+							})
+							for (const l of lds) loads.push({ ...l, mod: wmod, file: `${routesDir}/${wmod}.v` })
+						}
+						const fns = parseVFile(src).filter((x) => x.attr !== 'before' && x.attr !== 'after')
+						for (const l of parseVFile(src).filter((x) => x.attr === 'load'))
+							loads.push({ ...l, mod: d.mod, file: `${routesDir}/${d.mod}.v` })
+						// Chain validation: level 0 takes (req); deeper levels
+						// take (req, parent T) where T is the previous level's
+						// return (short or vType-prefixed spelling — same form
+						// the inliner produces). Mismatch = build error
+						// (the layout contract, enforced).
+						{
+							let want: string | null = null
+							for (const l of loads) {
+								validateLoadFn(l.file, l, want)
+								// Next level's parent is THIS level's return,
+								// vType-prefixed (codegen merges into one file).
+								want = l.vret.includes('_') ? l.vret : vType(l.vret, l.mod)
+							}
+						}
+						mkdirSync(routesGenDir, { recursive: true })
+						writeFileSync(
+							join(routesGenDir, `${vFileSafe(d.mod)}.v`),
+							emitRouteFile(d.mod, d.route, d.prefix, src, fns, chain, loads)
+						)
 					}
-					// §10: @[sets_cookie] only on @[rpc]/verb fns; never on
-					// @[before]/@[after] middleware or +route.v wrapper endpoints
-					// (wrappers declare no endpoints of their own, §7). The
-					// multi-attr form is @[rpc; sets_cookie] on one fn.
-					for (const fn of allFns) {
-						if (fn.setsCookie && (fn.attr === 'before' || fn.attr === 'after'))
-							throw new Error(
-								`[swelte] ${routesDir}/${rel}: @[sets_cookie] on ${fn.name} — middleware (@[before]/@[after]) cannot set cookies; put it on an @[rpc]/verb handler.`
-							)
+					// Prune stale generated files (renamed/deleted routes).
+					// Compare against the CURRENT naming (vFileSafe) — and drop
+					// any legacy-named output (old `_x.v` flat stems) that no
+					// current mod maps to, so stale files never shadow fresh ones.
+					try {
+						for (const f of readdirSync(routesGenDir)) {
+							if (!f.endsWith('.v')) continue
+							const stem = f.slice(0, -2)
+							if (stem === 'server_gen') continue
+							if (![...seenMods].some((m) => vFileSafe(m) === stem)) {
+								try {
+									rmSync(join(routesGenDir, f))
+								} catch {
+									/* ignore */
+								}
+							}
+						}
+					} catch {
+						/* ignore */
 					}
-					dispatched.push({ route, mod, prefix: vPrefix(mod) })
-					// Runtime fetch stub for the browser import (dev + build).
-					// Sorted by mod: readdir order is filesystem-dependent;
-					// the stubs land per-mod but keep them deterministic too.
-					const genModDir = join(
-						genDir,
-						'generated',
-						'routes',
-						mod.split('/').slice(0, -1).join('/')
-					)
-					mkdirSync(genModDir, { recursive: true })
-					writeFileSync(join(genModDir, `${mod.split('/').pop()}.js`), jsFetchFor(route, fns))
-				}
-				// Per-file dispatchers: one `module routes` file per routes file,
-				// all under `.swelte/routes/` (never the project root). The v
-				// toolchain compiles `.swelte/` as one unit (harness + routes).
-				// Naming (.v + flat stems like `_page.v`) collided when
-				// `+page` and `+route` flattened alike — vFileSafe maps `/`
-				// to `__` so leaf and wrapper names never collide.
-				const routesGenDir = join(genDir, 'routes')
-				const seenMods = new Set<string>()
-				// NOTE: `routes/` once held a file literally named `routes/`
-				// from an older flat scheme — wipe semantics: rewrite the
-				// whole dir (write fresh AFTER deleting stale), so renamed
-				// routes (index.v → +page.v) never leave ghosts.
-				for (const d of dispatched) {
-					if (seenMods.has(d.mod)) continue
-					seenMods.add(d.mod)
-					// Source of truth is ALWAYS src/routes (routesAbs) —
-					// never the generated output dir (same leaf names exist
-					// in both; reading output back as input made routeFor
-					// flip between `/x` and `/x/+page` on alternating runs).
-					const src = readFileSync(join(routesAbs, `${d.mod}.v`), 'utf8')
-					// §7: per-leaf ancestor chain (ancestors' +route.v middleware,
-					// inlined by emitRouteFile). A leaf with no wrappers passes
-					// an empty chain (byte-identical output).
-					const leafDir = leafDirOf(d.mod)
-					const chain: WrapperMw[] = []
-					for (const dir of ancestorDirs(leafDir)) {
-						const wmod = dir === '' ? '+route' : `${dir}/+route`
-						if (wmod === d.mod) continue
-						const wf = join(routesAbs, ...wmod.split('/')) + '.v'
-						if (!existsSync(wf)) continue
-						const wsrc = readFileSync(wf, 'utf8')
-						const mws = parseVFile(wsrc).filter((x) => x.attr === 'before' || x.attr === 'after')
-						if (mws.length === 0) continue
-						chain.push({
-							wmod,
-							src: wsrc,
-							mws: mws.map((m) => ({ name: m.name, attr: m.attr as 'before' | 'after' })),
-						})
-					}
-					const fns = parseVFile(src).filter((x) => x.attr !== 'before' && x.attr !== 'after')
-					mkdirSync(routesGenDir, { recursive: true })
-					writeFileSync(
-						join(routesGenDir, `${vFileSafe(d.mod)}.v`),
-						emitRouteFile(d.mod, d.route, d.prefix, src, fns, chain)
-					)
-				}
-				// Prune stale generated files (renamed/deleted routes).
-				// Compare against the CURRENT naming (vFileSafe) — and drop
-				// any legacy-named output (old `_x.v` flat stems) that no
-				// current mod maps to, so stale files never shadow fresh ones.
-				try {
-					for (const f of readdirSync(routesGenDir)) {
-						if (!f.endsWith('.v')) continue
-						const stem = f.slice(0, -2)
-						if (stem === 'server_gen') continue
-						if (![...seenMods].some((m) => vFileSafe(m) === stem)) {
+					// Master dispatcher: route table + shared helpers, also `module routes`.
+					if (dispatched.length) {
+						mkdirSync(routesGenDir, { recursive: true })
+						const sseMods = new Set<string>()
+						for (const f of routeFiles) {
 							try {
-								rmSync(join(routesGenDir, f))
+								const mod = modulePath(routesAbs, f)
+								if (parseVFile(readFileSync(f, 'utf8')).some((x) => x.attr === 'sse'))
+									sseMods.add(mod)
 							} catch {
 								/* ignore */
 							}
 						}
+						writeFileSync(join(routesGenDir, `server_gen.v`), emitServerGen(dispatched, sseMods))
 					}
-				} catch {
-					/* ignore */
+					// Leaf-vs-index clash: foo.v + foo/index.v (or +page.v) both exist.
+					// Warn-only here (the hard build error lives in the per-file
+					// loop above via doubleClaimCheck, which names both files).
+					// Union of .v + .svelte mods: svelte-only leaves clash too.
+					const seen = new Set([
+						...listVFiles(routesAbs).map((f) => modulePath(routesAbs, f)),
+						...listFilesWithExt(routesAbs, '.svelte').map((f) =>
+							relPosix(routesAbs, f).replace(/\.svelte$/, '')
+						),
+					])
+					for (const mod of seen) {
+						for (const leafName of ['index', '+page']) {
+							if (mod !== leafName && seen.has(`${mod}/${leafName}`)) {
+								warnings.push(
+									`${routesDir}/${mod}.v clashes with ${routesDir}/${mod}/${leafName}.v — ambiguous route`
+								)
+							}
+						}
+					}
 				}
-				// Master dispatcher: route table + shared helpers, also `module routes`.
-				if (dispatched.length) {
-					mkdirSync(routesGenDir, { recursive: true })
-					const sseMods = new Set<string>()
-					for (const f of routeFiles) {
+				if (existsSync(libAbs)) {
+					// Backend runs purely on V: no .ts/.js/.svelte under backend/ (decided 2026-10-29).
+					{
+						const bad: string[] = []
+						const walk = (dir: string) => {
+							for (const e of readdirSync(dir, { withFileTypes: true })) {
+								const abs = join(dir, e.name)
+								if (e.isDirectory()) {
+									walk(abs)
+									continue
+								}
+								if (/\.(ts|js|mjs|cjs|svelte)$/.test(e.name)) {
+									const rel = abs
+										.split(sep)
+										.join('/')
+										.slice(libAbs.split(sep).join('/').length + 1)
+									if (rel.split('/').includes('backend')) bad.push(`${libDir}/${rel}`)
+								}
+							}
+						}
 						try {
-							const mod = modulePath(routesAbs, f)
-							if (parseVFile(readFileSync(f, 'utf8')).some((x) => x.attr === 'sse'))
-								sseMods.add(mod)
+							walk(libAbs)
 						} catch {
 							/* ignore */
 						}
-					}
-					writeFileSync(join(routesGenDir, `server_gen.v`), emitServerGen(dispatched, sseMods))
-				}
-				// Leaf-vs-index clash: foo.v + foo/index.v (or +page.v) both exist.
-				// Warn-only here (the hard build error lives in the per-file
-				// loop above via doubleClaimCheck, which names both files).
-				const seen = new Set(listVFiles(routesAbs).map((f) => modulePath(routesAbs, f)))
-				for (const mod of seen) {
-					for (const leafName of ['index', '+page']) {
-						if (mod !== leafName && seen.has(`${mod}/${leafName}`)) {
+						for (const b of bad)
 							warnings.push(
-								`${routesDir}/${mod}.v clashes with ${routesDir}/${mod}/${leafName}.v — ambiguous route`
+								`${b}: backend/ runs purely on V — no TS/JS/Svelte here (move it out of backend/)`
+							)
+					}
+					for (const f of listVFiles(libAbs)) {
+						const src = readFileSync(f, 'utf8')
+						const mod = modulePath(libAbs, f)
+						// #lib/backend convention (spec §7): backend-only, no stub, no
+						// browser import — record types for V-to-V reference only.
+						if (isBackendMod(mod)) continue
+						// Roadmap 16-remainder: only #routes/*.v may import backend.
+						// A #lib/*.v (non-backend) file importing backend fails here
+						// (generate-time, file+line) — the resolveId guard covers
+						// browser-side imports; this covers V-to-V misuse that never
+						// passes through resolveId.
+						for (const b of backendImportLines(src)) {
+							throw new Error(
+								`[swelte] ${libDir}/${mod}.v:${b.line}: imports backend module '${b.imp}' — only #routes/*.v may import #lib/backend (V-to-V include at codegen time).`
 							)
 						}
-					}
-				}
-			}
-			if (existsSync(libAbs)) {
-				// Backend runs purely on V: no .ts/.js/.svelte under backend/ (decided 2026-10-29).
-				{
-					const bad: string[] = []
-					const walk = (dir: string) => {
-						for (const e of readdirSync(dir, { withFileTypes: true })) {
-							const abs = join(dir, e.name)
-							if (e.isDirectory()) {
-								walk(abs)
-								continue
-							}
-							if (/\.(ts|js|mjs|cjs|svelte)$/.test(e.name)) {
-								const rel = abs
-									.split(sep)
-									.join('/')
-									.slice(libAbs.split(sep).join('/').length + 1)
-								if (rel.split('/').includes('backend')) bad.push(`${libDir}/${rel}`)
-							}
+						const rpcFns = parseVFile(src).filter((x) => x.attr === 'rpc')
+						// §7: middleware/verbs are meaningless in #lib — keep the
+						// warn-and-expose-RPC behavior for verbs, extend it to
+						// @[before]/@[after].
+						const verbFns = parseVFile(src).filter(
+							(x) => x.attr !== 'rpc' && x.attr !== 'before' && x.attr !== 'after'
+						)
+						for (const vf of [
+							...verbFns,
+							...parseVFile(src).filter((x) => x.attr === 'before' || x.attr === 'after'),
+						]) {
+							warnings.push(
+								`${libDir}/${mod}.v: @[${vf.attr}] on ${vf.name} is ignored in #lib — only @[rpc] exposes (still exported as RPC)`
+							)
 						}
-					}
-					try {
-						walk(libAbs)
-					} catch {
-						/* ignore */
-					}
-					for (const b of bad)
-						warnings.push(
-							`${b}: backend/ runs purely on V — no TS/JS/Svelte here (move it out of backend/)`
+						if (rpcFns.length === 0 && verbFns.length === 0) continue
+						const allFns = [...rpcFns, ...verbFns]
+						emitTypes('lib', mod, src, allFns)
+						const genModDir = join(
+							genDir,
+							'generated',
+							'lib',
+							mod.split('/').slice(0, -1).join('/')
 						)
-				}
-				for (const f of listVFiles(libAbs)) {
-					const src = readFileSync(f, 'utf8')
-					const mod = modulePath(libAbs, f)
-					// #lib/backend convention (spec §7): backend-only, no stub, no
-					// browser import — record types for V-to-V reference only.
-					if (isBackendMod(mod)) continue
-					// Roadmap 16-remainder: only #routes/*.v may import backend.
-					// A #lib/*.v (non-backend) file importing backend fails here
-					// (generate-time, file+line) — the resolveId guard covers
-					// browser-side imports; this covers V-to-V misuse that never
-					// passes through resolveId.
-					for (const b of backendImportLines(src)) {
-						throw new Error(
-							`[swelte] ${libDir}/${mod}.v:${b.line}: imports backend module '${b.imp}' — only #routes/*.v may import #lib/backend (V-to-V include at codegen time).`
+						mkdirSync(genModDir, { recursive: true })
+						writeFileSync(
+							join(genModDir, mod.split('/').pop() + '.js'),
+							jsWasmFor(root, mod, allFns)
 						)
-					}
-					const rpcFns = parseVFile(src).filter((x) => x.attr === 'rpc')
-					// §7: middleware/verbs are meaningless in #lib — keep the
-					// warn-and-expose-RPC behavior for verbs, extend it to
-					// @[before]/@[after].
-					const verbFns = parseVFile(src).filter(
-						(x) => x.attr !== 'rpc' && x.attr !== 'before' && x.attr !== 'after'
-					)
-					for (const vf of [
-						...verbFns,
-						...parseVFile(src).filter((x) => x.attr === 'before' || x.attr === 'after'),
-					]) {
-						warnings.push(
-							`${libDir}/${mod}.v: @[${vf.attr}] on ${vf.name} is ignored in #lib — only @[rpc] exposes (still exported as RPC)`
-						)
-					}
-					if (rpcFns.length === 0 && verbFns.length === 0) continue
-					const allFns = [...rpcFns, ...verbFns]
-					emitTypes('lib', mod, src, allFns)
-					const genModDir = join(genDir, 'generated', 'lib', mod.split('/').slice(0, -1).join('/'))
-					mkdirSync(genModDir, { recursive: true })
-					writeFileSync(join(genModDir, mod.split('/').pop() + '.js'), jsWasmFor(root, mod, allFns))
-					try {
-						const outWasm = join(devWasmDirFor(root), mod + '.wasm')
-						let fresh = false
 						try {
-							fresh = statSync(outWasm).mtimeMs >= statSync(f).mtimeMs
-						} catch {
-							/* missing */
+							const outWasm = join(devWasmDirFor(root), mod + '.wasm')
+							let fresh = false
+							try {
+								fresh = statSync(outWasm).mtimeMs >= statSync(f).mtimeMs
+							} catch {
+								/* missing */
+							}
+							if (!fresh) compileLibWasm(src, mod, outWasm, libDir + '/' + mod + '.v')
+						} catch (e) {
+							throw new Error('WASM compile failed: ' + (e as Error).message)
 						}
-						if (!fresh) compileLibWasm(src, mod, outWasm, libDir + '/' + mod + '.v')
-					} catch (e) {
-						throw new Error('WASM compile failed: ' + (e as Error).message)
 					}
 				}
-			}
-			// Editor resolution (spec §4, roadmap §3): everything lives in
-			// .swelte/ — src/ is never written. Two artifacts are ORDERED:
-			// types/*.d.ts FIRST (emitTypes loop above), then this block
-			// inlines those bodies into v-shim.d.ts (copies, since TS2686
-			// forbids relative re-export inside ambient modules). The shim
-			// therefore always lags the .d.ts by zero steps within one
-			// generate() run — never read a stale file.
-			// 2. tsconfig `paths` (STABLE wildcards, written once by hand in the
-			//    user config — TS drops non-`*` exact keys from extended
-			//    configs, so no fragment file):
-			//      "#routes/*.v": ["./.swelte/types/routes/*.d.ts"]
-			//      "#lib/*.v":    ["./.swelte/types/lib/*.d.ts"]
-			//    TS matches `#routes/*.v` vs `#routes/index.v`, captures
-			//    `index`, substitutes `./.swelte/types/routes/index.d.ts`.
-			//    Vite runtime aliases (vite.config.ts) are independent and
-			//    keep pointing at src/ (real .v for load() codegen).
-			//
-			// `declare module '*.v'` fallback stays last for unknown .v files.
-			{
-				const decls: string[] = ['// Auto-generated by swelte. Do not edit.', '']
-				const bodies = new Map<string, string[]>()
-				const collect = (sub: string, mod: string) => {
-					const file = join(genDir, 'types', sub, `${mod}.d.ts`)
-					let text = ''
-					try {
-						text = readFileSync(file, 'utf8')
-					} catch {
-						return
+				// Editor resolution (spec §4, roadmap §3): everything lives in
+				// .swelte/ — src/ is never written. Two artifacts are ORDERED:
+				// types/*.d.ts FIRST (emitTypes loop above), then this block
+				// inlines those bodies into v-shim.d.ts (copies, since TS2686
+				// forbids relative re-export inside ambient modules). The shim
+				// therefore always lags the .d.ts by zero steps within one
+				// generate() run — never read a stale file.
+				// 2. tsconfig `paths` (STABLE wildcards, written once by hand in the
+				//    user config — TS drops non-`*` exact keys from extended
+				//    configs, so no fragment file):
+				//      "#routes/*.v": ["./.swelte/types/routes/*.d.ts"]
+				//      "#lib/*.v":    ["./.swelte/types/lib/*.d.ts"]
+				//    TS matches `#routes/*.v` vs `#routes/index.v`, captures
+				//    `index`, substitutes `./.swelte/types/routes/index.d.ts`.
+				//    Vite runtime aliases (vite.config.ts) are independent and
+				//    keep pointing at src/ (real .v for load() codegen).
+				//
+				// `declare module '*.v'` fallback stays last for unknown .v files.
+				{
+					const decls: string[] = ['// Auto-generated by swelte. Do not edit.', '']
+					const bodies = new Map<string, string[]>()
+					const collect = (sub: string, mod: string) => {
+						const file = join(genDir, 'types', sub, `${mod}.d.ts`)
+						let text = ''
+						try {
+							text = readFileSync(file, 'utf8')
+						} catch {
+							return
+						}
+						const lines = text.split('\n').filter((l) => {
+							const t = l.trim()
+							return t !== '' && !t.startsWith('// Auto-generated')
+						})
+						bodies.set(`${sub}/${mod}`, lines)
 					}
-					const lines = text.split('\n').filter((l) => {
-						const t = l.trim()
-						return t !== '' && !t.startsWith('// Auto-generated')
-					})
-					bodies.set(`${sub}/${mod}`, lines)
-				}
-				for (const f of listVFiles(routesAbs)) {
-					const src = readFileSync(f, 'utf8')
-					const fns = parseVFile(src)
-					if (fns.length === 0) continue
-					collect('routes', modulePath(routesAbs, f))
-				}
-				if (existsSync(libAbs)) {
-					for (const f of listVFiles(libAbs)) {
-						const mod = modulePath(libAbs, f)
-						if (isBackendMod(mod)) continue
+					for (const f of listVFiles(routesAbs)) {
 						const src = readFileSync(f, 'utf8')
 						const fns = parseVFile(src)
 						if (fns.length === 0) continue
-						collect('lib', mod)
+						collect('routes', modulePath(routesAbs, f))
 					}
-				}
-				const emit = (spec: string, sub: string, mod: string) => {
-					const body = bodies.get(`${sub}/${mod}`)
-					if (!body) return
-					decls.push(`declare module '${spec}' {`)
-					for (const l of body) decls.push(`\t${l}`)
-					decls.push(`}`)
-					decls.push('')
-				}
-				for (const key of [...bodies.keys()].filter((k) => k.startsWith('routes/'))) {
-					emit(`#routes/${key.slice('routes/'.length)}.v`, 'routes', key.slice('routes/'.length))
-				}
-				for (const key of [...bodies.keys()].filter((k) => k.startsWith('lib/'))) {
-					emit(`#lib/${key.slice('lib/'.length)}.v`, 'lib', key.slice('lib/'.length))
-				}
-				// Roadmap §17: exact-key `./<base>.v` aliases — only when the
-				// basename is UNIQUE across the whole project (routes + lib).
-				// Ambiguous basenames (`+page.v` ×3) and sub-path relatives
-				// (`./sub/y.v`) keep the `*.v` fallback (any): use `#`-aliases.
-				// Bodies inlined (TS2686 forbids re-export in ambient modules).
-				{
-					const baseCount = new Map<string, number>()
-					const baseBody = new Map<string, { spec: string; sub: string; mod: string }>()
-					for (const key of bodies.keys()) {
-						const mod = key.includes('/') ? key.slice(key.indexOf('/') + 1) : key
-						const base = mod.includes('/') ? mod.slice(mod.lastIndexOf('/') + 1) : mod
-						baseCount.set(base, (baseCount.get(base) ?? 0) + 1)
-						const sub = key.startsWith('lib/') ? 'lib' : 'routes'
-						const prefix = sub === 'lib' ? '#lib' : '#routes'
-						if (!baseBody.has(base)) baseBody.set(base, { spec: `${prefix}/${mod}.v`, sub, mod })
+					if (existsSync(libAbs)) {
+						for (const f of listVFiles(libAbs)) {
+							const mod = modulePath(libAbs, f)
+							if (isBackendMod(mod)) continue
+							const src = readFileSync(f, 'utf8')
+							const fns = parseVFile(src)
+							if (fns.length === 0) continue
+							collect('lib', mod)
+						}
 					}
-					for (const [base, n] of [...baseCount.entries()].sort()) {
-						if (n !== 1) continue
-						const b = baseBody.get(base)
-						if (!b) continue
-						const body = bodies.get(`${b.sub}/${b.mod}`)
-						if (!body) continue
-						decls.push(`declare module './${base}.v' {`)
+					const emit = (spec: string, sub: string, mod: string) => {
+						const body = bodies.get(`${sub}/${mod}`)
+						if (!body) return
+						decls.push(`declare module '${spec}' {`)
 						for (const l of body) decls.push(`\t${l}`)
 						decls.push(`}`)
 						decls.push('')
 					}
-				}
-				decls.push(`// Fallback for unknown .v files only.
+					for (const key of [...bodies.keys()].filter((k) => k.startsWith('routes/'))) {
+						emit(`#routes/${key.slice('routes/'.length)}.v`, 'routes', key.slice('routes/'.length))
+					}
+					for (const key of [...bodies.keys()].filter((k) => k.startsWith('lib/'))) {
+						emit(`#lib/${key.slice('lib/'.length)}.v`, 'lib', key.slice('lib/'.length))
+					}
+					// Roadmap §17: exact-key `./<base>.v` aliases — only when the
+					// basename is UNIQUE across the whole project (routes + lib).
+					// Ambiguous basenames (`+page.v` ×3) and sub-path relatives
+					// (`./sub/y.v`) keep the `*.v` fallback (any): use `#`-aliases.
+					// Bodies inlined (TS2686 forbids re-export in ambient modules).
+					{
+						const baseCount = new Map<string, number>()
+						const baseBody = new Map<string, { spec: string; sub: string; mod: string }>()
+						for (const key of bodies.keys()) {
+							const mod = key.includes('/') ? key.slice(key.indexOf('/') + 1) : key
+							const base = mod.includes('/') ? mod.slice(mod.lastIndexOf('/') + 1) : mod
+							baseCount.set(base, (baseCount.get(base) ?? 0) + 1)
+							const sub = key.startsWith('lib/') ? 'lib' : 'routes'
+							const prefix = sub === 'lib' ? '#lib' : '#routes'
+							if (!baseBody.has(base)) baseBody.set(base, { spec: `${prefix}/${mod}.v`, sub, mod })
+						}
+						for (const [base, n] of [...baseCount.entries()].sort()) {
+							if (n !== 1) continue
+							const b = baseBody.get(base)
+							if (!b) continue
+							const body = bodies.get(`${b.sub}/${b.mod}`)
+							if (!body) continue
+							decls.push(`declare module './${base}.v' {`)
+							for (const l of body) decls.push(`\t${l}`)
+							decls.push(`}`)
+							decls.push('')
+						}
+					}
+					decls.push(`// Fallback for unknown .v files only.
 declare module '*.v' {
 	const __swelte_untyped: any
 	export default __swelte_untyped
 }
 `)
-				writeFileSync(join(genDir, 'v-shim.d.ts'), decls.join('\n'))
-			}
-			for (const w of warnings) console.warn(`[swelte] ${w}`)
-			// Roadmap 7: client router — UI composition without manual imports.
-			// Emits `.swelte/routes.js`: real static imports of every page +
-			// wrapper, a ROUTES array (path pattern, page, wrappers root→leaf),
-			// and mountRoute() that matches location.pathname (static-first,
-			// fewest-params-first — same precedence as the V dispatcher) and
-			// nests the page inside its wrappers via `children` snippets.
-			// main.ts mounts through it; unknown path → +error.svelte 404.
-			try {
-				const entries: { route: string; mod: string; wrappers: string[] }[] = []
-				for (const d of dispatched) {
-					const pageFile = join(routesAbs, ...d.mod.split('/')) + '.svelte'
-					if (!existsSync(pageFile)) continue // headless API route: no UI
-					const dir = d.mod.includes('/') ? d.mod.slice(0, d.mod.lastIndexOf('/')) : ''
-					const wrappers: string[] = []
-					let cur = dir
-					for (;;) {
-						const cand = (cur === '' ? '+route' : cur + '/+route') + '.svelte'
-						if (existsSync(join(routesAbs, ...cand.split('/'))))
-							wrappers.unshift(cand.replace(/\.svelte$/, ''))
-						if (cur === '') break
-						cur = cur.includes('/') ? cur.slice(0, cur.lastIndexOf('/')) : ''
-					}
-					entries.push({ route: d.route, mod: d.mod, wrappers })
+					writeFileSync(join(genDir, 'v-shim.d.ts'), decls.join('\n'))
 				}
-				const rank = (p: string) => (p.includes('[') ? (p.includes('...') ? 2 : 1) : 0)
-				entries.sort((a, b) => rank(a.route) - rank(b.route) || a.route.localeCompare(b.route))
-				const o: string[] = ['// Auto-generated by swelte from src/routes. Do not edit.', '']
-				const sym = (mod: string, suffix: string) =>
-					'R_' + mod.replace(/[^A-Za-z0-9_]/g, '_') + suffix
-				for (const e of entries) {
-					o.push(`import ${sym(e.mod, '_Page')} from '../${routesDir}/${e.mod}.svelte'`)
-					for (const w of e.wrappers)
-						o.push(`import ${sym(w, '_Wrap')} from '../${routesDir}/${w}.svelte'`)
-				}
+				for (const w of warnings) console.warn(`[swelte] ${w}`)
+				// Roadmap 7: client router — UI composition without manual imports.
+				// Emits `.swelte/routes.js`: real static imports of every page +
+				// wrapper, a ROUTES array (path pattern, page, wrappers root→leaf),
+				// and mountRoute() that matches location.pathname (static-first,
+				// fewest-params-first — same precedence as the V dispatcher) and
+				// nests the page inside its wrappers via `children` snippets.
+				// main.ts mounts through it; unknown path → +error.svelte 404.
 				try {
-					if (existsSync(join(routesAbs, '+error.svelte')))
-						o.push(`import SwelteErrorPage from '../${routesDir}/+error.svelte'`)
-				} catch {
-					/* no error page */
-				}
-				o.push(`
-import { mount, createRawSnippet } from 'svelte'
+					const svelteOnly: { route: string; mod: string; wrappers: string[] }[] = []
+					try {
+						const { entries: svelteEntries } = collectSvelteManifest(routesAbs, routesDir, vMods)
+						const dispMods = new Set(dispatched.map((d) => d.mod))
+						for (const e of svelteEntries) {
+							if (e.kind === 'wrapper' || e.kind === 'error') continue
+							const mod = e.svelte.replace(/\.svelte$/, '')
+							if (dispMods.has(mod)) continue // already covered by dispatched UI entry
+							const dir = mod.includes('/') ? mod.slice(0, mod.lastIndexOf('/')) : ''
+							const wrappers: string[] = []
+							let cur = dir
+							for (;;) {
+								const cand = (cur === '' ? '+route' : cur + '/+route') + '.svelte'
+								if (existsSync(join(routesAbs, ...cand.split('/'))))
+									wrappers.unshift(cand.replace(/\.svelte$/, ''))
+								if (cur === '') break
+								cur = cur.includes('/') ? cur.slice(0, cur.lastIndexOf('/')) : ''
+							}
+							svelteOnly.push({ route: e.route, mod, wrappers })
+						}
+					} catch {
+						/* svelte-only entries best-effort */
+					}
+					const entries: { route: string; mod: string; wrappers: string[] }[] = []
+					for (const d of dispatched) {
+						const pageFile = join(routesAbs, ...d.mod.split('/')) + '.svelte'
+						if (!existsSync(pageFile)) continue // headless API route: no UI
+						const dir = d.mod.includes('/') ? d.mod.slice(0, d.mod.lastIndexOf('/')) : ''
+						const wrappers: string[] = []
+						let cur = dir
+						for (;;) {
+							const cand = (cur === '' ? '+route' : cur + '/+route') + '.svelte'
+							if (existsSync(join(routesAbs, ...cand.split('/'))))
+								wrappers.unshift(cand.replace(/\.svelte$/, ''))
+							if (cur === '') break
+							cur = cur.includes('/') ? cur.slice(0, cur.lastIndexOf('/')) : ''
+						}
+						entries.push({ route: d.route, mod: d.mod, wrappers })
+					}
+					for (const s of svelteOnly) entries.push(s)
+					const rank = (p: string) => (p.includes('[') ? (p.includes('...') ? 2 : 1) : 0)
+					entries.sort((a, b) => rank(a.route) - rank(b.route) || a.route.localeCompare(b.route))
+					const o: string[] = ['// Auto-generated by swelte from src/routes. Do not edit.', '']
+					const sym = (mod: string, suffix: string) =>
+						'R_' + mod.replace(/[^A-Za-z0-9_]/g, '_') + suffix
+					for (const e of entries) {
+						o.push(`import ${sym(e.mod, '_Page')} from '../${routesDir}/${e.mod}.svelte'`)
+						for (const w of e.wrappers)
+							o.push(`import ${sym(w, '_Wrap')} from '../${routesDir}/${w}.svelte'`)
+					}
+					try {
+						if (existsSync(join(routesAbs, '+error.svelte')))
+							o.push(`import SwelteErrorPage from '../${routesDir}/+error.svelte'`)
+					} catch {
+						/* no error page */
+					}
+					o.push(`
+import { mount, hydrate, createRawSnippet } from 'svelte'
 
 function matchSegs(pattern, pathname) {
 	const pat = pattern.split('/').filter((s) => s !== '')
@@ -2246,13 +2578,13 @@ function matchSegs(pattern, pathname) {
 
 export const ROUTES = [
 `)
-				for (const e of entries) {
-					const wraps = e.wrappers.map((w) => sym(w, '_Wrap')).join(', ')
-					o.push(
-						`\t{ path: ${JSON.stringify(e.route)}, page: ${sym(e.mod, '_Page')}, wrappers: [${wraps}] },`
-					)
-				}
-				o.push(`]
+					for (const e of entries) {
+						const wraps = e.wrappers.map((w) => sym(w, '_Wrap')).join(', ')
+						o.push(
+							`\t{ path: ${JSON.stringify(e.route)}, page: ${sym(e.mod, '_Page')}, wrappers: [${wraps}] },`
+						)
+					}
+					o.push(`]
 
 export function mountSwelteRoute(target, pathname, errorProps) {
 	const path = pathname !== '/' && pathname.endsWith('/') ? pathname.slice(0, -1) : pathname
@@ -2278,21 +2610,87 @@ export function mountSwelteRoute(target, pathname, errorProps) {
 	throw new Error('swelte: no route for ' + pathname)
 }
 `)
-				writeFileSync(join(genDir, 'routes.js'), o.join('\n'))
-			} catch {
-				/* routes.js best-effort */
-			}
-			writeFileSync(join(genDir, 'sdk.ts'), '// Auto-generated by swelte. Do not edit.\n')
-			// Server harness: verbatim skeleton from templates/ (node_modules),
-			// rendered into `.swelte/server.v`. `dev`/`build` compile `.swelte/`
-			// as one V unit (harness `module main` + `routes/` + `server_gen.v`).
-			try {
-				const cfg = await loadConfig(root)
-				writeFileSync(join(genDir, 'server.v'), renderHarness(cfg, import.meta.url))
-			} catch (e) {
-				warnings.push(`harness: ${(e as Error).message}`)
-			}
-		})()
+					o.push(`
+// SSR hydrate path: when Hand fills <!--ssr-body-->
+// the same component tree hydrates in place instead of mounting fresh.
+// Falls back to mount on mismatch (SPA shell).
+export function hydrateSwelteRoute(target, pathname, errorProps) {
+	try {
+		const path = pathname !== '/' && pathname.endsWith('/') ? pathname.slice(0, -1) : pathname
+		for (const r of ROUTES) {
+			const params = matchSegs(r.path, path)
+			if (!params) continue
+			hydrate(r.page, { target, props: { params } })
+			return { params, path: r.path, hydrated: true }
+		}
+		if (typeof SwelteErrorPage !== 'undefined') {
+			hydrate(SwelteErrorPage, { target, props: errorProps ?? { status: 404, message: 'not found' } })
+			return { params: {}, path: null, hydrated: true }
+		}
+	} catch { /* fall through to mount */ }
+	return { ...mountSwelteRoute(target, pathname, errorProps), hydrated: false }
+}
+`)
+					writeFileSync(join(genDir, 'routes.js'), o.join('\n'))
+				} catch (e) {
+					console.warn(`[swelte] routes.js emit failed: ${(e as Error).message}`)
+				}
+				// SSR manifest: engine-agnostic JSON for adapters.
+				// [{ route, svelte, kind, hasData }] + hasError flag. Core emits it;
+				// ssr-qjs/ssr-bun compose render.js from it. Never import engine deps.
+				try {
+					const { entries: svelteEntries, hasError } = collectSvelteManifest(
+						routesAbs,
+						routesDir,
+						vMods
+					)
+					const manifest = {
+						version: 1,
+						hasError,
+						routes: svelteEntries
+							.filter((e) => e.kind !== 'wrapper' && e.kind !== 'error')
+							.map((e) => ({
+								route: e.route,
+								svelte: e.svelte,
+								kind: e.kind,
+								hasData: e.hasData,
+							}))
+							.sort((a, b) => a.route.localeCompare(b.route)),
+						error: svelteEntries.some((e) => e.kind === 'error')
+							? (svelteEntries.find((e) => e.kind === 'error')?.svelte ?? null)
+							: null,
+						wrappers: svelteEntries
+							.filter((e) => e.kind === 'wrapper')
+							.map((e) => e.svelte)
+							.sort(),
+					}
+					writeFileSync(join(genDir, 'ssr-manifest.json'), JSON.stringify(manifest, null, 2))
+				} catch (e) {
+					throw e
+				}
+				writeFileSync(join(genDir, 'sdk.ts'), '// Auto-generated by swelte. Do not edit.\n')
+				// Server harness: verbatim skeleton from templates/ (node_modules),
+				// rendered into `.swelte/server.v`. `dev`/`build` compile `.swelte/`
+				// as one V unit (harness `module main` + `routes/` + `server_gen.v`).
+				try {
+					const cfg = await loadConfig(root)
+					writeFileSync(join(genDir, 'server.v'), renderHarness(cfg, import.meta.url))
+				} catch (e) {
+					warnings.push(`harness: ${(e as Error).message}`)
+				}
+				// Client entry (engine-owned, like server.v):
+				// templates/client/main.ts → .swelte/entry-main.ts.
+				// transformIndexHtml below points the script tag at it;
+				// src/main.ts stays a user-owned shim.
+				try {
+					writeFileSync(join(genDir, 'entry-main.ts'), renderClientEntry(root, import.meta.url))
+				} catch (e) {
+					warnings.push(`entry: ${(e as Error).message}`)
+				}
+			})()
+		)
+		genChain = run.catch(() => {})
+		return run
 	}
 
 	return {
@@ -2328,6 +2726,17 @@ export function mountSwelteRoute(target, pathname, errorProps) {
 			// different context; never reuse a stale .swelte/ from dev).
 			usedLibFiles.clear()
 			return generate(activeRoot || process.cwd())
+		},
+		transformIndexHtml(html) {
+			// Point the entry script at the generated client entry
+			// (.swelte/entry-main.ts, engine-owned). src/main.ts remains a
+			// user-owned shim for eject/custom setups — the framework never
+			// requires editing it. Only rewrites the canonical /src/main.ts
+			// reference; custom entries are left alone.
+			if (html.includes('/src/main.ts')) {
+				return html.replaceAll('/src/main.ts', '/.swelte/entry-main.ts')
+			}
+			return html
 		},
 		async resolveId(source, importer, _opts) {
 			if (!importer) return null
@@ -2692,7 +3101,7 @@ export function mountSwelteRoute(target, pathname, errorProps) {
 						)
 					}
 					const entry = [
-    `module main
+						`module main
 
 @[export: 'swelte_alloc']
 pub fn swelte_alloc(n int) &u8 {

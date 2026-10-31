@@ -124,3 +124,17 @@ export function renderHarness(_config: Required<SwelteOptions>, fromUrl: string)
 	const file = join(templatesDir(fromUrl), 'harness', 'server.v')
 	return readFileSync(file, 'utf8')
 }
+
+/** Render the client entry: verbatim `templates/client/main.ts` (its
+ *  `./routes.js` import already targets the `.swelte/` sibling).
+ *  User hook: when `<root>/src/client.ts` exists it is imported for
+ *  side effects (app setup) before the router mounts — engine composes,
+ *  user fills. Never throws when the hook is absent. */
+export function renderClientEntry(root: string, fromUrl: string): string {
+	const file = join(templatesDir(fromUrl), 'client', 'main.ts')
+	const src = readFileSync(file, 'utf8')
+	const hook = existsSync(join(resolve(root), 'src', 'client.ts'))
+		? `import '../src/client.js'\n`
+		: `// Optional user hook: create src/client.ts for app-level setup.\n`
+	return hook + src
+}

@@ -58,6 +58,7 @@ JSON body. No `?fn=` anywhere (removed with the old model).
 | `#routes/` | `@[post]` / `@[post('q')]` | POST form (multipart / urlencoded) | form fields = args; default, or `?q` present. `File`/`Blob` stub args → multipart, filenames land in `Request.files` (bytes discarded); plain values → urlencoded |
 | `#routes/` | `@[put]`/`@[delete]`/`@[patch]` (+`('q')`) | respective method | same per-method rules |
 | `#routes/` | `@[before]` / `@[after]` (only in `+route.v`) | — (subtree middleware, roadmap §7) | `@[before]`: root→leaf, `SwelteRequest -> !SwelteRequest`; `@[after]`: leaf→root, response observe-or-replace; middleware fns never exported to TS, but the wrapper's `pub struct`s are (+layout-shaped shared types) |
+| `#routes/` leaf + `+route.v` | `@[load]` | — (page data, `Hand` HTML navigations only) | `(SwelteRequest[, parent T]) -> !R`. Zero/one per file. Level 0 takes `(req)`; deeper levels take `(req, parent T)` where T is the previous level's return struct (short or prefixed spelling — mismatch is a build error). The cascade threads typed values root-first; the leaf's return is encoded once at the edge → `props_json` for SSR. No JSON in `.v` files. Throw → `+error` props. On-click stubs stay — `load` is initial paint only |
 | `#lib/` | `@[rpc]` | local WASM call | none (direct dispatch) |
 
 - No attribute = internal helper, never exported, never routed.

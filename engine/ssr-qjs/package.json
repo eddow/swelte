@@ -1,0 +1,28 @@
+{
+  "name": "@swelte/ssr-qjs",
+  "version": "0.1.0",
+  "description": "Swelte SSR adapter: embedded QuickJS engine (default). Re-exports @swelte/core and adds build + runtime SSR.",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": "./dist/index.js",
+    "./vite": "./dist/vite.js"
+  },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "tsc -p tsconfig.json --watch"
+  },
+  "peerDependencies": {
+    "@swelte/core": "^0.1.0",
+    "svelte": "^5.0.0",
+    "vite": "^6.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.6",
+    "typescript": "^5.0.0",
+    "vite": "^6.0.0"
+  },
+  "license": "MIT"
+}

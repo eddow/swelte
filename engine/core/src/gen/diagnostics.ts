@@ -7,6 +7,26 @@ import { join, resolve, sep } from 'node:path'
 import { loadConfig } from './config.js'
 import { parseStructs, parseVFile } from '../vite.js'
 
+function listFilesWithExt(dir: string, ext: string): string[] {
+	const out: string[] = []
+	const walk = (d: string) => {
+		for (const e of readdirSync(d, { withFileTypes: true })) {
+			const p = join(d, e.name)
+			if (e.isDirectory()) {
+				walk(p)
+				continue
+			}
+			if (e.name.endsWith(ext)) out.push(p)
+		}
+	}
+	try {
+		walk(dir)
+	} catch {
+		/* missing dir */
+	}
+	return out.sort()
+}
+
 export interface Diagnostic {
 	file: string
 	line: number
@@ -87,9 +107,12 @@ export async function collectDiagnostics(root: string): Promise<Diagnostic[]> {
 				)
 		}
 		try {
-			const seen = new Set(
-				listVFiles(routesAbs).map((f) => relPosix(routesAbs, f).replace(/\.v$/, ''))
-			)
+			const seen = new Set([
+				...listVFiles(routesAbs).map((f) => relPosix(routesAbs, f).replace(/\.v$/, '')),
+				...listFilesWithExt(routesAbs, '.svelte').map((f) =>
+					relPosix(routesAbs, f).replace(/\.svelte$/, '')
+				),
+			])
 			for (const mod of seen) {
 				for (const leafName of ['index', '+page']) {
 					if (mod !== leafName && seen.has(mod + '/' + leafName)) {
@@ -112,6 +135,24 @@ export async function collectDiagnostics(root: string): Promise<Diagnostic[]> {
 			}
 		} catch {
 			/* ignore */
+		}
+		// Nested +error guard: only the global is recognized.
+		for (const f of listFilesWithExt(routesAbs, '.svelte')) {
+			const rel = relPosix(routesAbs, f)
+			const mod = rel.replace(/\.svelte$/, '')
+			const slash = mod.lastIndexOf('/')
+			const base = slash < 0 ? mod : mod.slice(slash + 1)
+			const dir = slash < 0 ? '' : mod.slice(0, slash)
+			if (base === '+error' && dir !== '') {
+				warn(
+					routesDir + '/' + rel,
+					'ssr-error',
+					routesDir +
+						'/' +
+						rel +
+						' is not allowed — only src/routes/+error.svelte exists (single global error boundary)'
+				)
+			}
 		}
 	}
 	try {

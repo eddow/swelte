@@ -1,8 +1,10 @@
 // `swelte init <dir>`: scaffold a new Swelte project.
 // `templates/base/` is the empty skeleton; `templates/sample/src/` overlays
 // the demo routes/lib on top (`--sample`, or interactive pick). Only
-// `__NAME__` is replaced. Generated files (server harness, routers) are
-// NEVER scaffolded — `dev`/`build` derive them into `.swelte/`.
+// `__NAME__` is replaced. Generated files (server harness, client entry,
+// routers) are NEVER scaffolded — `dev`/`build` derive them into `.swelte/`.
+// src/main.ts ships as a thin user-owned shim; the plugin's
+// transformIndexHtml points the script tag at .swelte/entry-main.ts.
 import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
