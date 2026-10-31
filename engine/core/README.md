@@ -57,5 +57,5 @@ npm run dev     # tsc --watch
 - `../../docs/rpc.md` — `.v` imports, attributes, transport (built)
 - `../../docs/types.md` — V → TS projection (built)
 - `../../docs/errors.md` — envelope, SPA-first rule (built)
-- `../../docs/specs/v-imports.md` — design rationale + decisions log
+- `../../docs/internal/v-imports.md` — design rationale + decisions log
 - `../../docs/specs/roadmap.md` — forward work only (items 2–5, 15 land here as `src/commands/*`)

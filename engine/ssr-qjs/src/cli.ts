@@ -84,6 +84,112 @@ export async function runSsrDev(opts: SsrDevRunOptions = {}): Promise<void> {
  * adapter's proof. Missing `+error.svelte` → SPA `index.html` 200 is
  * covered by the static fallback (back-compat, asserted in core smoke).
  * Used by CI and `swelte-ssr check`. */
+/** Probe one HTTP assertion against a live base URL. Throws on mismatch. */
+async function probeSsr(
+	base: string,
+	label: string,
+	path: string,
+	init: RequestInit,
+	wantStatus: number,
+	wantSubstrings: string[],
+	notSubstrings: string[] = [],
+): Promise<void> {
+	const res = await fetch(base + path, init)
+	const body = await res.text()
+	if (res.status !== wantStatus) {
+		throw new Error(`${label} ${path} -> ${res.status} (want ${wantStatus}): ${body.slice(0, 160)}`)
+	}
+	for (const s of wantSubstrings) {
+		if (!body.includes(s)) {
+			throw new Error(`${label} ${path} missing ${JSON.stringify(s)}: ${body.slice(0, 160)}`)
+		}
+	}
+	for (const s of notSubstrings) {
+		if (body.includes(s)) {
+			throw new Error(
+				`${label} ${path} must not contain ${JSON.stringify(s)}: ${body.slice(0, 160)}`,
+			)
+		}
+	}
+}
+
+/** SSR HTML assertions shared by the sidecar half and the prod-binary half.
+ *  - `/` → 200 text/html with rendered <main> + hydration marker
+ *  - `/nope` → 404 text/html +error fallback (never blank/JSON)
+ *  - JSON Accept on a page route → JSON, not HTML (bypass intact)
+ *  The caller supplies a `base` and a `label` for error messages. */
+async function assertSsrHtml(base: string, label: string): Promise<void> {
+	const html: RequestInit = { headers: { accept: 'text/html,application/xhtml+xml' } }
+	await probeSsr(base, label, '/', html, 200, ['<main>', 'data-swelte-ssr="1"'], ['<!--ssr-body-->'])
+	await probeSsr(base, label, '/nope', html, 404, ['ssr', 'data-swelte-ssr="1"'])
+	const res = await fetch(base + '/', { headers: { accept: 'application/json' } })
+	const body = await res.text()
+	if (res.status !== 200 || body.includes('<main>')) {
+		throw new Error(`${label} / JSON bypass broken: ${res.status} ${body.slice(0, 120)}`)
+	}
+	console.log(`ssr check: ${label} html + bypass ok`)
+}
+
+/** Boot the built V binary (with embedded QJS) for the prod half of the gate. */
+async function withProdBinary(
+	root: string,
+	binary: string,
+	fn: (base: string) => Promise<void>,
+): Promise<void> {
+	const { spawn } = await import('node:child_process')
+	const { createServer } = await import('node:net')
+	const port = await new Promise<number>((resolvePort, rejectPort) => {
+		const s = createServer()
+		s.once('error', rejectPort)
+		s.listen(0, '127.0.0.1', () => {
+			const addr = s.address()
+			const p = typeof addr === 'object' && addr ? (addr.port as number) : 0
+			s.close(() => resolvePort(p))
+		})
+	})
+	if (!port) throw new Error('no free port for prod-binary probe')
+	const child = spawn(binary, [], {
+		cwd: root,
+		env: { ...process.env, PORT: String(port), SWELTE_DIST: 'dist', SWELTE_SSR: '1' },
+		stdio: ['ignore', 'pipe', 'pipe'],
+	})
+	let out = ''
+	child.stderr?.on('data', (d: Buffer) => {
+		out += d.toString()
+	})
+	child.stdout?.on('data', (d: Buffer) => {
+		out += d.toString()
+	})
+	try {
+		const t0 = Date.now()
+		for (;;) {
+			try {
+				await fetch(`http://127.0.0.1:${port}/`)
+				break
+			} catch {
+				if (Date.now() - t0 > 15000) {
+					throw new Error(`prod binary did not listen on :${port}\n${out}`)
+				}
+				await new Promise((r) => setTimeout(r, 200))
+			}
+		}
+		await fn(`http://127.0.0.1:${port}`)
+	} finally {
+		try {
+			child.kill('SIGTERM')
+		} catch {
+			/* ignore */
+		}
+		await new Promise((r) => setTimeout(r, 800))
+		try {
+			child.kill('SIGKILL')
+		} catch {
+			/* ignore */
+		}
+	}
+}
+
+
 export async function runSsrCheck(
 	opts: { root?: string; renderFile?: string; port?: number } = {}
 ): Promise<void> {
@@ -114,9 +220,137 @@ export async function runSsrCheck(
 		if (!r2.body.includes('ssr'))
 			throw new Error(`sidecar /nope missing +error fallback: ${r2.body.slice(0, 120)}`)
 		console.log('ssr check: /nope +error fallback ok')
+		// 2b. Sidecar through Hand: V backend with SWELTE_SSR_URL pointed at
+		// the sidecar must serve the same browser-shape HTML. Skipped when
+		// no generated backend is present (dev-only manifest check).
+		try {
+			const { spawn } = await import('node:child_process')
+			const { createServer } = await import('node:net')
+			const { existsSync: existsSyncV } = await import('node:fs')
+			const genRoutes = join(root, '.swelte', 'routes', 'server_gen.v')
+			if (existsSyncV(genRoutes)) {
+				const freePort = await new Promise<number>((resPort, rejPort) => {
+					const s = createServer()
+					s.once('error', rejPort)
+					s.listen(0, '127.0.0.1', () => {
+						const addr = s.address()
+						const p = typeof addr === 'object' && addr ? (addr.port as number) : 0
+						s.close(() => resPort(p))
+					})
+				})
+				let toolchain: {
+					toolchainEnv?: (e?: Record<string, string>) => NodeJS.ProcessEnv
+					resolveCC?: () => string
+					resolveV?: (u: string) => string
+				} = {}
+				try {
+					toolchain = ((await import('@swelte/core/toolchain')) as unknown) as typeof toolchain
+				} catch {
+					toolchain = {}
+				}
+				if (toolchain.resolveV && toolchain.toolchainEnv) {
+					const vBin = toolchain.resolveV(import.meta.url)
+					const hasBridge = existsSyncV(join(root, '.swelte', 'routes', 'swelte_qjs_bridge.v'))
+					const cc =
+						typeof toolchain.resolveCC === 'function' ? toolchain.resolveCC() : 'gcc'
+					const vArgs = hasBridge
+						? ['-enable-globals', '-cc', cc, 'run', join(root, '.swelte', 'server.v')]
+						: ['run', join(root, '.swelte', 'server.v')]
+					const backend = spawn(vBin, vArgs, {
+						cwd: root,
+						env: toolchain.toolchainEnv({
+							PORT: String(freePort),
+							SWELTE_DIST: 'dist',
+							SWELTE_SSR_URL: sidecar.url,
+						}),
+						stdio: ['ignore', 'pipe', 'pipe'],
+					})
+					try {
+						const t0 = Date.now()
+						for (;;) {
+							try {
+								await fetch(`http://127.0.0.1:${freePort}/`)
+								break
+							} catch {
+								if (Date.now() - t0 > 30000) throw new Error('V backend did not listen')
+								await new Promise((r) => setTimeout(r, 300))
+							}
+						}
+						await assertSsrHtml(`http://127.0.0.1:${freePort}`, 'sidecar-via-Hand')
+					} finally {
+						try {
+							backend.kill('SIGTERM')
+						} catch {
+							/* ignore */
+						}
+						await new Promise((r) => setTimeout(r, 800))
+						try {
+							backend.kill('SIGKILL')
+						} catch {
+							/* ignore */
+						}
+					}
+				} else {
+					console.log('ssr check: toolchain import unavailable — skipping Hand half')
+				}
+			} else {
+				console.log('ssr check: no .swelte/routes/server_gen.v — skipping Hand half')
+			}
+		} catch (e) {
+			throw new Error(`ssr check: sidecar-via-Hand failed: ${(e as Error).message}`)
+		}
+		// 4. Prod binary half (embedded QJS): when dist/server exists, boot it
+		// with SWELTE_SSR=1 and assert the same browser-shape HTML. This is
+		// the path `swelte preview` serves — the gate that caught the GET
+		// 303 loop and the unset-SWELTE_SSR fallback.
+		try {
+			const { existsSync: existsSyncB } = await import('node:fs')
+			const binary = join(root, 'dist', 'server')
+			if (existsSyncB(binary)) {
+				await withProdBinary(root, binary, async (base) => {
+					await assertSsrHtml(base, 'prod-binary')
+				})
+			} else {
+				console.log('ssr check: no dist/server — skipping prod-binary half')
+			}
+		} catch (e) {
+			throw new Error(`ssr check: prod-binary half failed: ${(e as Error).message}`)
+		}
+		// 5. Bytecode repeat-render: the prod binary caches the compiled
+		// bundle (FNV-1a key, ring of 4) and reuses it across renders.
+		// 20 sequential browser GETs must all be 200 SSR HTML with no
+		// crash (the double-link assertion killed the server on render
+		// #2 before the loader fix) and stable timing.
+		try {
+			const { existsSync: existsSyncC } = await import('node:fs')
+			const binary = join(root, 'dist', 'server')
+			if (existsSyncC(binary)) {
+				await withProdBinary(root, binary, async (base) => {
+					const times: number[] = []
+					for (let i = 0; i < 20; i++) {
+						const t0 = Date.now()
+						const res = await fetch(base + '/', {
+							headers: { accept: 'text/html,application/xhtml+xml' },
+						})
+						const body = await res.text()
+						times.push(Date.now() - t0)
+						if (res.status !== 200 || !body.includes('<main>')) {
+							throw new Error(`repeat render #${i}: ${res.status} ${body.slice(0, 80)}`)
+						}
+					}
+					const sorted = [...times].sort((a, b) => a - b)
+					console.log(
+						`ssr check: 20x repeat render ok (min ${sorted[0]}ms p50 ${sorted[10]}ms max ${sorted[sorted.length - 1]}ms)`,
+					)
+				})
+			}
+		} catch (e) {
+			throw new Error(`ssr check: repeat-render half failed: ${(e as Error).message}`)
+		}
+
+
 		// 3. Single artifact in dist/ssr/ (post-QJS-link: exactly one).
 		const { readdirSync } = await import('node:fs')
-		const { join } = await import('node:path')
 		try {
 			const files = readdirSync(join(root, 'dist', 'ssr'))
 			if (files.length !== 1)

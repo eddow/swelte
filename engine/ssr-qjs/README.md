@@ -37,7 +37,8 @@ c/            vendored QuickJS 2026-06-04 (see c/README.md) + swelte_qjs.* glue
       `.swelte/routes/swelte_qjs_bridge.v`
       (`routes.swelte_qjs_render_page(route, props) (string, bool)`).
       `swelte build` regenerates after `vite build` (bridge pass) and
-      compiles with `-enable-globals -cc gcc` when the bridge is present.
+      compiles with `-enable-globals -cc <abs-gcc>` (conda-safe PATH +
+      absolute cc) when the bridge is present.
       Proven: `dist/server` + `dist/` on one port — `/` 200 SSR HTML with
       markers, `/nope` 404 `+error` HTML, `/admin` 400 `+error` HTML,
       JSON bypass intact, server stays up. Design constraints (V 0.5.2):
@@ -46,8 +47,18 @@ c/            vendored QuickJS 2026-06-04 (see c/README.md) + swelte_qjs.* glue
       reports the needed length; runtimes are C-side int handles (V
       truncates u64 C values to 32 bits); `free()` always from C, never
       `C.free()` from V. Binary delta: +~1MB (5.1MB → 6.1MB).
+      Budgets (73KB bundle): `renderRoute` ~0.012ms in-process;
+      browser `GET /` ~3–12ms wall; timeout 50ms ≈ 4–15× p-cold;
+      16MB cap ≈ 200× bundle.
+      Bytecode cache (no `qjsc` binary): compile once per bundle
+      bytes (`JS_WriteObject`), reuse across renders (`JS_ReadObject`);
+      miss → source path. 20× repeat-render in `runSsrCheck`.
 - [x] **`§5 gate as CI` (`§4 done`)**: `runSsrCheck` asserts `/` HTML +
-      markers, `/nope` +error fallback, single `dist/ssr/` artifact.
+      markers, `/nope` +error fallback, single `dist/ssr/` artifact,
+      20× repeat-render (bytecode cache) —
+      three halves: sidecar direct, sidecar-via-Hand (V backend +
+      `SWELTE_SSR_URL`), prod binary (`SWELTE_SSR=1` embedded QJS,
+      the `swelte preview` path).
       Core smoke stays static/SPA + JSON (no Accept) — SSR bytes only
       flow on real browser Accepts (`text/html`), so curl probes and the
       core build smoke never see SSR output.

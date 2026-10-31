@@ -9,7 +9,8 @@
     ".": "./dist/index.js",
     "./vite": "./dist/vite.js",
     "./cli": "./dist/cli.js",
-    "./config": "./dist/gen/config.js"
+    "./config": "./dist/gen/config.js",
+    "./toolchain": "./dist/toolchain.js"
   },
   "bin": {
     "swelte": "./bin/swelte.js"

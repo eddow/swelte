@@ -149,12 +149,11 @@ export function buildQjsProd(opts: {
 		.replace(/buf_cap := 64 \* 1024\n\tbig_cap := 1024 \* 1024\n\t/g, '')
 	writeFileSync(bridge, fixed)
 	const flags = `-I ${cDir} -L ${qjsDir} -lqjs -lm -lpthread -ldl`
-	const qjsc = whichQjsc()
 	return {
 		lib,
 		bridge,
 		flags,
-		qjscNote: qjsc ? '' : 'qjsc not on PATH — bytecode check skipped (embed reads render.js directly)',
+		qjscNote: 'QJS bytecode cached at runtime (no qjsc binary needed)',
 	}
 }
 

@@ -38,9 +38,17 @@ toolchain — no manual install). `swelte build` typechecks, compiles
 
 ## Docs
 
+`docs/` describes built behavior; `docs/internal/` holds contributor design notes;
+`docs/specs/` holds TODOs and design for what is not yet built:
+
+- `docs/ssr.md` — SSR, built (ownership, request path, `@[load]`
+  cascade, `+error` contract, measured budgets, gate)
 - `docs/rpc.md` — `.v` imports, attributes, transport (implemented)
 - `docs/types.md` — V → TS projection, codegen (implemented)
 - `docs/errors.md` — error envelope, `SwelteRpcError`, SPA-first rule (implemented)
 - `docs/example.md` — the `something` example (implemented)
 - `docs/versus.md` — Swelte vs. other full-stack paradigms (positioning)
-- `docs/specs/` — everything not yet built (`v-imports.md` design, dispatcher, dev orchestration, WASM compile, streaming)
+- `docs/internal/` — design rationale: `v-imports.md` + `load.md`
+  (ephemeral; contract lives in `rpc.md`)
+- `docs/specs/` — open work: `ssr.md` (bytecode opt, `ssr-bun`, CI),
+  plus `roadmap.md` / `4agents.md`

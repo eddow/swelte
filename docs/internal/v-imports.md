@@ -4,9 +4,9 @@ Status: design reference (§1–§5 built) + decisions log (§6). §6 records
 all 2026-10-29 decisions including the verb-vs-rpc handler split
 (verb handlers: `SwelteRequest` in, response out; `@[rpc]` fns:
 one args-struct).
-`docs/rpc.md`+`types.md`+`errors.md` describe the built behavior;
+`../rpc.md`+`../types.md`+`../errors.md` describe the built behavior;
 this file is the design rationale and the undecided remainder.
-Forward work lives in `roadmap.md` only.
+Forward work lives in `../specs/roadmap.md` only.
 
 ## 1. Goal
 
@@ -287,12 +287,12 @@ static + `main()`) via directory-mode `v run .` (`/` ->
 `src/routes/index.v`, `/api/greet` -> `src/routes/api/greet.v`,
 else 404; unknown fn -> 404 + available; missing carrier -> 400;
 bad JSON -> 400; `!T` -> 400; mismatch -> 405).
-Envelope: `docs/errors.md`. Dev proxy: `docs/errors.md` SPA-first rule.
+Envelope: `../errors.md`. Dev proxy: `../errors.md` SPA-first rule.
 See roadmap item 1 (built) and item 23 (static-vlib deferral).
 
 ## 6. Decisions (2026-10-29, all built or recorded)
 
-* `time.Time` wire format: unix int (`json.encode(time)` as-is, zero V-side work), TS projects `number` (epoch seconds). No drift: wire and projection agree. `docs/types.md` updated.
+* `time.Time` wire format: unix int (`json.encode(time)` as-is, zero V-side work), TS projects `number` (epoch seconds). No drift: wire and projection agree. `../types.md` updated.
 * Notation follows current SvelteKit: `#lib` (hash), not `$lib`.
   SvelteKit swapped `$lib` -> `#lib` (Node subpath-import style);
   we match. Same for `#routes`.

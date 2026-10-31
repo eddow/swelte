@@ -1,6 +1,6 @@
 # Spec: `@[load]` page-data cascade
 
-Ephemeral design note. Durable contract lives in `docs/rpc.md` (Attributes).
+Ephemeral design note. Durable contract lives in `../rpc.md` (Attributes).
 
 ## Rule
 

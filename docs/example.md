@@ -56,7 +56,7 @@ node engine/core/dist/cli.js dev --port 5174 --backend 8131 --root examples/some
   missing fn → 400, `!T` → 400 `err.msg()`, unknown path → 404,
   method without handler → 405.
 
-## Stubs (see docs/specs/)
+## Stubs (see `rpc.md`, `types.md`)
 
 Dev `/@swelte-dev/<mod>.wasm` micro-modules; prod single bundle
 (`__swelteWasmCall` drives `memory` + `main.<fn>` directly).
