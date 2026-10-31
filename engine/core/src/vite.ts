@@ -527,13 +527,13 @@ export function swelte(options: SweltePluginOptions = {}): Plugin {
 				return keep.length > 0 ? '@[' + keep.join('; ') + '] ' : ''
 			})
 		const compiled = [
-			'module main',
-			'',
-			"@[export: 'swelte_alloc']",
-			'pub fn swelte_alloc(n int) &u8 {',
-			'\treturn unsafe { malloc(if n <= 0 { 1 } else { n }) }',
-			'}',
-			'',
+			`module main
+
+@[export: 'swelte_alloc']
+pub fn swelte_alloc(n int) &u8 {
+	return unsafe { malloc(if n <= 0 { 1 } else { n }) }
+}
+`,
 			...body.split('\n').filter((l) => !/^\s*module\s+\S+/.test(l)),
 		].join('\n')
 		mkdirSync(dirname(outWasm), { recursive: true })
@@ -960,16 +960,22 @@ pub fn swelte_route(path string, method string, query map[string]string, headers
 			// dynamics, fewer [segs] first, [...rest] catch-all last (stable sort).
 			...dynSorted().map(
 				(d) =>
-					`\t${d.prefix}matched, ${d.prefix}params := swelte_match_route(${vJsonStr(d.route)}, norm_path)\n\tif ${d.prefix}matched { return ${d.prefix}dispatch(norm_path, method, query, ${d.prefix}params, headers, cookies, body, content_type, qualifier) }`
+					`\t${d.prefix}matched, ${d.prefix}params := swelte_match_route(${vJsonStr(d.route)}, norm_path)
+	if ${d.prefix}matched { return ${d.prefix}dispatch(norm_path, method, query, ${d.prefix}params, headers, cookies, body, content_type, qualifier) }`
 			),
-			`\treturn 404, '{"error":"not found"}', []string{}\n}\n`,
+			`\treturn 404, '{"error":"not found"}', []string{}
+}
+`,
 			// SSE route predicate (§14, true streaming via veb).
 			// `before_request` (which owns `ctx`) calls this FIRST: on a
 			// GET+Accept match on an SSE route it takes over + streams and
 			// never reaches dispatch. Returns the dispatch prefix for the
 			// matched file (whose `sse_events` accessor yields the list),
 			// or '' when this request is not an SSE stream.
-			`pub fn swelte_sse_route(path string, method string, query map[string]string, headers map[string]string, qualifier string) (string, map[string]string) {\n\tmut accept := headers['Accept'] or { headers['accept'] or { '' } }\n\tif method != 'GET' || !accept.contains('text/event-stream') { return '', map[string]string{} }\n\tnorm_path := swelte_normalize_path(path)`,
+			`pub fn swelte_sse_route(path string, method string, query map[string]string, headers map[string]string, qualifier string) (string, map[string]string) {
+	mut accept := headers['Accept'] or { headers['accept'] or { '' } }
+	if method != 'GET' || !accept.contains('text/event-stream') { return '', map[string]string{} }
+	norm_path := swelte_normalize_path(path)`,
 			...dispatched
 				.filter((x) => !x.route.includes('['))
 				.filter((d) => sseMods.has(d.mod))
@@ -981,43 +987,54 @@ pub fn swelte_route(path string, method string, query map[string]string, headers
 				.filter((d) => sseMods.has(d.mod))
 				.map(
 					(d) =>
-						`\t${d.prefix}matched, ${d.prefix}params := swelte_match_route(${vJsonStr(d.route)}, norm_path)\n\tif ${d.prefix}matched { return ${vJsonStr(d.prefix)}, ${d.prefix}params }`
+						`\t${d.prefix}matched, ${d.prefix}params := swelte_match_route(${vJsonStr(d.route)}, norm_path)
+	if ${d.prefix}matched { return ${vJsonStr(d.prefix)}, ${d.prefix}params }`
 				),
-			`\treturn '', map[string]string{}\n}\n`,
+			`\treturn '', map[string]string{}
+}
+`,
 			// SSE events fan-out (§14): `before_request` resolves the route
 			// to a dispatch prefix; this maps prefix → per-file accessor.
 			// List mode returns the list; emit mode runs the fn with the
 			// harness emitter. Qualifier pre-check is side-effect free
 			// (emit fns run ONLY inside the writer, post-takeover).
-			'pub fn swelte_sse_events_for(prefix string, qualifier string, req SwelteRequest) ![]string {',
+			`pub fn swelte_sse_events_for(prefix string, qualifier string, req SwelteRequest) ![]string {`,
 			...dispatched
 				.filter((d) => sseMods.has(d.mod))
 				.map(
 					(d) =>
 						`\tif prefix == ${vJsonStr(d.prefix)} { return ${d.prefix}sse_events(qualifier, req) }`
 				),
-			`\treturn error('no sse route for prefix: ' + prefix)\n}\n`,
-			'pub fn swelte_sse_is_emit(prefix string) bool {',
+			`\treturn error('no sse route for prefix: ' + prefix)
+}
+
+pub fn swelte_sse_is_emit(prefix string) bool {`,
 			...dispatched
 				.filter((d) => sseMods.has(d.mod))
 				.map((d) => `\tif prefix == ${vJsonStr(d.prefix)} { return ${d.prefix}sse_is_emit() }`),
-			'\treturn false\n}\n',
-			'pub fn swelte_sse_check_qual(prefix string, qualifier string) ! {',
+			`\treturn false
+}
+
+pub fn swelte_sse_check_qual(prefix string, qualifier string) ! {`,
 			...dispatched
 				.filter((d) => sseMods.has(d.mod))
 				.map(
 					(d) =>
 						`\tif prefix == ${vJsonStr(d.prefix)} { ${d.prefix}sse_check_qual(qualifier) or { return err } return }`
 				),
-			`\treturn error('no sse route for prefix: ' + prefix)\n}\n`,
-			'pub fn swelte_sse_emit_for(prefix string, qualifier string, req SwelteRequest, emit fn (string) bool) ! {',
+			`\treturn error('no sse route for prefix: ' + prefix)
+}
+
+pub fn swelte_sse_emit_for(prefix string, qualifier string, req SwelteRequest, emit fn (string) bool) ! {`,
 			...dispatched
 				.filter((d) => sseMods.has(d.mod))
 				.map(
 					(d) =>
 						`\tif prefix == ${vJsonStr(d.prefix)} { ${d.prefix}sse_emit(qualifier, req, emit) or { return err } return }`
 				),
-			`\treturn error('no sse route for prefix: ' + prefix)\n}\n`,
+			`\treturn error('no sse route for prefix: ' + prefix)
+}
+`,
 		]
 		return o.join('\n')
 	}
@@ -1099,10 +1116,10 @@ ${fn.setsCookie ? `\treturn ['sess=__SWELTE_SESS__; Path=/; HttpOnly; SameSite=L
 			return [out]
 		})
 		const o: string[] = [
-			'// Auto-generated by swelte from V signatures. Do not edit.',
-			`// Route: ${route} <- ${mod}.v`,
-			'module routes',
-			'',
+			`// Auto-generated by swelte from V signatures. Do not edit.
+// Route: ${route} <- ${mod}.v
+module routes
+`,
 			// Only what this file's dispatch branch uses: rpc -> json+json2,
 			// verbs -> json+http. Never emit an unused import (V warns).
 			...baseImports,
@@ -1140,23 +1157,49 @@ ${fn.setsCookie ? `\treturn ['sess=__SWELTE_SESS__; Path=/; HttpOnly; SameSite=L
 				`pub fn ${prefix}dispatch(path string, method string, query map[string]string, params map[string]string, headers map[string]string, cookies map[string]string, body string, content_type string, qualifier string) (int, string, []string) {`,
 				dispatchBody(prefix, mod, fns, null),
 				'',
-				...emitSseEvents(prefix, mod, fns),
+				emitSseEvents(prefix, mod, fns),
 			].join('\n')
 		}
 		return [
 			...o,
-			`pub fn ${prefix}dispatch(path string, method string, query map[string]string, params map[string]string, headers map[string]string, cookies map[string]string, body string, content_type string, qualifier string) (int, string, []string) {\n\tmut form_before := map[string]string{}\n\tmut files_before := map[string]string{}\n\tif content_type.contains('multipart/form-data') {\n\t\tmut boundary_before := ''\n\t\tfor part in content_type.split(';') {\n\t\t\tp_before := part.trim_space()\n\t\t\tif p_before.starts_with('boundary=') { boundary_before = p_before.all_after('boundary=').trim('"') }\n\t\t}\n\t\tmut swelte_raw_before := map[string][]http.FileData{}\n\t\tif boundary_before != '' { form_before, swelte_raw_before = http.parse_multipart_form(body, boundary_before) }\n\t\tfor k, fs in swelte_raw_before {\n\t\t\tmut swelte_names := []string{}\n\t\t\tfor f in fs { swelte_names << f.filename }\n\t\t\tfiles_before[k] = swelte_names.join(';')\n\t\t}\n\t} else if content_type.contains('application/x-www-form-urlencoded') || body != '' {\n\t\tform_before = http.parse_form(body)\n\t}\n\tmut swelte_req := SwelteRequest{ query: query, form: form_before, files: files_before, headers: headers, cookies: cookies, params: params, method: method, path: path, qualifier: qualifier }`,
+			`pub fn ${prefix}dispatch(path string, method string, query map[string]string, params map[string]string, headers map[string]string, cookies map[string]string, body string, content_type string, qualifier string) (int, string, []string) {
+	mut form_before := map[string]string{}
+	mut files_before := map[string]string{}
+	if content_type.contains('multipart/form-data') {
+		mut boundary_before := ''
+		for part in content_type.split(';') {
+			p_before := part.trim_space()
+			if p_before.starts_with('boundary=') { boundary_before = p_before.all_after('boundary=').trim('"') }
+		}
+		mut swelte_raw_before := map[string][]http.FileData{}
+		if boundary_before != '' { form_before, swelte_raw_before = http.parse_multipart_form(body, boundary_before) }
+		for k, fs in swelte_raw_before {
+			mut swelte_names := []string{}
+			for f in fs { swelte_names << f.filename }
+			files_before[k] = swelte_names.join(';')
+		}
+	} else if content_type.contains('application/x-www-form-urlencoded') || body != '' {
+		form_before = http.parse_form(body)
+	}
+	mut swelte_req := SwelteRequest{ query: query, form: form_before, files: files_before, headers: headers, cookies: cookies, params: params, method: method, path: path, qualifier: qualifier }`,
 			beforeCalls,
-			`\tmut swelte_cookies := []string{}\n\tcode_before, body_before, verbs_cookies := ${prefix}dispatch_verbs(path, method, query, params, headers, cookies, body, content_type, qualifier, swelte_req)\n\tswelte_cookies << verbs_cookies\n\tmut swelte_code := code_before\n\tmut swelte_body := body_before`,
+			`	mut swelte_cookies := []string{}
+	code_before, body_before, verbs_cookies := ${prefix}dispatch_verbs(path, method, query, params, headers, cookies, body, content_type, qualifier, swelte_req)
+	swelte_cookies << verbs_cookies
+	mut swelte_code := code_before
+	mut swelte_body := body_before`,
 			afterCalls,
-			'\treturn swelte_code, swelte_body, swelte_cookies\n}\n',
-			`fn ${prefix}dispatch_verbs(path string, method string, query map[string]string, params map[string]string, headers map[string]string, cookies map[string]string, body string, content_type string, qualifier string, swelte_req SwelteRequest) (int, string, []string) {`,
+			`\treturn swelte_code, swelte_body, swelte_cookies
+}
+
+fn ${prefix}dispatch_verbs(path string, method string, query map[string]string, params map[string]string, headers map[string]string, cookies map[string]string, body string, content_type string, qualifier string, swelte_req SwelteRequest) (int, string, []string) {`,
 			// `req` outlives the method arm (assigned per-arm below, read by
 			// handler calls): declare once at function scope.
-			'\t_ = body\n\t_ = content_type\n\tmut req := SwelteRequest{ query: query, form: map[string]string{}, files: map[string]string{}, headers: headers, cookies: cookies, params: params, method: method, path: path, qualifier: qualifier }',
+			`\t_ = body
+	_ = content_type
+	mut req := SwelteRequest{ query: query, form: map[string]string{}, files: map[string]string{}, headers: headers, cookies: cookies, params: params, method: method, path: path, qualifier: qualifier }`,
 			dispatchBody(prefix, mod, fns, 'swelte_req'),
-			'',
-			...emitSseEvents(prefix, mod, fns),
+			emitSseEvents(prefix, mod, fns),
 		].join('\n')
 	}
 
@@ -1165,9 +1208,9 @@ ${fn.setsCookie ? `\treturn ['sess=__SWELTE_SESS__; Path=/; HttpOnly; SameSite=L
 	 * event list for the qualifier, or an error for unknown qualifiers /
 	 * fallible failures. `before_request` calls this (it owns `ctx`),
 	 * then streams via `swelte_serve_sse`. No body, no sentinel. */
-	function emitSseEvents(prefix: string, mod: string, fns: RpcFn[]): string[] {
+	function emitSseEvents(prefix: string, mod: string, fns: RpcFn[]): string {
 		const sseFns = fns.filter((f) => f.attr === 'sse')
-		if (!sseFns.length) return []
+		if (!sseFns.length) return ''
 		const quals = sseFns.filter((h) => h.qualifier).map((h) => vJsonStr(h.qualifier as string))
 		const qualErr = `\treturn error('unknown qualifier: ' + qualifier + ' (available: [${quals.join(', ')}])')`
 		const isEmitFn = (h: RpcFn): boolean => {
@@ -1208,12 +1251,23 @@ ${fn.setsCookie ? `\treturn ['sess=__SWELTE_SESS__; Path=/; HttpOnly; SameSite=L
 				return `\tif ${condFor(h)} {\n${pre}${run}\n\t\treturn\n\t}`
 			}
 		)
-		return [
-			`pub fn ${prefix}sse_events(qualifier string, req SwelteRequest) ![]string {\n${arm(eventsArms, qualErr)}\n}\n`,
-			`pub fn ${prefix}sse_is_emit() bool {\n\treturn ${sseFns.some((h) => isEmitFn(h))}\n}\n`,
-			`pub fn ${prefix}sse_check_qual(qualifier string) ! {\n${arm(checkArms, qualErr)}\n}\n`,
-			`pub fn ${prefix}sse_emit(qualifier string, req SwelteRequest, emit fn (string) bool) ! {\n${arm(emitArms, qualErr)}\n}\n`,
-		]
+		return `
+pub fn ${prefix}sse_events(qualifier string, req SwelteRequest) ![]string {
+${arm(eventsArms, qualErr)}
+}
+
+pub fn ${prefix}sse_is_emit() bool {
+\treturn ${sseFns.some((h) => isEmitFn(h))}
+}
+
+pub fn ${prefix}sse_check_qual(qualifier string) ! {
+${arm(checkArms, qualErr)}
+}
+
+pub fn ${prefix}sse_emit(qualifier string, req SwelteRequest, emit fn (string) bool) ! {
+${arm(emitArms, qualErr)}
+}
+`
 	}
 
 	/** Extracted verb/rpc body (unchanged semantics — moved verbatim out
@@ -1240,11 +1294,15 @@ ${fn.setsCookie ? `\treturn ['sess=__SWELTE_SESS__; Path=/; HttpOnly; SameSite=L
 			const call = `${prefix}${fn.name}(${dec})`
 			const ck = `swelte_set_cookies_for_${prefix}${fn.name}()`
 			const body = fn.fallible
-				? `\t\t\tres := ${call} or { return swelte_err_bad_cookies(path, fn_name, err.msg()) }\n${fn.vret === 'void' ? `\t\t\treturn 200, '{}', ${ck}` : `\t\t\treturn 200, json.encode(res), ${ck}`}`
+				? `\t\t\tres := ${call} or { return swelte_err_bad_cookies(path, fn_name, err.msg()) }
+${fn.vret === 'void' ? `\t\t\treturn 200, '{}', ${ck}` : `\t\t\treturn 200, json.encode(res), ${ck}`}`
 				: fn.vret === 'void'
-					? `\t\t\t${call}\n\t\t\treturn 200, '{}', ${ck}`
+					? `\t\t\t${call}
+			return 200, '{}', ${ck}`
 					: `\t\t\treturn 200, json.encode(${call}), ${ck}`
-			return `\t\tif fn_name == ${vJsonStr(fn.name)} {\n${body}\n\t\t}`
+			return `\t\tif fn_name == ${vJsonStr(fn.name)} {
+${body}
+		}`
 		}
 		const avail = '[' + rpcFns.map((f) => vJsonStr(f.name)).join(', ') + ']'
 		const rpcHead = `\tif method == 'POST' && (content_type.contains('application/json') || content_type == '') {\n\t\tparsed := json2.decode[map[string]json2.Any](body) or {\n\t\t\treturn swelte_err_bad_cookies(path, '', 'bad json body')\n\t\t}\n\t\tfn_any := parsed['fn'] or {\n\t\t\treturn swelte_err_bad_cookies(path, '', 'missing fn')\n\t\t}\n\t\tfn_name := fn_any.str().trim('"')\n\t\targs_any := parsed['args'] or { json2.Any(json2.null) }\n\t\targs_json := json2.encode(args_any)`
