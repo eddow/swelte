@@ -383,9 +383,10 @@ fn (mut app App) before_request(mut ctx Ctx) veb.Result {
 	if wants_html && !wants_json && swelte_ssr_enabled() {
 		if status == 200 {
 			props_json := swelte_page_props(path, query, headers, cookies, map[string]string{})
-			html, ok := swelte_render_page(path, props_json)
+			joined, ok := swelte_render_page(path, props_json)
 			if ok {
-				head := swelte_page_head(path, props_json)
+				head := swelte_page_head_split(joined)
+				html, _ := swelte_split_head_body(joined, true)
 				ctx.res.set_status(http.status_from_int(status))
 				return ctx.send_response_to_client(
 					'text/html; charset=utf-8',
@@ -395,21 +396,25 @@ fn (mut app App) before_request(mut ctx Ctx) veb.Result {
 		} else if status >= 400 && body.contains('not found') {
 			// Unknown path → global +error 404 when SSR is on; without
 			// +error.svelte the static/SPA fallback below still applies.
-			html, ok := swelte_render_page('/+error', '{"status":404,"message":"not found"}')
+			joined, ok := swelte_render_page('/+error', '{"status":404,"message":"not found"}')
 			if ok {
+				head := swelte_page_head_split(joined)
+				html, _ := swelte_split_head_body(joined, true)
 				ctx.res.set_status(http.status_from_int(404))
 				return ctx.send_response_to_client(
 					'text/html; charset=utf-8',
-					swelte_fill_ssr(swelte_shell_for(dist, path), '', html)
+					swelte_fill_ssr(swelte_shell_for(dist, path), head, html)
 				)
 			}
 		} else if status >= 400 {
-			html, ok := swelte_render_page('/+error', '{"status":' + status.str() + ',"message":"error"}')
+			joined, ok := swelte_render_page('/+error', '{"status":' + status.str() + ',"message":"error"}')
 			if ok {
+				head := swelte_page_head_split(joined)
+				html, _ := swelte_split_head_body(joined, true)
 				ctx.res.set_status(http.status_from_int(status))
 				return ctx.send_response_to_client(
 					'text/html; charset=utf-8',
-					swelte_fill_ssr(swelte_shell_for(dist, path), '', html)
+					swelte_fill_ssr(swelte_shell_for(dist, path), head, html)
 				)
 			}
 		}
@@ -478,9 +483,9 @@ fn swelte_render_page(route string, props_json string) (string, bool) {
 	// SWELTE_SSR=1 without an adapter build fails the V compile (missing
 	// symbol) — CORRECT: loud config error, not a silent SPA fallback.
 	// So: SWELTE_SSR=1 → embedded; else URL proxy; else not-ok.
-	// The bridge returns BARE html (not the sidecar envelope): the glue
-	// copies only `body` into the V buffer. Keep it that way — head stays
-	// '' via swelte_page_head (components set <svelte:head> rarely in v1).
+	// The embedded bridge returns head+BODY joined by the
+	// `<!--ssr-head-body-->` marker (or body alone when no <svelte:head>);
+	// the sidecar returns the {html, head} envelope. Both split below.
 	if os.getenv_opt('SWELTE_SSR') or { '' } == '1' {
 		return routes.swelte_qjs_render_page(route, props_json)
 	}
@@ -497,13 +502,35 @@ fn swelte_render_page(route string, props_json string) (string, bool) {
 	if resp.status_code != 200 {
 		return '', false
 	}
-	// Envelope: {"html":"...","head":"..."}. Extract html (head goes into
-	// the shell via the ssr-head placeholder fill below).
+	// Envelope: {"html":"...","head":"..."}. Both flow into the shell via
+	// the ssr-body / ssr-head placeholder fill below.
 	html := swelte_json_field(resp.body, 'html')
 	if html == '' {
 		return '', false
 	}
-	return html, true
+	head := swelte_json_field(resp.body, 'head')
+	return head + '<!--ssr-head-body-->' + html, true
+}
+
+// Split the bridge/sidecar `head + marker + body` form into the
+// (html, head, ok) triple Hand fills into the shell. Marker absent →
+// body-only (no <svelte:head> on the page, or legacy bridge).
+fn swelte_split_head_body(s string, ok bool) (string, bool) {
+	if !ok || s == '' {
+		return '', false
+	}
+	marker := '<!--ssr-head-body-->'
+	idx := s.index(marker) or { return s, true }
+	return s[idx + marker.len..], true
+}
+
+// Head for a page render: the slice before the marker. The
+// envelope/bridge carries `head + marker + body`; Hand splits once and
+// fills both placeholders. Empty when the page has no <svelte:head>.
+fn swelte_page_head_split(s string) string {
+	marker := '<!--ssr-head-body-->'
+	idx := s.index(marker) or { return '' }
+	return s[..idx]
 }
 
 // Minimal JSON string-field extractor (flat envelope only — the sidecar
@@ -572,12 +599,9 @@ fn swelte_min_shell() string {
 	return '<!doctype html><html><head><meta charset="utf-8"><!--ssr-head--></head><body><div id="app"><!--ssr-body--></div></body></html>'
 }
 
-// Head for a page render: sidecar envelope head when present, else ''.
-// The sidecar returns { html, head }; swelte_render_page unwraps html —
-// head travels via a second proxy call only when non-empty? No: keep it
-// simple — head comes from the same envelope (cached per route+props).
-// For now '' (components set <svelte:head> rarely in v1); the fill
-// handles the empty case by clearing the placeholder.
+// `swelte_page_head` is superseded by `swelte_page_head_split` (the head
+// rides the render return, split once at the call site). Kept as a stub
+// for source-compat; always ''.
 fn swelte_page_head(route string, props_json string) string {
 	_ = route
 	_ = props_json

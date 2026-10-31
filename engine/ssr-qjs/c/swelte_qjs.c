@@ -223,10 +223,42 @@ static swelte_qjs_cached *swelte_qjs_ensure_bytecode(const char *src, int len) {
     return slot;
 }
 
+/* Shared render core. When want_head is set, also extracts `ret.head`
+ * into head_buf (needed length into *head_len_out). Exactly one JS
+ * `renderRoute()` call serves both strings — no double render, one
+ * interrupt budget for both. */
+static int swelte_qjs_render_inner(int rt_handle, const char *mod_src, int mod_len,
+                                   const char *route, int route_len, const char *props,
+                                   int props_len, char *out_buf, int out_cap,
+                                   int timeout_ms, unsigned mem_cap_mb,
+                                   int want_head, char *head_buf, int head_cap,
+                                   int *head_len_out);
+
 int swelte_qjs_render(int rt_handle, const char *mod_src, int mod_len,
                       const char *route, int route_len, const char *props,
                       int props_len, char *out_buf, int out_cap,
                       int timeout_ms, unsigned mem_cap_mb) {
+    return swelte_qjs_render_inner(rt_handle, mod_src, mod_len, route, route_len,
+                                   props, props_len, out_buf, out_cap,
+                                   timeout_ms, mem_cap_mb, 0, NULL, 0, NULL);
+}
+
+/* Shared render core. When want_head is set, also extracts `ret.head`
+ * into head_buf (needed length into *head_len_out). Exactly one JS
+ * `renderRoute()` call serves both strings — no double render, one
+ * interrupt budget for both. */
+static int swelte_qjs_render_inner(int rt_handle, const char *mod_src, int mod_len,
+                                   const char *route, int route_len, const char *props,
+                                   int props_len, char *out_buf, int out_cap,
+                                   int timeout_ms, unsigned mem_cap_mb,
+                                   int want_head, char *head_buf, int head_cap,
+                                   int *head_len_out) {
+    if (head_len_out)
+        *head_len_out = 0;
+    if (head_cap > 0 && head_buf)
+        head_buf[0] = 0;
+    if (head_len_out)
+        *head_len_out = 0;
     if (out_cap > 0 && out_buf)
         out_buf[0] = 0;
     pthread_mutex_lock(&swelte_qjs_mu);
@@ -345,13 +377,56 @@ int swelte_qjs_render(int rt_handle, const char *mod_src, int mod_len,
         rc = -1;
         goto done;
     }
+    /* Head rides the same return object (`render()` yields { head, body }).
+     * Extract it first when asked; head == '' (no <svelte:head>) completes
+     * with head_len 0 — not a failure. A missing/unreadable head on a
+     * want_head call is -1 (contract breach, not silent drop). */
+    const char *hs = NULL;
+    size_t hlen = 0;
+    JSValue headv = JS_UNDEFINED;
+    int have_headv = 0;
+    if (want_head) {
+        headv = JS_GetPropertyStr(ctx, ret, "head");
+        have_headv = 1;
+        if (JS_IsException(headv)) {
+            JS_FreeValue(ctx, headv);
+            JS_FreeValue(ctx, body);
+            JS_FreeValue(ctx, ret);
+            rc = -1;
+            goto done;
+        }
+        hs = JS_ToCStringLen(ctx, &hlen, headv);
+        if (!hs) {
+            JS_FreeValue(ctx, headv);
+            JS_FreeValue(ctx, body);
+            JS_FreeValue(ctx, ret);
+            rc = -1;
+            goto done;
+        }
+    }
     size_t blen = 0;
     const char *bs = JS_ToCStringLen(ctx, &blen, body);
     JS_FreeValue(ctx, body);
+    if (have_headv)
+        JS_FreeValue(ctx, headv);
     JS_FreeValue(ctx, ret);
     if (!bs) {
+        if (hs)
+            JS_FreeCString(ctx, hs);
         rc = -1;
         goto done;
+    }
+    if (want_head && head_len_out)
+        *head_len_out = (int)hlen;
+    if (want_head && hs) {
+        size_t hcopy = hlen < (size_t)(head_cap - 1) ? hlen : (size_t)(head_cap - 1);
+        if (head_cap > 0) {
+            memcpy(head_buf, hs, hcopy);
+            head_buf[hcopy] = 0;
+        }
+        JS_FreeCString(ctx, hs);
+    } else if (hs) {
+        JS_FreeCString(ctx, hs);
     }
     if (blen == 0) {
         JS_FreeCString(ctx, bs);
@@ -376,4 +451,28 @@ done:
     if (timeout_ms > 0)
         JS_SetInterruptHandler(rt, NULL, NULL);
     return rc;
+}
+
+int swelte_qjs_render_head_body(int rt_handle, const char *mod_src, int mod_len,
+                                const char *route, int route_len, const char *props,
+                                int props_len, char *head_buf, int head_cap,
+                                int *head_len_out, char *body_buf, int body_cap,
+                                int *body_len_out, int timeout_ms, unsigned mem_cap_mb) {
+    if (head_len_out)
+        *head_len_out = 0;
+    if (body_len_out)
+        *body_len_out = 0;
+    int rc = swelte_qjs_render_inner(rt_handle, mod_src, mod_len, route, route_len,
+                                     props, props_len, body_buf, body_cap,
+                                     timeout_ms, mem_cap_mb,
+                                     1, head_buf, head_cap, head_len_out);
+    if (rc < 0)
+        return rc;
+    /* Inner returns body needed length; the dual-buffer contract returns
+     * 0 on success (lengths travel via the out-params). Map it so V's
+     * `need` is the 0 that means "complete" (any positive return would
+     * be misread as "truncated, grow and retry"). */
+    if (body_len_out)
+        *body_len_out = rc;
+    return 0;
 }

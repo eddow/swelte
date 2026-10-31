@@ -23,6 +23,14 @@
 //   - returns -1 (JS exception / timeout-fire / OOM), -2 (no renderRoute
 //     export), -3 (load/compile failure). Any failure → V falls back to
 //     SPA shell / +error — never blank.
+//   swelte_qjs_render_head_body(...) is the same call but ALSO copies
+//   the `head` string (`<svelte:head>` output: title/meta/link) into a
+//   second caller buffer with its own needed-length return. One JS call
+//   serves both (no double render, one interrupt budget). Negative
+//   returns mirror the single-buffer codes; head_len_out/body_len_out
+//   carry the FULL needed lengths (each excluding NUL). `head == ''`
+//   (no <svelte:head> on the page) completes with head_len 0 — NOT a
+//   failure. -4 means empty body (rendered, nothing inside).
 //
 // Guards (enforced here, not in JS):
 //   - interrupt handler: wall-clock budget in ms (0 = none; prod ~50).
@@ -50,10 +58,23 @@ void swelte_qjs_free_runtime(int handle);
 // or negative on failure (-1 js/timeout/mem, -2 no export, -3 load,
 // -4 empty body: rendered, nothing inside — caller keeps the SPA shell).
 // `out_buf` always NUL-terminated when out_cap > 0 (possibly truncated).
+// NOTE: body-only legacy. Prefer swelte_qjs_render_head_body (single JS
+// call, both strings); this stays for source-compat.
 int swelte_qjs_render(int rt_handle, const char *mod_src, int mod_len,
                       const char *route, int route_len, const char *props,
                       int props_len, char *out_buf, int out_cap,
                       int timeout_ms, unsigned mem_cap_mb);
+
+// Render body AND head in one JS call. `head_buf`/`head_cap` and
+// `body_buf`/`body_cap` are independent caller buffers (each NUL-terminated
+// when cap > 0, possibly truncated); `head_len_out`/`body_len_out` receive
+// the FULL needed lengths. Return 0 on success (check the lens), negative
+// on failure (-1/-2/-3/-4, same codes as swelte_qjs_render).
+int swelte_qjs_render_head_body(int rt_handle, const char *mod_src, int mod_len,
+                                const char *route, int route_len, const char *props,
+                                int props_len, char *head_buf, int head_cap,
+                                int *head_len_out, char *body_buf, int body_cap,
+                                int *body_len_out, int timeout_ms, unsigned mem_cap_mb);
 
 #ifdef __cplusplus
 }
