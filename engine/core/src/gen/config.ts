@@ -25,8 +25,28 @@ export type SwelteConfig = SvelteBaseConfig & {
 /** Back-compat alias: the `swelte` key payload. */
 export type { SwelteOptions as SwelteConfigOptions }
 
-export function defineConfig(config: SwelteConfig): SwelteConfig {
-	return config
+/** Build the project config: `preprocess` + friends stay enumerable for the
+ * svelte() vite plugin, while the `swelte` key is attached NON-enumerable.
+ * That keeps it in the file for illustration and readable via `loadConfig`
+ * (which re-imports the module and reads `.swelte` off the namespace), but
+ * invisible to `Object.keys` — so `validateInlineOptions` in
+ * vite-plugin-svelte no longer warns `invalid plugin options "swelte"` and
+ * projects never strip it by hand. Deep-clone first: the same object
+ * reference also feeds `svelte()`, and deleting the key there would drop it
+ * for `loadConfig` too. Symbol-keyed storage would survive a spread but not
+ * a fresh `import()` — non-enumerable string key does both. */
+export function defineConfig(config: SwelteConfig): SvelteBaseConfig {
+	const { swelte, ...rest } = config
+	const out = { ...rest } as SvelteBaseConfig & { swelte?: SwelteOptions }
+	if (swelte !== undefined) {
+		Object.defineProperty(out, 'swelte', {
+			value: swelte,
+			writable: true,
+			configurable: true,
+			enumerable: false,
+		})
+	}
+	return out
 }
 
 const DEFAULTS: Required<Pick<SwelteOptions, 'routesDir' | 'libDir' | 'outDir' | 'distDir'>> = {
@@ -67,9 +87,12 @@ export async function loadConfig(root: string): Promise<Required<SwelteOptions>>
 			}
 			const d = mod.default as SwelteConfig | SwelteOptions | undefined
 			if (!d) return normalize({})
-			// svelte.config.* carries our fields under the `swelte` key;
-			// legacy swelte.config.ts held them at the top level.
-			const opts = (d as SwelteConfig).swelte ?? (d as SwelteOptions)
+			// svelte.config.* carries our fields under the `swelte` key
+			// (non-enumerable since defineConfig hides it from the svelte()
+			// plugin — direct access still reads it); legacy swelte.config.ts
+			// held them at the top level.
+			const maybeSwelte = (d as SwelteConfig).swelte as SwelteOptions | undefined
+			const opts = maybeSwelte ?? (d as SwelteOptions)
 			return normalize(opts)
 		} catch {
 			return normalize({})

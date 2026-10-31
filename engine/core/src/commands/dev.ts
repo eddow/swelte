@@ -140,7 +140,15 @@ export async function runDev(ctx: Ctx): Promise<void> {
 		// `routes/` relative to it (dir target fails on dotted dirs).
 		vChild = spawn(v, ['run', join(genAbs, 'server.v')], {
 			cwd: root,
-			env: { ...process.env, PORT: String(backend) },
+			env: {
+				...process.env,
+				PORT: String(backend),
+				// Dev same-origin: Vite (:port) POSTs through the proxy with
+				// `Origin: http://localhost:<port>` — opt it in so the §10
+				// CSRF guard (403 on foreign non-GET/HEAD) lets it through.
+				SWELTE_CORS_ORIGIN:
+					process.env.SWELTE_CORS_ORIGIN ?? `http://localhost:${port}`,
+			},
 			stdio: ['ignore', 'pipe', 'pipe'],
 		})
 		vChild.stdout?.on('data', (d: Buffer) => process.stdout.write(`[v:${backend}] ${d}`))

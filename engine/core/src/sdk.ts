@@ -89,7 +89,7 @@ async function getVerb<TResult>(
 	args: object
 ): Promise<TResult> {
 	const q = qualifier ? `?q=${encodeURIComponent(qualifier)}` : ''
-	const res = await fetch(`${base}${encodeQuery(args ?? {}).replace(/^\?/, q ? '&' : '?') || q}`, {
+	const res = await fetch(`${base}${q}${encodeQuery(args ?? {}).replace(/^\?/, q ? '&' : '?')}`, {
 		method,
 		headers: { accept: 'application/json' },
 	})
@@ -185,7 +185,7 @@ export async function* __swelteStream(
 	opts: { signal?: AbortSignal; lastEventId?: string } = {}
 ): AsyncGenerator<string, void, void> {
 	const q = qualifier ? `?q=${encodeURIComponent(qualifier)}` : ''
-	const url = `${base}${encodeQuery(args ?? {}).replace(/^\?/, q ? '&' : '?') || q}`
+	const url = `${base}${q}${encodeQuery(args ?? {}).replace(/^\?/, q ? '&' : '?')}`
 	const headers: Record<string, string> = { accept: 'text/event-stream' }
 	if (opts.lastEventId) headers['last-event-id'] = opts.lastEventId
 	const res = await fetch(url, { headers, signal: opts.signal })

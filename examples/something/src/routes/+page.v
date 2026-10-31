@@ -18,5 +18,5 @@ pub fn save_name(req SwelteRequest) string {
 // `Parameters<typeof greet_narrow>[0]`, numbers JSON-stringified on the wire.
 @[get('narrow')]
 pub fn greet_narrow(name string, age int, nick ?string) string {
-	return 'hi ' + name + ' age=' + age.str()
+	return 'hi ' + name + ' age=' + age.str() + ' nick=' + (nick or { '<none>' })
 }

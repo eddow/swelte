@@ -12,6 +12,9 @@ export default defineConfig({
   // See: node_modules/@sveltejs/vite-plugin-svelte/src/index.js (name) vs
   // ~/.vscode/extensions/svelte.svelte-vscode-*/node_modules/@sveltejs/load-config/dist/src/index.js
   preprocess: vitePreprocess(),
+  // Illustrative only — all defaults. defineConfig() keeps this key
+  // non-enumerable: invisible to svelte() (no "invalid plugin options"
+  // warning) but still readable by @swelte/core's loadConfig.
   swelte: {
     name: 'something',
     routesDir: 'src/routes',

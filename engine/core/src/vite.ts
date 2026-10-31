@@ -318,6 +318,51 @@ function routeParams(route: string): string[] {
 	return out
 }
 
+/** Narrow-args binding (roadmap section 8): verb fns not taking SwelteRequest
+ * resolve each param by name from form-query-params (all strings on the
+ * wire) and coerce to the V param type: ints via .int(), floats via .f64(),
+ * bools via == true-string. `?T` optionals CANNOT inline `none` in a call
+ * arg on V 0.5.2 (C backend emits `void[]`, cc rejects) — the call-site
+ * builder below hoists them into `mut swelte_opt_N := ?T(none)` temps.
+ * Returns per-param { raw, expr, optType }: raw is the string lookup, expr
+ * the coerced value expression, optType the `?T` when optional. */
+function narrowArgParts(p: { name: string; vtype: string }): {
+	raw: string
+	expr: string
+	optType: string | null
+} {
+	const raw = "req.form['" + p.name + "'] or { req.query['" + p.name + "'] or { req.params['" + p.name + "'] or { '' } } }"
+	const t = p.vtype.trim()
+	if (t.startsWith('?')) {
+		const inner = narrowArgParts({ name: p.name, vtype: t.slice(1) })
+		return { raw, expr: inner.expr, optType: t }
+	}
+	if (/^(int|i8|i16|i32|i64|u8|u16|u32|u64|usize|isize|byte|rune)$/.test(t))
+		return { raw, expr: '(' + raw + ').int()', optType: null }
+	if (/^(f32|f64|float|fsize)$/.test(t)) return { raw, expr: '(' + raw + ').f64()', optType: null }
+	if (/^bool$/.test(t)) return { raw, expr: '(' + raw + ") == 'true'", optType: null }
+	return { raw, expr: raw, optType: null }
+}
+
+/** Build a narrow-args call: `stmts` hoists `?T` temps (V 0.5.2 needs
+ * `mut v_N := ?T(none)` + conditional assign — inline `none` in an arg
+ * miscompiles), `call` is the `fn(a0, a1, ...)` expression. */
+function narrowCall(fnName: string, params: { name: string; vtype: string }[]): {
+	stmts: string[]
+	call: string
+} {
+	const stmts: string[] = []
+	const args = params.map((p, i) => {
+		const part = narrowArgParts(p)
+		if (part.optType === null) return part.expr
+		const tmp = `swelte_opt_${i}`
+		stmts.push(`mut ${tmp} := ${part.optType}(none)`)
+		stmts.push(`if ${part.raw} != '' { ${tmp} = ${part.expr} }`)
+		return tmp
+	})
+	return { stmts, call: `${fnName}(${args.join(', ')})` }
+}
+
 function pascal(s: string): string {
 	return s
 		.split('_')
@@ -1133,7 +1178,7 @@ pub fn swelte_route(path string, method string, query map[string]string, headers
 		// `req` outlives the method arm (assigned per-arm below, read by
 		// handler calls): declare once at function scope.
 		o.push(
-			`\tmut req := SwelteRequest{ query: query, form: map[string]string{}, files: map[string]string{}, headers: headers, cookies: cookies, params: params, method: method, path: path, qualifier: qualifier }`
+			`\t_ = body\n\t_ = content_type\n\tmut req := SwelteRequest{ query: query, form: map[string]string{}, files: map[string]string{}, headers: headers, cookies: cookies, params: params, method: method, path: path, qualifier: qualifier }`
 		)
 		o.push(...dispatchBody(prefix, mod, fns, 'swelte_req'))
 		o.push('')
@@ -1157,17 +1202,18 @@ pub fn swelte_route(path string, method string, query map[string]string, headers
 		}
 		const condFor = (h: RpcFn): string =>
 			h.qualifier ? `qualifier == ${vJsonStr(h.qualifier)}` : `qualifier == ''`
-		const verbCall = (h: RpcFn): string => {
+		const verbCall = (h: RpcFn): { pre: string[]; call: string } => {
 			const isReq = h.params.length === 1 && h.params[0].vtype === 'SwelteRequest'
-			return isReq
-				? `${prefix}${h.name}(req)`
-				: `${prefix}${h.name}(${h.params.map((p) => `req.form['${p.name}]' or { req.query['${p.name}]' or { req.params['${p.name}]' or { '' } } }`).join(', ')})`
+			if (isReq) return { pre: [], call: `${prefix}${h.name}(req)` }
+			const built = narrowCall(`${prefix}${h.name}`, h.params)
+			return { pre: built.stmts, call: built.call }
 		}
 		const arm = (body: string, tail: string): string => (body ? `${body}\n${tail}` : tail)
 		const eventsArms = list(sseFns.filter((h) => !isEmitFn(h)), (h) => {
-			const call = verbCall(h)
-			const ret = h.fallible ? `\t\treturn ${call} or { return err }` : `\t\treturn ${call}`
-			return v`\tif ${condFor(h)} {\n${ret}\n\t}`
+			const vc = verbCall(h)
+			const pre = vc.pre.map((st) => `\t\t${st}`).join('\n')
+			const ret = h.fallible ? `\t\treturn ${vc.call} or { return err }` : `\t\treturn ${vc.call}`
+			return v`\tif ${condFor(h)} {\n${pre ? pre + '\n' : ''}${ret}\n\t}`
 		})
 		const checkArms = list(sseFns, (h) => v`\tif ${condFor(h)} { return }`)
 		const emitArms = list(
@@ -1175,15 +1221,17 @@ pub fn swelte_route(path string, method string, query map[string]string, headers
 			(h) => {
 				const narrow = h.params.slice(0, -1)
 				const isReq = narrow.length === 1 && narrow[0].vtype === 'SwelteRequest'
+				const built = isReq ? null : narrowCall(`${prefix}${h.name}`, narrow)
 				const callArgs = isReq
 					? `req, emit`
 					: narrow.length
-						? `${narrow.map((p) => `req.form['${p.name}]' or { req.query['${p.name}]' or { req.params['${p.name}]' or { '' } } }`).join(', ')}, emit`
+						? `${built!.call}, emit`
 						: `emit`
+				const pre = built && built.stmts.length ? built.stmts.map((st) => `\t\t${st}`).join('\n') + '\n' : ''
 				const run = h.fallible
 					? `\t\t${prefix}${h.name}(${callArgs}) or { return err }`
 					: `\t\t${prefix}${h.name}(${callArgs})`
-				return v`\tif ${condFor(h)} {\n${run}\n\t\treturn\n\t}`
+				return v`\tif ${condFor(h)} {\n${pre}${run}\n\t\treturn\n\t}`
 			},
 		)
 		return [
@@ -1286,11 +1334,11 @@ pub fn swelte_route(path string, method string, query map[string]string, headers
 			for (const h of hs) {
 				const cond = h.qualifier ? `qualifier == ${vJsonStr(h.qualifier)}` : `qualifier == ''`
 				const isReq = h.params.length === 1 && h.params[0].vtype === 'SwelteRequest'
-				const call = isReq
-					? `${prefix}${h.name}(req)`
-					: `${prefix}${h.name}(${h.params.map((p) => `req.form['${p.name}'] or { req.query['${p.name}'] or { req.params['${p.name}'] or { '' } } }`).join(', ')})`
+				const built = isReq ? null : narrowCall(`${prefix}${h.name}`, h.params)
+				const call = isReq ? `${prefix}${h.name}(req)` : built!.call
 				const ck = `swelte_set_cookies_for_${prefix}${h.name}()`
 				o.push(`\t\tif ${cond} {`)
+				for (const st of built?.stmts ?? []) o.push(`\t\t\t${st}`)
 				if (h.fallible) {
 					o.push(
 						`\t\t\tres := ${call} or { return swelte_err_bad_cookies(path, ${vJsonStr(h.name)}, err.msg()) }`

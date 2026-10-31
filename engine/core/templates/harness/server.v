@@ -434,7 +434,7 @@ fn swelte_sse_write(mut ctx Ctx, pch chan string) {
 
 @[get; post; put; patch; delete; options; head]
 @['/:path...']
-pub fn (mut app App) swelte_catchall(mut ctx Ctx) veb.Result {
+pub fn (mut app App) swelte_catchall(mut ctx Ctx, _path string) veb.Result {
 	return app.before_request(mut ctx)
 }
 

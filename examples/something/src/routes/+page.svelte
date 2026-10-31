@@ -1,7 +1,7 @@
 <script lang="ts">
 import { tick } from 'svelte'
-import { get_greeting, save_name } from '#routes/+page.v'
-import type { GetGreetingResult, SaveNameResult, SwelteRequest } from '#routes/+page.v'
+import { get_greeting, save_name, greet_narrow } from '#routes/+page.v'
+import type { GetGreetingResult, SaveNameResult, GreetNarrowResult, SwelteRequest } from '#routes/+page.v'
 import { login, tick_stream } from '#routes/api/greet.v'
 import type { Session } from '#routes/api/greet.v'
 import { hash_string } from '#lib/crypto/hash.v'
@@ -13,6 +13,7 @@ let greeting: GetGreetingResult = $state('')
 let saved: SaveNameResult = $state('')
 let session: Session | null = $state(null)
 let hashed: HashStringResult = $state('')
+let narrow: GreetNarrowResult = $state('')
 let lastError = $state('')
 let ticks: string[] = $state([])
 
@@ -56,6 +57,14 @@ async function doLogin() {
 		showError(e)
 	}
 }
+async function loadNarrow() {
+	lastError = ''
+	try {
+		narrow = await greet_narrow({ name, age: 42, nick: 'al' })
+	} catch (e) {
+		showError(e)
+	}
+}
 async function streamTicks() {
 	lastError = ''
 	ticks = []
@@ -79,6 +88,7 @@ async function streamTicks() {
 		<button onclick={hashName}>Hash (#lib WASM)</button>
 		<button onclick={doLogin}>Login (#routes api struct)</button>
 		<button onclick={streamTicks}>Stream (#routes SSE)</button>
+		<button onclick={loadNarrow}>Narrow (#routes GET narrow-args)</button>
 	</div>
 	{#if greeting}
 		<p>{greeting}</p>
@@ -94,6 +104,9 @@ async function streamTicks() {
 	{/if}
 	{#if ticks.length}
 		<p>stream: {ticks.join(' | ')}</p>
+	{/if}
+	{#if narrow}
+		<p>{narrow}</p>
 	{/if}
 	{#if lastError}
 		<pre style="color:crimson; white-space:pre-wrap;">{lastError}</pre>
