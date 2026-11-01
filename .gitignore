@@ -2,6 +2,7 @@ node_modules/
 dist/
 **/node_modules/
 **/dist/
+**/dist-test/
 **/.swelte/
 examples/*/server
 engine/core/templates/*/.swelte/

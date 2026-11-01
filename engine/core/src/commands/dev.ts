@@ -1,9 +1,11 @@
 // `swelte dev`: free ports, spawn `v run .` + Vite with injected
 // `vBackendUrl`, restart V on `.v` change, kill both on Ctrl-C.
-import { execSync, spawn, type ChildProcess } from 'node:child_process'
+// Portable: no curl/ss/fuser/pkill required — best-effort Unix cleanup
+// only (guarded try/catch), child handles + fetch probes otherwise.
+import { spawn, type ChildProcess } from 'node:child_process'
 import { createServer, type Server } from 'node:net'
-import { existsSync, readFileSync, watch } from 'node:fs'
-import { join, resolve } from 'node:path'
+import { existsSync, readFileSync, readdirSync, statSync, watch } from 'node:fs'
+import { basename, join, resolve } from 'node:path'
 import type { Ctx } from './types.js'
 
 export function takePort(v: unknown, fallback: number): number {
@@ -20,28 +22,140 @@ export function portFree(port: number): Promise<boolean> {
 	})
 }
 
+function isUnixLike(): boolean {
+	return process.platform !== 'win32'
+}
+
 export async function killPort(port: number, log: (m: string) => void): Promise<void> {
 	if (await portFree(port)) return
 	log(`port ${port} busy — freeing it`)
-	try {
-		const { execSync } = await import('node:child_process')
-		const out = execSync(`ss -ltnp 2>/dev/null | grep -E ':${port} ' || true`).toString()
-		const pids = new Set<string>()
-		for (const m of out.matchAll(/pid=(\d+)/g)) pids.add(m[1])
-		for (const pid of pids) {
+	if (isUnixLike()) {
+		// Best-effort: `ss` (Linux) pid lookup, then TERM. Missing tools
+		// (macOS/Windows) fall through to the wait below.
+		try {
+			const { execFileSync } = await import('node:child_process')
+			let out = ''
 			try {
-				process.kill(Number(pid), 'SIGTERM')
+				out = execFileSync('ss', ['-ltnp'], { encoding: 'utf8' }).toString()
 			} catch {
-				/* ignore */
+				out = ''
 			}
+			const pids = new Set<string>()
+			for (const line of out.split('\n')) {
+				if (!line.includes(`:${port} `)) continue
+				for (const m of line.matchAll(/pid=(\d+)/g)) pids.add(m[1])
+			}
+			for (const pid of pids) {
+				try {
+					process.kill(Number(pid), 'SIGTERM')
+				} catch {
+					/* ignore */
+				}
+			}
+		} catch {
+			/* ignore */
 		}
-	} catch {
-		/* ignore */
 	}
 	const t0 = Date.now()
 	while (!(await portFree(port)) && Date.now() - t0 < 8000) {
 		await new Promise((r) => setTimeout(r, 200))
 	}
+	if (!(await portFree(port))) {
+		log(`port ${port} still busy — proceeding anyway (stop the holder or pass --port)`)
+	}
+}
+
+/** Best-effort Unix port cleanup after a child is killed (fuser is
+ * Linux-only — skip elsewhere, never throw). */
+export async function freePortUnix(port: number): Promise<void> {
+	if (!isUnixLike()) return
+	try {
+		const { execFileSync } = await import('node:child_process')
+		execFileSync('fuser', ['-k', `${port}/tcp`], { stdio: 'ignore' })
+	} catch {
+		/* ignore — child handles are the real cleanup */
+	}
+}
+
+/** Recursive `.v` watch that works on Linux: `fs.watch(recursive:true)`
+ * only recurses on macOS/Windows. Walk subdirs and watch each one. */
+export function watchVRecursive(
+	dir: string,
+	onVFile: (file: string) => void,
+): { close: () => void } {
+	type W = ReturnType<typeof watch>
+	const watchers: W[] = []
+	let closed = false
+	try {
+		const walk = (d: string) => {
+			if (closed) return
+			try {
+				if (!statSync(d).isDirectory()) return
+			} catch {
+				return
+			}
+			try {
+				const w = watch(d, (_ev, file) => {
+					if (closed) return
+					// A new subdir appeared — watch it too.
+					if (file) {
+						const cand = join(d, String(file))
+						try {
+							if (statSync(cand).isDirectory() && !String(file).endsWith('.v')) {
+								walk(cand)
+								return
+							}
+						} catch {
+							/* not a dir */
+						}
+						if (String(file).endsWith('.v')) onVFile(String(file))
+					}
+				})
+				watchers.push(w)
+			} catch {
+				/* ignore */
+			}
+			let entries: string[] = []
+			try {
+				entries = readdirSync(d)
+			} catch {
+				return
+			}
+			for (const e of entries) {
+				if (e === 'node_modules' || e === '.swelte' || e.startsWith('.')) continue
+				walk(join(d, e))
+			}
+		}
+		walk(dir)
+	} catch {
+		/* ignore */
+	}
+	return {
+		close: () => {
+			closed = true
+			for (const w of watchers) {
+				try {
+					w.close()
+				} catch {
+					/* ignore */
+				}
+			}
+		},
+	}
+}
+
+/** Attach a readable `error` handler to a spawned child (missing binary
+ * otherwise surfaces as an unhandled 'error' event). */
+export function onSpawnError(child: ChildProcess, label: string, log: (m: string) => void): void {
+	child.on('error', (e: Error) => {
+		log(`${label} failed to start: ${e.message} (is the binary on PATH? see toolchain)`)
+	})
+}
+
+/** Basename-derived kill-pattern for this project (never leaks the
+ * checked-in example path into user projects). Only used on Unix. */
+export function projectKillPattern(root: string): string {
+	return basename(resolve(root))
 }
 
 export function findViteConfig(root: string): string | null {
@@ -117,13 +231,9 @@ export async function runDev(ctx: Ctx): Promise<void> {
 				/* ignore */
 			}
 			// `v run` wrapper exit does not mean the compiled binary released
-			// the port — kill whoever still holds :backend, then wait.
+			// the port — best-effort Unix cleanup, then wait.
 			setTimeout(() => {
-				try {
-					execSync(`fuser -k ${backend}/tcp 2>/dev/null || true`)
-				} catch {
-					/* ignore */
-				}
+				void freePortUnix(backend)
 			}, 400).unref?.()
 			setTimeout(() => {
 				try {
@@ -162,6 +272,7 @@ export async function runDev(ctx: Ctx): Promise<void> {
 			}),
 			stdio: ['ignore', 'pipe', 'pipe'],
 		})
+		onSpawnError(vChild, 'V backend', ctx.log)
 		vChild.stdout?.on('data', (d: Buffer) => process.stdout.write(`[v:${backend}] ${d}`))
 		vChild.stderr?.on('data', (d: Buffer) => process.stderr.write(`[v:${backend}] ${d}`))
 		vChild.on('exit', (code) => {
@@ -207,6 +318,7 @@ export async function runDev(ctx: Ctx): Promise<void> {
 			}),
 			stdio: ['ignore', 'pipe', 'pipe'],
 		})
+		onSpawnError(viteChild, 'Vite', ctx.log)
 		viteChild.stdout?.on('data', (d: Buffer) => process.stdout.write(`[vite:${port}] ${d}`))
 		viteChild.stderr?.on('data', (d: Buffer) => process.stderr.write(`[vite:${port}] ${d}`))
 		viteChild.on('exit', (code) => {
@@ -219,34 +331,31 @@ export async function runDev(ctx: Ctx): Promise<void> {
 	if (!viteUp) ctx.log(`Vite did not come up on :${port} within 60s — check output above`)
 	else ctx.log(`ready: http://localhost:${port} (V backend :${backend})`)
 	let timer: NodeJS.Timeout | null = null
-	const watchers: ReturnType<typeof watch>[] = []
-	for (const dir of ['src/routes', 'src/lib']) {
+	const watchHandles: { close: () => void }[] = []
+	const queueRestart = (where: string) => {
+		if (timer) clearTimeout(timer)
+		timer = setTimeout(() => {
+			void (async () => {
+				restarts += 1
+				ctx.log(`.v changed (${where}) — restarting V backend (#${restarts})`)
+				await killBackend()
+				spawnBackend()
+			})()
+		}, 300)
+	}
+	// cfg-relative (not hardcoded src/): manual per-subdir watchers so
+	// Linux (no recursive fs.watch) sees nested routes/** changes.
+	for (const dir of [cfg.routesDir, cfg.libDir]) {
 		const abs = join(root, dir)
 		if (!existsSync(abs)) continue
-		try {
-			const w = watch(abs, { recursive: true }, (_ev, file) => {
-				if (!file || !String(file).endsWith('.v')) return
-				if (timer) clearTimeout(timer)
-				timer = setTimeout(() => {
-					void (async () => {
-						restarts += 1
-						ctx.log(`.v changed (${dir}/${file}) — restarting V backend (#${restarts})`)
-						await killBackend()
-						spawnBackend()
-					})()
-				}, 300)
-			})
-			watchers.push(w)
-		} catch {
-			/* ignore */
-		}
+		watchHandles.push(watchVRecursive(abs, (file) => queueRestart(`${dir}/${file}`)))
 	}
 	await new Promise<void>((resolveDone) => {
 		const stop = () => {
 			if (stopping) return
 			stopping = true
 			if (timer) clearTimeout(timer)
-			for (const w of watchers) {
+			for (const w of watchHandles) {
 				try {
 					w.close()
 				} catch {
@@ -265,10 +374,8 @@ export async function runDev(ctx: Ctx): Promise<void> {
 			}
 			ctx.log('shutting down...')
 			void (async () => {
-				// Kill by port + command line, not by handle: `npx`/`v run`
-				// wrappers re-parent the real servers (Vite keeps :port, the
-				// compiled `something` binary keeps :backend), so ChildProcess
-				// handles alone orphan them. fuser frees the listeners; pkill
+				// Kill by child handle first (portable). Unix extras are
+				// best-effort: fuser frees re-parented listeners, pkill
 				// catches anything still matching our exact invocation.
 				const killAll = (sig: 'TERM' | 'KILL') => {
 					try {
@@ -281,21 +388,21 @@ export async function runDev(ctx: Ctx): Promise<void> {
 					} catch {
 						/* ignore */
 					}
-					try {
-						execSync(`fuser -k ${port}/tcp ${backend}/tcp 2>/dev/null || true`)
-					} catch {
-						/* ignore */
-					}
-					for (const pat of [
-						`vite --port ${port}`,
-						`PORT=${backend} `,
-						'examples/something/something',
-					]) {
-						try {
-							execSync(`pkill -${sig} -f '${pat}' 2>/dev/null || true`)
-						} catch {
-							/* ignore */
-						}
+					if (process.platform !== 'win32') {
+						void freePortUnix(port).then(() => freePortUnix(backend))
+						const pats =
+							process.platform === 'linux'
+								? [`vite --port ${port}`, `PORT=${backend} `, projectKillPattern(root)]
+								: [`vite --port ${port}`]
+						void import('node:child_process').then(({ execFileSync }) => {
+							for (const pat of pats) {
+								try {
+									execFileSync('pkill', [`-${sig}`, '-f', pat], { stdio: 'ignore' })
+								} catch {
+									/* ignore */
+								}
+							}
+						})
 					}
 				}
 				killAll('TERM')
@@ -331,11 +438,7 @@ export async function runDev(ctx: Ctx): Promise<void> {
 						} catch {
 							/* ignore */
 						}
-						try {
-							execSync(`fuser -k ${port}/tcp 2>/dev/null || true`)
-						} catch {
-							/* ignore */
-						}
+						await freePortUnix(port)
 						setTimeout(spawnVite, 800)
 					})()
 				} else if (key === 'q') {

@@ -94,7 +94,10 @@ export async function loadConfig(root: string): Promise<Required<SwelteOptions>>
 			const maybeSwelte = (d as SwelteConfig).swelte as SwelteOptions | undefined
 			const opts = maybeSwelte ?? (d as SwelteOptions)
 			return normalize(opts)
-		} catch {
+		} catch (e) {
+			// Never silent: a syntax error in svelte.config.js previously
+			// fell back to defaults (wrong dirs, confusing codegen).
+			console.warn(`[swelte] ${file} failed to load, using defaults: ${(e as Error).message}`)
 			return normalize({})
 		}
 	}

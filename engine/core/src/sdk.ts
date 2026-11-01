@@ -420,10 +420,17 @@ export function isPageData<T>(r: SwelteLoadResult<T>): r is { data: T } {
 
 /** True when a `#lib` rel path is backend-only: a `backend` path segment
  * at any depth, or a V-native `_backend.v` suffix. Kept name
- * `isLibServerPath` (public API) — semantics are backend-only. */
-export function isLibServerPath(libRel: string): boolean {
-	const parts = libRel.split('/').filter(Boolean)
+ * `isLibServerPath` (public API) — semantics are backend-only.
+ * (Body duplicated from `gen/paths.ts`: sdk.ts must stay browser-safe,
+ * no node imports; keep both in sync.) */
+export function isBackendMod(mod: string): boolean {
+	const norm = mod.split('\\').join('/').replace(/\.v$/, '')
+	const parts = norm.split('/').filter(Boolean)
 	if (parts.includes('backend')) return true
-	const stem = (parts.pop() ?? '').replace(/\.v$/, '')
+	const stem = parts.pop() ?? ''
 	return stem.endsWith('_backend')
+}
+
+export function isLibServerPath(libRel: string): boolean {
+	return isBackendMod(libRel)
 }

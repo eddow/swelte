@@ -23,6 +23,8 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "dev": "tsc -p tsconfig.json --watch",
+    "test": "node --test --test-reporter=spec \"dist-test/**/*.test.js\"",
+    "pretest": "tsc -p tsconfig.test.json",
     "prepublishOnly": "npm run build"
   },
   "peerDependencies": {
@@ -42,6 +44,15 @@
     "*": {
       "cli": [
         "./dist/cli.d.ts"
+      ],
+      "vite": [
+        "./dist/vite.d.ts"
+      ],
+      "config": [
+        "./dist/gen/config.d.ts"
+      ],
+      "toolchain": [
+        "./dist/toolchain.d.ts"
       ]
     }
   }

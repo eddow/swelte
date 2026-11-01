@@ -22,6 +22,12 @@ export interface Ctx {
 	error: (msg: string) => void
 }
 
+export function parseBoolFlag(raw: string | undefined): boolean {
+	if (raw === undefined) return true
+	const v = raw.toLowerCase()
+	return !(v === 'false' || v === '0' || v === 'no' || v === 'off' || v === 'n')
+}
+
 export function parseArgs(cmd: Command, argv: string[]): { opts: Ctx['opts']; rest: string[] } {
 	const defs = new Map<string, ArgDef>()
 	for (const a of [
@@ -42,7 +48,7 @@ export function parseArgs(cmd: Command, argv: string[]): { opts: Ctx['opts']; re
 			const def = defs.get(key)
 			if (!def) throw new Error(`unknown option --${key}`)
 			if (def.value === 'boolean' || !def.value) {
-				opts[def.name] = eq >= 0 ? tok.slice(eq + 1) !== 'false' : true
+				opts[def.name] = parseBoolFlag(eq >= 0 ? tok.slice(eq + 1) : undefined)
 				i++
 			} else {
 				const raw = eq >= 0 ? tok.slice(eq + 1) : argv[++i]

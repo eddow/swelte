@@ -94,7 +94,10 @@ const checkCmd: Command = {
 const testCmd: Command = {
 	name: 'test',
 	summary: 'V tests (v test) + TS contract check (stubs match projected types).',
-	args: [{ name: 'root', help: 'Project root', value: 'string' }],
+	args: [
+		{ name: 'root', help: 'Project root', value: 'string' },
+		{ name: 'update-snapshot', short: 'u', help: 'Rewrite swelte.contract.json', value: 'boolean' },
+	],
 	async run(ctx: Ctx) {
 		await runTest(ctx)
 	},

@@ -10,9 +10,9 @@ import {
 	statSync,
 	writeFileSync,
 } from 'node:fs'
-import { createRequire } from 'node:module'
 import { dirname, join, relative, resolve, sep } from 'node:path'
 import { loadConfig, renderClientEntry, renderHarness } from './gen/config.js'
+import { isBackendMod } from './gen/paths.js'
 import { resolveV, toolchainEnv } from './toolchain.js'
 
 function list<T>(collection: readonly T[], fn: (item: T, i: number) => unknown): string {
@@ -22,13 +22,6 @@ function list<T>(collection: readonly T[], fn: (item: T, i: number) => unknown):
 // Lazy V binary for `v -b wasm` (resolved on first compile).
 // (module import must not throw when the caller passes a plain path).
 let vBin = ''
-
-const _createRequire = createRequire
-void _createRequire
-void dirname
-void execVSync
-void vBin
-void resolveV
 
 export interface SweltePluginOptions {
 	routesDir?: string
@@ -234,17 +227,6 @@ function listFilesWithExt(dir: string, ext: string, base?: string): string[] {
 
 function listVFiles(dir: string, base?: string): string[] {
 	return listFilesWithExt(dir, '.v', base)
-}
-
-/** Backend-only test (decided 2026-10-29): `backend/` dir segment at any
- * depth, or V-native `_backend.v` suffix (single-file exception without
- * moving the file). Backend runs purely on V — no `.ts`/`.js`/`.svelte`
- * under `backend/` (enforced in generate()). */
-function isBackendMod(mod: string): boolean {
-	const parts = mod.split('/')
-	if (parts.includes('backend')) return true
-	const stem = (parts.pop() ?? '').replace(/\.v$/, '')
-	return stem.endsWith('_backend')
 }
 
 export function svelteModKind(mod: string): 'page' | 'wrapper' | 'error' | 'plain' | null {
@@ -2915,7 +2897,10 @@ export function hydrateSwelteRoute(target, pathname, errorProps) {
 			return null
 		},
 		configureServer(server) {
-			const watch = [resolve(routesDir), resolve(libDir)]
+			// Root-anchored (never cwd-relative): language-server and
+			// non-cwd roots resolve through server.config.root.
+			const root = server.config.root
+			const watch = [resolve(root, routesDir), resolve(root, libDir)]
 			server.watcher.add(watch)
 			const regen = (file: string) => {
 				if (!file.endsWith('.v')) return
@@ -3166,15 +3151,6 @@ pub fn swelte_alloc(n int) &u8 {
 			void bundle
 		},
 	}
-}
-
-function wasmDevMiddleware(server: {
-	config: { root: string }
-	watcher: unknown
-	moduleGraph: unknown
-}): (req: IncomingMessage, res: ServerResponse, next: () => void) => void {
-	void server
-	return (_req: IncomingMessage, _res: ServerResponse, _next: () => void) => undefined
 }
 
 export default swelte

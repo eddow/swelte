@@ -2,9 +2,12 @@
 // `generate()` in vite.ts emits files (types, stubs, dispatcher); this module
 // runs the same scans and returns `{ file, line, kind, message }` entries so
 // `swelte check` (human + `--format json`) and generate-time warns agree.
+// Subset: SSE *shape* checks (emit fn vs []string, duplicate qualifiers)
+// stay build errors in generate() only (diagnostics warns types/orphans/clashes).
 import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { join, resolve, sep } from 'node:path'
 import { loadConfig } from './config.js'
+import { isBackendMod } from './paths.js'
 import { parseStructs, parseVFile } from '../vite.js'
 
 function listFilesWithExt(dir: string, ext: string): string[] {
@@ -59,13 +62,6 @@ function relPosix(abs: string, f: string): string {
 		.slice(abs.length + 1)
 		.split(sep)
 		.join('/')
-}
-
-function isBackendMod(mod: string): boolean {
-	const parts = mod.split('/')
-	if (parts.includes('backend')) return true
-	if (mod.endsWith('_backend')) return true
-	return false
 }
 
 /** Collect warnings for a project root (mirrors generate() warn sites). */

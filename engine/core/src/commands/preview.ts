@@ -1,10 +1,10 @@
 // `swelte preview`: run the built V binary only (vite-less prod run).
 // Serves dist/ + API on one port. No Vite involved.
-import { execSync, spawn, type ChildProcess } from 'node:child_process'
+import { spawn, type ChildProcess } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import type { Ctx } from './types.js'
-import { killPort, takePort, waitPort } from './dev.js'
+import { freePortUnix, killPort, onSpawnError, takePort, waitPort } from './dev.js'
 
 export async function runPreview(ctx: Ctx): Promise<void> {
 	const root = resolve(String(ctx.opts.root ?? process.cwd()))
@@ -47,6 +47,7 @@ export async function runPreview(ctx: Ctx): Promise<void> {
 		},
 		stdio: ['ignore', 'pipe', 'pipe'],
 	})
+	onSpawnError(child, 'preview binary', ctx.log)
 	child.stdout?.on('data', (d: Buffer) => process.stdout.write(`[preview:${port}] ${d}`))
 	child.stderr?.on('data', (d: Buffer) => process.stderr.write(`[preview:${port}] ${d}`))
 	child.on('exit', (code) => {
@@ -73,11 +74,7 @@ export async function runPreview(ctx: Ctx): Promise<void> {
 			} catch {
 				/* ignore */
 			}
-			try {
-				execSync(`fuser -k ${port}/tcp 2>/dev/null || true`)
-			} catch {
-				/* ignore */
-			}
+			void freePortUnix(port)
 			setTimeout(() => {
 				try {
 					child?.kill('SIGKILL')

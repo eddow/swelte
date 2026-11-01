@@ -138,7 +138,10 @@ export async function runTest(ctx: Ctx): Promise<void> {
 	// return type / struct field changes vs the committed snapshot.
 	// This is the pre-browser contract: the page's `session.remember` read
 	// breaks here (plain tsc never sees .svelte scripts without svelte-check).
-	const snapFile = join(root, cfg.outDir, 'contract-snapshot.json')
+	// Stored at `<root>/swelte.contract.json` (committed, not gitignored) so
+	// drift detection survives a fresh clone. `.swelte/` stays derived.
+	const updateSnap = ctx.opts['update-snapshot'] === true || ctx.opts.u === true
+	const snapFile = join(root, 'swelte.contract.json')
 	const snap: Record<string, string> = {}
 	const walkSnap = (dir: string, rel: string) => {
 		let entries: string[] = []
@@ -172,7 +175,7 @@ export async function runTest(ctx: Ctx): Promise<void> {
 	} catch {
 		/* first run */
 	}
-	if (prev) {
+	if (prev && !updateSnap) {
 		const diffs: string[] = []
 		for (const k of new Set([...Object.keys(prev), ...Object.keys(snap)])) {
 			if (prev[k] !== snap[k])
@@ -183,7 +186,7 @@ export async function runTest(ctx: Ctx): Promise<void> {
 		}
 		if (diffs.length)
 			throw new Error(
-				`contract drift — V types changed since last snapshot:\n${diffs.join('\n')}\nReview the diff, then re-run with ... to accept: rm ${snapFile} && swelte test`
+				`contract drift — V types changed since last snapshot:\n${diffs.join('\n')}\nReview the diff, then re-run with --update-snapshot to accept`
 			)
 		ctx.log(`contract: snapshot clean (${Object.keys(snap).length} type files)`)
 	} else {
