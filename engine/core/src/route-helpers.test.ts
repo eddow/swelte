@@ -32,14 +32,16 @@ describe('route helpers', () => {
 		)
 	})
 
-	it('routeFor: dynamic [id] passes through; bare [...rest] leaf is malformed', () => {
+	it('routeFor: dynamic [id] passes through; [...rest] leaf is a valid catch-all', () => {
 		assert.equal(
 			routeFor('src/routes', '/tmp/rr/src/routes', R('users/[id].v')),
 			'/users/[id]'
 		)
-		assert.throws(
-			() => routeFor('src/routes', '/tmp/rr/src/routes', R('files/[...rest].v')),
-			/malformed route/
+		// Bare catch-all leaf is allowed: /files/[...rest] with empty rest
+		// on GET /files (fallback when no folder-root leaf claims /files).
+		assert.equal(
+			routeFor('src/routes', '/tmp/rr/src/routes', R('files/[...rest].v')),
+			'/files/[...rest]'
 		)
 	})
 
@@ -82,6 +84,27 @@ describe('route helpers', () => {
 		// the `+route` wrapper (folder router, no URL of its own).
 		assert.equal(svelteRouteFor('api/greet'), '/api/greet')
 		assert.equal(svelteRouteFor('admin/+route'), null)
+	})
+
+	it('same-folder double catch-all is a build error (one per dir)', async () => {
+		const { mkdtempSync, mkdirSync, writeFileSync } = await import('node:fs')
+		const { tmpdir } = await import('node:os')
+		const root = mkdtempSync(join(tmpdir(), 'swelte-catch-'))
+		mkdirSync(join(root, 'src', 'routes', 'files'), { recursive: true })
+		mkdirSync(join(root, 'src', 'lib'), { recursive: true })
+		writeFileSync(join(root, 'package.json'), '{"name":"t"}')
+		writeFileSync(join(root, 'svelte.config.js'), 'export default {}')
+		writeFileSync(join(root, 'src', 'routes', 'files', '[...a].v'), 'module a\n@[get] pub fn g() string { return "" }')
+		writeFileSync(join(root, 'src', 'routes', 'files', '[...b].v'), 'module b\n@[get] pub fn g() string { return "" }')
+		const { swelte } = await import('./vite.js')
+		const plug = swelte({}) as unknown as {
+			configResolved?: (c: { root: string }) => void
+			buildStart?: () => Promise<void>
+		}
+		plug.configResolved?.({ root })
+		await assert.rejects(async () => {
+			await plug.buildStart?.()
+		}, /same dynamic shape/)
 	})
 
 	it('folder-root double-claim throws in generate() (either extension)', async () => {

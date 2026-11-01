@@ -77,10 +77,13 @@ export async function runSsrDev(opts: SsrDevRunOptions = {}): Promise<void> {
  *  - `/nope` → 404 `text/html` `+error` render (not blank/JSON)
  *  - `Accept: application/json` on a page route → JSON, not HTML
  *  - sidecar envelope `{html, head}` non-empty for both routes
+ *  - load-throw `{"status":500}` props → `+error` render with status/message
  *  - `ls dist/ssr/` shows exactly one artifact (post-QJS-link)
+ *  - bare-machine prod: SWELTE_SSR=1, no SWELTE_SSR_URL, same HTML shape
  *  - 20× repeat-render against the prod binary: all 200, stable timing
- * Open (documented in specs/ssr.md, not asserted here): `!T` → 500 HTML +
- * server stays up, `/api/greet/` strip, dev HMR touch-and-swap proof.
+ * `qjsc` needs no half (C ring-cache, unvendored); `ssr-bun` streaming
+ * is excluded (tracked with the bun package). Dev HMR touch-and-swap
+ * is covered by hmr-proof.test.ts.
  * Core's `swelte build` smoke stays static/SPA + JSON — this is the
  * adapter's proof. Missing `+error.svelte` → SPA `index.html` 200 is
  * covered by the static fallback (back-compat, asserted in core smoke).
@@ -118,9 +121,17 @@ async function probeSsr(
  *  - `/` → 200 text/html with hydration marker + no ssr placeholders left
  *  - `/nope` → 404 text/html +error fallback (never blank/JSON)
  *  - JSON Accept on a page route → JSON, not HTML (bypass intact)
+ *  - `throwRoute` (when the backend serves it): `!T` throw → ≥400 +error
+ *    HTML with the marker, JSON bypass intact on the same route, then `/`
+ *    → 200 again (server up). Skipped when the backend 404s the route
+ *    (fixture absent — unit stubs have no throw route).
  *  The caller supplies a `base` and a `label` for error messages.
  *  Marker-only (no `<main>`): any project page passes, example or real. */
-async function assertSsrHtml(base: string, label: string): Promise<void> {
+async function assertSsrHtml(
+	base: string,
+	label: string,
+	throwRoute?: string
+): Promise<void> {
 	const html: RequestInit = { headers: { accept: 'text/html,application/xhtml+xml' } }
 	await probeSsr(
 		base,
@@ -137,10 +148,33 @@ async function assertSsrHtml(base: string, label: string): Promise<void> {
 	if (res.status !== 200 || body.includes('data-swelte-ssr="1"')) {
 		throw new Error(`${label} / JSON bypass broken: ${res.status} ${body.slice(0, 120)}`)
 	}
+	if (throwRoute) {
+		const tr = await fetch(base + throwRoute, html)
+		const tb = await tr.text()
+		if (tr.status === 404 && tb.includes('not found')) {
+			console.log(`ssr check: ${label} no ${throwRoute} fixture — skipping throw half`)
+		} else {
+			if (tr.status < 400 || !tb.includes('data-swelte-ssr="1"')) {
+				throw new Error(
+					`${label} ${throwRoute} -> ${tr.status} (want >=400 +error HTML): ${tb.slice(0, 160)}`
+				)
+			}
+			const tj = await fetch(base + throwRoute, { headers: { accept: 'application/json' } })
+			const tjb = await tj.text()
+			if (tjb.includes('data-swelte-ssr="1"')) {
+				throw new Error(`${label} ${throwRoute} JSON bypass broken: ${tjb.slice(0, 120)}`)
+			}
+			// Server up: `/` still 200 SSR after the throw.
+			await probeSsr(base, label, '/', html, 200, ['data-swelte-ssr="1"'])
+			console.log(`ssr check: ${label} ${throwRoute} -> ${tr.status} +error HTML, server up`)
+		}
+	}
 	console.log(`ssr check: ${label} html + bypass ok`)
 }
 
-/** Boot the built V binary (with embedded QJS) for the prod half of the gate. */
+/** Boot the built V binary (with embedded QJS) for the prod half of the gate.
+ * Bare-machine: SWELTE_SSR=1, SWELTE_DIST=dist, no SWELTE_SSR_URL —
+ * exactly what `swelte preview` serves (single artifact, no sidecar). */
 async function withProdBinary(
 	root: string,
 	binary: string,
@@ -200,7 +234,13 @@ async function withProdBinary(
 }
 
 export async function runSsrCheck(
-	opts: { root?: string; renderFile?: string; port?: number; outDir?: string } = {}
+	opts: {
+		root?: string
+		renderFile?: string
+		port?: number
+		outDir?: string
+		throwRoute?: string
+	} = {}
 ): Promise<void> {
 	const root = resolve(String(opts.root ?? process.cwd()))
 	const { loadConfig } = await import('@swelte/core/config')
@@ -234,6 +274,21 @@ export async function runSsrCheck(
 		if (typeof e2.html !== 'string' || e2.html.length === 0)
 			throw new Error(`sidecar /nope missing +error fallback: ${r2.body.slice(0, 120)}`)
 		console.log('ssr check: /nope +error fallback ok')
+		// 2c. Load-throw 500: `+error` render from `{"status":500}` props
+		// (what Hand sends when a `@[load]` throws — `swelte_page_props`
+		// returns '{}' and the renderer falls back to +error via its own
+		// path; prod Hand maps it to 500 HTML, server stays up).
+		// Rendered here against the sidecar envelope (no V binary needed):
+		// status + message must reach the +error component.
+		const r3 = await post({ route: '/+error', props: { status: 500, message: 'boom' } })
+		if (r3.status !== 200)
+			throw new Error(`sidecar /+error -> ${r3.status}: ${r3.body.slice(0, 120)}`)
+		const e3 = JSON.parse(r3.body) as { html?: string }
+		if (typeof e3.html !== 'string' || !e3.html.includes('data-swelte-ssr="1"'))
+			throw new Error(`sidecar /+error missing SSR marker: ${r3.body.slice(0, 120)}`)
+		if (!e3.html.includes('boom') && !e3.html.includes('500'))
+			throw new Error(`sidecar /+error missing status/message: ${r3.body.slice(0, 120)}`)
+		console.log('ssr check: /+error 500 props render ok')
 		// 2b. Sidecar through Hand: V backend with SWELTE_SSR_URL pointed at
 		// the sidecar must serve the same browser-shape HTML. Skipped when
 		// no generated backend is present (dev-only manifest check).
@@ -289,7 +344,7 @@ export async function runSsrCheck(
 								await new Promise((r) => setTimeout(r, 300))
 							}
 						}
-						await assertSsrHtml(`http://127.0.0.1:${freePort}`, 'sidecar-via-Hand')
+						await assertSsrHtml(`http://127.0.0.1:${freePort}`, 'sidecar-via-Hand', opts.throwRoute)
 					} finally {
 						try {
 							backend.kill('SIGTERM')
@@ -321,7 +376,7 @@ export async function runSsrCheck(
 			const binary = join(root, 'dist', 'server')
 			if (existsSyncB(binary)) {
 				await withProdBinary(root, binary, async (base) => {
-					await assertSsrHtml(base, 'prod-binary')
+					await assertSsrHtml(base, 'prod-binary', opts.throwRoute)
 				})
 			} else {
 				console.log('ssr check: no dist/server — skipping prod-binary half')

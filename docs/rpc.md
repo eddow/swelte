@@ -18,7 +18,12 @@ via directory-mode `v run .`. Structs are prefixed per file
   `+page.v` → `/`, `api/greet.v` → `/api/greet` (`index.v` is the legacy
   spelling of `+page.v`, same URL). Dynamic segments: `users/[id].v` →
   `/users/[id]`, `files/[...rest].v` → `/files/[...rest]` (roadmap §8;
-  params arrive in `Request.params`).
+  params arrive in `Request.params`). `[...rest]` may match empty
+  (`GET /files` → `rest=''` when no `files/+page.v` leaf claims `/files`;
+  when the leaf exists it wins — static beats dynamic). Catch-all is a
+  fallback: it matches only when no exact or narrower dynamic arm does.
+  `.svelte` and `.v` match independently (HTML vs JSON dispatch never
+  conflict — see `internal/v-imports.md` §2).
   Import from `#routes/...` (or relative `./x.v`).
 - `src/lib/**/*.v` — isomorphic lib. Never routed, never fetched.
   Same V compiles native + `v -b wasm`; TS import is always `async`.

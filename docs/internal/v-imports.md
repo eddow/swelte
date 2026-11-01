@@ -80,8 +80,20 @@ Rules (`routeFor`, once in `vite.ts`, reused by V dispatcher gen):
   partner outside `api/` is a build warning (future: error).
 * Dynamic segments (roadmap §8, built 2026-10-30): `[id]` matches one
   non-empty segment, `[...rest]` matches the remainder (must be the
-  last segment). Matched values flow into `SwelteRequest.params`;
-  static routes win over dynamic, fewer params win over catch-all.
+  last segment, may be empty). Matched values flow into
+  `SwelteRequest.params`; static routes win over dynamic, fewer params
+  win over catch-all; a catch-all matches only when no static or
+  narrower dynamic arm does (fallback, never a conflict).
+  `files/+page.v` (`/files`) and `files/[...rest].v`
+  (`/files/[...rest]`) coexist: `GET /files` hits the leaf, `GET
+  /files/a/b` hits the catch-all with `rest='a/b'`, `GET /files` with
+  no leaf hits the catch-all with `rest=''`.
+  Per-extension independence: matching runs separately on `.svelte`
+  routes (client router `matchSegs`) and `.v` routes (V dispatcher
+  `swelte_match_route`) — `files/+page.svelte` owns HTML `GET /files`
+  while `files/[...rest].v` owns JSON `GET /files` (`rest=''`) with no
+  conflict. Same-folder `[...a]` + `[...b]` is a build error (one
+  catch-all per dir).
   Build errors: malformed brackets, non-final catch-all, duplicate
   params, same normalized shape across files.
 

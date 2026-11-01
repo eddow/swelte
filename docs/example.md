@@ -10,6 +10,7 @@ artifact: `dist/server` + `dist/`).
 ```
 src/routes/+page.svelte + +page.v   / (get_greeting GET, save_name POST)
 src/routes/api/greet.v              /api/greet (get_greeting GET, login @[rpc] → Session)
+src/routes/boom/+page.svelte + +page.v   /boom (throw fixture: @[load] + @[get] both `return error('boom')` — SSR `!T` gate)
 src/routes/users/[id].v             /users/[id] ([id] → req.params['id], roadmap §8)
 src/routes/files/[...rest].v        /files/[...rest] (catch-all → req.params['rest'])
 src/routes/admin/+route.svelte + +route.v   /admin wrapper (nav + @[before] sess guard / @[after] passthrough)
@@ -46,6 +47,7 @@ node engine/core/dist/cli.js dev --port 5174 --backend 8131 --root examples/some
   404, `/files/a/b/c` → `"files:a/b/c"` (`req.params`; static beats
   dynamic, `[...rest]` last).
 - Uploads proven: multipart `POST /api/greet?upload` reads `req.files['file']` (fallible `!string`) → `"got:<name>"`; only filenames kept (bytes parsed then discarded, never persisted); JS stubs send `File`/`Blob` args as `FormData`; 5MB under the 10MB `SWELTE_BODY_LIMIT` cap → 200; over-cap body → 413.
+- Throw fixture proven (`/boom`, SSR `!T` gate): `@[load]` throws + `@[get]` throws → JSON `400 {"error":"boom"}` (bypass intact), HTML `400` +error render (marker, status), server stays up (`/` → 200 after); verified bare-machine (`SWELTE_SSR=1`, no sidecar) and sidecar-via-Hand via `runSsrCheck(throwRoute: '/boom')`.
 - No-JS proven: `Accept: text/html` POST → 303 + `Location` on success, rendered HTML error on failure; `Accept: application/json` keeps JSON (same handler, content-negotiated). Page has plain `<form method=post>` variants (save + upload).
 - Middleware chain proven: `admin/+route.v` `@[before]` rejects without
   `sess` cookie (400 `missing session`), injects `x-user` otherwise;
