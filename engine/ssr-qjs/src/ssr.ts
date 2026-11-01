@@ -16,12 +16,12 @@ import { dirname, join, resolve, sep } from 'node:path'
 import { posix } from 'node:path'
 
 /** posix-normalize a relative import against a `./`-relative module key. */
-function posixNormalize(fromKey: string, id: string): string {
+export function posixNormalize(fromKey: string, id: string): string {
 	return posix.normalize(posix.join(posix.dirname(fromKey), id))
 }
 
 /** Re-prefix a normalized key with `./` (`+error.svelte` → `./+error.svelte`). */
-function withDot(p: string): string {
+export function withDot(p: string): string {
 	return p.startsWith('./') || p.startsWith('/') ? p : './' + p
 }
 
@@ -45,7 +45,7 @@ export interface SsrManifest {
  * are preserved (every char maps 1:1, newlines kept). With `keepStrings`
  * the contents of string literals survive (newlines inside them kept) —
  * used by assertNoNodeExternals, which looks *for* a string (`'node:…'`). */
-function stripForScan(
+export function stripForScan(
 	src: string,
 	keepStrings = false
 ): { code: string; lineOf: (idx: number) => number } {
@@ -267,7 +267,7 @@ export async function compileSsrComponent(absFile: string, relFile: string): Pro
 /** Rewrite SDK stub imports to render-time throw-stubs.
  * `import { a, b } from '#routes/x.v'` → `const a = () => { throw ... }; ...`.
  * Type-only imports (`import type`) vanish already (erased by compile). */
-function stubSdkImports(code: string, relFile: string): string {
+export function stubSdkImports(code: string, relFile: string): string {
 	const out: string[] = []
 	let last = 0
 	const re = /import\s*\{([^}]*)\}\s*from\s*['"](#routes\/[^'"]*|#lib\/[^'"]*|@swelte\/core)['"]/g

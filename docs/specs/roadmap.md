@@ -18,76 +18,84 @@ through `node:os tmpdir()` + `fs.mkdtempSync`, never the real `examples/`.
 - `core`: `parseArgs`/`parseBoolFlag` (`commands/types.test.ts`), `parseVFile`
   + `parseStructs` against real `greet.v` shapes (`parse.test.ts`),
   `isBackendMod` (`gen/paths.test.ts`). 11/11 passing.
+- Roadmap items 1–10, 12–13, 15 (pure parts) — **103/103 passing**
+  (`npm test` in `engine/core`, 2026-11-01). New files:
+  `src/types-matrix.test.ts` (item 1: every `docs/types.md` row — with two
+  documented divergences: `map[…]` projects `unknown` today, `??T` nests),
+  `src/attr-validation.test.ts` + `src/generate-errors.test.ts` (item 2),
+  `src/route-helpers.test.ts` (item 3, incl. folder-root double-claim via
+  tmp `generate()`), `src/codegen-shape.test.ts` (item 4: dispatcher entry
+  points + fetch/SSE/qualifier shapes + golden byte-identical rerun),
+  `src/sdk-errors.test.ts` (item 5), `src/commands/cli-parsing.test.ts`
+  (item 6), `src/gen/config-norm.test.ts` (item 7),
+  `src/gen/diagnostics-parity.test.ts` (item 8: orphan / folder-clash /
+  unknown-type / ignored-`#lib`-attr / backend-TS; SSE shape stays out),
+  `src/toolchain-hygiene.test.ts` (item 9),
+  `src/commands/dev-ports.test.ts` (item 10),
+  `src/commands/init-scaffold.test.ts` (item 13: empty vs sample,
+  `__NAME__`, non-empty guard, `--empty`/`--sample`/`--template` bypass),
+  `src/commands/contract-snapshot.test.ts` (item 12: write → clean →
+  drift-names-file → `--update-snapshot`, tmp-root mirror of `runTest`
+  steps 3–4 without the V binary / `tsc`),
+  `src/ssr-manifest.test.ts` (item 15: wrapper order, `+error` global-only,
+  headless-API exclusion, dynamic verbatim).
+  Testability exports (no logic change): core `tsTypeFor`,
+  `routeForPublic`, `modulePath`, `vPrefix`, `vFileSafe`
+  (closure `routeFor` kept; `jsFetchFor`/`jsWasmFor` covered via item 11-style
+  golden stubs); ssr-qjs `stripForScan`, `posixNormalize`, `withDot`,
+  `stubSdkImports`, `bridgeSrc`.
+  Not covered (stated gaps): `@[sse]`+verb stack and `@[sets_cookie]`-on-
+  `+route`-wrapper are dead code at `parseVFile` (stacking fans out /
+  never attaches) — tests assert the shapes the parser produces, not the
+  roadmap phrasing; `routeForPublic` wraps the closure copy (incl. its
+  `[...rest]`-as-leaf quirk) rather than a hoisted single source.
 
 ### core — pure unit tests (no V binary, no network, no fs outside tmp)
 
-1. **V → TS projection matrix** (`tsTypeFor` via `parseVFile`/`parseStructs`):
-   every row in `docs/types.md` — `int`/`i64`/`u32` → `number`, `bool`,
-   `time.Time` → `number`, `[]u8` → `string`, `[]T` → `T[]`, `map[string]T`,
-   `?T` → `T | null`, `!T` fallible flag, `json.Any` → `unknown`,
-   named struct → same-name interface, `json.Any` → `unknown`.
-   (Needs `export` on the pure helpers first: `tsTypeFor`, `routeFor`,
-   `modulePath`, `vPrefix`, `vFileSafe`, `jsFetchFor`, `jsWasmFor`, plus the
-   same for ssr-qjs `stripForScan`/`posixNormalize`/`withDot` — no logic
-   change, just testability. `emitRouteFile` is nested in `generate()`;
-   either hoist it or cover it through item 11's golden project.)
-2. **Attr fan-out + validation errors**: stacked `@[rpc; sse]` → two fns;
-   two `@[load]` per file throws; `@[load]` stacked with verb throws;
-   `@[sse]` stacked with verb throws; two `@[get]` defaults throws;
-   duplicate `@[get('q')]` throws; `@[before]` wrong signature throws;
-   `@[after]` wrong return throws; `@[sets_cookie]` on middleware throws.
-3. **Route helpers**: `routeFor` (leaf `/x`, `/`, dynamic `[id]`/`[...rest]`,
-   `api/` prefix, `+route` wrapper → null); `modulePath`, `vPrefix`,
-   `vFileSafe` (no `/` collisions); `svelteModKind`/`svelteRouteFor`
-   (page/wrapper/error/plain/null); folder-root double-claim
-   (`foo.v` vs `foo/+page.v`, either extension, wrapper exempt).
-4. **Codegen shape snapshots**: `jsFetchFor` (dyn params, SSE generator,
-   qualifier plumbing) and `jsWasmFor` compared as golden strings for one
-   route file + one lib file; `emitRouteFile` dispatcher contains
-   `swelte_route`/`swelte_sse_*`/`swelte_load_for` entry points.
-5. **SDK error contract** (`sdk.ts`, fetch mocked): `SwelteRpcError` message
-   includes fn/base/status/available/hint; 404 JSON body parsed vs raw text
-   fallback; `loadPage` maps `SwelteRpcError` → `{ error: { status, message } }`,
-   non-RPC throw → 500; `isPageError`/`isPageData` narrow correctly.
-   WASM path: `__swelteWasmCall` fallback map hit without fetch; unknown fn
-   without fallback → status-0 shape with `available`.
-6. **CLI parsing** (`commands/types.ts`, `cli.ts` dispatch): unknown command
-   → exit 1 + help; `--port=abc` → number error; short flags; `check --format
-   bogus` throws; `helpText`/`commandHelp` list all six commands.
-7. **Config normalization** (`gen/config.ts` with tmp roots): missing file →
-   defaults; `swelte` key read (non-enumerable `defineConfig`); legacy
-   top-level `swelte.config.ts`; broken config warns (capture `console.warn`)
-   and falls back; `renderClientEntry` prepends hook only when
-   `src/client.ts` exists.
-8. **Diagnostics parity** (`gen/diagnostics.ts` vs `generate()` on tmp
-   fixtures): orphan route, duplicate qualifier, unknown V type, ignored
-   `#lib` attr, `backend/` TS file — each yields the documented `kind`;
-   assert SSE *shape* stays out (documented subset, build-error only).
-9. **Toolchain PATH hygiene** (`toolchain.ts`, pure parts): `sanitizedPath`
-   strips conda/miniconda/mamba (case-insensitive), drops empties, falls back
-   to system dirs on conda-only PATH; `toolchainEnv` preserves extra vars.
-10. **Dev port helpers** (`commands/dev.ts`, no real binds except `portFree`
-    on port 0): `takePort` fallbacks/NaN/negative; `portFree(0)` true;
-    `projectKillPattern` returns basename; `onSpawnError` logs readable hint.
+> Status 2026-11-01: items 1–10 DONE (103/103 green, see Done above).
+> What remains in each item is the delta in parentheses.
+
+1. **V → TS projection matrix** — DONE. (Divergences documented in tests:
+   `map[string]T` → `unknown`, `??T` nests.)
+2. **Attr fan-out + validation errors** — DONE except the two dead-code
+   phrasings (`@[sse]`+verb stack, `@[sets_cookie]`-on-wrapper never reach
+   `generate()` — `parseVFile` fans/ignores first). Covered instead: middleware
+   in leaf files, `@[after]` param shape, all load/qualifier/default rules.
+3. **Route helpers** — DONE (`routeForPublic` wraps the closure copy).
+   Remaining: hoist nested `routeFor`/`jsFetchFor`/`jsWasmFor`/`emitRouteFile`
+   to a single source if the `[...rest]`-as-leaf quirk ever matters.
+4. **Codegen shape snapshots** — DONE via golden `generate()` (dispatcher
+   entry points, fetch/SSE/qualifier, WASM stub, byte-identical rerun).
+   Remaining: literal golden-string comparison of `jsFetchFor`/`jsWasmFor`.
+5. **SDK error contract** — DONE (WASM unknown-fn asserts status-0 shape;
+   roadmap's "with `available`" does not hold — body carries the fetch error).
+6. **CLI parsing** — DONE.
+7. **Config normalization** — DONE.
+8. **Diagnostics parity** — DONE (duplicate-qualifier is a generate-time
+   build error, not a diagnostic `kind`; folder-clash covered instead).
+9. **Toolchain PATH hygiene** — DONE.
+10. **Dev port helpers** — DONE.
 
 ### core — integration tests (needs V binary / network loopback)
 
-11. **Codegen golden project**: run `generate()` on a tmp scaffold (empty +
-    sample overlay), snapshot `.swelte/` file list + one dispatcher +
-    `routes.js` + `ssr-manifest.json`; rerun is byte-identical (order-stable).
-12. **Contract snapshot flow**: `swelte.contract.json` write → clean rerun →
-    drift (edit one `.v` return) → error names the file → `--update-snapshot`
-    rewrites. Uses tmp root, not `examples/`.
-13. **`swelte init` scaffolds**: empty (no `src/routes/api`), sample
-    (greet route present), `__NAME__` replaced, non-empty target throws;
-    interactive prompt bypassed via `--empty`/`--sample` in tests.
-14. **Build smoke matrix** (mocked binary or `node -e` stub server):
+> Status 2026-11-01: items 11–13, 15 DONE at the pure/tmp level (no V
+> binary). Item 14 untouched; the "needs V binary" halves below remain.
+
+11. **Codegen golden project** — DONE (pure/tmp half: `codegen-shape.test.ts`
+    runs `generate()` on a tmp scaffold, asserts dispatcher + `ssr-manifest`,
+    rerun byte-identical). Remaining: sample-overlay variant + `routes.js`
+    snapshot.
+12. **Contract snapshot flow** — DONE (tmp-root mirror without the V binary /
+    `tsc`). Remaining: run through real `runTest` with the toolchain.
+13. **`swelte init` scaffolds** — DONE (empty/sample/`__NAME__`/non-empty guard,
+    prompt bypassed). Remaining: nothing open.
+14. **Build smoke matrix** (mocked binary or `node -e` stub server) — OPEN:
     page 200 always; `/api/greet` probed only when the route file exists
     (empty scaffold skips API); JSON accept path logged. Real-binary half
     stays in `examples/something` CI, not unit tests.
-15. **SSR-manifest consumers**: `collectSvelteManifest` on tmp routes —
-    wrapper chain order, `+error` global-only rule (nested throws),
-    headless API route excluded from entries but present in dispatch.
+15. **SSR-manifest consumers** — DONE (`collectSvelteManifest` on tmp routes:
+    wrapper entries, `+error` global-only, headless-API exclusion, dynamic
+    verbatim). Remaining: dispatch-side presence assertion (covered in 11).
 
 Out of scope for unit tests (covered by `swelte test` / example CI):
 `v test` execution, real `vite build`, `v -o` link, WASM compile
@@ -115,6 +123,11 @@ Harness: same `node:test` + `dist-test/` setup as core (needs its own
 `tsconfig.test.json` + `npm test` script — copy the pattern).
 
 ### ssr-qjs — pure unit tests (no QJS link, no rollup, no network)
+
+> Status 2026-11-01: harness NOT YET set up; testability exports ARE in
+> (`stripForScan`, `posixNormalize`, `withDot`, `stubSdkImports` exported
+> from `ssr.ts`; `bridgeSrc` exported from `qjs.ts` — no logic change).
+> Items 16–22 below are fully OPEN, ordered by value.
 
 16. **Scan + strip** (`stripForScan`): `//comment fetch(` not flagged,
     `"fetch("` string not flagged, backtick template preserved, line numbers

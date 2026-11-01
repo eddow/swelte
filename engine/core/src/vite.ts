@@ -335,11 +335,74 @@ export function collectSvelteManifest(
 	return { entries, hasError }
 }
 
-function modulePath(root: string, file: string): string {
+export function modulePath(root: string, file: string): string {
 	return relative(root, file).replace(/\.v$/, '').split(sep).join('/')
 }
 
-function tsTypeFor(vType: string): string {
+/** V dispatch prefix for a route mod (`admin/+page` → `swelte_admin__page_`). */
+export function vPrefix(mod: string): string {
+	return 'swelte_' + mod.replace(/[^A-Za-z0-9_]/g, '_') + '_'
+}
+
+/** Filesystem-safe generated name for a route mod (`+page` → `_page`). */
+export function vFileSafe(mod: string): string {
+	return mod.replace(/[^A-Za-z0-9_]/g, '_')
+}
+
+/** Route URL for a route file (`src/routes/<mod>.v` → `/…`), `+route` → null.
+ * Pure + exported for tests; `generate()` uses the closure twin (same code,
+ * needs `routesDir` for its error prefix). */
+export function routeForPublic(routesDir: string, routesAbs: string, file: string): string | null {
+	const mod = modulePath(routesAbs, file)
+	if (mod === '+route' || mod.endsWith('/+route')) {
+		if (mod.includes('['))
+			throw new Error(
+				`[swelte] ${routesDir}/${relPosixInner(routesAbs, file)}: dynamic wrapper dirs are not supported (no brackets in +route.v paths)`
+			)
+		return null
+	}
+	const leaf =
+		mod === 'index' || mod.endsWith('/index') || mod === '+page' || mod.endsWith('/+page')
+	if (leaf) {
+		const dir = mod.includes('/') ? mod.slice(0, mod.lastIndexOf('/')) : ''
+		if (dir !== '') validateDynamicSegsInner(`${routesDir}/${relPosixInner(routesAbs, file)}`, dir.split('/'))
+		return dir === '' || dir === 'api' ? '/' : `/${dir}`
+	}
+	validateDynamicSegsInner(`${routesDir}/${relPosixInner(routesAbs, file)}`, mod.split('/'))
+	return `/${mod}`
+}
+
+function validateDynamicSegsInner(file: string, segs: string[]): void {
+	const seen = new Set<string>()
+	for (let i = 0; i < segs.length; i++) {
+		const s = segs[i]
+		if (!s.includes('[') && !s.includes(']')) continue
+		const single = /^\[([A-Za-z_][A-Za-z0-9_]*)\]$/.exec(s)
+		const rest = /^\[\.\.\.([A-Za-z_][A-Za-z0-9_]*)\]$/.exec(s)
+		if (single) {
+			if (seen.has(single[1]))
+				throw new Error(`[swelte] ${file}: duplicate route param [${single[1]}]`)
+			seen.add(single[1])
+			continue
+		}
+		if (rest) {
+			if (i !== segs.length - 1)
+				throw new Error(`[swelte] ${file}: [...${rest[1]}] catch-all must be the last segment`)
+			if (seen.has(rest[1]))
+				throw new Error(`[swelte] ${file}: duplicate route param [...${rest[1]}]`)
+			seen.add(rest[1])
+			continue
+		}
+		throw new Error(`[swelte] ${file}: bad dynamic segment '${s}' (want [id] or [...rest])`)
+	}
+}
+
+function relPosixInner(abs: string, f: string): string {
+	return relative(abs, f).split(sep).join('/')
+}
+
+/** V → TS projection (single place both `parseVFile` and `parseStructs` use). */
+export function tsTypeFor(vType: string): string {
 	const t = vType.trim()
 	if (t === 'SwelteRequest') return 'SwelteRequest'
 	if (/^string$/.test(t)) return 'string'
@@ -861,19 +924,6 @@ pub fn swelte_alloc(n int) &u8 {
 
 	function vJsonStr(s: string): string {
 		return JSON.stringify(s)
-	}
-
-	function vPrefix(mod: string): string {
-		return 'swelte_' + mod.replace(/[^A-Za-z0-9_]/g, '_') + '_'
-	}
-
-	/** Filesystem-safe generated name for a route mod. IDENTICAL to
-	 * the historical vSafe (flat `[^A-Za-z0-9_]` → `_`): `+page` →
-	 * `_page`, `admin/+page` → `admin__page`. Same leaf names as
-	 * before, so no new stems appear — byte-identical outputs when
-	 * no wrappers are present. */
-	function vFileSafe(mod: string): string {
-		return mod.replace(/[^A-Za-z0-9_]/g, '_')
 	}
 
 	function vType(base: string, mod: string): string {
