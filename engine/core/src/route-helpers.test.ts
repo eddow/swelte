@@ -10,6 +10,10 @@ import {
 	svelteRouteFor,
 	stripRouteGroups,
 	routeParams,
+	routeParamTs,
+	dynSegName,
+	dynSegMatcher,
+	jsFetchFor,
 } from './vite.js'
 
 const R = (f: string) => join('/tmp/rr', 'src', 'routes', f)
@@ -118,6 +122,30 @@ describe('route helpers', () => {
 		)
 	})
 
+	it('§2.10 param matchers [id=integer]: validate, names, ts, url guard', () => {
+		assert.equal(
+			routeFor('src/routes', '/tmp/rr/src/routes', R('users/[id=integer].v')),
+			'/users/[id=integer]'
+		)
+		assert.deepEqual(routeParams('/users/[id=integer]'), ['id'])
+		assert.equal(dynSegName('[id=integer]'), 'id')
+		assert.equal(dynSegMatcher('[id=integer]'), 'integer')
+		assert.equal(dynSegMatcher('[id]'), null)
+		assert.equal(routeParamTs('/users/[id=integer]', 'id'), 'number')
+		assert.equal(routeParamTs('/users/[id]', 'id'), 'string')
+		assert.throws(
+			() => routeFor('src/routes', '/tmp/rr/src/routes', R('users/[id=nope].v')),
+			/unknown matcher 'nope'/
+		)
+		assert.throws(
+			() => routeFor('src/routes', '/tmp/rr/src/routes', R('users/[id=integer]/[id].v')),
+			/duplicate route param/
+		)
+		const stub = jsFetchFor('/users/[id=integer]', [], 'ignore')
+		assert.ok(stub.includes('__swelteMatchers'), stub.slice(0, 500))
+		assert.ok(stub.includes('does not match'), stub.slice(0, 2000))
+	})
+
 	it('roadmap §1.4 RouteId + Params types', async () => {
 		const { mkdtempSync, mkdirSync, writeFileSync, readFileSync } = await import('node:fs')
 		const { tmpdir } = await import('node:os')
@@ -185,6 +213,34 @@ describe('route helpers', () => {
 		await assert.rejects(async () => {
 			await plug.buildStart?.()
 		}, /same dynamic shape/)
+	})
+
+	it('§2.14 global middleware = root +route.v (no new file)', async () => {
+		const { mkdtempSync, mkdirSync, writeFileSync, readFileSync } = await import('node:fs')
+		const { tmpdir } = await import('node:os')
+		const root = mkdtempSync(join(tmpdir(), 'swelte-rootwrap-'))
+		mkdirSync(join(root, 'src', 'routes', 'admin'), { recursive: true })
+		mkdirSync(join(root, 'src', 'lib'), { recursive: true })
+		writeFileSync(join(root, 'package.json'), '{"name":"t"}')
+		writeFileSync(join(root, 'svelte.config.js'), 'export default {}')
+		writeFileSync(
+			join(root, 'src', 'routes', '+route.v'),
+			'module r\n\n@[before]\npub fn guard(req SwelteRequest) !SwelteRequest {\n\treturn req\n}\n'
+		)
+		writeFileSync(
+			join(root, 'src', 'routes', 'admin', '+page.v'),
+			'module ap\n\n@[get]\npub fn g(req SwelteRequest) string {\n\treturn \"x\"\n}\n'
+		)
+		const { swelte } = await import('./vite.js')
+		const plug = swelte({}) as unknown as {
+			configResolved?: (c: { root: string }) => void
+			buildStart?: () => Promise<void>
+		}
+		plug.configResolved?.({ root })
+		await plug.buildStart?.()
+		// Root wrapper chains into the nested leaf (global before-head).
+		const disp = readFileSync(join(root, '.swelte', 'routes', 'admin__page.v'), 'utf8')
+		assert.ok(disp.includes('swelte__route_guard(swelte_req)'), disp.slice(0, 3000))
 	})
 
 	it('folder-root double-claim throws in generate() (either extension)', async () => {

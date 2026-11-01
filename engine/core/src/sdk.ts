@@ -418,6 +418,69 @@ export function isPageData<T>(r: SwelteLoadResult<T>): r is { data: T } {
 	return (r as { error?: unknown }).error === undefined
 }
 
+// §2.11 `fail`-lite: form/action failure convention. V side throws `!T`
+// with a `{ ok: false, fieldErrors: {...} }` JSON body (status 422 by
+// convention; any 4xx works). Client side narrows it without parsing:
+//
+//   try { await save_name({ name }) }
+//   catch (e) { if (isFail(e)) showInline(e.body.fieldErrors) }
+//
+// No `actions{}` namespace — verbs + `?q` qualifiers already route;
+// this is only the typed-failure shape on top.
+export interface SwelteFailBody {
+	ok: false
+	fieldErrors: Record<string, string>
+	[key: string]: unknown
+}
+
+/** True when `e` is a `SwelteRpcError` carrying a fail-lite body. When
+ * `status` is given it must also match (default: any 4xx). */
+export function isFail(e: unknown, status?: number): e is SwelteRpcError & { body: SwelteFailBody } {
+	if (!(e instanceof SwelteRpcError)) return false
+	const b = e.body as unknown as Record<string, unknown> | null
+	if (b === null || typeof b !== 'object') return false
+	if ((b as { ok?: unknown }).ok !== false) return false
+	const fe = (b as { fieldErrors?: unknown }).fieldErrors
+	if (fe === null || typeof fe !== 'object' || Array.isArray(fe)) return false
+	if (status !== undefined) return e.status === status
+	return e.status >= 400 && e.status < 500
+}
+
+// §2.12 `#app/forms`-lite: `deserialize` only. Pure TS port of SvelteKit's
+// `deserialize` — parses the action-result envelope from a `fetch` response
+// (`{"type":"success"|"failure"|"error"|"redirect","data"|"error"|"location","status"}`).
+// No client router needed: `use:enhance` calls this on the fetch response.
+export type SwelteActionResult =
+	| { type: 'success'; status: number; data?: unknown }
+	| { type: 'failure'; status: number; data?: unknown }
+	| { type: 'error'; status: number; error: unknown }
+	| { type: 'redirect'; status: number; location: string }
+
+/** Parse a SvelteKit-shaped action response. Throws `SwelteRpcError`-style
+ * `Error` on non-JSON or unknown envelope (same surface as `__swelteFetch`). */
+export async function deserialize(res: Response): Promise<SwelteActionResult> {
+	const text = await res.text()
+	let json: Record<string, unknown>
+	try {
+		json = JSON.parse(text) as Record<string, unknown>
+	} catch {
+		throw new Error(`swelte: deserialize failed — not JSON (HTTP ${res.status}): ${text.slice(0, 120)}`)
+	}
+	const type = json['type']
+	if (type === 'success' || type === 'failure') {
+		return { type, status: typeof json['status'] === 'number' ? json['status'] : res.status, data: json['data'] }
+	}
+	if (type === 'error') {
+		return { type, status: typeof json['status'] === 'number' ? json['status'] : res.status, error: json['error'] }
+	}
+	if (type === 'redirect') {
+		const location = json['location']
+		if (typeof location !== 'string') throw new Error('swelte: deserialize failed — redirect without location')
+		return { type, status: typeof json['status'] === 'number' ? json['status'] : res.status, location }
+	}
+	throw new Error(`swelte: deserialize failed — unknown type ${JSON.stringify(type)}`)
+}
+
 /** True when a `#lib` rel path is backend-only: a `backend` path segment
  * at any depth, or a V-native `_backend.v` suffix. Kept name
  * `isLibServerPath` (public API) — semantics are backend-only.

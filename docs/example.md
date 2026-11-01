@@ -11,7 +11,7 @@ artifact: `dist/server` + `dist/`).
 src/routes/+page.svelte + +page.v   / (get_greeting GET, save_name POST)
 src/routes/api/greet.v              /api/greet (get_greeting GET, login @[rpc] → Session)
 src/routes/boom/+page.svelte + +page.v   /boom (throw fixture: @[load] + @[get] both `return error('boom')` — SSR `!T` gate)
-src/routes/users/[id].v             /users/[id] ([id] → req.params['id], roadmap §8)
+src/routes/users/[id].v             /users/[id] ([id] → req.params['id'])
 src/routes/files/[...rest].v        /files/[...rest] (catch-all → req.params['rest'])
 src/routes/admin/+route.svelte + +route.v   /admin wrapper (nav + @[before] sess guard / @[after] passthrough)
 src/routes/admin/+page.svelte + +page.v     /admin leaf (admin_whoami GET, reads injected x-user)

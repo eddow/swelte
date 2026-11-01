@@ -10,9 +10,13 @@ Documentation for users of Swelte (all describe built behavior):
 - `rpc.md` — `.v` imports, attributes, transport (implemented)
 - `types.md` — V → TS projection, codegen (implemented)
 - `errors.md` — error envelope, `SwelteRpcError`, SPA-first rule (implemented)
+- `config.md` — `svelte.config.js` (`swelte` key) + `SWELTE_*` env knobs, routing knobs, per-route types, no-JS (implemented)
+- `forms.md` — verbs + `?q`, no-JS 303, `fail`-lite (`isFail`), `deserialize` (implemented)
+- `cli.md` — `dev`/`build`/`preview`/`test`/`check`/`init`, contract snapshot (implemented)
 - `ssr.md` — SSR, built (ownership, request path, `@[load]` cascade, `+error` contract, measured budgets, gate)
 - `example.md` — the `something` example (implemented)
 - `versus.md` — Swelte vs. other full-stack paradigms (positioning)
+- `coming-from-sveltekit.md` — SvelteKit → Swelte migration map (built behavior + planned gaps)
 
 ## Internal
 
@@ -25,6 +29,7 @@ Internal docs to modify Swelte (design rationale, decisions, ephemeral notes):
 
 Specifications of what has to be done (plans, open work only):
 
-- `specs/roadmap.md` — forward work only (open items)
-- `specs/ssr.md` — SSR open work (bytecode opt, `ssr-bun`, CI)
+- `specs/sveltekit.md` — SvelteKit equivalence (open work only; built behavior moved to docs root)
+- `specs/moar.md` — server lifecycle: startup, cron, queue, reroute (open)
+- `specs/ssr.md` — SSR open work (dev sidecar, `ssr-bun`, CI)
 - `specs/4agents.md` — agent tooling proposal (MCP server, skill packs)

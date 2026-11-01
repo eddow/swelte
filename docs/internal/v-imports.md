@@ -6,7 +6,7 @@ all 2026-10-29 decisions including the verb-vs-rpc handler split
 one args-struct).
 `../rpc.md`+`../types.md`+`../errors.md` describe the built behavior;
 this file is the design rationale and the undecided remainder.
-Forward work lives in `../specs/roadmap.md` only.
+Forward work lives in `../specs/sveltekit.md` + `../specs/moar.md` only.
 
 ## 1. Goal
 
@@ -25,7 +25,7 @@ a named export. **Directory decides runtime; extension stays `.v`:**
 * `#routes/**/*.v` = **server call** (fetch to the V backend).
   File path is the route, fn name goes in the body (`[@rpc]`).
   `+route.v` files are wrappers, not endpoints: their `@[before]` /
-  `@[after]` middleware runs for the subtree (roadmap §7); middleware
+  `@[after]` middleware runs for the subtree; middleware
   fns export nothing to TS, but the wrapper's `pub struct`s ARE
   exported (wrapper is +layout-shaped: shared types flow to
   `+page.svelte`).
@@ -46,7 +46,7 @@ src/routes/+page.svelte + src/routes/+page.v      route `/`
 src/routes/about.svelte + src/routes/about.v      route `/about`
 src/routes/api/greet.v                            route `/api/greet`
 src/routes/api/admin/users.v                      route `/api/admin/users`
-src/routes/admin/+route.svelte + +route.v         wraps `/admin/*` + `/admin`'s `+page` (nav + @[before]/@[after]; roadmap §7)
+src/routes/admin/+route.svelte + +route.v         wraps `/admin/*` + `/admin`'s `+page` (nav + @[before]/@[after])
 src/routes/admin/+page.svelte + +page.v           route `/admin` (folder-root leaf, ex-`index.*`)
 src/lib/crypto/hash.v                             isomorphic, no route
 src/lib/format.v                                  isomorphic, no route
@@ -78,7 +78,7 @@ Rules (`routeFor`, once in `vite.ts`, reused by V dispatcher gen):
 * Every routed `.v` must have either a `.svelte` partner (page) or
   live under `api/` (headless JSON). Orphan `routes/*.v` without a
   partner outside `api/` is a build warning (future: error).
-* Dynamic segments (roadmap §8, built 2026-10-30): `[id]` matches one
+* Dynamic segments (built 2026-10-30): `[id]` matches one
   non-empty segment, `[...rest]` matches the remainder (must be the
   last segment, may be empty). Matched values flow into
   `SwelteRequest.params`; static routes win over dynamic, fewer params
@@ -167,7 +167,7 @@ always JSON, even for `@[after]` (a non-2xx `code` returned by
 * Signatures differ by kind. `@[rpc]` keeps the single-args-struct rule
   (`pub fn login(args LoginArgs)`). Verb handlers take the framework
   `Request` (query, form fields, headers, cookies, route params —
-  exact shape with the dispatcher, roadmap item 1):
+  exact shape with the dispatcher):
   ```v
   @[post('delete')]
   pub fn delete_account(req Request) ! { ... }
@@ -300,7 +300,7 @@ static + `main()`) via directory-mode `v run .` (`/` ->
 else 404; unknown fn -> 404 + available; missing carrier -> 400;
 bad JSON -> 400; `!T` -> 400; mismatch -> 405).
 Envelope: `../errors.md`. Dev proxy: `../errors.md` SPA-first rule.
-See roadmap item 1 (built) and item 23 (static-vlib deferral).
+See `../rpc.md` (built). Static-vlib deferral: `SwelteRequest` stays emitted into `routes/server_gen.v` until the route shape freezes.
 
 ## 6. Decisions (2026-10-29, all built or recorded)
 
@@ -320,7 +320,7 @@ See roadmap item 1 (built) and item 23 (static-vlib deferral).
   qualifier; route params open) and return a response; `@[rpc]` fns
   take one args-struct and return `T`/`!T`. TS stubs stay uniform
   (`fn(args)` → `Promise`); the file path already said which kind.
-* V runtime placement (deferred — roadmap item 23): `SwelteRequest` +
+* V runtime placement (deferred — static vlib): `SwelteRequest` +
   `swelte_err_*` stay emitted into `routes/server_gen.v` until the
   shape freezes (route params §8 open). Then: static
   `engine/core/vlib/request.v` (`module routes`), copied verbatim by

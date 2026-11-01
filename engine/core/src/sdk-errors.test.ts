@@ -5,6 +5,8 @@ import {
 	loadPage,
 	isPageError,
 	isPageData,
+	isFail,
+	deserialize,
 	__swelteFetch,
 	__swelteWasmCall,
 	__registerLibFallback,
@@ -91,6 +93,39 @@ describe('SDK error contract', () => {
 					Array.isArray(err.body?.available)
 				)
 			}
+		)
+	})
+
+	it('§2.11 isFail narrows fail-lite bodies, optional status', () => {
+		const fail = new SwelteRpcError('/b', 'save', 422, { error: 'bad', ok: false, fieldErrors: { name: 'required' } }, '')
+		assert.ok(isFail(fail))
+		assert.ok(isFail(fail, 422))
+		assert.ok(!isFail(fail, 400))
+		const plain = new SwelteRpcError('/b', 'save', 422, { error: 'bad' }, '')
+		assert.ok(!isFail(plain))
+		assert.ok(!isFail(new Error('x')))
+		const wrongStatus = new SwelteRpcError('/b', 'save', 200, { error: 'x', ok: false, fieldErrors: {} }, '')
+		assert.ok(!isFail(wrongStatus))
+	})
+
+	it('§2.12 deserialize parses action envelopes', async () => {
+		const r1 = await deserialize(
+			new Response(JSON.stringify({ type: 'success', status: 200, data: { id: 1 } }), { status: 200 })
+		)
+		assert.equal(r1.type, 'success')
+		const r2 = await deserialize(
+			new Response(JSON.stringify({ type: 'failure', status: 422, data: { ok: false } }), { status: 200 })
+		)
+		assert.equal(r2.type, 'failure')
+		if (r2.type === 'failure') assert.equal(r2.status, 422)
+		const r3 = await deserialize(
+			new Response(JSON.stringify({ type: 'redirect', status: 303, location: '/done' }), { status: 200 })
+		)
+		assert.equal(r3.type, 'redirect')
+		await assert.rejects(() => deserialize(new Response('not json', { status: 200 })), /not JSON/)
+		await assert.rejects(
+			() => deserialize(new Response(JSON.stringify({ type: 'weird' }), { status: 200 })),
+			/unknown type/
 		)
 	})
 })

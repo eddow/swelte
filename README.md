@@ -46,9 +46,11 @@ toolchain — no manual install). `swelte build` typechecks, compiles
 - `docs/rpc.md` — `.v` imports, attributes, transport (implemented)
 - `docs/types.md` — V → TS projection, codegen (implemented)
 - `docs/errors.md` — error envelope, `SwelteRpcError`, SPA-first rule (implemented)
+- `docs/config.md` — `svelte.config.js` (`swelte` key) + `SWELTE_*` env knobs, routing, per-route types (implemented)
+- `docs/forms.md` — verbs + `?q`, no-JS 303, `fail`-lite, `deserialize` (implemented)
+- `docs/cli.md` — `dev`/`build`/`preview`/`test`/`check`/`init` (implemented)
 - `docs/example.md` — the `something` example (implemented)
 - `docs/versus.md` — Swelte vs. other full-stack paradigms (positioning)
-- `docs/internal/` — design rationale: `v-imports.md` + `load.md`
-  (ephemeral; contract lives in `rpc.md`)
-- `docs/specs/` — open work: `ssr.md` (bytecode opt, `ssr-bun`, CI),
-  plus `roadmap.md` / `4agents.md`
+- `docs/coming-from-sveltekit.md` — SvelteKit → Swelte migration map
+- `docs/internal/` — design rationale.
+- `docs/specs/` — open work.

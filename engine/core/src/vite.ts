@@ -418,12 +418,16 @@ export function routeFor(routesDir: string, routesAbs: string, file: string): st
 
 export function validateDynamicSegs(file: string, segs: string[]): void {
 	const seen = new Set<string>()
+	// Built-in param matchers: `[id=integer]` constrains the segment.
+	// v1: `integer` only (digits). Unknown matcher name = build error.
+	const KNOWN_MATCHERS = new Set(['integer'])
 	for (let i = 0; i < segs.length; i++) {
 		const s = segs[i]
 		if (!s.includes('[') && !s.includes(']')) continue
 		const single = /^\[([A-Za-z_][A-Za-z0-9_]*)\]$/.exec(s)
 		const optional = /^\[\[([A-Za-z_][A-Za-z0-9_]*)\]\]$/.exec(s)
 		const rest = /^\[\.\.\.([A-Za-z_][A-Za-z0-9_]*)\]$/.exec(s)
+		const matched = /^\[([A-Za-z_][A-Za-z0-9_]*)=([A-Za-z_][A-Za-z0-9_]*)\]$/.exec(s)
 		if (single) {
 			if (seen.has(single[1]))
 				throw new Error(`[swelte] ${file}: duplicate route param [${single[1]}]`)
@@ -448,7 +452,16 @@ export function validateDynamicSegs(file: string, segs: string[]): void {
 			seen.add(rest[1])
 			continue
 		}
-		throw new Error(`[swelte] ${file}: bad dynamic segment '${s}' (want [id], [[slug]], or [...rest])`)
+		if (matched) {
+			const [, name, matcher] = matched
+			if (!KNOWN_MATCHERS.has(matcher))
+				throw new Error(`[swelte] ${file}: unknown matcher '${matcher}' in [${name}=${matcher}] (v1: integer only)`)
+			if (seen.has(name))
+				throw new Error(`[swelte] ${file}: duplicate route param [${name}]`)
+			seen.add(name)
+			continue
+		}
+		throw new Error(`[swelte] ${file}: bad dynamic segment '${s}' (want [id], [id=integer], [[slug]], or [...rest])`)
 	}
 }
 
@@ -528,11 +541,14 @@ export function parseStructs(src: string): VStruct[] {
 /** Dynamic path params of a route pattern (`users/[id]` -> ['id']). */
 export function routeParams(route: string): string[] {
 	const out: string[] = []
-	for (const m of route.matchAll(
-		/\[\[([A-Za-z_][A-Za-z0-9_]*)\]\]|\[\.\.\.([A-Za-z_][A-Za-z0-9_]*)\]|\[([A-Za-z_][A-Za-z0-9_]*)\]/g
-	))
-		out.push(m[1] ?? m[2] ?? m[3])
+	for (const m of route.matchAll(dynSegPatternGlobal()))
+		out.push(m[1] ?? m[2] ?? m[3] ?? m[5])
 	return out
+}
+
+/** Global-flag copy of dynSegPattern (matchAll needs /g; keeps one source). */
+export function dynSegPatternGlobal(): RegExp {
+	return new RegExp(dynSegPattern.source, 'g')
 }
 
 /** Narrow-args binding (roadmap section 8): verb fns not taking SwelteRequest
@@ -629,29 +645,60 @@ export function wasmReturnKind(vtype: string): string | null {
 	return null
 }
 
-/** Route dynamic-segment pattern ([id] / [...rest] / [[slug]]) — shared by
- * jsFetchFor stub codegen and runtime matching. */
+/** Route dynamic-segment pattern ([id] / [id=integer] / [...rest] / [[slug]]) — shared by
+ * jsFetchFor stub codegen and runtime matching. Group 4 is the matcher name. */
 export const dynSegPattern =
-	/\[\[([A-Za-z_][A-Za-z0-9_]*)\]\]|\[\.\.\.([A-Za-z_][A-Za-z0-9_]*)\]|\[([A-Za-z_][A-Za-z0-9_]*)\]/
+	/\[\[([A-Za-z_][A-Za-z0-9_]*)\]\]|\[\.\.\.([A-Za-z_][A-Za-z0-9_]*)\]|\[([A-Za-z_][A-Za-z0-9_]*)=([A-Za-z_][A-Za-z0-9_]*)\]|\[([A-Za-z_][A-Za-z0-9_]*)\]/
+
+/** Param name of one dynamic segment text (`[id]`/`[id=integer]`/`[[s]]`/`[...r]` -> name). */
+export function dynSegName(seg: string): string | null {
+	const m =
+		/^\[\[([A-Za-z_][A-Za-z0-9_]*)\]\]$/.exec(seg) ??
+		/^\[\.\.\.([A-Za-z_][A-Za-z0-9_]*)\]$/.exec(seg) ??
+		/^\[([A-Za-z_][A-Za-z0-9_]*)=([A-Za-z_][A-Za-z0-9_]*)\]$/.exec(seg) ??
+		/^\[([A-Za-z_][A-Za-z0-9_]*)\]$/.exec(seg)
+	if (!m) return null
+	return m[1]
+}
+
+/** TS type of one route param (`integer` -> `number`, else `string`). */
+export function routeParamTs(route: string, name: string): string {
+	for (const seg of route.split('/')) {
+		if (dynSegName(seg) === name) return dynSegMatcher(seg) === 'integer' ? 'number' : 'string'
+	}
+	return 'string'
+}
+
+/** Matcher of one dynamic segment text (`[id=integer]` -> `integer`, else null). */
+export function dynSegMatcher(seg: string): string | null {
+	const m = /^\[([A-Za-z_][A-Za-z0-9_]*)=([A-Za-z_][A-Za-z0-9_]*)\]$/.exec(seg)
+	return m ? m[2] : null
+}
 
 /** Codegen: fetch stub for a `#routes/*.v` file. Big `v` template -
   verbatim JS with `${}` inserts (no per-line push/escaping). */
 export function jsFetchFor(route: string, fns: RpcFn[], trailingSlash = 'ignore'): string {
 		const hasDyn = route.includes('[')
-		// Dynamics: [id] required, [...rest] catch-all, [[slug]] optional (item 2).
+		// Dynamics: [id] required, [id=integer] matcher, [...rest] catch-all, [[slug]] optional.
 		const dynSeg = dynSegPattern
 		const dynHelper =
 			hasDyn || trailingSlash === 'always' || trailingSlash === 'never'
 				? `
 const __swelteBase = ${JSON.stringify(route)}
 const __swelteTrailing = ${JSON.stringify(trailingSlash === 'always' ? 'always' : trailingSlash === 'never' ? 'never' : '')}
+const __swelteMatchers = { integer: (s) => /^[0-9]+$/.test(s) }
 function __swelteUrl(args = {}) {
 	let u = __swelteBase
   for (const m of __swelteBase.matchAll(${dynSeg.source}/g)) {
-		const name = m[1] ?? m[2] ?? m[3]
+		const name = m[1] ?? m[2] ?? m[3] ?? m[5]
+		const matcher = m[4]
 		const v = args?.[name]
 		if (m[1] !== undefined && (v === undefined || v === null || v === '')) { u = u.replace('/' + m[0], ''); continue }
 		if (v === undefined || v === null) throw new Error(\\\`swelte: missing route param '\\\${name}' for \\\${__swelteBase}\\\`);
+		if (matcher !== undefined) {
+			const check = __swelteMatchers[matcher]
+			if (check && !check(String(v))) throw new Error(\\\`swelte: route param '\\\${name}' does not match '\\\${matcher}' for \\\${__swelteBase}\\\`);
+		}
     const enc = m[2] !== undefined ? String(v).split("/").map(encodeURIComponent).join("/") : encodeURIComponent(String(v));
     u = u.replace(m[0], enc);
   }
@@ -664,7 +711,7 @@ function __swelteUrl(args = {}) {
 		const stripCall = (call: string) => `
 	const { __swelteRest, ...__swelteArgs } = (() => {
 		const c = { ...(args ?? {}) }
-    for (const m of __swelteBase.matchAll(${dynSeg.source}/g)) delete c[m[1] ?? m[2] ?? m[3]];
+    for (const m of __swelteBase.matchAll(${dynSeg.source}/g)) delete c[m[1] ?? m[2] ?? m[3] ?? m[5]];
     return c;
   })();
 	void __swelteRest
@@ -1180,9 +1227,11 @@ fn swelte_normalize_path(path string) string {
 	if path.len > 1 && path.ends_with('/') { return path[..path.len - 1] }
 	return path
 }
+
+// Item 7 request shape: SwelteRequest + cookie helpers.
+
 `,
-		`
-pub struct SwelteRequest {
+		`pub struct SwelteRequest {
 pub mut:
 	query map[string]string
 	form map[string]string
@@ -1238,8 +1287,43 @@ fn swelte_err_unknown_qual_cookies(path string, available []string) (int, string
 	return swelte_err_unknown_qual(path, available)
 }
 
-// Route-table note: static exact arms first, then dynamics with fewer
-// [segs] first, [...rest] catch-all last (stable sort) — but a
+// Built-in param matchers (§2.10, v1: integer only).
+// [id=integer] constrains the segment to digits; the name still lands in
+// params['id']. Unknown matchers never reach here — validateDynamicSegs
+// rejects them at generate time.
+fn swelte_matcher_check(matcher string, value string) bool {
+	if matcher == 'integer' { return swelte_matcher_integer(value) }
+	return false
+}
+
+fn swelte_matcher_integer(s string) bool {
+	if s == '' { return false }
+	for c in s.bytes() {
+		if c < 48 || c > 57 { return false }
+	}
+	return true
+}
+
+// Dynamic-segment helpers: [id] -> (id, blank), [id=integer] -> (id, integer).
+fn swelte_dyn_name(ps string) string {
+	if ps.contains('=') { return ps[1..ps.index('=') or { ps.len - 1 }] }
+	return ps[1..ps.len - 1]
+}
+
+fn swelte_dyn_matcher(ps string) string {
+	if ps.contains('=') { return ps[ps.index('=') or { 0 } + 1..ps.len - 1] }
+	return ''
+}
+
+fn swelte_dyn_check(ps string, value string) bool {
+	m := swelte_dyn_matcher(ps)
+	if m == '' { return true }
+	return swelte_matcher_check(m, value)
+}
+`,
+		`
+		// Route-table note: static exact arms first, then dynamics with fewer
+		// [segs] first, [...rest] catch-all last (stable sort) — but a
 // catch-all ONLY matches when no exact or narrower arm does
 // (fallback, never a conflict).
 // The matcher is greedy-but-ordered: caller order decides
@@ -1265,7 +1349,7 @@ fn swelte_match_route(pattern string, path string) (bool, map[string]string) {
 		if segs.len < psegs.len - 1 { return false, params }
 		for i in 0 .. psegs.len - 1 {
 			ps := psegs[i]
-			if ps.starts_with('[') { params[ps[1..ps.len - 1]] = if i < segs.len { swelte_unescape(segs[i]) } else { '' } } else if i >= segs.len || ps != segs[i] { return false, params }
+			if ps.starts_with('[') { if i < segs.len && !swelte_dyn_check(ps, segs[i]) { return false, params } params[swelte_dyn_name(ps)] = if i < segs.len { swelte_unescape(segs[i]) } else { '' } } else if i >= segs.len || ps != segs[i] { return false, params }
 		}
 		mut rest_parts := segs[psegs.len - 1..].clone()
 		for ri, rp in rest_parts { rest_parts[ri] = swelte_unescape(rp) }
@@ -1279,7 +1363,7 @@ fn swelte_match_route(pattern string, path string) (bool, map[string]string) {
 		if segs.len != base && segs.len != psegs.len { return false, params }
 		for i in 0 .. base {
 			ps := psegs[i]
-			if ps.starts_with('[') { if segs[i] == '' { return false, params } params[ps[1..ps.len - 1]] = swelte_unescape(segs[i]) } else if ps != segs[i] { return false, params }
+			if ps.starts_with('[') { if segs[i] == '' { return false, params } if !swelte_dyn_check(ps, segs[i]) { return false, params } params[swelte_dyn_name(ps)] = swelte_unescape(segs[i]) } else if ps != segs[i] { return false, params }
 		}
 		if segs.len == psegs.len { params[name] = swelte_unescape(segs[base]) } else { params[name] = '' }
 		return true, params
@@ -1287,7 +1371,7 @@ fn swelte_match_route(pattern string, path string) (bool, map[string]string) {
 	if psegs.len != segs.len { return false, params }
 	for i in 0 .. psegs.len {
 		ps := psegs[i]
-		if ps.starts_with('[') { if segs[i] == '' { return false, params } params[ps[1..ps.len - 1]] = swelte_unescape(segs[i]) } else if ps != segs[i] { return false, params }
+		if ps.starts_with('[') { if segs[i] == '' { return false, params } if !swelte_dyn_check(ps, segs[i]) { return false, params } params[swelte_dyn_name(ps)] = swelte_unescape(segs[i]) } else if ps != segs[i] { return false, params }
 	}
 	return true, params
 }
@@ -1873,7 +1957,7 @@ ${body}
 						out.push(
 							`export type RouteId = ${JSON.stringify(route)}`,
 							`export interface Params {`,
-							...dynPs.map((n) => `	${n}: string`),
+							...dynPs.map((n) => `	${n}: ${routeParamTs(route, n)}`),
 							`}`,
 							``,
 						)
@@ -2015,7 +2099,7 @@ ${list(params, (p) => `\t${p.name}${p.optional ? '?' : ''}: ${p.tstype}\n`)}}
 									const dynPs = routeParams(route)
 									if (dynPs.length) {
 										out.push(
-											`export function ${fn.name}(args: { ${dynPs.map((n) => `${n}: string`).join(', ')} } & Record<string, string>): AsyncGenerator<string, void, void>${fn.fallible ? ' // !T: may reject with SwelteRpcError' : ''}`
+											`export function ${fn.name}(args: { ${dynPs.map((n) => `${n}: ${routeParamTs(route, n)}`).join(', ')} } & Record<string, string>): AsyncGenerator<string, void, void>${fn.fallible ? ' // !T: may reject with SwelteRpcError' : ''}`
 										)
 									} else {
 										out.push(
@@ -2050,7 +2134,7 @@ ${list(params, (p) => `\t${p.name}${p.optional ? '?' : ''}: ${p.tstype}\n`)}}
 								const dynPs = routeParams(route)
 								if (dynPs.length) {
 									out.push(
-										`export function ${fn.name}(args: { ${dynPs.map((n) => `${n}: string`).join(', ')} } & Record<string, string>): Promise<${Res}>`
+										`export function ${fn.name}(args: { ${dynPs.map((n) => `${n}: ${routeParamTs(route, n)}`).join(', ')} } & Record<string, string>): Promise<${Res}>`
 									)
 								} else {
 									out.push(
@@ -2754,6 +2838,12 @@ declare module '*.v' {
 					o.push(`
 import { mount, hydrate, createRawSnippet } from 'svelte'
 
+const __swelteMatcherFns = { integer: (s) => /^[0-9]+$/.test(s) }
+function __swelteSegName(seg) {
+	const m = /^\[([A-Za-z_][A-Za-z0-9_]*)=([A-Za-z_][A-Za-z0-9_]*)\]$/.exec(seg)
+	if (m) return { name: m[1], matcher: m[2] }
+	return { name: seg.slice(1, -1), matcher: null }
+}
 function matchSegs(pattern, pathname) {
 	const pat = pattern.split('/').filter((s) => s !== '')
 	const got = pathname.split('/').filter((s) => s !== '')
@@ -2770,7 +2860,7 @@ function matchSegs(pattern, pathname) {
 			params[name] = decodeURIComponent(got[gi++])
 			continue
 		}
-		if (seg.startsWith('[') && seg.endsWith(']')) { if (gi >= got.length || !got[gi]) return null; params[seg.slice(1, -1)] = decodeURIComponent(got[gi++]); continue }
+		if (seg.startsWith('[') && seg.endsWith(']')) { if (gi >= got.length || !got[gi]) return null; const { name: __nm, matcher: __mm } = __swelteSegName(seg); if (__mm) { const __ck = __swelteMatcherFns[__mm]; if (__ck && !__ck(got[gi])) return null } params[__nm] = decodeURIComponent(got[gi++]); continue }
 		if (got[gi++] !== seg) return null
 	}
 	return gi === got.length ? params : null

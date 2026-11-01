@@ -72,4 +72,4 @@ npm run dev     # tsc --watch
 - `../../docs/types.md` — V → TS projection (built)
 - `../../docs/errors.md` — envelope, SPA-first rule (built)
 - `../../docs/internal/v-imports.md` — design rationale + decisions log
-- `../../docs/specs/roadmap.md` — forward work only
+- `../../docs/specs/sveltekit.md` + `../../docs/specs/moar.md` — forward work

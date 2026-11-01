@@ -17,7 +17,8 @@ via directory-mode `v run .`. Structs are prefixed per file
 - `src/routes/**/*.v` — server RPC. File path is the route:
   `+page.v` → `/`, `api/greet.v` → `/api/greet` (`index.v` is the legacy
   spelling of `+page.v`, same URL). Dynamic segments: `users/[id].v` →
-  `/users/[id]`, `files/[...rest].v` → `/files/[...rest]` (roadmap §8;
+  `/users/[id]`, `files/[...rest].v` → `/files/[...rest]`;
+  `[id=integer]` constrains to digits (see `config.md`);
   params arrive in `Request.params`). `[...rest]` may match empty
   (`GET /files` → `rest=''` when no `files/+page.v` leaf claims `/files`;
   when the leaf exists it wins — static beats dynamic). Catch-all is a
@@ -59,10 +60,10 @@ JSON body. No `?fn=` anywhere (removed with the old model).
 |---|---|---|---|
 | `#routes/` | `@[rpc]` | POST JSON `Accept: application/json` | body `{ "fn", "args" }`; unlimited per file |
 | `#routes/` | `@[get]` / `@[get('q')]` | GET `Accept: application/json` | query = args; default, or `?q` present |
-| `#routes/` | `@[sse]` / `@[sse('q')]` | GET `Accept: text/event-stream` (true streaming via veb, roadmap §14) | query = args; default, or `?q` present. Two shapes: list mode returns `[]string` (harness streams each per-event); emit mode takes trailing `emit fn (string) bool` + returns void — each `emit(e)` flushes one frame NOW (`if !emit(e) { return }` on disconnect). Client stub is `AsyncGenerator<string>` (`for await`); `!T` failures + unknown qualifiers stay JSON |
+| `#routes/` | `@[sse]` / `@[sse('q')]` | GET `Accept: text/event-stream` (true streaming via veb) | query = args; default, or `?q` present. Two shapes: list mode returns `[]string` (harness streams each per-event); emit mode takes trailing `emit fn (string) bool` + returns void — each `emit(e)` flushes one frame NOW (`if !emit(e) { return }` on disconnect). Client stub is `AsyncGenerator<string>` (`for await`); `!T` failures + unknown qualifiers stay JSON |
 | `#routes/` | `@[post]` / `@[post('q')]` | POST form (multipart / urlencoded) | form fields = args; default, or `?q` present. `File`/`Blob` stub args → multipart, filenames land in `Request.files` (bytes discarded); plain values → urlencoded |
 | `#routes/` | `@[put]`/`@[delete]`/`@[patch]` (+`('q')`) | respective method | same per-method rules |
-| `#routes/` | `@[before]` / `@[after]` (only in `+route.v`) | — (subtree middleware, roadmap §7) | `@[before]`: root→leaf, `SwelteRequest -> !SwelteRequest`; `@[after]`: leaf→root, response observe-or-replace; middleware fns never exported to TS, but the wrapper's `pub struct`s are (+layout-shaped shared types) |
+| `#routes/` | `@[before]` / `@[after]` (only in `+route.v`) | — (subtree middleware; root `+route.v` is the global head — verified, chains into every leaf) | `@[before]`: root→leaf, `SwelteRequest -> !SwelteRequest`; `@[after]`: leaf→root, response observe-or-replace; middleware fns never exported to TS, but the wrapper's `pub struct`s are (+layout-shaped shared types) |
 | `#routes/` leaf + `+route.v` | `@[load]` | — (page data, `Hand` HTML navigations only) | `(SwelteRequest[, parent T]) -> !R`. Zero/one per file. Level 0 takes `(req)`; deeper levels take `(req, parent T)` where T is the previous level's return struct (short or prefixed spelling — mismatch is a build error). The cascade threads typed values root-first; the leaf's return is encoded once at the edge → `props_json` for SSR. No JSON in `.v` files. Throw → `+error` props. On-click stubs stay — `load` is initial paint only |
 | `#lib/` | `@[rpc]` | local WASM call | none (direct dispatch) |
 
@@ -77,7 +78,7 @@ JSON body. No `?fn=` anywhere (removed with the old model).
   emit mode takes trailing `emit fn (string) bool` + returns void
   (mutually exclusive — build error otherwise).
 - `@[get]`/`@[post]` in `#lib/` warn and still expose as RPC.
-- `@[before]`/`@[after]` only in `+route.v` wrappers (roadmap §7):
+- `@[before]`/`@[after]` only in `+route.v` wrappers:
   subtree middleware, never exported as callables to TS (but the
   wrapper's `pub struct`s are — +layout-shaped shared types).
   `+route.v` files declare no `@[rpc]`/verb endpoints of their own.
@@ -108,11 +109,11 @@ pub fn delete_account(req Request) ! { ... }
 inline literal and the result interface project to TS). Verb handlers
 take the framework `Request` (query, form,
 files, headers, cookies, route params — exact shape with the
-dispatcher, roadmap item 1). `@[sse]` fns take the framework `Request`
+dispatcher, exact shape). `@[sse]` fns take the framework `Request`
 like verbs in two shapes: list mode returns `[]string`, emit mode
 takes trailing `emit fn (string) bool` + returns void — the harness
 injects `emit`, each call flushes one frame NOW. The TS stub is an
-`AsyncGenerator<string>` (`for await … of`, roadmap item 14).
+`AsyncGenerator<string>` (`for await … of`).
 `!T` = may reject with `SwelteRpcError` (status 0 for local `#lib/`
 calls). `?T` = `T | null`. `Request.params` carries dynamic-segment
 values (`req.params['id']` for `/users/[id]`); client stubs

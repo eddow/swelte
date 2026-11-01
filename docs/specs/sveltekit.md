@@ -1,111 +1,124 @@
-# Sveltekit equivalence
+# SvelteKit equivalence — open work only
 
-## State
+Built behavior lives in `docs/` root (`rpc.md`, `types.md`, `errors.md`,
+`ssr.md`, `config.md`, `forms.md`, `cli.md`, `example.md`,
+`coming-from-sveltekit.md`). This file tracks ONLY what remains.
 
-In `swelte` today (`engine/core` + `docs/{rpc,types,errors,ssr,example}.md` + `examples/something`):
+Locked invariants (no item below may change these): single global
+`+error.svelte`; `core` engine-agnostic, `Hand`+dispatcher ownership;
+`@[load]` server-only; `#routes/` fetch vs `#lib/` WASM split;
+single-artifact `dist/server`; SPA-first proxy rule.
 
-> Built: `src/routes/**/*.v` file-route RPC (`+page.v->/`,`api/*.v->/api/*`,`[id]`,`[...rest]`), verbs `get/post/put/patch/delete` + `@[rpc]` many-per-file + `@[sse]` streaming + `@[load]` cascade + `@[before]/@[after]` in `+route.v`, `SwelteRequest{query,form,files,headers,cookies,params,method,path,qualifier}`, `303` no-JS forms, global `+error.svelte`, QuickJS runtime SSR (`render.js`+`Hand`), V->TS projection, `SwelteRpcError`/`loadPage`.
+## 1. Routing (open)
 
-What it lacks vs. full `SvelteKit`:
+* `[id=integer]` builtins are DONE (`integer` → digits, both sides,
+  `Params: number`; see `config.md`). What remains: custom matchers via
+  central `src/matchers.v` (`@[matcher]`, WASM-safe portable subset —
+  separate file from the lifecycle file, which imports `time`/`os`).
+* Route groups `(group)`, optional `[[slug]]`, `trailingSlash` are DONE
+  (see `config.md`).
+* `+server.ts`-style standalone `Response` endpoints: verbs return
+  `string`/struct, `@[after](req,code,body)->(code,body)` only — no
+  `headers`/`set-cookie`/stream/redirect control. OPEN (ties to P0-A
+  below).
+* `reroute` / host-based routing: OPEN → lifecycle file
+  (`@[reroute]` in `specs/moar.md`).
+* `+route.svelte` is manual composition, not nested `<slot/>`/children
+  inheritance. OPEN (needs client router).
 
-### 1. Routing
-* No route-groups `(group)` — layout reset without URL segment.
-* No optional `[[slug]]`, no matchers `[id=integer]`.
-* No `+server.ts`-style standalone `Response` endpoints: verbs return `string/struct`, `@[after](req,code,body)->(code,body)` only — no `headers/set-cookie/stream/redirect` control.
-* No `reroute`, `trailingSlash`, `strict` config.
-* `+route.svelte` is manual composition, not nested `<slot/>/children` inheritance.
+## 2. Data-loading / client-router (open)
 
-### 2. Data-loading / client-router
-* `@[load]` is server-only, HTML-navigation only. No universal `+page.ts` load. Note: like in sveltekit, *can* be `async` *only* when `ssr = false`.
-* No `parent()`, `depends()/invalidate()/invalidateAll()`, no streaming `Promise` + `<await>` Suspense.
-* No client router: no `goto(), preloadData(), pushState(), beforeNavigate/afterNavigate/onNavigate`, no `navigating/page/updated` stores (`$app/navigation|stores|state`).
+* `@[load]` is server-only, HTML-navigation only. No universal `+page.ts`
+  load (async parity only when `ssr = false` — same rule as SvelteKit).
+* No `parent()` (typed `parent T` param instead — built, see `rpc.md`),
+  no `depends()`/`invalidate()`/`invalidateAll()`, no streaming `Promise`
+  + `<await>` Suspense.
+* No client router: no `goto()`, `preloadData()`, `pushState()`,
+  `beforeNavigate`/`afterNavigate`/`onNavigate`, no
+  `navigating`/`page`/`updated` stores.
 * No server `fetch` wrapper with cookie/auth forwarding in `load`.
 
-### 3. Forms/Actions
-* Has verb `POST ?q` + `303 Location` + HTML-escaped error, but no named `actions{save,delete}`, no `fail(422,{fieldErrors})`, no `use:enhance/applyAction/deserialize` progressive-enhancement cycle.
+## 3. Forms/Actions (open)
 
-### 4. Layouts/Errors/Hooks
-* Single global `+error.svelte{status,message}` by design — no per-directory `+error` inheritance/bubbling.
-* No `+layout(.server).ts` data merging, no layout reset via groups.
-* Subtree `@[before]/@[after]` only — no global `hooks.server.ts: handle/handleFetch/handleError/init/transformPageChunk`, no `event.locals`, no `cookies.get/set/delete` signed API.
+* Verbs + `?q` + `303` no-JS + `fail`-lite (`isFail`) + `deserialize`
+  are DONE (see `forms.md`).
+* No named `actions{save,delete}` namespace (verbs + `?q` cover it —
+  explicitly out, not planned).
+* No `use:enhance`/`applyAction` progressive-enhancement cycle
+  (needs client router).
 
-### 5. Rendering modes
-* No per-route `export const ssr/csr/prerender=true|false`, no `entries/prerender-crawl`, no SSG/ISR, no `adapter-static/node/auto/edge`.
-* SSR is runtime-only (`SWELTE_SSR=1` embedded QuickJS/`SWELTE_SSR_URL` sidecar, `50ms/16MB` fallback to SPA shell) — never emits prerendered `.html` files.
-* No `csr=false` islands, no hydration directives.
+## 4. Layouts/Errors/Hooks (open)
 
-### 6. Platform DX
-* No `$app/paths(base/assets)`, `$app/environment`, `$app/forms`, `$env/static/private|dynamic/private`, `$lib/server` env contract — Swelte uses physical `#lib/backend|*_backend.v` + `PORT/SWELTE_DIST/SWELTE_CORS_ORIGIN/SWELTE_BODY_LIMIT/RATE_LIMIT/HANDLER_TIMEOUT_MS`.
-* No `CSP/CSRF/methodOverride/version` kit config, no `service-worker`, no `snapshot` export, no `svelte-check` `$types{Params,ServerLoad,Actions}` generics — Swelte generates flat `types/routes/*.d.ts{Struct,Result,fn(args)}`.
+* Single global `+error.svelte` by design — no per-directory
+  inheritance (explicitly out, not planned).
+* No `+layout(.server).ts` data merging (the `+route.v` `@[load]`
+  cascade + typed parent covers position; SvelteKit-shaped merging is
+  not planned). No layout reset via groups beyond the URL strip (done).
+* Subtree `@[before]`/`@[after]` + root `+route.v` as global head are
+  DONE (see `rpc.md` attributes table). What remains: lifecycle file
+  (`@[startup]`/`@[cron]`/`@[queue]`/`@[reroute]` → `specs/moar.md`).
+  No `handle`/`handleFetch`/`handleError` (explicitly out);
+  `transformPageChunk` = `@[after]` string rewrite (no chunks exist);
+  `init` = `@[startup]`.
 
-## Roadmap
+## 5. Rendering modes (open)
 
-### 1. Trivial — implementable with no architectural question
+* Per-route `ssr=false`-lite: manifest flag → `Hand` skips QJS/sidecar,
+  serves SPA shell. No prerendered `.html`, no `csr=false` islands.
+* No `entries`/`prerender-crawl`, no SSG/ISR, no
+  `adapter-static`/`node`/`auto`/`edge`.
+* SSR stays runtime-only (embedded QuickJS / sidecar, 50ms/16MB
+  fallback to SPA shell) — never emits prerendered `.html` files.
+* No service-worker, no offline story, no snapshot export.
 
-Status: all 9 implemented.
+## 6. Platform DX (open)
 
-Additive only: no change to locked invariants (single global `+error.svelte`,
-core engine-agnostic, Hand+dispatcher ownership, `@[load]` server-only,
-`#routes/` fetch vs `#lib/` WASM split, single-artifact `dist/server`,
-SPA-first proxy rule). Each item is a contained diff in
-`engine/core/src/vite.ts` (`routeFor`/`svelteRouteFor`/`validateDynamicSegs`/
-`routeParams`/`tsTypeFor`/stub emitters), `gen/diagnostics.ts`,
-`templates/harness/server.v` (env-driven Hand), `sdk.ts`, or docs.
+* `#app/paths` + `#app/environment` virtual stubs: DONE. `#app/forms`:
+  DONE (`deserialize` only). No `$app/stores`, `$app/state`,
+  `$app/navigation` (need client router).
+* No `$env/static/private` / `dynamic/private` — physical
+  `#lib/backend` / `*_backend.v` instead (built, see `rpc.md`).
+* `CSP`/`CSRF`/`methodOverride`/`version` knobs: DONE.
+* No `svelte-check` `$types{Params,ServerLoad,Actions}` generics —
+  flat `types/routes/*.d.ts{Struct,Result,fn(args)}` + `RouteId`/`Params`
+  instead (built, see `types.md`).
 
-1. **Route groups `(group)` — strip from URL, keep on disk.** DONE.
-   What: `(admin)/users/+page.v` -> `/users`, not `/(admin)/users`.
-   Implemented: `stripRouteGroups()` in `vite.ts`; used in `routeFor`,
-   `svelteRouteFor`, claim-check; unit-tested (`route-helpers.test.ts`).
-   Manifest keeps the full mod for `+route.v` scoping. Wrapping stays
-   explicit/manual (no layout-inheritance change).
+## First external demand (migrating apps: micro, emw)
 
-2. **Optional params `[[slug]]`.** DONE.
-   Implemented: `validateDynamicSegs` accepts last-segment `[[slug]]`,
-   `routeFor` passes through, V `swelte_match_route` matches zero-or-one
-   (`params['slug']=''` on empty), client `matchSegs` + `__swelteUrl`
-   handle it, clash-check distinguishes `[?]` shape. Tested in
-   `route-helpers.test.ts` + live `users/42` probe.
+### P0 — cannot migrate without (design + build)
 
-3. **`trailingSlash` config (`'always'|'never'|'ignore'`).** DONE.
-   Implemented: `SwelteOptions.trailingSlash` + `SWELTE_TRAILING_SLASH`
-   env wins; server 301s in `Hand.before_request`, TS `__swelteUrl`
-   normalizes via baked `__swelteTrailing`; `dev`/`build`/`preview`
-   forward config→env. Default `ignore`. Verified `301 /api/greet → /api/greet/`.
+A. Binary/response control. Verbs return string|struct, uploads keep
+   filenames only. Both apps serve PDFs, images, ZIPs,
+   manifest.webmanifest, sitemap.xml, sw.js, PWA icons, auth cookies.
+   Minimum viable: `@[after]` grows to
+   `(req,code,body)->(code,body,headers)` + a bytes return kind
+   (`[]u8` → base64 already projects as string; need Content-Type +
+   Content-Disposition passthrough), and `SwelteRequest.files`
+   optionally retains bytes (size knob, default discard).
+B. Global hooks. `@[before]`/`@[after]` subtree-only is DONE for
+   middleware; both apps ALSO need the lifecycle file (auth session
+   resolution on every request, Sentry wrapping, security headers +
+   CSP nonce, locale cookies, module/subdomain gating, favicon
+   short-circuit) → `specs/moar.md`.
+C. Reroute / host-based routing → `@[reroute]` in `specs/moar.md`.
+D. Route groups + `[[slug]]` + matchers: DONE (groups/optional/matcher
+   builtins; custom matchers open).
 
-4. **Per-route `Params` types (`$types`-lite).** DONE.
-   Implemented: every `types/routes/*.d.ts` starts with
-   `export type RouteId` + `export interface Params`. Tested
-   (`route-helpers.test.ts` asserts `/users/[id]`).
+### P1 — parity, workaroundable briefly
 
-5. **`#app/paths` + `#app/environment` virtual stubs.** DONE.
-   Implemented: `.swelte/paths.js`, `.swelte/environment.js` (+ `.d.ts`
-   for types) generated from `loadConfig()`; `#app/paths` + `#app/environment`
-   declared in `v-shim.d.ts`, wired via `resolve.alias`. No V side.
+`locals` + cookie helpers, CSP/CSRF/methodOverride, HEAD/OPTIONS,
+trailingSlash, `Params` types, `#app/paths|environment`, version
+stamping: all DONE (see `config.md`).
 
-6. **CSP + CSRF + `methodOverride` knobs.** DONE.
-   Implemented: `SwelteOptions.csp/csrf/methodOverride` + `SWELTE_CSP`,
-   `SWELTE_CSRF_CHECK_ORIGIN`, `SWELTE_METHOD_OVERRIDE` env wins;
-   `transformIndexHtml` injects the CSP meta, `Hand` enforces origin +
-   `_method` dispatch. `dev`/`build`/`preview` forward config→env.
+`+server.ts`-style raw `Response` escape hatch for webhook signature
+verification (raw bodies + HMAC — Resend/EnableBanking/Stripe need
+raw bytes JSON/form dispatch mangles): raw-body mode per file or a
+tiny TS sidecar. OPEN.
 
-7. **`SwelteRequest.locals` + cookie helpers (V-side sugar).** DONE.
-   Implemented: `locals map[string]string` threaded `server_gen.swelte_route`
-   → `dispatch` → verbs/`load`/`swelte_req` (incl. `load_for`), projected
-   into TS `SwelteRequest`; `swelte_cookie_get/set/delete` helpers emitted.
-   `before_request` passes empty locals today (middleware can fill it).
+### P2 — later, live without
 
-8. **`HEAD`/`OPTIONS` auto-handling.** DONE (shape adjusted).
-   Implemented: `GET` verb arm also matches `HEAD` (same handler, veb sends
-   headers; body present but `curl -I` reports `size=0`), CORS preflight
-   `Allow-Methods` line gains `HEAD`. OPTIONS stays CORS-preflight-only
-   (the SvelteKit `Allow:`-on-405 listing was dropped — `Hand` returns JSON
-   envelope, not per-prefix headers; codegen already knows handlers per
-   prefix and a future pass can re-add it). Tested (`route-helpers.test.ts`
-   asserts the `GET || HEAD` arm + live `HEAD / → 200`, `DELETE / → 405`).
-
-9. **`version` + `name` stamping.** DONE.
-   Implemented: `.swelte/version.js` (`version` from `svelte.config.js` or
-   `package.json`, + `buildTime` ISO) + `SWELTE_VERSION` env forwarded by
-   `dev`/`build`/`preview`; `Hand` emits `X-Swelte-Version` when set.
-   Golden tests exclude `version.js` bytes (wall-clock) but pin version pin.
+Client router (goto/invalidate/depends/beforeNavigate), streaming
+`<await>`, `parent()`, server fetch wrapper, per-route
+ssr/csr/prerender/entries, SSG/ISR/adapters, `snapshot` export.
+None block a server-rendered migration.
 
