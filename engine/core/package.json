@@ -10,6 +10,7 @@
     "./vite": "./dist/vite.js",
     "./cli": "./dist/cli.js",
     "./config": "./dist/gen/config.js",
+    "./diagnostics": "./dist/gen/diagnostics.js",
     "./toolchain": "./dist/toolchain.js"
   },
   "bin": {
@@ -50,6 +51,9 @@
       ],
       "config": [
         "./dist/gen/config.d.ts"
+      ],
+      "diagnostics": [
+        "./dist/gen/diagnostics.d.ts"
       ],
       "toolchain": [
         "./dist/toolchain.d.ts"

@@ -112,15 +112,14 @@ struct SwelteRouteCall {
 }
 
 struct SwelteRouteOut {
-	status      int
-	body        string
-	set_cookies []string
+	mut:
+		res routes.SwelteResponse
 }
 
 fn swelte_route_spawned(c SwelteRouteCall, ch chan SwelteRouteOut) {
-	status, body, set_cookies := routes.swelte_route(c.path, c.method, c.query,
+	res := routes.swelte_route(c.path, c.method, c.query,
 		c.headers, c.cookies, c.locals, c.body, c.content_type, c.qualifier)
-	ch <- SwelteRouteOut{status, body, set_cookies}
+	ch <- SwelteRouteOut{ res: res }
 }
 
 fn swelte_call_route(path string, method string, query map[string]string, headers map[string]string, cookies map[string]string, locals map[string]string, body string, content_type string, qualifier string) SwelteRouteOut {
@@ -134,11 +133,11 @@ fn swelte_call_route(path string, method string, query map[string]string, header
 			return out
 		}
 		budget * time.millisecond {
-			return SwelteRouteOut{500, '{"error":"handler timeout"}', []string{}}
+			return SwelteRouteOut{ res: routes.SwelteResponse{ status: 500, headers: {'Content-Type': 'application/json'}, body: '{"error":"handler timeout"}' } }
 		}
 	}
 	// Unreachable: select always returns via the channel or the timeout.
-	return SwelteRouteOut{500, '{"error":"handler timeout"}', []string{}}
+	return SwelteRouteOut{ res: routes.SwelteResponse{ status: 500, headers: {'Content-Type': 'application/json'}, body: '{"error":"handler timeout"}' } }
 }
 
 fn swelte_html_escape(s string) string {
@@ -351,7 +350,7 @@ fn (mut app App) before_request(mut ctx Ctx) veb.Result {
 	// resolve events via the generated accessor, take over + stream.
 	sse_prefix, sse_params := routes.swelte_sse_route(path, dispatch_method, query, headers, qualifier)
 	if sse_prefix != '' {
-		mut sse_req := routes.SwelteRequest{ query: query, form: map[string]string{}, files: map[string]string{}, headers: headers, cookies: cookies, params: sse_params, locals: map[string]string{}, method: 'GET', path: path, qualifier: qualifier }
+		mut sse_req := routes.SwelteRequest{ query: query, form: map[string]string{}, files: map[string]string{}, files_bytes: map[string][]u8{}, raw_body: []u8{}, headers: headers, cookies: cookies, params: sse_params, locals: map[string]string{}, method: 'GET', path: path, qualifier: qualifier }
 		if cors_ok {
 			ctx.set_header(.access_control_allow_origin, if cors_origin == '*' { '*' } else { origin })
 			ctx.res.header.set_custom('Access-Control-Allow-Credentials', 'true') or {}
@@ -376,9 +375,9 @@ fn (mut app App) before_request(mut ctx Ctx) veb.Result {
 	// (swelte_call_route is sync — veb runs before_request on a worker;
 	// the `spawn select` watchdog keeps the server responsive).
 	out := swelte_call_route(path, dispatch_method, query, headers, cookies, map[string]string{}, ctx.req.data, content_type, qualifier)
-	status := out.status
-	body := out.body
-	set_cookies := out.set_cookies
+	status := out.res.status
+	body := out.res.body
+	set_cookies := out.res.cookies
 	if !cors_ok && origin != '' && ctx.req.method != .get && ctx.req.method != .head {
 		ctx.res.set_status(.forbidden)
 		return ctx.send_response_to_client('application/json', '{"error":"forbidden"}')
@@ -392,20 +391,6 @@ fn (mut app App) before_request(mut ctx Ctx) veb.Result {
 	// Only a real browser Accept (contains text/html, no application/json)
 	// enters the SSR chain. This also preserves §12 no-JS form redirects.
 	mut cookies_out := set_cookies.clone()
-	if status == 200 && cookies_out.len > 0 {
-		mut sess := ''
-		after_id := body.all_after('"id":"')
-		if after_id != body {
-			sess = after_id.all_before('"')
-		}
-		if sess != '' {
-			for i in 0 .. cookies_out.len {
-				cookies_out[i] = cookies_out[i].replace('sess=__SWELTE_SESS__', 'sess=' + sess)
-			}
-		} else {
-			cookies_out = []string{}
-		}
-	}
 	// §12 No-JS forms: browser navigations (Accept: text/html, no JSON)
 	// get a redirect on success / server-rendered error page on failure
 	// instead of JSON. Fetch stubs (Accept: application/json) keep JSON.
@@ -417,7 +402,7 @@ fn (mut app App) before_request(mut ctx Ctx) veb.Result {
 	wants_html := accept.contains('text/html') && !accept.contains('application/json')
 	wants_json := (headers['Accept'] or { headers['accept'] or { '' } }).contains('application/json')
 	for c in cookies_out {
-		ctx.res.header.add(.set_cookie, c)
+		ctx.res.header.add(.set_cookie, c.to_header())
 	}
 	set_cors(mut ctx, cors_ok, cors_origin, origin)
 	// Load cascade → SSR props. On HTML navigations (never fetch), resolve
@@ -488,11 +473,23 @@ fn (mut app App) before_request(mut ctx Ctx) veb.Result {
 		ctx.res.set_status(http.status_from_int(s))
 		return ctx.send_response_to_client(ct, sb)
 	}
-	// §14 SSE (true streaming, veb): the dispatch SSE arm never reaches
-	// here — it takes over the conn in swelte_serve_sse below and returns
-	// veb.no_result(). This is the JSON path only.
+	// API response: Hand translates the SwelteResponse envelope 1:1 into
+	// veb calls (set_status, custom headers, cookies already set above).
+	// Binary (is_bytes) sends raw bytes with the handler's Content-Type;
+	// text/JSON sends the body with Content-Type (default application/json).
+	mut resp_ct := out.res.headers['Content-Type'] or { out.res.headers['content-type'] or { '' } }
+	if resp_ct == '' {
+		resp_ct = if out.res.is_bytes { 'application/octet-stream' } else { 'application/json' }
+	}
 	ctx.res.set_status(http.status_from_int(status))
-	return ctx.send_response_to_client('application/json', body)
+	for k, v in out.res.headers {
+		if k.to_lower() == 'content-type' { continue }
+		ctx.res.header.set_custom(k, v) or {}
+	}
+	if out.res.is_bytes {
+		return ctx.send_response_to_client(resp_ct, out.res.body_bytes.bytestr())
+	}
+	return ctx.send_response_to_client(resp_ct, body)
 }
 
 // §14 SSE (true streaming): veb takeover + producer/writer split.
@@ -678,6 +675,8 @@ fn swelte_page_props(
 		query: query
 		form: map[string]string{}
 		files: map[string]string{}
+		files_bytes: map[string][]u8{}
+		raw_body: []u8{}
 		headers: headers
 		cookies: cookies
 		params: params

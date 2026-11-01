@@ -11,7 +11,7 @@ describe('tsTypeFor projection matrix (docs/types.md)', () => {
 		['bool', 'boolean'],
 		['string', 'string'],
 		['time.Time', 'number'],
-		['[]u8', 'string'],
+		['[]u8', 'Blob'],
 		['[]string', 'string[]'],
 		['[]int', 'number[]'],
 		['map[string]string', 'Record<string, unknown>'],
@@ -61,7 +61,7 @@ describe('tsTypeFor projection matrix (docs/types.md)', () => {
 				['a', 'number'],
 				['b', 'boolean'],
 				['c', 'number'],
-				['d', 'string'],
+				['d', 'Blob'],
 				['e', 'string[]'],
 				// `map[string]int` projects `Record<string, unknown>` (associative
 				// array shape — value type stays opaque, see docs/types.md).

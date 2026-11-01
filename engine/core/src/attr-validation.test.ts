@@ -23,15 +23,21 @@ describe('attr fan-out + validation errors (parse level)', () => {
 		assert.equal(fns[0]?.qualifier, 'q')
 	})
 
-	it('bare @[sets_cookie] carrier attaches to next verb', () => {
-		const fns = parseVFile(`@[sets_cookie]\n@[rpc] pub fn login() string { return '' }`)
-		assert.equal(fns[0]?.setsCookie, true)
+	it('bare @[sets_cookie] is rejected (removed — use SwelteResponse)', () => {
+		assert.throws(() => parseVFile(`@[sets_cookie]\n@[rpc] pub fn login() string { return '' }`), /sets_cookie.*removed/)
+	})
+
+	it('verbs = HTTP, rpc = protocol-ignorant (parse keeps shapes; generate validates)', () => {
+		const rpc = parseVFile(`@[rpc] pub fn f(args LoginArgs) !Session { return Session{} }`)
+		assert.equal(rpc[0]?.attr, 'rpc')
+		const verb = parseVFile(`@[get] pub fn g(req SwelteRequest) SwelteResponse { return SwelteResponse{} }`)
+		assert.equal(verb[0]?.attr, 'get')
 	})
 
 	it('@[before]/@[after]/@[load] parse as attrs', () => {
 		const fns = parseVFile(
 			`@[before] pub fn b(req SwelteRequest) !SwelteRequest { return req }\n` +
-				`@[after] pub fn a(req SwelteRequest, body string) !string { return body }\n` +
+				`@[after] pub fn a(req SwelteRequest, res SwelteResponse) !SwelteResponse { return res }\n` +
 				`@[load] pub fn l(req SwelteRequest) !string { return '' }`
 		)
 		assert.deepEqual(

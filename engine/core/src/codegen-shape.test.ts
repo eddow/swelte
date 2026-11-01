@@ -13,7 +13,6 @@ function goldenFn(over: Partial<RpcFnGolden> = {}): RpcFnGolden {
 		tsret: 'string',
 		fallible: false,
 		singleArgsStruct: undefined,
-		setsCookie: false,
 		...over,
 	}
 }
@@ -172,7 +171,6 @@ pub:
 	payload string
 }
 @[rpc]
-@[sets_cookie]
 pub fn login(args LoginArgs) !string {
 	return args.payload
 }

@@ -10,6 +10,6 @@ pub fn require_session(req SwelteRequest) !SwelteRequest {
 }
 
 @[after]
-pub fn stamp_admin(req SwelteRequest, code int, body string) !(int, string) {
-	return code, body
+pub fn stamp_admin(req SwelteRequest, res SwelteResponse) !SwelteResponse {
+	return res
 }

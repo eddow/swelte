@@ -1,4 +1,4 @@
-# Moar — server lifecycle (startup, cron, MQ, reroute)
+# Moar — server lifecycle (startup, cron, MQ, reroute) + cross-build
 
 Server-only central file. Never WASM, never fetch-stubbed — same guard as
 `@lib/backend`: resolving from browser/`#lib/` WASM stubs is a build error.
@@ -9,8 +9,9 @@ Pure V (no TS sidecar).
 One file, four concerns. No `handle/handleFetch/handleError`
 (SvelteKit hook surface explicitly out — `+route.v`
 `@[before]/@[after]` already covers request middleware, including what
-`transformPageChunk` does: `@[after](req, code, body) -> (code, body)`
-rewrites the final HTML string; Swelte never chunks, so there is nothing
+`transformPageChunk` does: `@[after](req, res) -> res`
+(verbs are HTTP, `@[rpc]` is protocol-ignorant — enforced at generate time);
+Swelte never chunks, so there is nothing
 to transform per-chunk. See item 14 in `./sveltekit.md`).
 
 ```v
@@ -59,6 +60,34 @@ pub fn rewrite(host string, path string) string { ... }
 
 `@[startup]` + `@[reroute]` first (harness call-sites only),
 `@[cron]` second (spawn loop), `@[queue]` last (channel plumbing).
+
+## Cross-build (`swelte build --target-os`)
+
+Today both V invocations fix the OS: the server binary passes NO `-os`
+(`v -o dist/server .swelte/server.v` in `commands/build.ts:122` — V
+defaults to the build-host OS), and `#lib/` WASM hardcodes
+`v -b wasm -os browser` (`vite.ts:915` — correct, browsers only).
+Build-host == run-host is silently assumed; `swelte build` on macOS
+cannot produce the Linux `dist/server` the Docker/CI flow needs.
+
+Proposal: `swelte build [--target-os <os>]` (`linux`|`macos`|`windows`)
++ `targetOs?: 'linux' | 'macos' | 'windows'` in the `swelte` config key
+(CLI flag wins, env `SWELTE_TARGET_OS` middle, config fallback — same
+precedence shape as the other knobs):
+
+* `build.ts` passes `-os <os>` to the `v -o` link. Smoke probe (step 5)
+  must SKIP when target != host (foreign binary can't boot) — assert
+  artifacts only.
+* QJS embed is the hard part: `libqjs.a` is prebuilt for the HOST
+  (`qjs.ts` compiles `quickjs.c` with the host cc at generate time).
+  Cross-build needs a per-OS prebuilt (vendored `libqjs-<os>.a`, picked
+  by target) or a from-source QJS compile under the target cc. Core-only
+  projects (no bridge) cross trivially — plain `v -o -os` works today
+  by hand.
+* WASM untouched: always `-os browser` (not a target, a different
+  backend).
+* `dev`/`preview`/`test` stay host-native (run, not ship) — flag is
+  `build`-only.
 
 ## Open
 

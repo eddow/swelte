@@ -28,7 +28,7 @@ describe('parseVFile', () => {
 		assert.equal(parseVFile(`pub fn helper(x int) int { return x }`).length, 0)
 	})
 	it('single-args struct expands (real greet.v shape)', () => {
-		const src = `pub struct LoginArgs {\npub:\n\tpayload string\n}\n@[rpc]\n@[sets_cookie]\npub fn login(args LoginArgs) !Session {\n\treturn Session{}\n}`
+		const src = `pub struct LoginArgs {\npub:\n\tpayload string\n}\n@[rpc]\npub fn login(args LoginArgs) !Session {\n\treturn Session{}\n}`
 		const fns = parseVFile(src)
 		assert.equal(fns.length, 1)
 		assert.equal(fns[0]?.singleArgsStruct, 'LoginArgs')
@@ -36,7 +36,6 @@ describe('parseVFile', () => {
 			fns[0]?.params.map((p) => p.name),
 			['payload']
 		)
-		assert.equal(fns[0]?.setsCookie, true)
 		assert.equal(fns[0]?.fallible, true)
 	})
 })

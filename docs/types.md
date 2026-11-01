@@ -75,10 +75,11 @@ struct out, always `await`).
 ## Type table
 
 `string→string`, `bool→boolean`, ints/floats→`number`,
-`[]T→T[]`, `[]u8→string` (base64), `map[string]T→Record<string,unknown>`
+`[]T→T[]`, `[]u8→Blob`, `map[string]T→Record<string,unknown>`
 (value type stays opaque — `T` does not cross the TS boundary),
 `time.Time→number` (unix epoch, `json.encode` as-is — decided 2026-10-29),
-`?T→T|null`, `!T` strips to `T` + fallible flag,
+`?T→T|null`, `!T` strips to `T` + fallible flag, `SwelteResponse→{ status, headers, cookies, body }`,
+`(int, string)→SwelteResponse` (status+text sugar),
 named `UpperCamel` structs pass through 1:1, else `unknown` + warning.
 
 No drift: the wire and the projection agree (unix int both sides).

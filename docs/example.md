@@ -9,7 +9,7 @@ artifact: `dist/server` + `dist/`).
 
 ```
 src/routes/+page.svelte + +page.v   / (get_greeting GET, save_name POST)
-src/routes/api/greet.v              /api/greet (get_greeting GET, login @[rpc] → Session)
+src/routes/api/greet.v              /api/greet (get_greeting GET, greet_pure @[rpc] → Session, login POST → Session+cookie, pdf/created probes)
 src/routes/boom/+page.svelte + +page.v   /boom (throw fixture: @[load] + @[get] both `return error('boom')` — SSR `!T` gate)
 src/routes/users/[id].v             /users/[id] ([id] → req.params['id'])
 src/routes/files/[...rest].v        /files/[...rest] (catch-all → req.params['rest'])
@@ -33,7 +33,7 @@ node engine/core/dist/cli.js dev --port 5174 --backend 8131 --root examples/some
 
 ## Proved
 
-- `/` GET/POST (`get_greeting`/`save_name`), `/api/greet` GET + `login → Session{id,user,remember,expires_at}`,
+- `/` GET/POST (`get_greeting`/`save_name`), `/api/greet` GET + `greet_pure @[rpc] → Session{id,user,remember,expires_at}` + `login POST → Session+cookie` (verb, HTTP) + `?pdf` (binary) + `?created` (201),
   empty payload → 400, unknown fn → 404 + available, `vite build` green.
 - Page buttons: Greet / Save / Hash (`#lib` real WASM) / Login / Stream (`@[sse]` `tick_stream`).
 - SSE proven (true streaming via veb, emit mode): `Accept: text/event-stream` on `/api/greet` → 200 with per-event flush (`data: tick 1` ~0.5s, `tick 2` ~1.0s, `tick 3` ~1.5s with `?wait_ms=500` — pacing proves zero buffering); plain JSON GETs keep hitting `@[get]` on the same URL.

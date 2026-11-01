@@ -17,6 +17,7 @@ export interface SwelteErrorShape {
 	path?: string
 	available?: string[]
 	hint?: string
+	[key: string]: unknown
 }
 
 export class SwelteRpcError extends Error {
@@ -71,6 +72,13 @@ function encodeQuery(args: object): string {
 	return s ? `?${s}` : ''
 }
 
+async function decodeBody<TResult>(base: string, fn: string, res: Response): Promise<TResult> {
+	const ct = (res.headers.get('content-type') ?? '').toLowerCase()
+	if (ct.includes('application/json') || ct === '') return res.json()
+	if (ct.startsWith('text/') || ct.includes('json')) return (await res.text()) as unknown as TResult
+	return (await res.blob()) as unknown as TResult
+}
+
 async function postJson<TResult>(base: string, fn: string, args: object): Promise<TResult> {
 	const res = await fetch(base, {
 		method: 'POST',
@@ -78,7 +86,7 @@ async function postJson<TResult>(base: string, fn: string, args: object): Promis
 		body: JSON.stringify({ fn, args: args ?? {} }),
 	})
 	if (!res.ok) return throwForStatus(base, fn, res)
-	return res.json()
+	return decodeBody<TResult>(base, fn, res)
 }
 
 async function getVerb<TResult>(
@@ -94,7 +102,7 @@ async function getVerb<TResult>(
 		headers: { accept: 'application/json' },
 	})
 	if (!res.ok) return throwForStatus(base, fn, res)
-	return res.json()
+	return decodeBody<TResult>(base, fn, res)
 }
 
 async function postForm<TResult>(
@@ -145,7 +153,7 @@ async function postForm<TResult>(
 		body: params.toString(),
 	})
 	if (!res.ok) return throwForStatus(base, fn, res)
-	return res.json()
+	return decodeBody<TResult>(base, fn, res)
 }
 
 /**

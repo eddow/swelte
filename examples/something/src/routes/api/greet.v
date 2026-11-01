@@ -1,6 +1,7 @@
 // Swelte API route `/api/greet`. V struct -> TS interface projection.
 module greet
 
+import json
 import time
 
 pub struct Session {
@@ -16,18 +17,23 @@ pub:
 	payload string
 }
 
-@[rpc]
-@[sets_cookie]
-pub fn login(args LoginArgs) !Session {
-	if args.payload == '' {
+// login is HTTP (sets the sess cookie) → a verb, not @[rpc].
+// @[rpc] stays protocol-ignorant: typed args in, typed value out (or throw → reject).
+@[post]
+pub fn login(req SwelteRequest) !SwelteResponse {
+	payload := req.form['payload'] or { req.query['payload'] or { '' } }
+	if payload == '' {
 		return error('missing payload')
 	}
-	return Session{
-		id: 'sess_' + args.payload
-		user: args.payload
+	sess := Session{
+		id: 'sess_' + payload
+		user: payload
 		remember: true
 		expires_at: time.now()
 	}
+	mut res := SwelteResponse{ status: 200, headers: {'Content-Type': 'application/json'}, body: json.encode(sess) }
+	res.cookies << SwelteCookie{ name: 'sess', value: sess.id, path: '/', http_only: true, same_site: 'Lax', max_age: 604800 }
+	return res
 }
 
 @[get]
@@ -91,4 +97,31 @@ pub fn tick_stream(req SwelteRequest, emit fn (string) bool) {
 			return
 		}
 	}
+}
+
+// Binary probe: serves bytes with Content-Type passthrough.
+@[get('pdf')]
+pub fn serve_pdf(req SwelteRequest) SwelteResponse {
+	_ = req
+	data := 'PDF-fixture'.bytes()
+	mut res := swelte_bytes(data, 'application/pdf')
+	res.headers['Content-Disposition'] = 'attachment; filename="doc.pdf"'
+	return res
+}
+
+// Status sugar probe: (int, string) -> status+text.
+@[get('created')]
+pub fn make_created(req SwelteRequest) (int, string) {
+	_ = req
+	return 201, 'created'
+}
+
+// Pure rpc: protocol-ignorant typed call (works in #routes/ fetch AND #lib/ WASM).
+// No HTTP types allowed (no SwelteRequest/SwelteResponse/[]u8/(int,string)) — throw → TS reject.
+@[rpc]
+pub fn greet_pure(args LoginArgs) !Session {
+	if args.payload == '' {
+		return error('missing payload')
+	}
+	return Session{ id: 'pure_' + args.payload, user: args.payload, remember: false, expires_at: time.now() }
 }

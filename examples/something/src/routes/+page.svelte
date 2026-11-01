@@ -7,8 +7,8 @@ import type {
 	GreetNarrowResult,
 	SwelteRequest,
 } from '#routes/+page.v'
-import { login, tick_stream } from '#routes/api/greet.v'
-import type { Session } from '#routes/api/greet.v'
+import { login, greet_pure, serve_pdf, make_created, tick_stream } from '#routes/api/greet.v'
+import type { Session, SwelteResponse } from '#routes/api/greet.v'
 import { hash_string } from '#lib/crypto/hash.v'
 import type { HashStringResult } from '#lib/crypto/hash.v'
 import { SwelteRpcError } from '@swelte/core'
@@ -17,6 +17,9 @@ let name = $state('world')
 let greeting: GetGreetingResult = $state('')
 let saved: SaveNameResult = $state('')
 let session: Session | null = $state(null)
+let pureSession: Session | null = $state(null)
+let pdfInfo = $state('')
+let createdInfo = $state('')
 let hashed: HashStringResult = $state('')
 let narrow: GreetNarrowResult = $state('')
 let lastError = $state('')
@@ -57,7 +60,35 @@ async function hashName() {
 async function doLogin() {
 	lastError = ''
 	try {
-		session = await login({ payload: name })
+		{ const res: SwelteResponse = await login({ payload: name })
+		session = JSON.parse(typeof res.body === 'string' ? res.body : await (res.body as Blob).text()) as Session }
+	} catch (e) {
+		showError(e)
+	}
+}
+async function loadPure() {
+	lastError = ''
+	try {
+		pureSession = await greet_pure({ payload: name })
+	} catch (e) {
+		showError(e)
+	}
+}
+async function loadPdf() {
+	lastError = ''
+	try {
+		const res = await serve_pdf({})
+		const blob = res.body as Blob
+		pdfInfo = `pdf ${blob.size}B ${blob.type}`
+	} catch (e) {
+		showError(e)
+	}
+}
+async function loadCreated() {
+	lastError = ''
+	try {
+		const res = await make_created({})
+		createdInfo = `created ${res.status}: ${res.body}`
 	} catch (e) {
 		showError(e)
 	}
@@ -91,7 +122,10 @@ async function streamTicks() {
 		<button onclick={loadGreeting}>Greet (#routes GET)</button>
 		<button onclick={saveName}>Save (#routes POST)</button>
 		<button onclick={hashName}>Hash (#lib WASM)</button>
-		<button onclick={doLogin}>Login (#routes api struct)</button>
+		<button onclick={doLogin}>Login (POST verb + cookie)</button>
+		<button onclick={loadPure}>Pure (rpc typed)</button>
+		<button onclick={loadPdf}>PDF (verb binary)</button>
+		<button onclick={loadCreated}>Created (verb 201)</button>
 		<button onclick={streamTicks}>Stream (#routes SSE)</button>
 		<button onclick={loadNarrow}>Narrow (#routes GET narrow-args)</button>
 	</div>
@@ -106,6 +140,15 @@ async function streamTicks() {
 	{/if}
 	{#if session}
 		<p>session {session.id} for {session.user} (remember={session.remember})</p>
+	{/if}
+	{#if pureSession}
+		<p>pure {pureSession.id} for {pureSession.user}</p>
+	{/if}
+	{#if pdfInfo}
+		<p>{pdfInfo}</p>
+	{/if}
+	{#if createdInfo}
+		<p>{createdInfo}</p>
 	{/if}
 	{#if ticks.length}
 		<p>stream: {ticks.join(' | ')}</p>

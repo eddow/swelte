@@ -67,7 +67,7 @@ export default defineConfig({
   (`base`, `assets`) + `.swelte/environment.js`
   (`browser`, `dev`, `building`, `version`) from config. No V side.
 * **`SwelteRequest.locals` + cookie helpers**: `locals map[string]string`
-  threaded dispatch → verbs/`load`; `swelte_cookie_get/set/delete`
+  threaded dispatch → verbs/`load`; `swelte_cookie_get/set/set_full/delete` (+`swelte_text/json/status/bytes/redirect` constructors)
   emitted. `before_request` passes empty locals (middleware fills it).
 * **`HEAD`/`OPTIONS`**: `GET` arms also match `HEAD` (same handler).
   `OPTIONS` is CORS-preflight-only (`204`, no `Allow:`-on-405 listing).

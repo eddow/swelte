@@ -30,6 +30,33 @@ async function buildStart(root: string): Promise<void> {
 }
 
 describe('generate() validation errors (tmp scaffold, no V binary)', () => {
+	it('@[rpc] with SwelteRequest param throws (protocol-ignorant)', async () => {
+		const root = scaffold({
+			'+page.v': 'module p\n@[rpc] pub fn f(req SwelteRequest) string { return "" }',
+		})
+		await assert.rejects(() => buildStart(root), /protocol-ignorant/)
+	})
+
+	it('@[rpc] with SwelteResponse return throws', async () => {
+		const root = scaffold({
+			'+page.v': 'module p\n@[rpc] pub fn f(args LoginArgs) !SwelteResponse { return SwelteResponse{} }',
+		})
+		await assert.rejects(() => buildStart(root), /typed values/)
+	})
+
+	it('@[rpc] with []u8 return throws (use a verb)', async () => {
+		const root = scaffold({
+			'+page.v': 'module p\n@[rpc] pub fn f(args LoginArgs) []u8 { return []u8{} }',
+		})
+		await assert.rejects(() => buildStart(root), /use a verb/)
+	})
+
+	it('@[get] with non-HTTP return throws', async () => {
+		const root = scaffold({
+			'+page.v': 'module p\n@[get] pub fn g() chan int { return chan int{} }',
+		})
+		await assert.rejects(() => buildStart(root), /verbs are HTTP/)
+	})
 	it('wrong middleware signature throws (before: one SwelteRequest)', async () => {
 		const root = scaffold({
 			'+route.v': 'module r\n@[before] pub fn b(x int, y string) !SwelteRequest { return "" }',
@@ -43,7 +70,7 @@ describe('generate() validation errors (tmp scaffold, no V binary)', () => {
 			'+route.v': 'module r\n@[after] pub fn a(x int) int { return 1 }',
 			'+page.v': 'module p\n@[get] pub fn g() string { return "" }',
 		})
-		await assert.rejects(() => buildStart(root), /must take \(SwelteRequest, int, string\)/)
+		await assert.rejects(() => buildStart(root), /must take/)
 	})
 
 	it('middleware in a leaf file throws (only +route.v)', async () => {
