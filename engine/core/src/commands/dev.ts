@@ -308,6 +308,16 @@ export async function runDev(ctx: Ctx): Promise<void> {
 				// `Origin: http://localhost:<port>` — opt it in so the §10
 				// CSRF guard (403 on foreign non-GET/HEAD) lets it through.
 				SWELTE_CORS_ORIGIN: process.env.SWELTE_CORS_ORIGIN ?? `http://localhost:${port}`,
+				// Item pass-through: config knobs → backend env (env wins
+				// when already set, same rule as the §11 knobs).
+				...(!process.env.SWELTE_TRAILING_SLASH && cfg.trailingSlash !== 'ignore'
+					? { SWELTE_TRAILING_SLASH: cfg.trailingSlash }
+					: {}),
+				...(!process.env.SWELTE_CSRF_CHECK_ORIGIN && cfg.csrf === 'enforce'
+					? { SWELTE_CSRF_CHECK_ORIGIN: '1' }
+					: {}),
+				...(!process.env.SWELTE_METHOD_OVERRIDE && cfg.methodOverride ? { SWELTE_METHOD_OVERRIDE: '1' } : {}),
+				...(!process.env.SWELTE_VERSION && cfg.version !== '' ? { SWELTE_VERSION: cfg.version } : {}),
 			}),
 			stdio: ['ignore', 'pipe', 'pipe'],
 		})

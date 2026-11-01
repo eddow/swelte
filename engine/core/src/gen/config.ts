@@ -15,6 +15,20 @@ export interface SwelteOptions {
 	distDir?: string
 	port?: number
 	corsOrigin?: string
+	/** URL trailing-slash policy: 'always' | 'never' | 'ignore' (default 'ignore' = today's behavior). */
+	trailingSlash?: 'always' | 'never' | 'ignore'
+	/** Base path for generated URLs (SvelteKit `paths.base` equivalent). Default ''. */
+	base?: string
+	/** Assets prefix for generated URLs (`paths.assets` equivalent). Defaults to base. */
+	assets?: string
+	/** Content-Security-Policy value; when set, transformIndexHtml injects the meta tag. */
+	csp?: string
+	/** CSRF origin check: 'ignore' (default) or 'enforce' (reject cross-origin mutating requests). */
+	csrf?: 'ignore' | 'enforce'
+	/** Honor `?_method=` override before verb dispatch. Default false. */
+	methodOverride?: boolean
+	/** App version stamp (SvelteKit `version` equivalent). Defaults to package.json version. */
+	version?: string
 }
 
 /** Project config: standard Svelte config + our `swelte` key. */
@@ -66,6 +80,16 @@ function normalize(raw: SwelteOptions | null | undefined): Required<SwelteOption
 		distDir: String(r.distDir ?? DEFAULTS.distDir),
 		port: typeof r.port === 'number' && Number.isFinite(r.port) ? r.port : 8131,
 		corsOrigin: String(r.corsOrigin ?? ''),
+		trailingSlash:
+			r.trailingSlash === 'always' || r.trailingSlash === 'never' || r.trailingSlash === 'ignore'
+				? r.trailingSlash
+				: 'ignore',
+		base: String(r.base ?? ''),
+		assets: String(r.assets ?? (r.base ?? '')),
+		csp: String(r.csp ?? ''),
+		csrf: r.csrf === 'enforce' ? 'enforce' : 'ignore',
+		methodOverride: r.methodOverride === true,
+		version: String(r.version ?? ''),
 	}
 }
 

@@ -30,6 +30,20 @@ export interface SweltePluginOptions {
 	/** V backend base URL for dev RPC proxy (e.g. http://localhost:8131).
 	 * Falls back to SWELTE_V_BACKEND_URL (injected by `swelte dev`). Unset = no proxy. */
 	vBackendUrl?: string
+	/** URL trailing-slash policy ('always'|'never'|'ignore'). Env SWELTE_TRAILING_SLASH wins. */
+	trailingSlash?: 'always' | 'never' | 'ignore'
+	/** Base path for generated URLs (SvelteKit `paths.base` equivalent). */
+	base?: string
+	/** Assets prefix (SvelteKit `paths.assets` equivalent). Defaults to base. */
+	assets?: string
+	/** Content-Security-Policy value; injected as a meta tag. Env SWELTE_CSP wins. */
+	csp?: string
+	/** CSRF origin check: 'ignore' (default) or 'enforce'. Env SWELTE_CSRF_CHECK_ORIGIN wins. */
+	csrf?: 'ignore' | 'enforce'
+	/** Honor `?_method=` override before verb dispatch. Env SWELTE_METHOD_OVERRIDE wins. */
+	methodOverride?: boolean
+	/** App version stamp. Defaults to package.json version. Env SWELTE_VERSION wins. */
+	version?: string
 }
 
 /** Re-export the unified config type + helper so projects can
@@ -238,6 +252,16 @@ export function svelteModKind(mod: string): 'page' | 'wrapper' | 'error' | 'plai
 	return 'plain'
 }
 
+/** Route groups `(name)` — disk-only folders that contribute no URL segment.
+ * `(admin)/users` -> `/users`. Syntactic only: a whole segment wrapped in
+ * parens. Dynamics, `+page`, `+route` pass through untouched. */
+export function stripRouteGroups(mod: string): string {
+	return mod
+		.split('/')
+		.filter((seg) => seg !== '' && !/^\([^/]+\)$/.test(seg))
+		.join('/')
+}
+
 /** URL pattern for a `.svelte` mod (mirrors routeFor leaf/dir rules).
  * Returns null for wrappers (+route) and unknown +-files. */
 export function svelteRouteFor(mod: string): string | null {
@@ -245,9 +269,13 @@ export function svelteRouteFor(mod: string): string | null {
 	if (kind === null || kind === 'wrapper' || kind === 'error') return null
 	if (kind === 'page') {
 		const dir = mod.includes('/') ? mod.slice(0, mod.lastIndexOf('/')) : ''
-		return dir === '' || dir === 'api' ? '/' : `/${dir}`
+		const stripped = stripRouteGroups(dir)
+		// A page that lives ONLY inside groups (`(mkt)/+page`) is `/` — same
+		// folder-root rule as `+page` (folder-root claims the parent URL).
+		if (stripped === '' && dir !== '') return '/'
+		return stripped === '' || stripped === 'api' ? '/' : `/${stripped}`
 	}
-	return `/${mod}`
+	return `/${stripRouteGroups(mod)}`
 }
 
 /** SSR manifest entry: route → svelte file + data pairing.
@@ -377,13 +405,15 @@ export function routeFor(routesDir: string, routesAbs: string, file: string): st
 		// listVFiles is deterministic; route identity never depends
 		// on it (pure function of mod).
 		const dir = mod.includes('/') ? mod.slice(0, mod.lastIndexOf('/')) : ''
+		const strippedDir = stripRouteGroups(dir)
 		if (dir !== '')
-			validateDynamicSegs(`${routesDir}/${relPosix(routesAbs, file)}`, dir.split('/'))
-		return dir === '' || dir === 'api' ? '/' : `/${dir}`
+			validateDynamicSegs(`${routesDir}/${relPosix(routesAbs, file)}`, strippedDir.split('/'))
+		if (strippedDir === '' && dir !== '') return '/'
+		return strippedDir === '' || strippedDir === 'api' ? '/' : `/${strippedDir}`
 	}
-	const segs = mod.split('/')
+	const segs = stripRouteGroups(mod).split('/')
 	validateDynamicSegs(`${routesDir}/${relPosix(routesAbs, file)}`, segs)
-	return `/${mod}`
+	return '/' + segs.join('/')
 }
 
 export function validateDynamicSegs(file: string, segs: string[]): void {
@@ -392,11 +422,22 @@ export function validateDynamicSegs(file: string, segs: string[]): void {
 		const s = segs[i]
 		if (!s.includes('[') && !s.includes(']')) continue
 		const single = /^\[([A-Za-z_][A-Za-z0-9_]*)\]$/.exec(s)
+		const optional = /^\[\[([A-Za-z_][A-Za-z0-9_]*)\]\]$/.exec(s)
 		const rest = /^\[\.\.\.([A-Za-z_][A-Za-z0-9_]*)\]$/.exec(s)
 		if (single) {
 			if (seen.has(single[1]))
 				throw new Error(`[swelte] ${file}: duplicate route param [${single[1]}]`)
 			seen.add(single[1])
+			continue
+		}
+		if (optional) {
+			// `[[slug]]` matches zero-or-one segment; last-segment only
+			// (same positional rule as the catch-all — unambiguous).
+			if (i !== segs.length - 1)
+				throw new Error(`[swelte] ${file}: [[${optional[1]}]] optional param must be the last segment`)
+			if (seen.has(optional[1]))
+				throw new Error(`[swelte] ${file}: duplicate route param [[${optional[1]}]]`)
+			seen.add(optional[1])
 			continue
 		}
 		if (rest) {
@@ -407,7 +448,7 @@ export function validateDynamicSegs(file: string, segs: string[]): void {
 			seen.add(rest[1])
 			continue
 		}
-		throw new Error(`[swelte] ${file}: bad dynamic segment '${s}' (want [id] or [...rest])`)
+		throw new Error(`[swelte] ${file}: bad dynamic segment '${s}' (want [id], [[slug]], or [...rest])`)
 	}
 }
 
@@ -488,9 +529,9 @@ export function parseStructs(src: string): VStruct[] {
 export function routeParams(route: string): string[] {
 	const out: string[] = []
 	for (const m of route.matchAll(
-		/\[\.\.\.([A-Za-z_][A-Za-z0-9_]*)\]|\[([A-Za-z_][A-Za-z0-9_]*)\]/g
+		/\[\[([A-Za-z_][A-Za-z0-9_]*)\]\]|\[\.\.\.([A-Za-z_][A-Za-z0-9_]*)\]|\[([A-Za-z_][A-Za-z0-9_]*)\]/g
 	))
-		out.push(m[1] ?? m[2])
+		out.push(m[1] ?? m[2] ?? m[3])
 	return out
 }
 
@@ -588,31 +629,42 @@ export function wasmReturnKind(vtype: string): string | null {
 	return null
 }
 
+/** Route dynamic-segment pattern ([id] / [...rest] / [[slug]]) — shared by
+ * jsFetchFor stub codegen and runtime matching. */
+export const dynSegPattern =
+	/\[\[([A-Za-z_][A-Za-z0-9_]*)\]\]|\[\.\.\.([A-Za-z_][A-Za-z0-9_]*)\]|\[([A-Za-z_][A-Za-z0-9_]*)\]/
+
 /** Codegen: fetch stub for a `#routes/*.v` file. Big `v` template -
   verbatim JS with `${}` inserts (no per-line push/escaping). */
-export function jsFetchFor(route: string, fns: RpcFn[]): string {
+export function jsFetchFor(route: string, fns: RpcFn[], trailingSlash = 'ignore'): string {
 		const hasDyn = route.includes('[')
-		const dynSeg = /\[\.\.\.([A-Za-z_][A-Za-z0-9_]*)\]|\[([A-Za-z_][A-Za-z0-9_]*)\]/
-		const dynHelper = hasDyn
-			? `
+		// Dynamics: [id] required, [...rest] catch-all, [[slug]] optional (item 2).
+		const dynSeg = dynSegPattern
+		const dynHelper =
+			hasDyn || trailingSlash === 'always' || trailingSlash === 'never'
+				? `
 const __swelteBase = ${JSON.stringify(route)}
+const __swelteTrailing = ${JSON.stringify(trailingSlash === 'always' ? 'always' : trailingSlash === 'never' ? 'never' : '')}
 function __swelteUrl(args = {}) {
 	let u = __swelteBase
   for (const m of __swelteBase.matchAll(${dynSeg.source}/g)) {
-		const name = m[1] ?? m[2]
+		const name = m[1] ?? m[2] ?? m[3]
 		const v = args?.[name]
+		if (m[1] !== undefined && (v === undefined || v === null || v === '')) { u = u.replace('/' + m[0], ''); continue }
 		if (v === undefined || v === null) throw new Error(\\\`swelte: missing route param '\\\${name}' for \\\${__swelteBase}\\\`);
-    const enc = m[1] !== undefined ? String(v).split("/").map(encodeURIComponent).join("/") : encodeURIComponent(String(v));
+    const enc = m[2] !== undefined ? String(v).split("/").map(encodeURIComponent).join("/") : encodeURIComponent(String(v));
     u = u.replace(m[0], enc);
   }
+  if (__swelteTrailing === 'always' && u !== '/' && !u.endsWith('/')) u += '/';
+  if (__swelteTrailing === 'never' && u.length > 1 && u.endsWith('/')) u = u.slice(0, -1);
 	return u
 }
 `
-			: ''
+				: ''
 		const stripCall = (call: string) => `
 	const { __swelteRest, ...__swelteArgs } = (() => {
 		const c = { ...(args ?? {}) }
-    for (const m of __swelteBase.matchAll(${dynSeg.source}/g)) delete c[m[1] ?? m[2]];
+    for (const m of __swelteBase.matchAll(${dynSeg.source}/g)) delete c[m[1] ?? m[2] ?? m[3]];
     return c;
   })();
 	void __swelteRest
@@ -676,6 +728,16 @@ export function swelte(options: SweltePluginOptions = {}): Plugin {
 	let routesDir = options.routesDir ?? 'src/routes'
 	let libDir = options.libDir ?? 'src/lib'
 	let outDir = options.outDir ?? '.swelte'
+	// Roadmap §1: SvelteKit knob parity (config < env — env wins at runtime,
+	// like BODY_LIMIT/RATE_LIMIT; generate() bakes the resolved value).
+	let trailingSlash: 'always' | 'never' | 'ignore' =
+		options.trailingSlash === 'always' || options.trailingSlash === 'never' ? options.trailingSlash : 'ignore'
+	let appBase = String(options.base ?? '')
+	let appAssets = String(options.assets ?? (options.base ?? ''))
+	let appCsp = String(options.csp ?? '')
+	let csrfMode: 'ignore' | 'enforce' = options.csrf === 'enforce' ? 'enforce' : 'ignore'
+	let methodOverride = options.methodOverride === true
+	let appVersion = String(options.version ?? '')
 	// Resolved per-generate() against the Vite root (never at construction:
 	// outDir is relative and the cwd at plugin-construction time is not the
 	// project root when loaded via vite.config.ts).
@@ -1099,6 +1161,16 @@ fn swelte_method_not_allowed() (int, string, []string) {
 	return 405, '{"error":"method not allowed"}', []string{}
 }
 
+fn swelte_err_unknown(path string, fn_name string, available []string) (int, string, []string) {
+	mut avail := '['
+	for i, a in available {
+		if i > 0 { avail += ',' }
+		avail += json.encode(a)
+	}
+	avail += ']'
+	return 404, '{"error":"unknown fn","fn":' + json.encode(fn_name) + ',"path":' + json.encode(path) + ',"available":' + avail + '}', []string{}
+}
+
 fn swelte_method_gate(method string) (int, string, []string) {
 	if method == 'POST' || method == 'PUT' || method == 'PATCH' || method == 'DELETE' { return swelte_forbidden() }
 	return swelte_method_not_allowed()
@@ -1118,19 +1190,26 @@ pub mut:
 	headers map[string]string
 	cookies map[string]string
 	params map[string]string
+	// Item 7 locals: per-request server-side bag, threaded from
+	// before_request through middleware into verbs and loads.
+	locals map[string]string
 	method string
 	path string
 	qualifier string
 }
 
-fn swelte_err_unknown(path string, fn_name string, available []string) (int, string, []string) {
-	mut avail := '['
-	for i, a in available {
-		if i > 0 { avail += ',' }
-		avail += json.encode(a)
-	}
-	avail += ']'
-	return 404, '{"error":"unknown fn","fn":' + json.encode(fn_name) + ',"path":' + json.encode(path) + ',"available":' + avail + '}', []string{}
+// Item 7 cookie helpers: read from the request map;
+// writes append to the response cookie list.
+fn swelte_cookie_get(req SwelteRequest, name string) string {
+	return req.cookies[name] or { '' }
+}
+
+fn swelte_cookie_set(mut out []string, name string, value string) {
+	out << name + '=' + value + '; Path=/; HttpOnly; SameSite=Lax'
+}
+
+fn swelte_cookie_delete(mut out []string, name string) {
+	out << name + '=; Path=/; Max-Age=0'
 }
 
 fn swelte_err_unknown_cookies(path string, fn_name string, available []string) (int, string, []string) {
@@ -1193,6 +1272,18 @@ fn swelte_match_route(pattern string, path string) (bool, map[string]string) {
 		params[name] = rest_parts.join("/")
 		return true, params
 	}
+	// Item 2 optional last segment: matches with or without it.
+	if psegs.len > 0 && psegs.last().starts_with('[[') {
+		name := psegs.last()[2..psegs.last().len - 2]
+		base := psegs.len - 1
+		if segs.len != base && segs.len != psegs.len { return false, params }
+		for i in 0 .. base {
+			ps := psegs[i]
+			if ps.starts_with('[') { if segs[i] == '' { return false, params } params[ps[1..ps.len - 1]] = swelte_unescape(segs[i]) } else if ps != segs[i] { return false, params }
+		}
+		if segs.len == psegs.len { params[name] = swelte_unescape(segs[base]) } else { params[name] = '' }
+		return true, params
+	}
 	if psegs.len != segs.len { return false, params }
 	for i in 0 .. psegs.len {
 		ps := psegs[i]
@@ -1201,20 +1292,20 @@ fn swelte_match_route(pattern string, path string) (bool, map[string]string) {
 	return true, params
 }
 
-pub fn swelte_route(path string, method string, query map[string]string, headers map[string]string, cookies map[string]string, body string, content_type string, qualifier string) (int, string, []string) {
+pub fn swelte_route(path string, method string, query map[string]string, headers map[string]string, cookies map[string]string, locals map[string]string, body string, content_type string, qualifier string) (int, string, []string) {
 	norm_path := swelte_normalize_path(path)`,
 			...dispatched
 				.filter((x) => !x.route.includes('['))
 				.map(
 					(d) =>
-						`\tif norm_path == ${vJsonStr(d.route)} { return ${d.prefix}dispatch(norm_path, method, query, map[string]string{}, headers, cookies, body, content_type, qualifier) }`
+						`\tif norm_path == ${vJsonStr(d.route)} { return ${d.prefix}dispatch(norm_path, method, query, map[string]string{}, headers, cookies, locals, body, content_type, qualifier) }`
 				),
 			// Dynamic arms (section 8) after exact arms: static beats dynamic; among
 			// dynamics, fewer [segs] first, [...rest] catch-all last (stable sort).
 			...dynSorted().map(
 				(d) =>
 					`\t${d.prefix}matched, ${d.prefix}params := swelte_match_route(${vJsonStr(d.route)}, norm_path)
-	if ${d.prefix}matched { return ${d.prefix}dispatch(norm_path, method, query, ${d.prefix}params, headers, cookies, body, content_type, qualifier) }`
+	if ${d.prefix}matched { return ${d.prefix}dispatch(norm_path, method, query, ${d.prefix}params, headers, cookies, locals, body, content_type, qualifier) }`
 			),
 			`\treturn 404, '{"error":"not found"}', []string{}
 }
@@ -1458,7 +1549,7 @@ module routes
 		if (befores.length === 0 && afters.length === 0) {
 			return [
 				...o,
-				`pub fn ${prefix}dispatch(path string, method string, query map[string]string, params map[string]string, headers map[string]string, cookies map[string]string, body string, content_type string, qualifier string) (int, string, []string) {`,
+				`pub fn ${prefix}dispatch(path string, method string, query map[string]string, params map[string]string, headers map[string]string, cookies map[string]string, locals map[string]string, body string, content_type string, qualifier string) (int, string, []string) {`,
 				dispatchBody(prefix, mod, fns, null),
 				'',
 				emitSseEvents(prefix, mod, fns),
@@ -1467,7 +1558,7 @@ module routes
 		}
 		return [
 			...o,
-			`pub fn ${prefix}dispatch(path string, method string, query map[string]string, params map[string]string, headers map[string]string, cookies map[string]string, body string, content_type string, qualifier string) (int, string, []string) {
+			`pub fn ${prefix}dispatch(path string, method string, query map[string]string, params map[string]string, headers map[string]string, cookies map[string]string, locals map[string]string, body string, content_type string, qualifier string) (int, string, []string) {
 	mut form_before := map[string]string{}
 	mut files_before := map[string]string{}
 	if content_type.contains('multipart/form-data') {
@@ -1486,7 +1577,7 @@ module routes
 	} else if content_type.contains('application/x-www-form-urlencoded') || body != '' {
 		form_before = http.parse_form(body)
 	}
-	mut swelte_req := SwelteRequest{ query: query, form: form_before, files: files_before, headers: headers, cookies: cookies, params: params, method: method, path: path, qualifier: qualifier }`,
+	mut swelte_req := SwelteRequest{ query: query, form: form_before, files: files_before, headers: headers, cookies: cookies, params: params, locals: locals, method: method, path: path, qualifier: qualifier }`,
 			beforeCalls,
 			`	mut swelte_cookies := []string{}
 	code_before, body_before, verbs_cookies := ${prefix}dispatch_verbs(path, method, query, params, headers, cookies, body, content_type, qualifier, swelte_req)
@@ -1502,7 +1593,7 @@ fn ${prefix}dispatch_verbs(path string, method string, query map[string]string, 
 			// handler calls): declare once at function scope.
 			`\t_ = body
 	_ = content_type
-	mut req := SwelteRequest{ query: query, form: map[string]string{}, files: map[string]string{}, headers: headers, cookies: cookies, params: params, method: method, path: path, qualifier: qualifier }`,
+	mut req := swelte_req`,
 			dispatchBody(prefix, mod, fns, 'swelte_req'),
 			emitSseEvents(prefix, mod, fns),
 			emitLoadCascade(prefix, loads),
@@ -1673,7 +1764,7 @@ ${body}
 		const sseArm =
 			sseFns.length === 0
 				? ''
-				: `\tif method == 'GET' && headers['Accept'] or { headers['accept'] or { '' } }.contains('text/event-stream') {\n${sseCheck}\n\t\treturn swelte_err_bad_cookies(path, '', 'sse handled in before_request')\n\t}`
+				: `	if method == 'GET' && headers['Accept'] or { headers['accept'] or { '' } }.contains('text/event-stream') {\n${sseCheck}\n\t\treturn swelte_err_bad_cookies(path, '', 'sse handled in before_request')\n\t}`
 		// §13: with @[before] wrappers the request already exists
 		// (pre-filtered `swelte_req`, parsed once in dispatch) — reuse
 		// it directly, no second multipart parse. Unchained leaves
@@ -1681,7 +1772,7 @@ ${body}
 		const reqHead = (vb: string): string =>
 			sharedReq != null
 				? `\t\treq = ${sharedReq}\n\t\treq.method = '${vb.toUpperCase()}'`
-				: `\t\tmut form := map[string]string{}\n\t\tmut files := map[string]string{}\n\t\tif content_type.contains('multipart/form-data') {\n\t\t\tmut boundary := ''\n\t\t\tfor part in content_type.split(';') {\n\t\t\t\tp := part.trim_space()\n\t\t\t\tif p.starts_with('boundary=') { boundary = p.all_after('boundary=').trim('"') }\n\t\t\t}\n\t\t\tmut swelte_raw_files := map[string][]http.FileData{}\n\t\t\tif boundary != '' { form, swelte_raw_files = http.parse_multipart_form(body, boundary) }\n\t\t\tfor k, fs in swelte_raw_files {\n\t\t\t\tmut swelte_names := []string{}\n\t\t\t\tfor f in fs { swelte_names << f.filename }\n\t\t\t\tfiles[k] = swelte_names.join(';')\n\t\t}\n\t\t} else if content_type.contains('application/x-www-form-urlencoded') || body != '' {\n\t\t\tform = http.parse_form(body)\n\t\t}\n\t\tmut req := SwelteRequest{ query: query, form: form, files: files, headers: headers, cookies: cookies, params: params, method: '${vb.toUpperCase()}', path: path, qualifier: qualifier }`
+				: `\t\tmut form := map[string]string{}\n\t\tmut files := map[string]string{}\n\t\tif content_type.contains('multipart/form-data') {\n\t\t\tmut boundary := ''\n\t\t\tfor part in content_type.split(';') {\n\t\t\t\tp := part.trim_space()\n\t\t\t\tif p.starts_with('boundary=') { boundary = p.all_after('boundary=').trim('"') }\n\t\t\t}\n\t\t\tmut swelte_raw_files := map[string][]http.FileData{}\n\t\t\tif boundary != '' { form, swelte_raw_files = http.parse_multipart_form(body, boundary) }\n\t\t\tfor k, fs in swelte_raw_files {\n\t\t\t\tmut swelte_names := []string{}\n\t\t\t\tfor f in fs { swelte_names << f.filename }\n\t\t\t\tfiles[k] = swelte_names.join(';')\n\t\t}\n\t\t} else if content_type.contains('application/x-www-form-urlencoded') || body != '' {\n\t\t\tform = http.parse_form(body)\n\t\t}\n\t\tmut req := SwelteRequest{ query: query, form: form, files: files, headers: headers, cookies: cookies, params: params, locals: locals, method: '${vb.toUpperCase()}', path: path, qualifier: qualifier }`
 		const verbArm = (vb: string): string => {
 			const hs = fns.filter((f) => f.attr === vb)
 			if (hs.length === 0) return ''
@@ -1689,12 +1780,14 @@ ${body}
 			const tail = quals.length
 				? `\t\treturn swelte_err_unknown_qual_cookies(path, [${quals.map((q) => vJsonStr(q)).join(', ')}])`
 				: `\t\treturn swelte_err_bad_cookies(path, '', 'missing qualifier')`
+			// Item 8: HEAD auto-handling — a GET handler also answers HEAD.
+			const methodCond = vb === 'get' ? `	if method == 'GET' || method == 'HEAD' {` : `	if method == '${vb.toUpperCase()}' {`
 			return [
-				`\tif method == '${vb.toUpperCase()}' {`,
+				methodCond,
 				reqHead(vb),
 				list(hs, verbBranch),
 				tail,
-				`\t}`,
+				`	}`,
 			].join('\n')
 		}
 		const verbBranch = (h: RpcFn): string => {
@@ -1738,6 +1831,15 @@ ${body}
 					if (options.routesDir === undefined) routesDir = cfg.routesDir
 					if (options.libDir === undefined) libDir = cfg.libDir
 					if (options.outDir === undefined) outDir = cfg.outDir
+					if (options.trailingSlash === undefined && cfg.trailingSlash !== 'ignore')
+						trailingSlash = cfg.trailingSlash
+					if (options.base === undefined && cfg.base !== '') appBase = cfg.base
+					if (options.assets === undefined && (cfg.assets !== '' || cfg.base !== ''))
+						appAssets = cfg.assets
+					if (options.csp === undefined && cfg.csp !== '') appCsp = cfg.csp
+					if (options.csrf === undefined && cfg.csrf === 'enforce') csrfMode = 'enforce'
+					if (options.methodOverride === undefined && cfg.methodOverride) methodOverride = true
+					if (options.version === undefined && cfg.version !== '') appVersion = cfg.version
 				} catch {
 					/* defaults stand */
 				}
@@ -1764,6 +1866,18 @@ ${body}
 					const base = mod.split('/').pop() || 'index'
 					const file = join(dir, `${base}.d.ts`)
 					const out: string[] = ['// Auto-generated by swelte from V signatures. Do not edit.', '']
+					if (route !== '') {
+						// Per-route params + id (SvelteKit `$types` lite):
+						// `Params` lists the dynamic segments, `RouteId` the pattern.
+						const dynPs = routeParams(route)
+						out.push(
+							`export type RouteId = ${JSON.stringify(route)}`,
+							`export interface Params {`,
+							...dynPs.map((n) => `	${n}: string`),
+							`}`,
+							``,
+						)
+					}
 					if (fns.some((f) => f.attr !== 'rpc')) {
 						out.push(`export interface SwelteRequest {
 	query: Record<string, string>
@@ -1772,6 +1886,7 @@ ${body}
 	headers: Record<string, string>
 	cookies: Record<string, string>
 	params: Record<string, string>
+	locals: Record<string, string>
 	method: string
 	path: string
 	qualifier: string
@@ -2038,9 +2153,10 @@ ${list(params, (p) => `\t${p.name}${p.optional ? '?' : ''}: ${p.tstype}\n`)}}
 					const mod = f.endsWith('.svelte')
 						? rel.replace(/\.svelte$/, '')
 						: modulePath(routesAbs, f)
-					const slash = mod.lastIndexOf('/')
-					const base = slash < 0 ? mod : mod.slice(slash + 1)
-					const dir = slash < 0 ? '' : mod.slice(0, slash)
+					const strippedForClaim = stripRouteGroups(mod)
+					const slash = strippedForClaim.lastIndexOf('/')
+					const base = slash < 0 ? strippedForClaim : strippedForClaim.slice(slash + 1)
+					const dir = slash < 0 ? '' : strippedForClaim.slice(0, slash)
 					if (base !== '+page' && base !== 'index') continue
 					if (dir === '') continue // root +page has no sibling to collide with
 					// +route wrappers never compete (checked before this loop
@@ -2166,9 +2282,11 @@ ${list(params, (p) => `\t${p.name}${p.optional ? '?' : ''}: ${p.tstype}\n`)}}
 						// same shape (`users/[id]` vs `users/[slug]`) are ambiguous —
 						// build error naming both files.
 						for (const d of dispatched) {
-							const shA = d.route.replace(/\[\.\.\.[^\]]+\]/g, '...').replace(/\[[^\]]+\]/g, '[]')
+							const shA = d.route.replace(/\[\.\.\.[^\]]+\]/g, '...').replace(/\[\[([^\]]+)\]\]/g, '[?]')
+								.replace(/\[[^\]]+\]/g, '[]')
 							const shB = (route as string)
 								.replace(/\[\.\.\.[^\]]+\]/g, '...')
+								.replace(/\[\[([^\]]+)\]\]/g, '[?]')
 								.replace(/\[[^\]]+\]/g, '[]')
 							if (route.includes('[') && shA === shB)
 								throw new Error(
@@ -2196,7 +2314,7 @@ ${list(params, (p) => `\t${p.name}${p.optional ? '?' : ''}: ${p.tstype}\n`)}}
 							mod.split('/').slice(0, -1).join('/')
 						)
 						mkdirSync(genModDir, { recursive: true })
-						writeFileSync(join(genModDir, `${mod.split('/').pop()}.js`), jsFetchFor(route, fns))
+						writeFileSync(join(genModDir, `${mod.split('/').pop()}.js`), jsFetchFor(route, fns, trailingSlash))
 					}
 					// Per-file dispatchers: one `module routes` file per routes file,
 					// all under `.swelte/routes/` (never the project root). The v
@@ -2513,7 +2631,60 @@ declare module '*.v' {
 	export default __swelte_untyped
 }
 `)
+					// Roadmap §1.5 + §1.9: virtual `#app/paths` + `#app/environment`
+					// ambient declarations — resolved at runtime by the aliases below.
+					decls.push(
+						`declare module '#app/paths' {`,
+						`	export const base: string;`,
+						`	export const assets: string;`,
+						`}`,
+						``,
+						`declare module '#app/environment' {`,
+						`	export const browser: boolean;`,
+						`	export const dev: boolean;`,
+						`	export const building: boolean;`,
+						`	export const version: string;`,
+						`}`,
+						``,
+					)
 					writeFileSync(join(genDir, 'v-shim.d.ts'), decls.join('\n'))
+				}
+				// Roadmap §1.5 + §1.9: virtual `#app/paths` + `#app/environment`
+				// modules and the version stamp — generated from loadConfig()
+				// (SvelteKit `$app/*` equivalent, build-time constants, no V side).
+				{
+					// Version falls back to package.json (SvelteKit `version` equivalent).
+					if (appVersion === '') {
+						try {
+							const pkg = JSON.parse(readFileSync(resolve(root, 'package.json'), 'utf8')) as {
+								version?: unknown
+							}
+							if (typeof pkg.version === 'string') appVersion = pkg.version
+						} catch {
+							/* no package.json version */
+						}
+					}
+					const esc = (s: string) => JSON.stringify(s)
+					writeFileSync(
+						join(genDir, 'paths.js'),
+						`// Auto-generated by swelte. Do not edit.\nexport const base = ${esc(appBase)};\nexport const assets = ${esc(appAssets)};\n`
+					)
+					writeFileSync(
+						join(genDir, 'paths.d.ts'),
+						`// Auto-generated by swelte. Do not edit.\nexport declare const base: string;\nexport declare const assets: string;\n`
+					)
+					writeFileSync(
+						join(genDir, 'environment.js'),
+						`// Auto-generated by swelte. Do not edit.\nexport const browser = typeof window !== 'undefined';\nexport const dev = ${process.env.NODE_ENV === 'production' ? 'false' : 'true'};\nexport const building = false;\nexport const version = ${esc(appVersion)};\n`
+					)
+					writeFileSync(
+						join(genDir, 'environment.d.ts'),
+						`// Auto-generated by swelte. Do not edit.\nexport declare const browser: boolean;\nexport declare const dev: boolean;\nexport declare const building: boolean;\nexport declare const version: string;\n`
+					)
+					writeFileSync(
+						join(genDir, 'version.js'),
+						`// Auto-generated by swelte. Do not edit.\nexport const version = ${esc(appVersion)};\nexport const buildTime = ${esc(new Date().toISOString())};\n`
+					)
 				}
 				for (const w of warnings) console.warn(`[swelte] ${w}`)
 				// Roadmap 7: client router — UI composition without manual imports.
@@ -2591,6 +2762,14 @@ function matchSegs(pattern, pathname) {
 	for (let pi = 0; pi < pat.length; pi++) {
 		const seg = pat[pi]
 		if (seg.startsWith('[...') && seg.endsWith(']')) { params[seg.slice(4, -1)] = got.slice(gi).map(decodeURIComponent).join('/'); gi = got.length; break }
+		// Item 2 double-bracket optional: matches zero or one segment.
+		if (seg.startsWith('[[') && seg.endsWith(']]')) {
+			const name = seg.slice(2, -2)
+			if (pi === pat.length - 1 && gi >= got.length) { params[name] = ''; break }
+			if (gi >= got.length || !got[gi]) return null
+			params[name] = decodeURIComponent(got[gi++])
+			continue
+		}
 		if (seg.startsWith('[') && seg.endsWith(']')) { if (gi >= got.length || !got[gi]) return null; params[seg.slice(1, -1)] = decodeURIComponent(got[gi++]); continue }
 		if (got[gi++] !== seg) return null
 	}
@@ -2732,6 +2911,8 @@ export function hydrateSwelteRoute(target, pathname, errorProps) {
 					alias: [
 						{ find: '#routes', replacement: routesAbs },
 						{ find: '#lib', replacement: libAbs },
+						{ find: '#app/paths', replacement: join(resolve(root, outDir), 'paths.js') },
+						{ find: '#app/environment', replacement: join(resolve(root, outDir), 'environment.js') },
 					],
 				},
 			}
@@ -2766,6 +2947,19 @@ export function hydrateSwelteRoute(target, pathname, errorProps) {
 			}
 			if (!out.includes('<!--ssr-head-->') && out.includes('</head>')) {
 				out = out.replace('</head>', '<!--ssr-head--></head>')
+			}
+			// CSP knob (SvelteKit `csp` equivalent): configured value ships
+			// as a meta tag so static + SSR shells enforce it without a
+			// server header change. Skipped when unset (today's behavior).
+			// Closure over the generate()-resolved value — `this` is the
+			// Vite plugin context here, not our closure.
+			{
+				const csp = String(appCsp ?? '')
+				if (csp !== '' && !out.includes('http-equiv="Content-Security-Policy"')) {
+					const tag = `<meta http-equiv="Content-Security-Policy" content="${csp.replace(/"/g, '&quot;')}">`
+					if (out.includes('</head>')) out = out.replace('</head>', `${tag}</head>`)
+					else out = `${tag}${out}`
+				}
 			}
 			return out
 		},

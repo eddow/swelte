@@ -52,6 +52,29 @@ describe('config normalization (tmp roots)', () => {
 		assert.ok(warns.join('\n').includes('failed to load'))
 	})
 
+	it('sveltekit knobs normalize (trailingSlash/base/csp/csrf/methodOverride/version)', async () => {
+		const root = mkdtempSync(join(tmpdir(), 'swelte-cfg-'))
+		writeFileSync(
+			join(root, 'svelte.config.js'),
+			`export default { swelte: { trailingSlash: 'always', base: '/app', csp: "default-src 'self'", csrf: 'enforce', methodOverride: true, version: '1.2.3' } }`
+		)
+		const cfg = await loadConfig(root)
+		assert.equal(cfg.trailingSlash, 'always')
+		assert.equal(cfg.base, '/app')
+		assert.equal(cfg.assets, '/app')
+		assert.equal(cfg.csp, "default-src 'self'")
+		assert.equal(cfg.csrf, 'enforce')
+		assert.equal(cfg.methodOverride, true)
+		assert.equal(cfg.version, '1.2.3')
+	})
+
+	it('bad trailingSlash falls back to ignore', async () => {
+		const root = mkdtempSync(join(tmpdir(), 'swelte-cfg-'))
+		writeFileSync(join(root, 'svelte.config.js'), `export default { swelte: { trailingSlash: 'sometimes' } }`)
+		const cfg = await loadConfig(root)
+		assert.equal(cfg.trailingSlash, 'ignore')
+	})
+
 	it('renderClientEntry prepends hook only when src/client.ts exists', async () => {
 		const { templatesDir } = await import('./config.js')
 		const fromUrl = import.meta.url

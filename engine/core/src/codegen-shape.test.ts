@@ -254,14 +254,21 @@ describe('codegen shape snapshots (fetch/SSE/dispatcher)', () => {
 	it('rerun is byte-identical (order-stable)', async () => {
 		const root = scaffold()
 		await generate(root)
-		const snap1 = tree(root, '.swelte')
-			.map((f) => f + '\n' + readFileSync(join(root, '.swelte', f), 'utf8'))
-			.join('\n====\n')
+		const snapTree = () =>
+			tree(root, '.swelte')
+				// Item 9: version.js embeds buildTime (ISO wall clock) — it
+				// changes every run by design. Compare it separately below.
+				.filter((f) => f !== 'version.js')
+				.map((f) => f + '\n' + readFileSync(join(root, '.swelte', f), 'utf8'))
+				.join('\n====\n')
+		const snap1 = snapTree()
 		await generate(root)
-		const snap2 = tree(root, '.swelte')
-			.map((f) => f + '\n' + readFileSync(join(root, '.swelte', f), 'utf8'))
-			.join('\n====\n')
+		const snap2 = snapTree()
 		assert.equal(snap2, snap1)
+		// version.js: version pin stable + buildTime present (ISO format).
+		const vjs = readFileSync(join(root, '.swelte', 'version.js'), 'utf8')
+		assert.ok(vjs.includes('export const version'), vjs.slice(0, 200))
+		assert.ok(vjs.includes('export const buildTime'), vjs.slice(0, 300))
 	})
 
 	it('ssr-manifest lists svelte pages; headless api stays out of entries', async () => {
@@ -386,9 +393,13 @@ describe('item 11 — codegen golden project (sample-overlay variant + routes.js
 		sampleFiles(root)
 		await generate(root)
 		const snap = (f: string) => readFileSync(join(root, f), 'utf8')
+		// Item 9: version.js embeds buildTime — compare shape, not bytes.
 		const before = ['.swelte/routes.js', '.swelte/ssr-manifest.json', '.swelte/entry-main.ts', '.swelte/routes/server_gen.v'].map(snap).join('\n====\n')
+		const beforeV = snap('.swelte/version.js').replace(/buildTime = "[^"]*"/, 'buildTime = "T"')
 		await generate(root)
 		const after = ['.swelte/routes.js', '.swelte/ssr-manifest.json', '.swelte/entry-main.ts', '.swelte/routes/server_gen.v'].map(snap).join('\n====\n')
+		const afterV = snap('.swelte/version.js').replace(/buildTime = "[^"]*"/, 'buildTime = "T"')
 		assert.equal(after, before)
+		assert.equal(afterV, beforeV)
 	})
 })

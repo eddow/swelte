@@ -8,6 +8,8 @@ import {
 	vPrefix,
 	svelteModKind,
 	svelteRouteFor,
+	stripRouteGroups,
+	routeParams,
 } from './vite.js'
 
 const R = (f: string) => join('/tmp/rr', 'src', 'routes', f)
@@ -84,6 +86,84 @@ describe('route helpers', () => {
 		// the `+route` wrapper (folder router, no URL of its own).
 		assert.equal(svelteRouteFor('api/greet'), '/api/greet')
 		assert.equal(svelteRouteFor('admin/+route'), null)
+	})
+
+	it('roadmap §1.1 route groups strip from URL, keep on disk', () => {
+		assert.equal(stripRouteGroups('(mkt)/users'), 'users')
+		assert.equal(stripRouteGroups('(mkt)/(a)/users'), 'users')
+		assert.equal(stripRouteGroups('admin/(mkt)/users'), 'admin/users')
+		assert.equal(stripRouteGroups('users/[id]'), 'users/[id]')
+		assert.equal(
+			routeFor('src/routes', '/tmp/rr/src/routes', R('(mkt)/users/+page.v')),
+			'/users'
+		)
+		assert.equal(
+			routeFor('src/routes', '/tmp/rr/src/routes', R('(mkt)/+page.v')),
+			'/'
+		)
+		assert.equal(svelteRouteFor('(mkt)/users/+page'), '/users')
+		assert.equal(svelteRouteFor('(mkt)/+page'), '/')
+	})
+
+	it('roadmap §1.2 optional [[slug]] validates last-only, routes, params', () => {
+		assert.equal(
+			routeFor('src/routes', '/tmp/rr/src/routes', R('docs/[[slug]].v')),
+			'/docs/[[slug]]'
+		)
+		assert.deepEqual(routeParams('/docs/[[slug]]'), ['slug'])
+		assert.deepEqual(routeParams('/users/[id]/posts/[[page]]'), ['id', 'page'])
+		assert.throws(
+			() => routeFor('src/routes', '/tmp/rr/src/routes', R('docs/[[a]]/x.v')),
+			/optional param must be the last segment/
+		)
+	})
+
+	it('roadmap §1.4 RouteId + Params types', async () => {
+		const { mkdtempSync, mkdirSync, writeFileSync, readFileSync } = await import('node:fs')
+		const { tmpdir } = await import('node:os')
+		const root = mkdtempSync(join(tmpdir(), 'swelte-params-'))
+		mkdirSync(join(root, 'src', 'routes', 'users'), { recursive: true })
+		mkdirSync(join(root, 'src', 'lib'), { recursive: true })
+		writeFileSync(join(root, 'package.json'), '{"name":"t"}')
+		writeFileSync(join(root, 'svelte.config.js'), 'export default {}')
+		writeFileSync(
+			join(root, 'src', 'routes', 'users', '[id].v'),
+			'module u\n@[get] pub fn g(req SwelteRequest) string { return "x" }'
+		)
+		const { swelte } = await import('./vite.js')
+		const plug = swelte({}) as unknown as {
+			configResolved?: (c: { root: string }) => void
+			buildStart?: () => Promise<void>
+		}
+		plug.configResolved?.({ root })
+		await plug.buildStart?.()
+		const dts = readFileSync(join(root, '.swelte', 'types', 'routes', 'users', '[id].d.ts'), 'utf8')
+		assert.ok(dts.includes('export type RouteId = "/users/[id]"'), dts.slice(0, 400))
+		assert.ok(dts.includes('export interface Params {'), dts.slice(0, 400))
+		assert.ok(dts.includes('id: string'), dts.slice(0, 600))
+	})
+
+	it('roadmap §1.8 HEAD answers GET stubs (Allow on 405)', async () => {
+		const { mkdtempSync, mkdirSync, writeFileSync, readFileSync } = await import('node:fs')
+		const { tmpdir } = await import('node:os')
+		const root = mkdtempSync(join(tmpdir(), 'swelte-head-'))
+		mkdirSync(join(root, 'src', 'routes'), { recursive: true })
+		mkdirSync(join(root, 'src', 'lib'), { recursive: true })
+		writeFileSync(join(root, 'package.json'), '{"name":"t"}')
+		writeFileSync(join(root, 'svelte.config.js'), 'export default {}')
+		writeFileSync(
+			join(root, 'src', 'routes', '+page.v'),
+			'module p\n@[get] pub fn g() string { return "hi" }'
+		)
+		const { swelte } = await import('./vite.js')
+		const plug = swelte({}) as unknown as {
+			configResolved?: (c: { root: string }) => void
+			buildStart?: () => Promise<void>
+		}
+		plug.configResolved?.({ root })
+		await plug.buildStart?.()
+		const disp = readFileSync(join(root, '.swelte', 'routes', '_page.v'), 'utf8')
+		assert.ok(disp.includes(`method == 'GET' || method == 'HEAD'`), disp.slice(0, 2000))
 	})
 
 	it('same-folder double catch-all is a build error (one per dir)', async () => {

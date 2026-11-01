@@ -16,6 +16,20 @@ export async function runPreview(ctx: Ctx): Promise<void> {
 	if (!existsSync(join(root, 'dist', 'index.html'))) {
 		throw new Error(`no dist/index.html in ${root} — run ‘swelte build’ first`)
 	}
+	// Item pass-through: config knobs → preview env (env wins when set).
+	try {
+		const { loadConfig } = await import('../gen/config.js')
+		const cfg = await loadConfig(root)
+		if (!process.env.SWELTE_TRAILING_SLASH && cfg.trailingSlash !== 'ignore')
+			process.env.SWELTE_TRAILING_SLASH = cfg.trailingSlash
+		if (!process.env.SWELTE_CSRF_CHECK_ORIGIN && cfg.csrf === 'enforce')
+			process.env.SWELTE_CSRF_CHECK_ORIGIN = '1'
+		if (!process.env.SWELTE_METHOD_OVERRIDE && cfg.methodOverride)
+			process.env.SWELTE_METHOD_OVERRIDE = '1'
+		if (!process.env.SWELTE_VERSION && cfg.version !== '') process.env.SWELTE_VERSION = cfg.version
+	} catch {
+		/* config unreadable — env only */
+	}
 	await killPort(port, ctx.log)
 	ctx.log(`starting ${binary} on :${port} (dist/ + API, no Vite)`)
 	// Engine-agnostic: SWELTE_SSR_URL comes from the environment when the

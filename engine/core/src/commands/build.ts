@@ -40,6 +40,14 @@ export async function runBuild(ctx: Ctx): Promise<void> {
 	ctx.log(`root ${root}`)
 	const cfg = await loadConfig(root)
 	const genAbs = join(root, cfg.outDir)
+	// Item pass-through: build env for the smoke probe — config knobs
+	// become env when not already set (same env-wins rule as §11).
+	if (!process.env.SWELTE_TRAILING_SLASH && cfg.trailingSlash !== 'ignore')
+		process.env.SWELTE_TRAILING_SLASH = cfg.trailingSlash
+	if (!process.env.SWELTE_CSRF_CHECK_ORIGIN && cfg.csrf === 'enforce')
+		process.env.SWELTE_CSRF_CHECK_ORIGIN = '1'
+	if (!process.env.SWELTE_METHOD_OVERRIDE && cfg.methodOverride) process.env.SWELTE_METHOD_OVERRIDE = '1'
+	if (!process.env.SWELTE_VERSION && cfg.version !== '') process.env.SWELTE_VERSION = cfg.version
 	// 1. generate into .swelte/ (routes/*.v + server_gen.v + server.v harness).
 	try {
 		const { swelte } = await import('../vite.js')

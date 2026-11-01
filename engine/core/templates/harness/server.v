@@ -105,6 +105,7 @@ struct SwelteRouteCall {
 	query        map[string]string
 	headers      map[string]string
 	cookies      map[string]string
+	locals       map[string]string
 	body         string
 	content_type string
 	qualifier    string
@@ -118,14 +119,14 @@ struct SwelteRouteOut {
 
 fn swelte_route_spawned(c SwelteRouteCall, ch chan SwelteRouteOut) {
 	status, body, set_cookies := routes.swelte_route(c.path, c.method, c.query,
-		c.headers, c.cookies, c.body, c.content_type, c.qualifier)
+		c.headers, c.cookies, c.locals, c.body, c.content_type, c.qualifier)
 	ch <- SwelteRouteOut{status, body, set_cookies}
 }
 
-fn swelte_call_route(path string, method string, query map[string]string, headers map[string]string, cookies map[string]string, body string, content_type string, qualifier string) SwelteRouteOut {
+fn swelte_call_route(path string, method string, query map[string]string, headers map[string]string, cookies map[string]string, locals map[string]string, body string, content_type string, qualifier string) SwelteRouteOut {
 	budget := swelte_handler_timeout_ms()
 	ch := chan SwelteRouteOut{cap: 1}
-	call := SwelteRouteCall{path, method, query, headers, cookies, body, content_type,
+	call := SwelteRouteCall{path, method, query, headers, cookies, locals, body, content_type,
 		qualifier}
 	spawn swelte_route_spawned(call, ch)
 	select {
@@ -219,6 +220,33 @@ fn serve_static(dist string, path string) (int, string, string) {
 
 fn (mut app App) before_request(mut ctx Ctx) veb.Result {
 	path := if ctx.req.url.contains('?') { ctx.req.url.all_before('?') } else { ctx.req.url }
+	// Roadmap §1.3 `trailingSlash` (+ §1.6 CSRF + §1.6 `_method`): env wins,
+	// like the §11 knobs. `ignore` = today's behavior (no redirect, exact match).
+	trailing_mode := os.getenv_opt('SWELTE_TRAILING_SLASH') or { '' }
+	if trailing_mode == 'always' && path != '/' && !path.ends_with('/') {
+		ctx.res.header.set_custom('Location', path + '/') or {}
+		ctx.res.set_status(.moved_permanently)
+		return ctx.send_response_to_client('text/plain', '')
+	}
+	if trailing_mode == 'never' && path.len > 1 && path.ends_with('/') {
+		ctx.res.header.set_custom('Location', path[..path.len - 1]) or {}
+		ctx.res.set_status(.moved_permanently)
+		return ctx.send_response_to_client('text/plain', '')
+	}
+	// CSRF origin check (SvelteKit `csrf.checkOrigin` equivalent): when
+	// SWELTE_CSRF_CHECK_ORIGIN=1, cross-origin mutating requests without a
+	// matching Origin are rejected — same JSON envelope as §11.
+	if (os.getenv_opt('SWELTE_CSRF_CHECK_ORIGIN') or { '' }) == '1' {
+		m := ctx.req.method
+		if m == .post || m == .put || m == .patch || m == .delete {
+			origin := ctx.req.header.get_custom('Origin') or { '' }
+			host := ctx.req.header.get_custom('Host') or { ctx.req.header.get(.host) or { '' } }
+			if origin != '' && host != '' && !origin.contains(host) {
+				ctx.res.set_status(.forbidden)
+				return ctx.send_response_to_client('application/json', '{"error":"forbidden"}')
+			}
+		}
+	}
 	cors_origin := os.getenv_opt('SWELTE_CORS_ORIGIN') or { '' }
 	origin := ctx.req.header.get_custom('Origin') or { '' }
 	cors_ok := cors_origin != '' && (cors_origin == '*' || cors_origin == origin)
@@ -231,12 +259,17 @@ fn (mut app App) before_request(mut ctx Ctx) veb.Result {
 	if ctx.req.method == .options {
 		if cors_ok {
 			ctx.set_header(.access_control_allow_origin, if cors_origin == '*' { '*' } else { origin })
-			ctx.res.header.set_custom('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS') or {}
+			ctx.res.header.set_custom('Access-Control-Allow-Methods', 'GET, HEAD, POST, PUT, PATCH, DELETE, OPTIONS') or {}
 			ctx.res.header.set_custom('Access-Control-Allow-Headers', 'Content-Type, Accept') or {}
 			ctx.res.header.set_custom('Access-Control-Max-Age', '86400') or {}
 		}
 		ctx.res.set_status(.no_content)
 		return ctx.send_response_to_client('text/plain', '')
+	}
+	// Item 9: version stamp — X-Swelte-Version when SWELTE_VERSION is set
+	// (baked from package.json by generate(); env wins like the §11 knobs).
+	if v := os.getenv_opt('SWELTE_VERSION') {
+		ctx.res.header.set_custom('X-Swelte-Version', v) or {}
 	}
 	mut query := map[string]string{}
 	if ctx.req.url.contains('?') {
@@ -289,9 +322,26 @@ fn (mut app App) before_request(mut ctx Ctx) veb.Result {
 		for k, v in query {
 			// First bare key (`?delete`, value == '') doubles as qualifier.
 			// Real args (`?payload=x`) have values and are skipped.
+			// `_method` is consumed below (not a qualifier).
+			if k == '_method' {
+				continue
+			}
 			if v == '' {
 				qualifier = k
 				break
+			}
+		}
+	}
+	// Method override (SvelteKit `methodOverride` equivalent): when
+	// SWELTE_METHOD_OVERRIDE=1, `?_method=DELETE` on a POST re-dispatches
+	// as that verb. Body stays form-encoded; only the dispatch verb changes.
+	mut dispatch_method := ctx.req.method.str().to_upper()
+	if (os.getenv_opt('SWELTE_METHOD_OVERRIDE') or { '' }) == '1' {
+		override := query['_method'] or { '' }
+		if dispatch_method == 'POST' && override != '' {
+			upper := override.to_upper()
+			if upper == 'PUT' || upper == 'PATCH' || upper == 'DELETE' {
+				dispatch_method = upper
 			}
 		}
 	}
@@ -299,9 +349,9 @@ fn (mut app App) before_request(mut ctx Ctx) veb.Result {
 	// intent is intercepted HERE — never reaches dispatch. On a
 	// GET+Accept match on an SSE route: build the SwelteRequest,
 	// resolve events via the generated accessor, take over + stream.
-	sse_prefix, sse_params := routes.swelte_sse_route(path, ctx.req.method.str().to_upper(), query, headers, qualifier)
+	sse_prefix, sse_params := routes.swelte_sse_route(path, dispatch_method, query, headers, qualifier)
 	if sse_prefix != '' {
-		mut sse_req := routes.SwelteRequest{ query: query, form: map[string]string{}, files: map[string]string{}, headers: headers, cookies: cookies, params: sse_params, method: 'GET', path: path, qualifier: qualifier }
+		mut sse_req := routes.SwelteRequest{ query: query, form: map[string]string{}, files: map[string]string{}, headers: headers, cookies: cookies, params: sse_params, locals: map[string]string{}, method: 'GET', path: path, qualifier: qualifier }
 		if cors_ok {
 			ctx.set_header(.access_control_allow_origin, if cors_origin == '*' { '*' } else { origin })
 			ctx.res.header.set_custom('Access-Control-Allow-Credentials', 'true') or {}
@@ -325,7 +375,7 @@ fn (mut app App) before_request(mut ctx Ctx) veb.Result {
 	}
 	// (swelte_call_route is sync — veb runs before_request on a worker;
 	// the `spawn select` watchdog keeps the server responsive).
-	out := swelte_call_route(path, ctx.req.method.str().to_upper(), query, headers, cookies, ctx.req.data, content_type, qualifier)
+	out := swelte_call_route(path, dispatch_method, query, headers, cookies, map[string]string{}, ctx.req.data, content_type, qualifier)
 	status := out.status
 	body := out.body
 	set_cookies := out.set_cookies
