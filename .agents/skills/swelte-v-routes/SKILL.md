@@ -16,10 +16,13 @@ Every `.v` file is an ES module. Every `pub fn` with an attribute is a named exp
 | `#routes/` | `@[sse]` / `@[sse('q')]` | GET `Accept: text/event-stream` | two shapes (below); same default/qualifier rules as verbs |
 | `#routes/` | `@[post]` / `@[put]` / `@[delete]` / `@[patch]` (+`('q')`) | respective method | form fields = args; default, or `?q` qualifier |
 | `#routes/` leaf + `+route.v` | `@[load]` | page data, `Hand` HTML navigations only | `(SwelteRequest[, parent T]) -> !R`; zero/one per file |
-| `+route.v` only | `@[before]` / `@[after]` | subtree middleware; root `+route.v` = global head (verified) | `SwelteRequest -> !SwelteRequest` / observe-or-replace response; never exported to TS |
+| `+route.v` only | `@[before]` / `@[after]` | subtree middleware; root `+route.v` = global head | `SwelteRequest -> !SwelteRequest` / observe-or-replace response; never exported to TS |
 | `#lib/` | `@[rpc]` | local WASM call | none (direct dispatch) |
+| `src/matchers.v` | `@[matcher]` | param matcher, both sides | `(s string) bool`, non-fallible, portable subset only; `integer` builtin |
+| `src/server.v` | `@[startup]` | once before `veb.run` | `() void`, zero/one fn; throw aborts boot |
+| `src/server.v` | `@[reroute]` | host/path rewrite pre-dispatch | `(host, path) string`, `''` = no-op; zero/one fn |
 
-Rules: verbs stack (`@[get; post]`), one default per verb per file, qualifiers unique per verb per file. Never stack `@[sse]` with a verb/rpc on one fn. `@[load]` never stacked, no qualifier. Dynamic segments: `[id]` any segment, `[id=integer]` digits only (both sides enforced, `Params` narrows to `number`), `[[slug]]` last-segment optional, `[...rest]` catch-all last.
+Rules: verbs stack (`@[get; post]`), one default per verb per file, qualifiers unique per verb per file. Never stack `@[sse]` with a verb/rpc on one fn. `@[load]` never stacked, no qualifier. Dynamic segments: `[id]` any segment, `[id=matcher]` constrained (`integer` builtin = digits, `Params: number`; custom `@[matcher]` fns in `src/matchers.v`, `Params: string`), `[[slug]]` last-segment optional, `[...rest]` catch-all last. `src/matchers.v` / `src/server.v` are never routed and never importable from browser code; `@[matcher]`/`@[startup]`/`@[reroute]` in `src/routes/*` is a build error.
 
 ## Handler shapes
 
@@ -92,12 +95,6 @@ Stable — no spec dependency for the above:
 
 ⚠️ This skill MUST be updated when these specs land:
 
-- `docs/specs/moar.md` — `src/server.v` lifecycle (`@[startup]`,
-  `@[cron]`, `@[queue]`, `@[reroute]`). New attributes + new file
-  conventions → extend the table above. (`@[matcher]` lives in its
-  own `src/matchers.v`, NOT in the lifecycle file — see below.)
-- `docs/specs/sveltekit.md` — custom param matchers
-  (`src/matchers.v` `@[matcher]` builtins beyond `integer`); per-route
-  `ssr=false`-lite. The `[id=integer]` builtin, `fail`-lite (`isFail`),
-  `deserialize`, and root `+route.v` as global head are DONE and
-  documented in `docs/config.md`, `docs/forms.md`, `docs/rpc.md`.
+- `docs/specs/moar.md` — `@[cron]` (duration spawn loop) and `@[queue]`
+  (in-process channel). Same file/shape conventions as the built hooks.
+- `docs/specs/sveltekit.md` — per-route `ssr=false`-lite.

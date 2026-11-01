@@ -2,8 +2,10 @@ import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { join } from 'node:path'
 import {
+	loadMatchers,
 	modulePath,
 	routeFor,
+	transpileMatcherBody,
 	vFileSafe,
 	vPrefix,
 	svelteModKind,
@@ -144,6 +146,56 @@ describe('route helpers', () => {
 		const stub = jsFetchFor('/users/[id=integer]', [], 'ignore')
 		assert.ok(stub.includes('__swelteMatchers'), stub.slice(0, 500))
 		assert.ok(stub.includes('does not match'), stub.slice(0, 2000))
+	})
+
+	it('custom matchers: transpile subset + loadMatchers validation', async () => {
+		const { mkdtempSync, mkdirSync, writeFileSync } = await import('node:fs')
+		const { tmpdir } = await import('node:os')
+		const root = mkdtempSync(join(tmpdir(), 'swelte-matchers-'))
+		mkdirSync(join(root, 'src'), { recursive: true })
+		// Transpile: loop + nested ifs + early returns.
+		const js = transpileMatcherBody(
+			'slug',
+			"\n\tif s == '' {\n\t\treturn false\n\t}\n\tfor c in s.bytes() {\n\t\tif c < 48 || c > 57 {\n\t\t\tif c < 97 || c > 122 {\n\t\t\t\treturn false\n\t\t\t}\n\t\t}\n\t}\n\treturn true\n"
+		)
+		assert.ok(js.includes('for (const c_c of s)'), js.slice(0, 300))
+		assert.ok(js.includes('charCodeAt(0)'), js)
+		// Unsupported statement → build error naming the construct.
+		assert.throws(() => transpileMatcherBody('bad', '\ts := s + \"x\"\n\treturn true\n'), /unsupported statement/)
+		assert.throws(() => transpileMatcherBody('bad', '\treturn s.contains(\"x\")\n'), /unsupported statement/)
+		// loadMatchers: shape errors.
+		writeFileSync(join(root, 'src', 'matchers.v'), 'module m\n@[matcher]\npub fn bad(s string, t string) bool { return true }')
+		assert.throws(() => loadMatchers(root), /exactly one string param/)
+		writeFileSync(join(root, 'src', 'matchers.v'), 'module m\n@[matcher]\npub fn bad(s string) !bool { return true }')
+		assert.throws(() => loadMatchers(root), /must return bool \(total/)
+		writeFileSync(join(root, 'src', 'matchers.v'), 'module m\n@[matcher]\npub fn bad(s string) string { return s }')
+		assert.throws(() => loadMatchers(root), /must return bool/)
+		writeFileSync(join(root, 'src', 'matchers.v'), 'import time\nmodule m\n@[matcher]\npub fn bad(s string) bool { return true }')
+		assert.throws(() => loadMatchers(root), /poisons WASM/)
+		writeFileSync(
+			join(root, 'src', 'matchers.v'),
+			'module m\n@[matcher]\npub fn a(s string) bool { return true }\n@[matcher]\npub fn a(s string) bool { return true }'
+		)
+		assert.throws(() => loadMatchers(root), /duplicate @\[matcher\] a/)
+		writeFileSync(join(root, 'src', 'matchers.v'), 'module m\n@[matcher]\npub fn integer(s string) bool { return true }')
+		assert.throws(() => loadMatchers(root), /'integer' is builtin/)
+		// Happy path: known set extends validation.
+		writeFileSync(join(root, 'src', 'matchers.v'), 'module m\n@[matcher]\npub fn slug(s string) bool {\n\tif s == \'\' {\n\t\treturn false\n\t}\n\treturn true\n}')
+		const ms = loadMatchers(root)
+		assert.ok(ms.has('slug') && ms.has('integer'))
+		assert.equal(
+			routeFor('src/routes', '/tmp/rr/src/routes', R('users/[id=slug].v'), new Set(ms.keys())),
+			'/users/[id=slug]'
+		)
+		// Custom matchers project string (only integer narrows to number).
+		assert.equal(routeParamTs('/users/[id=slug]', 'id'), 'string')
+		const stub = jsFetchFor('/users/[id=slug]', [], 'ignore', ms)
+		assert.ok(stub.includes('slug: (s)'), stub.slice(0, 800))
+		// Unknown still rejected even with a file present.
+		assert.throws(
+			() => routeFor('src/routes', '/tmp/rr/src/routes', R('users/[id=nope].v'), new Set(ms.keys())),
+			/unknown matcher 'nope'/
+		)
 	})
 
 	it('roadmap §1.4 RouteId + Params types', async () => {

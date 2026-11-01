@@ -12,6 +12,10 @@ function fixture(): { root: string; manifest: SsrManifest } {
 	mkdirSync(join(routes, 'admin'), { recursive: true })
 	writeFileSync(join(routes, '+page.svelte'), `<h1>home</h1>`)
 	writeFileSync(join(routes, 'admin', '+page.svelte'), `<h1>admin</h1>`)
+	writeFileSync(
+		join(routes, 'admin', '+route.svelte'),
+		`<script>let { children } = $props();</script><nav>NAV</nav><main>{@render children?.()}</main>`
+	)
 	writeFileSync(join(routes, '+error.svelte'), `<h1>oops</h1>`)
 	const manifest: SsrManifest = {
 		version: 1,
@@ -21,7 +25,8 @@ function fixture(): { root: string; manifest: SsrManifest } {
 			{ route: '/admin', svelte: 'admin/+page.svelte', kind: 'page', hasData: false },
 		],
 		error: '+error.svelte',
-		wrappers: [],
+		wrappers: ['admin/+route.svelte'],
+		wrappersByRoute: { './admin/+page.svelte': ['./admin/+route.svelte'] },
 	}
 	return { root, manifest }
 }
@@ -52,9 +57,21 @@ describe('item 23 — full compose on tiny fixture', () => {
 		assert.ok(home.body.includes('home'))
 		const admin = mod.renderRoute('/admin', '{}')
 		assert.ok(admin.body.includes('admin'))
+		// Wrapper composes server-side: nav chrome surrounds the page.
+		assert.ok(admin.body.includes('NAV'), admin.body.slice(0, 400))
 		// Unknown route falls back to the global +error render.
 		const nope = mod.renderRoute('/nope', '{}')
 		assert.ok(nope.body.includes('oops'))
+	})
+
+	it('script-less +route.svelte is a build error (no children outlet)', async () => {
+		const { root, manifest } = fixture()
+		const { writeFileSync: w } = await import('node:fs')
+		w(join(root, 'src', 'routes', 'admin', '+route.svelte'), '<nav>NAV</nav>')
+		await assert.rejects(
+			() => composeRenderJs(manifest, { root }),
+			/must declare children via \$props/
+		)
 	})
 
 	it('emitRenderJs prod cleans dist/ssr/ to exactly one file', async () => {

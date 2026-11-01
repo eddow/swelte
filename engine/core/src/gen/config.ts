@@ -144,12 +144,54 @@ export function templatesDir(fromUrl: string): string {
 	return join(here, '..', '..', 'templates')
 }
 
-/** Render the server harness: verbatim skeleton from templates/ (no injection —
- *  all knobs are env-driven at runtime: PORT, SWELTE_DIST, SWELTE_CORS_ORIGIN).
- *  Kept as a function so later config values can be templated in one place. */
-export function renderHarness(_config: Required<SwelteOptions>, fromUrl: string): string {
+/** Render the server harness: skeleton from templates/ + user hooks from
+ *  `src/server.v` (`@[startup]` runs once in main, `@[reroute]` rewrites
+ *  host/path in before_request). Absent hooks → byte-identical skeleton. */
+export function renderHarness(
+	_config: Required<SwelteOptions>,
+	fromUrl: string,
+	hooks?: { startupBody?: string; rerouteBody?: string }
+): string {
 	const file = join(templatesDir(fromUrl), 'harness', 'server.v')
-	return readFileSync(file, 'utf8')
+	let src = readFileSync(file, 'utf8')
+	const indent = (body: string): string =>
+		body
+			.split('\n')
+			.map((l) => (l.trim() === '' ? '' : '\t' + l))
+			.join('\n')
+	if (hooks?.startupBody !== undefined) {
+		const anchor = '\tmut app := &App{}'
+		const inject =
+			'\tmut app := &App{}\n' +
+			'\t// @[startup] (src/server.v) — once, before veb.run. Throw aborts boot.\n' +
+			'\t{\n' +
+			indent(hooks.startupBody) +
+			'\n\t}'
+		if (src.includes(anchor)) src = src.replace(anchor, inject)
+		else src += '\n// @[startup] anchor missing — harness template changed.\n'
+	}
+	if (hooks?.rerouteBody !== undefined) {
+		const anchor = '\tpath := if ctx.req.url.contains'
+		const idx = src.indexOf(anchor)
+		if (idx >= 0) {
+			const lineEnd = src.indexOf('\n', idx)
+			const inject =
+				src.slice(0, lineEnd + 1) +
+				'\t// @[reroute] (src/server.v) — host/path rewrite before dispatch.\n' +
+				'\t// Returns rewritten path or \'\' for no-op. Must be pure + fast.\n' +
+				'\t{\n' +
+				'\t\thost_reroute := ctx.req.header.get_custom(\'Host\') or { ctx.req.header.get(.host) or { \'\' } }\n' +
+				'\t\trerouted := (fn (host string, path string) string {\n' +
+				indent(indent(hooks.rerouteBody)) +
+				'\n\t\t})(host_reroute, path)\n' +
+				'\t\tif rerouted != \'\' { path = rerouted }\n' +
+				'\t}'
+			src = inject + src.slice(lineEnd + 1)
+		} else {
+			src += '\n// @[reroute] anchor missing — harness template changed.\n'
+		}
+	}
+	return src
 }
 
 /** Render the client entry: verbatim `templates/client/main.ts` (its

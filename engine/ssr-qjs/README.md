@@ -60,5 +60,5 @@ for navigations, server stays up.
 * `docs/ssr.md` — the built record: ownership, request path,
   `@[load]` cascade, measured budgets, gate halves.
 * `docs/specs/ssr.md` — binding constraints + open work
-  (`<svelte:head>`, `ssr-bun`, CI).
+  (sidecar UX, `ssr-bun`, gate-as-CI).
 * `c/README.md` — vendored QuickJS version, file list, build.

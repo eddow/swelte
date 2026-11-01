@@ -72,4 +72,4 @@ Stable — no spec dependency for the above:
 
 ⚠️ This skill MUST be updated when these specs land:
 
-- `docs/specs/sveltekit.md` P2 (client router: `goto()`, `invalidate()`, `beforeNavigate`, `$app/navigation|stores|state`, streaming `<await>`, `use:enhance` cycle) — navigation and data-refresh patterns change fundamentally once a client router exists. (`#app/forms`-lite `deserialize` is DONE — see `docs/forms.md`; the remaining form gap is only the `use:enhance` cycle.)
+- `docs/specs/sveltekit.md` §§1–2, 5 (client router: `goto()`, `invalidate()`, `beforeNavigate`, `$app/navigation|stores|state`, streaming `<await>`, `use:enhance` cycle, server `fetch` wrapper) — navigation and data-refresh patterns change fundamentally once a client router exists. (`#app/forms`-lite `deserialize` is built — see `docs/forms.md`; the remaining form gap is only the `use:enhance` cycle.)

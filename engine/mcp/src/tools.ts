@@ -6,6 +6,7 @@ import { join, relative, resolve, sep } from 'node:path'
 import { loadConfig } from '@swelte/core/config'
 import { collectDiagnostics } from '@swelte/core/diagnostics'
 import {
+	loadMatchers,
 	modulePath,
 	parseStructs,
 	parseVFile,
@@ -168,9 +169,15 @@ function sveltePartner(routesAbs: string, mod: string): string | null {
 /** Scan routesDir into route entries (mirrors core generate() mapping). */
 export function scanRoutes(root: string, routesDir: string, routesAbs: string): RouteEntry[] {
 	const out: RouteEntry[] = []
+	let known: Set<string> | undefined
+	try {
+		known = new Set(loadMatchers(root).keys())
+	} catch {
+		known = undefined
+	}
 	for (const f of listVFiles(routesAbs)) {
 		const mod = modulePath(routesAbs, f)
-		const route = routeFor(routesDir, routesAbs, f)
+		const route = routeFor(routesDir, routesAbs, f, known)
 		if (route === null) continue // +route wrapper — not a URL
 		let src = ''
 		try {

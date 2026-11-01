@@ -68,8 +68,8 @@ Rules (`routeFor`, once in `vite.ts`, reused by V dispatcher gen):
   `@[after]` middleware for its directory subtree (never a route of
   its own; never exported as callables to TS, but its `pub struct`s
   are — +layout-shaped shared types). `+route.svelte` is the matching
-  wrapper UI (`<slot/>`/`children` + chrome; manual composition until
-  a client router lands). Wrapping covers `foo/+page.*` and
+  wrapper UI (`children` Snippet + chrome — Svelte 5, not slots;
+  SPA mount nests automatically, SSR composes the chain server-side). Wrapping covers `foo/+page.*` and
   `foo/**/*` — NOT the sibling `foo.svelte` / `foo.v` (same for UI).
 * Folder-root double-claim (`foo.v` + `foo/+page.v`, or `foo.svelte` +
   `foo/+page.svelte`) is a **build error, unconditionally** — either

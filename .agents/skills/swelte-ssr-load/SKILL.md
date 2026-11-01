@@ -65,5 +65,5 @@ Stable — no spec dependency for the above:
 
 ⚠️ This skill MUST be updated when these specs land:
 
-- `docs/specs/ssr.md` — `ssr-bun` (async/streaming renderer, same `POST {route, props} → {html, head}` protocol), dev auto-sidecar UX, §5 gate as CI. The no-async rule and ownership section change when `ssr-bun` exists.
-- `docs/specs/sveltekit.md` item 13 (per-route `ssr=false`-lite) — manifest flag → `Hand` skips rendering, serves SPA shell.
+- `docs/specs/ssr.md` — `ssr-bun` (async/streaming renderer, same `POST {route, props} → {html, head}` protocol), dev auto-sidecar UX, gate-as-CI (wrapper-route asserts in the prod half). The no-async rule and ownership section change when `ssr-bun` exists.
+- `docs/specs/sveltekit.md` §4 (per-route `ssr=false`-lite) — manifest flag → `Hand` skips rendering, serves SPA shell.

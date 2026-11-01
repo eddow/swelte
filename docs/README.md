@@ -17,7 +17,7 @@ Documentation for users of Swelte (all describe built behavior):
 - `mcp.md` — `@swelte/mcp` stdio server: tools, client config, wasm maps (implemented)
 - `example.md` — the `something` example (implemented)
 - `versus.md` — Swelte vs. other full-stack paradigms (positioning)
-- `coming-from-sveltekit.md` — SvelteKit → Swelte migration map (built behavior + planned gaps)
+- `coming-from-sveltekit.md` — SvelteKit → Swelte migration map (built behavior; open work in `specs/`)
 
 ## Internal
 

@@ -33,11 +33,13 @@ export interface SsrComposeOptions {
 }
 
 export interface SsrManifest {
-	version: 1
+	version: 1 | 2
 	hasError: boolean
 	routes: { route: string; svelte: string; kind: string; hasData: boolean }[]
 	error: string | null
 	wrappers: string[]
+	/** Wrapper chain per page (`./`-relative svelte path → root→leaf wrappers). v2+. */
+	wrappersByRoute?: Record<string, string[]>
 }
 
 /** Strip comments + string literals so the QJS-compat scan doesn't flag
@@ -251,8 +253,21 @@ export function assertNoNodeExternals(file: string, src: string): void {
  * routes to +error instead of a bare-specifier crash. The client bundle
  * is separate (Vite builds the real app from source) — these stubs never
  * ship to the browser. */
+/** Wrapper contract: `+route.svelte` must declare `children` via `$props()`
+ * (else SSR composition has nowhere to inject the page — and the client
+ * router passes `children` too, so an undeclared wrapper breaks both). */
+export function assertWrapperChildren(absFile: string, relFile: string): void {
+	const src = readFileSync(absFile, 'utf8')
+	const ok = /\bchildren\b/.test(src) && /\$props\s*\(\)/.test(src)
+	if (!ok)
+		throw new Error(
+			`[swelte:ssr-qjs] ${relFile}: +route.svelte must declare children via $props() (e.g. let { children }: { children?: Snippet } = $props() + {@render children?.()}) — nested composition needs the outlet.`
+		)
+}
+
 export async function compileSsrComponent(absFile: string, relFile: string): Promise<string> {
 	assertQjsCompatible(relFile, readFileSync(absFile, 'utf8'))
+	if (absFile.replace(/\\/g, '/').endsWith('/+route.svelte')) assertWrapperChildren(absFile, relFile)
 	await assertNoTopLevelStubCalls(absFile, relFile, readFileSync(absFile, 'utf8'))
 	const { compile } = (await import('svelte/compiler')) as typeof import('svelte/compiler')
 	const src = readFileSync(absFile, 'utf8')
@@ -462,6 +477,9 @@ export async function composeRenderJs(
 				`  ${JSON.stringify(r.route)}: ${JSON.stringify(withDot(r.svelte.split('/').join('/')))},`
 		)
 		.join('\n')
+	const chainTable = Object.entries(manifest.wrappersByRoute ?? {})
+		.map(([page, chain]) => `  ${JSON.stringify(page)}: ${JSON.stringify(chain)},`)
+		.join('\n')
 	const entrySrc = `import { render } from 'svelte/internal/server';
 ${[...modules.keys()].map((key, i) => `import C${i} from ${JSON.stringify(key)};`).join('\n')}
 const PAGES = {
@@ -470,17 +488,50 @@ ${[...modules.keys()].map((key, i) => `  ${JSON.stringify(key)}: C${i},`).join('
 const ROUTES = {
 ${table}
 };
+const CHAINS = {
+${chainTable}
+};
 const ERROR = ${manifest.error ? JSON.stringify(withDot(manifest.error.split('/').join('/'))) : 'null'};
 function run(Component, props) {
   const out = render(Component, { props });
   return { head: out.head, body: '<div data-swelte-ssr="1">' + out.body + '</div>' };
+}
+// Nested-page run: page renders inside its wrapper chain (root to leaf) via
+// the same snippet contract the client router uses — each wrapper's
+// children prop is a snippet fn (renderer) that renders the inner level.
+function runNested(keys, props) {
+  if (!keys.length) return null;
+  const last = keys[keys.length - 1];
+  if (!PAGES[last]) return null;
+  for (const k of keys) if (!PAGES[k]) return null;
+  const renderLevel = (i) => {
+    if (i === keys.length - 1) {
+      const out = render(PAGES[keys[i]], { props });
+      return () => out.body;
+    }
+    const innerBody = renderLevel(i + 1)();
+    const snippet = (renderer) => { renderer.push(innerBody); };
+    const out = render(PAGES[keys[i]], { props: { params: props?.params, children: snippet } });
+    return () => out.body;
+  };
+  const bodies = renderLevel(0)();
+  return { head: '', body: '<div data-swelte-ssr="1">' + bodies + '</div>' };
 }
 export function renderRoute(route, props_json) {
   let props = {};
   try { props = JSON.parse(props_json || '{}'); } catch (e) { props = {}; }
   const abs = ROUTES[route];
   if (abs && PAGES[abs]) {
-    try { return run(PAGES[abs], props); } catch (e) { /* fall to +error */ }
+    try {
+      const chain = [abs];
+      const wc = CHAINS[abs];
+      if (wc && wc.length) {
+        const keys = [...wc.slice().reverse(), abs];
+        const nested = runNested(keys, props);
+        if (nested) return nested;
+      }
+      return run(PAGES[abs], props);
+    } catch (e) { /* fall to +error */ }
   }
   if (ERROR && PAGES[ERROR]) {
     try {

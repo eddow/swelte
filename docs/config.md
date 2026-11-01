@@ -56,9 +56,31 @@ export default defineConfig({
 ## Request behavior driven by config/env
 
 * **Routing knobs**: route groups `(group)` stripped from URL, optional
-  `[[slug]]` last-segment only, dynamics `[id]`/`[id=integer]`/`[...rest]`
+  `[[slug]]` last-segment only, dynamics `[id]`/`[id=matcher]`/`[...rest]`
   (catch-all last, static beats dynamic; `[id=integer]` = digits-only
   builtin, enforced both sides, `Params` narrows to `number`).
+* **Custom matchers** (`src/matchers.v`, never routed/never WASM):
+  `@[matcher] (s string) bool`, non-fallible, one fn per name, portable
+  subset only (`for c in s.bytes()`, `s.len`, byte compares, early
+  returns; no `time`/`os`/`net` imports). Bodies inline into
+  `swelte_matcher_check` + transpile to both JS mirrors
+  (`__swelteUrl` guard + `matchSegs`). Custom matchers project
+  `string` (only `integer` narrows to `number`). Unknown name/bad
+  shape = build error with file+line.
+* **`src/server.v` lifecycle** (`@[startup]`, `@[reroute]`; never
+  routed/never importable from browser): `@[startup] () void` runs once
+  before `veb.run` (throw aborts boot); `@[reroute] (host, path) string`
+  runs after `trailingSlash` normalization, before CORS/static/dispatch
+  (`''` = no-op). `@[cron]`/`@[queue]` are open (→ `specs/moar.md`).
+* **`+route.svelte` nesting** (Svelte 5 `children` Snippet, not slots):
+  every wrapper must declare `children` via `$props()` + `{@render
+  children?.()}` (missing = SSR build error). SPA mount nests
+  automatically; SSR `renderRoute` composes root→leaf server-side
+  (`wrappersByRoute` in `ssr-manifest.json`); client `hydrateSwelteRoute`
+  hydrates the whole chain in place (one top-level `hydrate()` of the
+  outermost wrapper, each level's `children` snippet invokes the inner
+  component on the snippet anchor, so SSR DOM is adopted, not remounted;
+  mismatch falls back to mount).
 * **Per-route types**: every `types/routes/*.d.ts` starts with
   `RouteId` + `Params` (the `$types`-lite). Client `__swelteUrl(args)`
   interpolates dynamics and strips them from the payload; missing param

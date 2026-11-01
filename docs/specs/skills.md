@@ -9,10 +9,10 @@ Five skills, each a `SKILL.md` following the [Agent Skills spec](https://agentsk
 | skill | covers | stable sources | spec dependency |
 |---|---|---|---|
 | `swelte-overview` | layout, CLI, SPA-first proxy | `docs/README.md`, `docs/example.md`, `docs/versus.md`, `README.md` | none — do not touch on spec changes |
-| `swelte-v-routes` | attributes, `SwelteRequest`, type table, errors, WASM purity, matchers, fail/deserialize | `docs/rpc.md`, `docs/types.md`, `docs/errors.md`, `docs/forms.md`, `docs/config.md` | `specs/moar.md`, `specs/sveltekit.md` (custom matchers, `ssr=false`) |
-| `swelte-svelte5` | runes, imports, SSR component rule, `+error` | `docs/example.md`, `docs/ssr.md` | `specs/sveltekit.md` P2 only (deserialize is done) |
-| `swelte-ssr-load` | ownership, request path, `@[load]` cascade, budgets | `docs/ssr.md`, `docs/internal/load.md`, `docs/rpc.md` | `specs/ssr.md`, `specs/sveltekit.md` item 13 (`ssr=false`) |
-| `swelte-sveltekit-delta` | parity gaps P0/P1/P2, remaining open work | `docs/versus.md` (stable) | `specs/sveltekit.md` + `specs/moar.md` wholesale |
+| `swelte-v-routes` | attributes, `SwelteRequest`, type table, errors, WASM purity, matchers, hooks, fail/deserialize | `docs/rpc.md`, `docs/types.md`, `docs/errors.md`, `docs/forms.md`, `docs/config.md` | `specs/moar.md` (`@[cron]`, `@[queue]`), `specs/sveltekit.md` (`ssr=false`) |
+| `swelte-svelte5` | runes, imports, SSR component rule, `+error` | `docs/example.md`, `docs/ssr.md` | `specs/sveltekit.md` §§1–2, 5 (client router, streaming, server `fetch`, `use:enhance`) |
+| `swelte-ssr-load` | ownership, request path, `@[load]` cascade, budgets | `docs/ssr.md`, `docs/internal/load.md`, `docs/rpc.md` | `specs/ssr.md`, `specs/sveltekit.md` §4 (`ssr=false`) |
+| `swelte-sveltekit-delta` | open parity gaps, remaining work | `docs/versus.md` (stable) | `specs/sveltekit.md` + `specs/moar.md` wholesale |
 
 ## Rule
 

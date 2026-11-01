@@ -60,13 +60,17 @@ export interface RpcParam {
 
 export interface RpcFn {
 	name: string
-	attr: 'get' | 'post' | 'rpc' | 'put' | 'delete' | 'patch' | 'sse' | 'before' | 'after' | 'load'
+	attr: 'get' | 'post' | 'rpc' | 'put' | 'delete' | 'patch' | 'sse' | 'before' | 'after' | 'load' | 'matcher' | 'startup' | 'reroute'
 	qualifier?: string
 	params: RpcParam[]
 	vret: string
 	tsret: string
 	fallible: boolean
 	singleArgsStruct?: string
+	/** Raw V body of a `@[matcher]` fn (transpiled to JS for the router). */
+	body?: string
+	/** Raw V body of a `@[reroute]`/`@[startup]` hook (inlined into hooks). */
+	hookBody?: string
 }
 
 /** A `@[load]` page-data loader with its source file for error messages. */
@@ -143,9 +147,21 @@ export function parseVFile(src: string): RpcFn[] {
 			}
 			if (
 				pm &&
-				['get', 'post', 'rpc', 'put', 'delete', 'patch', 'sse', 'before', 'after', 'load'].includes(
-					pm[1]
-				)
+				[
+					'get',
+					'post',
+					'rpc',
+					'put',
+					'delete',
+					'patch',
+					'sse',
+					'before',
+					'after',
+					'load',
+					'matcher',
+					'startup',
+					'reroute',
+				].includes(pm[1])
 			) {
 				verbs.push({ verb: pm[1], qualifier: pm[2] })
 			}
@@ -201,6 +217,30 @@ export function parseVFile(src: string): RpcFn[] {
 			vret = vret.slice(1).trim() || 'void'
 		}
 		if (vret === '' || vret === 'void') vret = 'void'
+		// Raw fn bodies for matcher/hook fns (transpiled/inlined at generate).
+		// Brace-balanced walk from the `{` that opens the fn body.
+		let body: string | undefined
+		let hookBody: string | undefined
+		if (verbs.some((vb) => ['matcher', 'startup', 'reroute'].includes(vb.verb))) {
+			const afterRet = i + (retMatch?.[0].length ?? 0)
+			const openIdx = merged.indexOf('{', afterRet)
+			if (openIdx >= 0) {
+				let bdepth = 0
+				let j = openIdx
+				for (; j < merged.length; j++) {
+					if (merged[j] === '{') bdepth++
+					else if (merged[j] === '}') {
+						bdepth--
+						if (bdepth === 0) break
+					}
+				}
+				if (bdepth === 0) {
+					const inner = merged.slice(openIdx + 1, j)
+					if (verbs.some((vb) => vb.verb === 'matcher')) body = inner
+					else hookBody = inner
+				}
+			}
+		}
 		for (const vb of verbs) {
 			fns.push({
 				name,
@@ -211,6 +251,8 @@ export function parseVFile(src: string): RpcFn[] {
 				tsret: tsTypeFor(vret),
 				fallible,
 				singleArgsStruct,
+				...(body !== undefined ? { body } : {}),
+				...(hookBody !== undefined ? { hookBody } : {}),
 			})
 		}
 	}
@@ -383,7 +425,12 @@ export function vFileSafe(mod: string): string {
  * `/files` wins on exact match — static beats dynamic). `+route` →
  * null (wrapper-only; handled above by callers).
  * Pure + exported: single source for `generate()`'s load path and tests. */
-export function routeFor(routesDir: string, routesAbs: string, file: string): string | null {
+export function routeFor(
+	routesDir: string,
+	routesAbs: string,
+	file: string,
+	knownMatchers?: Set<string>
+): string | null {
 	const mod = modulePath(routesAbs, file)
 	if (mod === '+route' || mod.endsWith('/+route')) {
 		if (mod.includes('['))
@@ -405,20 +452,25 @@ export function routeFor(routesDir: string, routesAbs: string, file: string): st
 		const dir = mod.includes('/') ? mod.slice(0, mod.lastIndexOf('/')) : ''
 		const strippedDir = stripRouteGroups(dir)
 		if (dir !== '')
-			validateDynamicSegs(`${routesDir}/${relPosix(routesAbs, file)}`, strippedDir.split('/'))
+			validateDynamicSegs(
+				`${routesDir}/${relPosix(routesAbs, file)}`,
+				strippedDir.split('/'),
+				knownMatchers
+			)
 		if (strippedDir === '' && dir !== '') return '/'
 		return strippedDir === '' || strippedDir === 'api' ? '/' : `/${strippedDir}`
 	}
 	const segs = stripRouteGroups(mod).split('/')
-	validateDynamicSegs(`${routesDir}/${relPosix(routesAbs, file)}`, segs)
+	validateDynamicSegs(`${routesDir}/${relPosix(routesAbs, file)}`, segs, knownMatchers)
 	return '/' + segs.join('/')
 }
 
-export function validateDynamicSegs(file: string, segs: string[]): void {
+export function validateDynamicSegs(file: string, segs: string[], known?: Set<string>): void {
 	const seen = new Set<string>()
 	// Built-in param matchers: `[id=integer]` constrains the segment.
-	// v1: `integer` only (digits). Unknown matcher name = build error.
-	const KNOWN_MATCHERS = new Set(['integer'])
+	// Custom matchers from `src/matchers.v` extend the set; unknown name =
+	// build error (file+line at the call site).
+	const KNOWN_MATCHERS = known ?? new Set(['integer'])
 	for (let i = 0; i < segs.length; i++) {
 		const s = segs[i]
 		if (!s.includes('[') && !s.includes(']')) continue
@@ -456,7 +508,7 @@ export function validateDynamicSegs(file: string, segs: string[]): void {
 			const [, name, matcher] = matched
 			if (!KNOWN_MATCHERS.has(matcher))
 				throw new Error(
-					`[swelte] ${file}: unknown matcher '${matcher}' in [${name}=${matcher}] (v1: integer only)`
+					`[swelte] ${file}: unknown matcher '${matcher}' in [${name}=${matcher}] (known: ${[...KNOWN_MATCHERS].sort().join(', ')})`
 				)
 			if (seen.has(name)) throw new Error(`[swelte] ${file}: duplicate route param [${name}]`)
 			seen.add(name)
@@ -659,7 +711,192 @@ export function wasmReturnKind(vtype: string): string | null {
 export const dynSegPattern =
 	/\[\[([A-Za-z_][A-Za-z0-9_]*)\]\]|\[\.\.\.([A-Za-z_][A-Za-z0-9_]*)\]|\[([A-Za-z_][A-Za-z0-9_]*)=([A-Za-z_][A-Za-z0-9_]*)\]|\[([A-Za-z_][A-Za-z0-9_]*)\]/
 
-/** Param name of one dynamic segment text (`[id]`/`[id=integer]`/`[[s]]`/`[...r]` -> name). */
+export interface MatcherDef {
+	name: string
+	/** V source (verbatim body lines, module/import stripped at emit). */
+	vBody: string
+	/** JS function body (transpiled portable subset). */
+	jsBody: string
+}
+
+/** Portable matcher subset (V → JS): `s` string in, bool out.
+ * Allowed: `==`/`!=`/`&&`/`||`/`!`, `s.len`, `s[i]`/`s[..]` slices,
+ * byte compares (`c < 48`), `for c in s.bytes()`, early `return
+ * true/false`. Everything else → build error naming the construct. */
+export function transpileMatcherBody(name: string, vBody: string): string {
+	const lines = vBody.split('\n')
+	const out: string[] = []
+	const paramRe = /^[A-Za-z_][A-Za-z0-9_]*$/
+	void paramRe
+	for (let raw of lines) {
+		let line = raw.trim()
+		if (line === '' || line.startsWith('//')) continue
+		// for c in s.bytes() {  →  for (const c of s) {
+		// V iterates bytes; JS for..of over a string iterates UTF-16 units —
+		// same for the ASCII matchers this subset targets.
+		let m = /^for\s+([A-Za-z_][A-Za-z0-9_]*)\s+in\s+s\.bytes\(\)\s*\{\s*$/.exec(line)
+		if (m) {
+			if (m[1] === 's') throw new Error(`[swelte] @[matcher] ${name}: loop var shadows param 's'`)
+			out.push(`for (const ${m[1]}_c of s) { const ${m[1]} = ${m[1]}_c.charCodeAt(0);`)
+			continue
+		}
+		// if c < 48 || c > 57 { return false } → JS if (with byte var as number)
+		m = /^(if|else if)\s+(.+)\{\s*$/.exec(line)
+		if (m) {
+			out.push(`${m[1]} (${transpileMatcherExpr(name, m[2])}) {`)
+			continue
+		}
+		if (/^else\s*\{\s*$/.test(line)) {
+			out.push('else {')
+			continue
+		}
+		if (line === '}') {
+			out.push('}')
+			continue
+		}
+		m = /^return\s+(true|false)\s*$/.exec(line)
+		if (m) {
+			out.push(`return ${m[1]};`)
+			continue
+		}
+		// s == 'x' / s != '' statement form (rare) — treat as return expr.
+		throw new Error(
+			`[swelte] @[matcher] ${name}: unsupported statement '${line}' (want: for c in s.bytes(), if/else, return true/false)`
+		)
+	}
+	return out.join('\n')
+}
+
+function transpileMatcherExpr(name: string, expr: string): string {
+	let e = expr.trim()
+	// String literal guard: only comparisons against '...' allowed; the
+	// transpiler rewrites operators, so reject anything outside the subset.
+	if (/[;`]/.test(e)) throw new Error(`[swelte] @[matcher] ${name}: unsupported expression '${expr}'`)
+	// s.len → s.length, s[i] stays (charCode compare needs .charCodeAt — but
+	// the `for c in s.bytes()` form covers iteration; index form `s[i]`
+	// maps to s.charCodeAt(i)).
+	e = e.replace(/\bs\.len\b/g, 's.length')
+	// s[i] byte compare → s.charCodeAt(i) — only when compared to a number.
+	e = e.replace(/\bs\[([^\]]+)\]/g, 's.charCodeAt($1)')
+	// Bare loop var in a numeric compare is already a char code (see above).
+	// Equality on strings stays verbatim.
+	// Reject fn calls other than the approved shapes.
+	const calls = [...e.matchAll(/([A-Za-z_][A-Za-z0-9_]*)\s*\(/g)].map((mm) => mm[1])
+	for (const c of calls) {
+		if (c !== 'charCodeAt')
+			throw new Error(`[swelte] @[matcher] ${name}: call '${c}(...)' not in the portable subset`)
+	}
+	// Reject identifiers outside {s, true, false, loop vars, numbers}.
+	// (Loop vars are declared by the for-line; accept any single ident here
+	// and let JS scope it — V validation already enforces the shape.)
+	if (/[^A-Za-z0-9_+\-*/%<>=!&|().'"\s]/.test(e))
+		throw new Error(`[swelte] @[matcher] ${name}: unsupported expression '${expr}'`)
+	return e
+}
+
+/** Validate + collect `@[matcher]` fns from `src/matchers.v`.
+ * Shape: `(s string) bool`, non-fallible, no qualifier, no blocked
+ * imports in the file (`time`/`os`/`net`/`db`/`v`/`x` — WASM-safe).
+ * Returns name → def (with integer builtin when the file is absent). */
+export function loadMatchers(root: string, srcDir = 'src'): Map<string, MatcherDef> {
+	const out = new Map<string, MatcherDef>()
+	out.set('integer', {
+		name: 'integer',
+		vBody: 'integer builtin',
+		jsBody: 'return /^[0-9]+$/.test(s);',
+	})
+	const file = join(root, srcDir, 'matchers.v')
+	let src = ''
+	try {
+		src = readFileSync(file, 'utf8')
+	} catch {
+		return out
+	}
+	for (const m of src.matchAll(/^\s*import\s+(.+)$/gm)) {
+		for (const part of m[1].split(',')) {
+			const top = part.trim().split(/[\s.]/)[0]
+			if (['time', 'os', 'net', 'db', 'v', 'x', 'wasm'].includes(top))
+				throw new Error(`[swelte] src/matchers.v: import '${top}' poisons WASM — matchers stay portable (no time/os/net)`)
+		}
+	}
+	const fns = parseVFile(src)
+	const seen = new Set<string>()
+	for (const fn of fns) {
+		if (fn.attr !== 'matcher') continue
+		const rel = `src/matchers.v`
+		if (fn.qualifier)
+			throw new Error(`[swelte] ${rel}: @[matcher] ${fn.name} takes no qualifier (one fn per matcher).`)
+		if (fn.fallible)
+			throw new Error(`[swelte] ${rel}: @[matcher] ${fn.name} must return bool (total — no !bool).`)
+		if (fn.vret !== 'bool')
+			throw new Error(`[swelte] ${rel}: @[matcher] ${fn.name} must return bool (got ${fn.vret || 'none'}).`)
+		if (fn.params.length !== 1 || fn.params[0].vtype !== 'string')
+			throw new Error(`[swelte] ${rel}: @[matcher] ${fn.name} must take exactly one string param (s string).`)
+		if (seen.has(fn.name)) throw new Error(`[swelte] ${rel}: duplicate @[matcher] ${fn.name}`)
+		seen.add(fn.name)
+		if (fn.name === 'integer')
+			throw new Error(`[swelte] ${rel}: 'integer' is builtin — rename ${fn.name}.`)
+		if (fn.body === undefined)
+			throw new Error(`[swelte] ${rel}: @[matcher] ${fn.name} has no body to transpile.`)
+		out.set(fn.name, {
+			name: fn.name,
+			vBody: fn.body,
+			jsBody: transpileMatcherBody(fn.name, fn.body),
+		})
+	}
+	return out
+}
+export interface ServerHooks {
+	/** Raw V body of `@[startup]` (inlined into main before veb.run). */
+	startupBody?: string
+	/** Raw V body of `@[reroute]` (inlined into before_request). */
+	rerouteBody?: string
+	hasFile: boolean
+}
+
+/** Validate + collect `@[startup]`/`@[reroute]` from `src/server.v`.
+ * `@[startup]`: `() void|!void`, zero/one fn. `@[reroute]`:
+ * `(host string, path string) string`, zero/one fn, no qualifier.
+ * Missing file → no-op hooks (byte-identical harness when absent). No TS
+ * callable; `pub struct`s are NOT projected (Hand-level, not layout). */
+export function loadServerHooks(root: string, srcDir = 'src'): ServerHooks {
+	const file = join(root, srcDir, 'server.v')
+	let src = ''
+	try {
+		src = readFileSync(file, 'utf8')
+	} catch {
+		return { hasFile: false }
+	}
+	const rel = `src/server.v`
+	const fns = parseVFile(src)
+	const out: ServerHooks = { hasFile: true }
+	let startup: RpcFn | undefined
+	let reroute: RpcFn | undefined
+	for (const fn of fns) {
+		if (fn.attr !== 'startup' && fn.attr !== 'reroute') continue
+		if (fn.qualifier)
+			throw new Error(`[swelte] ${rel}: @[${fn.attr}] ${fn.name} takes no qualifier (one hook per kind).`)
+		if (fn.attr === 'startup') {
+			if (startup) throw new Error(`[swelte] ${rel}: two @[startup] fns (${startup.name} + ${fn.name}) — one startup hook per app.`)
+			if (fn.params.length !== 0)
+				throw new Error(`[swelte] ${rel}: @[startup] ${fn.name} takes no params (got ${fn.params.length}).`)
+			if (fn.vret !== 'void')
+				throw new Error(`[swelte] ${rel}: @[startup] ${fn.name} must return void (got ${fn.vret || 'none'}).`)
+			startup = fn
+		} else {
+			if (reroute) throw new Error(`[swelte] ${rel}: two @[reroute] fns (${reroute.name} + ${fn.name}) — one reroute hook per app.`)
+			if (fn.params.length !== 2 || fn.params[0].vtype !== 'string' || fn.params[1].vtype !== 'string')
+				throw new Error(`[swelte] ${rel}: @[reroute] ${fn.name} must take (host string, path string) (got (${fn.params.map((p) => p.vtype).join(', ')})).`)
+			if (fn.vret !== 'string')
+				throw new Error(`[swelte] ${rel}: @[reroute] ${fn.name} must return string (rewritten path, '' = no-op).`)
+			reroute = fn
+		}
+	}
+	if (startup?.hookBody !== undefined) out.startupBody = startup.hookBody
+	if (reroute?.hookBody !== undefined) out.rerouteBody = reroute.hookBody
+	return out
+}
+
 export function dynSegName(seg: string): string | null {
 	const m =
 		/^\[\[([A-Za-z_][A-Za-z0-9_]*)\]\]$/.exec(seg) ??
@@ -686,16 +923,23 @@ export function dynSegMatcher(seg: string): string | null {
 
 /** Codegen: fetch stub for a `#routes/*.v` file. Big `v` template -
   verbatim JS with `${}` inserts (no per-line push/escaping). */
-export function jsFetchFor(route: string, fns: RpcFn[], trailingSlash = 'ignore'): string {
+export function jsFetchFor(
+	route: string,
+	fns: RpcFn[],
+	trailingSlash = 'ignore',
+	matcherDefs?: Map<string, MatcherDef>
+): string {
 	const hasDyn = route.includes('[')
 	// Dynamics: [id] required, [id=integer] matcher, [...rest] catch-all, [[slug]] optional.
 	const dynSeg = dynSegPattern
+	const matcherEntries = [...(matcherDefs ?? new Map([['integer', { jsBody: 'return /^[0-9]+$/.test(s);' } as MatcherDef]])).values()]
+	const matcherObj = `{ ${matcherEntries.map((md) => `${md.name}: (s) => { ${md.jsBody} }`).join(', ')} }`
 	const dynHelper =
 		hasDyn || trailingSlash === 'always' || trailingSlash === 'never'
 			? `
 const __swelteBase = ${JSON.stringify(route)}
 const __swelteTrailing = ${JSON.stringify(trailingSlash === 'always' ? 'always' : trailingSlash === 'never' ? 'never' : '')}
-const __swelteMatchers = { integer: (s) => /^[0-9]+$/.test(s) }
+const __swelteMatchers = ${matcherObj}
 function __swelteUrl(args = {}) {
 	let u = __swelteBase
   for (const m of __swelteBase.matchAll(${dynSeg.source}/g)) {
@@ -1229,9 +1473,33 @@ pub fn swelte_alloc(n int) &u8 {
 		return out
 	}
 
+	function emitMatcherV(matcherDefs?: Map<string, MatcherDef>): string {
+		const customs = [...(matcherDefs ?? new Map()).values()].filter((md) => md.name !== 'integer')
+		const arms = customs.map((md) => `\tif matcher == '${md.name}' { return swelte_matcher_${md.name}(value) }`).join('\n')
+		const fns = customs.map((md) => `\nfn swelte_matcher_${md.name}(s string) bool {\n${md.vBody.split('\n').map((l: string) => (l.trim() === '' ? '' : '\t' + l)).join('\n')}\n}`).join('\n')
+		return `// [id=integer] constrains the segment to digits; the name still lands in
+// params['id']. Unknown matchers never reach here — validateDynamicSegs
+// rejects them at generate time. Custom bodies inline below (prefixed
+// swelte_matcher_<name>), dispatched through swelte_matcher_check.
+fn swelte_matcher_check(matcher string, value string) bool {
+\tif matcher == 'integer' { return swelte_matcher_integer(value) }
+${arms ? arms + '\n' : ''}\treturn false
+}
+
+fn swelte_matcher_integer(s string) bool {
+\tif s == '' { return false }
+\tfor c in s.bytes() {
+\t\tif c < 48 || c > 57 { return false }
+\t}
+\treturn true
+}
+${fns}`
+	}
+
 	function emitServerGen(
 		dispatched: { route: string; mod: string; prefix: string }[],
-		sseMods: Set<string> = new Set()
+		sseMods: Set<string> = new Set(),
+		matcherDefs?: Map<string, MatcherDef>
 	): string {
 		/** Dynamic route arms (section 8): static beats dynamic; among dynamics,
 		 * fewer [segs] first, [...rest] catch-all last (stable sort). */
@@ -1401,24 +1669,9 @@ fn swelte_err_unknown_qual(path string, available []string) SwelteResponse {
 	return SwelteResponse{ status: 404, headers: {'Content-Type': 'application/json'}, body: '{"error":"unknown qualifier","path":' + json.encode(path) + ',"available":' + avail + '}' }
 }
 
-// Built-in param matchers (§2.10, v1: integer only).
-// [id=integer] constrains the segment to digits; the name still lands in
-// params['id']. Unknown matchers never reach here — validateDynamicSegs
-// rejects them at generate time.
-fn swelte_matcher_check(matcher string, value string) bool {
-	if matcher == 'integer' { return swelte_matcher_integer(value) }
-	return false
-}
-
-fn swelte_matcher_integer(s string) bool {
-	if s == '' { return false }
-	for c in s.bytes() {
-		if c < 48 || c > 57 { return false }
-	}
-	return true
-}
-
-// Dynamic-segment helpers: [id] -> (id, blank), [id=integer] -> (id, integer).
+` ,
+			emitMatcherV(matcherDefs),
+			`// Dynamic-segment helpers: [id] -> (id, blank), [id=integer] -> (id, integer).
 fn swelte_dyn_name(ps string) string {
 	if ps.contains('=') { return ps[1..ps.index('=') or { ps.len - 1 }] }
 	return ps[1..ps.len - 1]
@@ -2040,6 +2293,18 @@ ${body}
 				mkdirSync(typesDir, { recursive: true })
 				const warnings: string[] = []
 				const dispatched: { route: string; mod: string; prefix: string }[] = []
+				// Custom param matchers (`src/matchers.v`, `@[matcher]`).
+				// Builtin fallback when absent: `{ integer }`.
+				let matchers: Map<string, MatcherDef>
+				try {
+					matchers = loadMatchers(root)
+				} catch (e) {
+					throw e
+				}
+				const knownMatchers = new Set(matchers.keys())
+				// Lifecycle hooks (`src/server.v`, `@[startup]`/`@[reroute]`).
+				// Missing file → no-op hooks (harness byte-identical).
+				const hooks = loadServerHooks(root)
 
 				function vSafe(mod: string): string {
 					return vFileSafe(mod)
@@ -2390,6 +2655,8 @@ ${list(params, (p) => `\t${p.name}${p.optional ? '?' : ''}: ${p.tstype}\n`)}}
 						const verbFns = fns.filter((x) => x.attr !== 'rpc')
 						const mod = modulePath(routesAbs, f)
 						const rel = relPosix(routesAbs, f)
+					for (const bad of allFns.filter((x) => x.attr === 'matcher' || x.attr === 'startup' || x.attr === 'reroute'))
+						throw new Error(`[swelte] ${routesDir}/${rel}: @[${bad.attr}] ${bad.name} is only allowed in its own file (matcher → src/matchers.v, startup/reroute → src/server.v).`)
 						const isWrapper = mod === '+route' || mod.endsWith('/+route')
 						if (isWrapper) {
 							const loads = allFns.filter((x) => x.attr === 'load')
@@ -2488,7 +2755,7 @@ ${list(params, (p) => `\t${p.name}${p.optional ? '?' : ''}: ${p.tstype}\n`)}}
 						// verbs = HTTP, rpc = protocol-ignorant (typed args/return, throw → reject).
 						for (const r of fns.filter((x) => x.attr === 'rpc')) validateRpcFn(`${routesDir}/${rel}`, r)
 						for (const v of fns.filter((x) => ['get', 'post', 'put', 'delete', 'patch'].includes(x.attr))) validateVerbFn(`${routesDir}/${rel}`, v)
-						const route = routeFor(routesDir, routesAbs, f)
+						const route = routeFor(routesDir, routesAbs, f, knownMatchers)
 						if (route === null) continue // wrapper-only (handled above); leaf always has a route
 						emitTypes('routes', mod, src, fns, route)
 						// Dynamic-shape clash (section 8): two files normalizing to the
@@ -2521,7 +2788,7 @@ ${list(params, (p) => `\t${p.name}${p.optional ? '?' : ''}: ${p.tstype}\n`)}}
 						mkdirSync(genModDir, { recursive: true })
 						writeFileSync(
 							join(genModDir, `${mod.split('/').pop()}.js`),
-							jsFetchFor(route, fns, trailingSlash)
+							jsFetchFor(route, fns, trailingSlash, matchers)
 						)
 					}
 					// Per-file dispatchers: one `module routes` file per routes file,
@@ -2629,7 +2896,7 @@ ${list(params, (p) => `\t${p.name}${p.optional ? '?' : ''}: ${p.tstype}\n`)}}
 								/* ignore */
 							}
 						}
-						writeFileSync(join(routesGenDir, `server_gen.v`), emitServerGen(dispatched, sseMods))
+						writeFileSync(join(routesGenDir, `server_gen.v`), emitServerGen(dispatched, sseMods, matchers))
 					}
 					// Leaf-vs-index clash: foo.v + foo/index.v (or +page.v) both exist.
 					// Warn-only here (the hard build error lives in the per-file
@@ -2962,9 +3229,9 @@ declare module '*.v' {
 					o.push(`
 import { mount, hydrate, createRawSnippet } from 'svelte'
 
-const __swelteMatcherFns = { integer: (s) => /^[0-9]+$/.test(s) }
+const __swelteMatcherFns = { ${[...matchers.values()].map((md) => `${md.name}: (s) => { ${md.jsBody} }`).join(', ')} }
 function __swelteSegName(seg) {
-	const m = /^\[([A-Za-z_][A-Za-z0-9_]*)=([A-Za-z_][A-Za-z0-9_]*)\]$/.exec(seg)
+	const m = /^\\[([A-Za-z_][A-Za-z0-9_]*)=([A-Za-z_][A-Za-z0-9_]*)\\]$/.exec(seg)
 	if (m) return { name: m[1], matcher: m[2] }
 	return { name: seg.slice(1, -1), matcher: null }
 }
@@ -3027,13 +3294,33 @@ export function mountSwelteRoute(target, pathname, errorProps) {
 					o.push(`
 // SSR hydrate path: when Hand fills <!--ssr-body-->
 // the same component tree hydrates in place instead of mounting fresh.
-// Falls back to mount on mismatch (SPA shell).
+// Wrapper routes hydrate nested: one top-level hydrate() of the outermost
+// wrapper, with each level's children snippet invoking the inner component
+// directly on the snippet anchor. Svelte's hydration cursor is already
+// positioned at the SSR slot, so every level adopts its SSR DOM and the
+// leaf page takes over without remount. Falls back to mount on mismatch.
 export function hydrateSwelteRoute(target, pathname, errorProps) {
 	try {
 		const path = pathname !== '/' && pathname.endsWith('/') ? pathname.slice(0, -1) : pathname
 		for (const r of ROUTES) {
 			const params = matchSegs(r.path, path)
 			if (!params) continue
+			if (r.wrappers.length > 0) {
+				// Root-first closure chain: the outermost hydrate()'s
+				// children snippet invokes the next wrapper with *its*
+				// children snippet, down to the leaf page. Each level runs
+				// while Svelte's hydration cursor sits on its SSR slot, so
+				// the whole tree adopts SSR DOM instead of remounting.
+				const leafProps = errorProps ?? { params }
+				let child = (anchor) => { r.page(anchor, leafProps) }
+				for (let i = r.wrappers.length - 1; i >= 1; i--) {
+					const Wrap = r.wrappers[i]
+					const inner = child
+					child = (anchor) => { Wrap(anchor, { params, children: inner }) }
+				}
+				hydrate(r.wrappers[0], { target, props: { params, children: child } })
+				return { params, path: r.path, hydrated: true }
+			}
 			hydrate(r.page, { target, props: { params } })
 			return { params, path: r.path, hydrated: true }
 		}
@@ -3058,6 +3345,29 @@ export function hydrateSwelteRoute(target, pathname, errorProps) {
 						routesDir,
 						vMods
 					)
+					// Wrapper chain per page svelte path (root-first), same
+					// candidate rule as routes.js (nearest +route.svelte per
+					// ancestor dir). Keyed by manifest svelte path.
+					const wrapperSet = new Set(svelteEntries.filter((e) => e.kind === 'wrapper').map((e) => e.svelte))
+					const chainFor = (pageSvelte: string): string[] => {
+						const mod = pageSvelte.replace(/\.svelte$/, '')
+						const dir = mod.includes('/') ? mod.slice(0, mod.lastIndexOf('/')) : ''
+						const chain: string[] = []
+						let cur = dir
+						for (;;) {
+							const cand = (cur === '' ? '+route' : cur + '/+route') + '.svelte'
+							if (wrapperSet.has(cand)) chain.unshift(cand)
+							if (cur === '') break
+							cur = cur.includes('/') ? cur.slice(0, cur.lastIndexOf('/')) : ''
+						}
+						return chain
+					}
+					const wrappersByRoute: Record<string, string[]> = {}
+					for (const e of svelteEntries) {
+						if (e.kind === 'wrapper' || e.kind === 'error') continue
+						const chain = chainFor(e.svelte)
+						if (chain.length) wrappersByRoute['./' + e.svelte] = chain.map((w) => './' + w)
+					}
 					const manifest = {
 						version: 1,
 						hasError,
@@ -3077,6 +3387,7 @@ export function hydrateSwelteRoute(target, pathname, errorProps) {
 							.filter((e) => e.kind === 'wrapper')
 							.map((e) => e.svelte)
 							.sort(),
+						wrappersByRoute,
 					}
 					writeFileSync(join(genDir, 'ssr-manifest.json'), JSON.stringify(manifest, null, 2))
 				} catch (e) {
@@ -3088,7 +3399,7 @@ export function hydrateSwelteRoute(target, pathname, errorProps) {
 				// as one V unit (harness `module main` + `routes/` + `server_gen.v`).
 				try {
 					const cfg = await loadConfig(root)
-					writeFileSync(join(genDir, 'server.v'), renderHarness(cfg, import.meta.url))
+					writeFileSync(join(genDir, 'server.v'), renderHarness(cfg, import.meta.url, hooks))
 				} catch (e) {
 					warnings.push(`harness: ${(e as Error).message}`)
 				}
@@ -3311,7 +3622,13 @@ export function hydrateSwelteRoute(target, pathname, errorProps) {
 				// §7: middleware is server-only — strip it from the browser
 				// stub (it has no client binding). +route.v wrappers expose
 				// nothing: importing one from the browser is a build error.
-				const route = routeFor(routesDir, routesAbs, abs)
+				let routeMatchers: Map<string, MatcherDef> | undefined
+				try {
+					routeMatchers = loadMatchers(root)
+				} catch {
+					routeMatchers = undefined
+				}
+				const route = routeFor(routesDir, routesAbs, abs, routeMatchers ? new Set(routeMatchers.keys()) : undefined)
 				if (route === null) {
 					throw new Error(
 						`[swelte] ${abs} is a +route.v wrapper (@[before]/@[after] middleware only) and cannot be imported in browser code.`
@@ -3319,7 +3636,7 @@ export function hydrateSwelteRoute(target, pathname, errorProps) {
 				}
 				const fns = parseVFile(src).filter((x) => x.attr !== 'before' && x.attr !== 'after')
 				if (fns.length === 0) return 'export {}; // swelte: no RPC fns in this .v file'
-				return jsFetchFor(route, fns)
+				return jsFetchFor(route, fns, trailingSlash, routeMatchers)
 			}
 			if (norm === libNorm || norm.startsWith(`${libNorm}/`)) {
 				const mod = modulePath(libAbs, abs)

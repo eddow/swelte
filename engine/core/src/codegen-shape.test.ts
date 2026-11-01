@@ -288,6 +288,21 @@ describe('codegen shape snapshots (fetch/SSE/dispatcher)', () => {
 		assert.equal(admin.hasData, true)
 	})
 
+	it('ssr-manifest wrappersByRoute maps page → root→leaf wrapper chain', async () => {
+		const root = scaffold()
+		mkdirSync(join(root, 'src', 'routes', 'admin'), { recursive: true })
+		writeFileSync(join(root, 'src', 'routes', 'admin', '+page.svelte'), '<h1>a</h1>')
+		writeFileSync(
+			join(root, 'src', 'routes', 'admin', '+route.svelte'),
+			'<script>let { children } = $props()</script><nav>n</nav>{@render children?.()}'
+		)
+		await generate(root)
+		const mf = JSON.parse(readFileSync(join(root, '.swelte', 'ssr-manifest.json'), 'utf8'))
+		assert.deepEqual(mf.wrappersByRoute, { './admin/+page.svelte': ['./admin/+route.svelte'] })
+		// Page without wrappers has no entry.
+		assert.ok(!('./+page.svelte' in (mf.wrappersByRoute ?? {})))
+	})
+
 	it('dispatch covers every page route in the manifest (item 15, presence)', async () => {
 		const root = scaffold()
 		mkdirSync(join(root, 'src', 'routes', 'admin'), { recursive: true })
@@ -310,6 +325,29 @@ describe('codegen shape snapshots (fetch/SSE/dispatcher)', () => {
 			assert.ok(disp.includes(JSON.stringify(r.route)), `dispatch missing manifest route ${r.route}`)
 			if (r.hasData) assert.ok(disp.includes('swelte_load_for'), `load arm missing for ${r.route}`)
 		}
+	})
+
+	it('routes.js nested hydrate: closure chain + parses as a module (§1 last bullet)', async () => {
+		const root = scaffold()
+		mkdirSync(join(root, 'src', 'routes', 'admin'), { recursive: true })
+		writeFileSync(join(root, 'src', 'routes', 'admin', '+page.svelte'), '<h1>a</h1>')
+		writeFileSync(
+			join(root, 'src', 'routes', 'admin', '+route.svelte'),
+			'<script>let { children } = $props()</script><nav>n</nav>{@render children?.()}'
+		)
+		await generate(root)
+		const js = readFileSync(join(root, '.swelte', 'routes.js'), 'utf8')
+		// No remount fallback: wrapper routes hydrate through the chain.
+		assert.ok(!js.includes('nested hydrate falls back to mount'), js.slice(0, 500))
+		assert.ok(js.includes('hydrate(r.wrappers[0], { target, props: { params, children: child } })'), js.slice(0, 3000))
+		// Emitted matcher regex keeps its escapes (parse check, not string match).
+		assert.ok(js.includes('/^\\[([A-Za-z_]'), 'matcher regex escapes lost in emit')
+		// The emit must parse: catches unbalanced-escape regressions at generate time.
+		// Component imports are stubbed (shape check only — real modules need Vite).
+		const stubbed = js
+			.replace(/^import .*$/gm, '// stripped')
+			.replace('const ROUTES = [', 'const R_admin__page_Page = 0;\nconst R_admin__route_Wrap = 1;\nconst SwelteErrorPage = 2;\nconst ROUTES = [')
+		await import(`data:text/javascript;base64,${Buffer.from(stubbed, 'utf8').toString('base64')}`)
 	})
 })
 

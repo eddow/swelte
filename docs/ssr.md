@@ -1,8 +1,8 @@
-# SSR (built)
+# SSR (record of built behavior)
 
-Server-side rendering is done and proven. This page is the durable
+Server-side rendering is proven. This page is the durable
 record: what SSR does, how it runs, and the measured budgets.
-Open work (`ssr-bun`, CI) stays in
+Open work (`ssr-bun`, gate-as-CI with wrapper-route asserts) stays in
 `specs/ssr.md`.
 
 ## Ownership (locked)
@@ -54,9 +54,13 @@ Browser `GET /` (`Accept: text/html`) → `Hand.before_request` →
 set) → `swelte_page_props()` (`swelte_load_for()` cascade) →
 embedded QuickJS `renderRoute(path, props)` (or sidecar POST when
 `SWELTE_SSR_URL` is set) → HTML injected at `<!--ssr-body-->` +
-`data-swelte-ssr="1"` on `#app` for hydration. Failures (no bundle,
-throw, timeout, OOM, too-big) → SPA shell / `+error` HTML — never
-blank/JSON for navigations.
+`data-swelte-ssr="1"` on `#app` for hydration. The client entry
+hydrates the full wrapper chain in place (`hydrateSwelteRoute`: one
+top-level `hydrate()` of the outermost `+route.svelte`, each level's
+`children` snippet invoking the inner component on the snippet anchor —
+SSR DOM adopted, leaf interactive; mismatch → mount fallback). Failures
+(no bundle, throw, timeout, OOM, too-big) → SPA shell / `+error` HTML —
+never blank/JSON for navigations.
 
 * `GET` navigations never redirect (§12 `303` is POST-only).
 * `Accept: application/json` bypasses SSR — API stays JSON (same
