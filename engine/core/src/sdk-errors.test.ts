@@ -82,7 +82,14 @@ describe('SDK error contract', () => {
 			() => __swelteWasmCall('/w.wasm', 'main.missing_fn', {}, [], 'string'),
 			(e: unknown) => {
 				const err = e as SwelteRpcError
-				return err instanceof SwelteRpcError && err.status === 0
+				// Fetch-failure path carries the fetch error + an (empty)
+				// `available` list — same envelope as the unknown-fn path,
+				// so callers can always read `body.available`.
+				return (
+					err instanceof SwelteRpcError &&
+					err.status === 0 &&
+					Array.isArray(err.body?.available)
+				)
 			}
 		)
 	})

@@ -16,6 +16,8 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "dev": "tsc -p tsconfig.json --watch",
+    "test": "node --test --test-force-exit --test-reporter=spec \"dist-test/**/*.test.js\"",
+    "pretest": "tsc -p tsconfig.test.json",
     "prepublishOnly": "npm run build"
   },
   "peerDependencies": {

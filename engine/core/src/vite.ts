@@ -349,30 +349,50 @@ export function vFileSafe(mod: string): string {
 	return mod.replace(/[^A-Za-z0-9_]/g, '_')
 }
 
-/** Route URL for a route file (`src/routes/<mod>.v` → `/…`), `+route` → null.
- * Pure + exported for tests; `generate()` uses the closure twin (same code,
- * needs `routesDir` for its error prefix). */
-export function routeForPublic(routesDir: string, routesAbs: string, file: string): string | null {
+/** Map a routes file to its URL path (spec v-imports.md §2).
+ * Dynamic segments pass through verbatim (`users/[id]` →
+ * `/users/[id]`); the V dispatcher matches them segment-wise
+ * (roadmap §8). `+route` → null (wrapper-only; handled above by callers).
+ * Pure + exported: single source for `generate()`'s load path and tests.
+ * `[...rest]` at the END of a path is a valid catch-all; `files/[...rest].v`
+ * (whole leaf is the catch-all) is malformed in V codegen and throws. */
+export function routeFor(routesDir: string, routesAbs: string, file: string): string | null {
 	const mod = modulePath(routesAbs, file)
 	if (mod === '+route' || mod.endsWith('/+route')) {
 		if (mod.includes('['))
 			throw new Error(
-				`[swelte] ${routesDir}/${relPosixInner(routesAbs, file)}: dynamic wrapper dirs are not supported (no brackets in +route.v paths)`
+				`[swelte] ${routesDir}/${relPosix(routesAbs, file)}: dynamic wrapper dirs are not supported (no brackets in +route.v paths)`
 			)
 		return null
 	}
-	const leaf =
-		mod === 'index' || mod.endsWith('/index') || mod === '+page' || mod.endsWith('/+page')
+	const leaf = mod === 'index' || mod.endsWith('/index') || mod === '+page' || mod.endsWith('/+page')
 	if (leaf) {
+		// Folder-root leaf: strip the leaf segment (`+page` or legacy
+		// `index`) to get the directory, whose path is the URL.
+		// `+page` → `/`, `admin/+page` → `/admin`.
+		// NOTE: `+page.v` sorting — `+` (0x2B) sorts before letters,
+		// so `+page.v` may scan before `admin/`. Sort order of
+		// listVFiles is deterministic; route identity never depends
+		// on it (pure function of mod).
 		const dir = mod.includes('/') ? mod.slice(0, mod.lastIndexOf('/')) : ''
-		if (dir !== '') validateDynamicSegsInner(`${routesDir}/${relPosixInner(routesAbs, file)}`, dir.split('/'))
+		if (dir !== '')
+			validateDynamicSegs(`${routesDir}/${relPosix(routesAbs, file)}`, dir.split('/'))
 		return dir === '' || dir === 'api' ? '/' : `/${dir}`
 	}
-	validateDynamicSegsInner(`${routesDir}/${relPosixInner(routesAbs, file)}`, mod.split('/'))
+	const segs = mod.split('/')
+	const restIdx = segs.findIndex((s) => /^\[\.\.\..+\]$/.test(s))
+	if (restIdx >= 0 && restIdx === segs.length - 1 && segs.length > 1 && /^\[\.\.\.[A-Za-z_][A-Za-z0-9_]*\]$/.test(segs[restIdx])) {
+		// `[...rest]`-as-whole-leaf: `files/[...rest].v` — the dispatcher
+		// treats a bare catch-all leaf as malformed (no static head).
+		throw new Error(
+			`[swelte] ${routesDir}/${relPosix(routesAbs, file)}: malformed route (bare [...rest] leaf — put the catch-all under a named dir)`
+		)
+	}
+	validateDynamicSegs(`${routesDir}/${relPosix(routesAbs, file)}`, segs)
 	return `/${mod}`
 }
 
-function validateDynamicSegsInner(file: string, segs: string[]): void {
+export function validateDynamicSegs(file: string, segs: string[]): void {
 	const seen = new Set<string>()
 	for (let i = 0; i < segs.length; i++) {
 		const s = segs[i]
@@ -397,7 +417,7 @@ function validateDynamicSegsInner(file: string, segs: string[]): void {
 	}
 }
 
-function relPosixInner(abs: string, f: string): string {
+export function relPosix(abs: string, f: string): string {
 	return relative(abs, f).split(sep).join('/')
 }
 
@@ -418,7 +438,7 @@ export function tsTypeFor(vType: string): string {
 		if (/^\[\]u8$/.test(t)) return 'string'
 		return `${tsTypeFor(t.slice(2))}[]`
 	}
-	if (t.startsWith('map\\[')) return 'Record<string, unknown>'
+	if (t.startsWith('map[')) return 'Record<string, unknown>'
 	if (t === 'json.Any' || t === 'json2.Any') return 'unknown'
 	if (/^\?/.test(t)) {
 		const inner = tsTypeFor(t.slice(1))
@@ -471,7 +491,7 @@ export function parseStructs(src: string): VStruct[] {
 }
 
 /** Dynamic path params of a route pattern (`users/[id]` -> ['id']). */
-function routeParams(route: string): string[] {
+export function routeParams(route: string): string[] {
 	const out: string[] = []
 	for (const m of route.matchAll(
 		/\[\.\.\.([A-Za-z_][A-Za-z0-9_]*)\]|\[([A-Za-z_][A-Za-z0-9_]*)\]/g
@@ -488,7 +508,7 @@ function routeParams(route: string): string[] {
  * builder below hoists them into `mut swelte_opt_N := ?T(none)` temps.
  * Returns per-param { raw, expr, optType }: raw is the string lookup, expr
  * the coerced value expression, optType the `?T` when optional. */
-function narrowArgParts(p: { name: string; vtype: string }): {
+export function narrowArgParts(p: { name: string; vtype: string }): {
 	raw: string
 	expr: string
 	optType: string | null
@@ -509,7 +529,7 @@ function narrowArgParts(p: { name: string; vtype: string }): {
 /** Build a narrow-args call: `stmts` hoists `?T` temps (V 0.5.2 needs
  * `mut v_N := ?T(none)` + conditional assign — inline `none` in an arg
  * miscompiles), `call` is the `fn(a0, a1, ...)` expression. */
-function narrowCall(
+export function narrowCall(
 	fnName: string,
 	params: { name: string; vtype: string }[]
 ): {
@@ -731,13 +751,10 @@ pub fn swelte_alloc(n int) &u8 {
 	 * leaf - never the sibling). foo/+router.v (roadmap 8, not built)
 	 * will own foo/** - never foo itself - so it never collides.
 	 * SSR: .svelte siblings participate via the same
-	 * rule — foo.svelte vs foo/+page.v collide on either extension. */
-	function relPosix(abs: string, f: string): string {
-		return f
-			.slice(abs.length + 1)
-			.split(sep)
-			.join('/')
-	}
+	 * rule — foo.svelte vs foo/+page.v collide on either extension.
+	 * Hoisted: `routeFor`, `validateDynamicSegs`, `relPosix` now live as
+	 * single exported sources above (shared with tests/load path). */
+	/* (closure copies removed) */
 	function doubleClaimCheck(routesAbs: string, routesDir: string, mod: string, rel: string): void {
 		const dirOf = (m: string) => (m.includes('/') ? m.slice(0, m.lastIndexOf('/')) : '')
 		const baseOf = (m: string) => (m.includes('/') ? m.slice(m.lastIndexOf('/') + 1) : m)
@@ -863,64 +880,16 @@ pub fn swelte_alloc(n int) &u8 {
 	}
 
 	/** Validate dynamic segments (`[id]`, `[...rest]`) in a route file path.
+	 * Hoisted: single exported `validateDynamicSegs` above.
 	 * Throws a build error naming the file on malformed brackets, a
 	 * non-final catch-all, or a duplicate param name. */
-	function validateDynamicSegs(what: string, segs: string[]): void {
-		const seen = new Set<string>()
-		for (let i = 0; i < segs.length; i++) {
-			const s = segs[i]
-			if (!s.includes('[') && !s.includes(']')) continue
-			const single = /^\[([A-Za-z_][A-Za-z0-9_]*)\]$/.exec(s)
-			const rest = /^\[\.\.\.([A-Za-z_][A-Za-z0-9_]*)\]$/.exec(s)
-			if (single) {
-				if (seen.has(single[1]))
-					throw new Error(`[swelte] ${what}: duplicate route param [${single[1]}]`)
-				seen.add(single[1])
-				continue
-			}
-			if (rest) {
-				if (i !== segs.length - 1)
-					throw new Error(`[swelte] ${what}: [...${rest[1]}] catch-all must be the last segment`)
-				if (seen.has(rest[1]))
-					throw new Error(`[swelte] ${what}: duplicate route param [...${rest[1]}]`)
-				seen.add(rest[1])
-				continue
-			}
-			throw new Error(`[swelte] ${what}: bad dynamic segment '${s}' (want [id] or [...rest])`)
-		}
-	}
+	/* (closure copy removed) */
 
 	/** Map a routes file to its URL path (spec v-imports.md §2).
 	 * Dynamic segments pass through verbatim (`users/[id]` →
 	 * `/users/[id]`); the V dispatcher matches them segment-wise
 	 * (roadmap §8). */
-	function routeFor(routesAbs: string, file: string): string | null {
-		const mod = modulePath(routesAbs, file)
-		if (mod === '+route' || mod.endsWith('/+route')) {
-			if (mod.includes('['))
-				throw new Error(
-					`[swelte] ${routesDir}/${relPosix(routesAbs, file)}: dynamic wrapper dirs are not supported (no brackets in +route.v paths)`
-				)
-			return null
-		}
-		const leaf =
-			mod === 'index' || mod.endsWith('/index') || mod === '+page' || mod.endsWith('/+page')
-		if (leaf) {
-			// Folder-root leaf: strip the leaf segment (`+page` or legacy
-			// `index`) to get the directory, whose path is the URL.
-			// `+page` → `/`, `admin/+page` → `/admin`.
-			// NOTE: `+page.v` sorting — `+` (0x2B) sorts before letters,
-			// so `+page.v` may scan before `admin/`. Sort order of
-			// listVFiles is deterministic; route identity never depends
-			// on it (pure function of mod).
-			const dir = mod.includes('/') ? mod.slice(0, mod.lastIndexOf('/')) : ''
-			if (dir !== '')
-				validateDynamicSegs(`${routesDir}/${relPosix(routesAbs, file)}`, dir.split('/'))
-			return dir === '' || dir === 'api' ? '/' : `/${dir}`
-		}
-		validateDynamicSegs(`${routesDir}/${relPosix(routesAbs, file)}`, mod.split('/'))
-		return `/${mod}`
-	}
+	/* hoisted: single exported `routeFor` above (kills the closure copy). */
 
 	function vJsonStr(s: string): string {
 		return JSON.stringify(s)
@@ -1263,15 +1232,17 @@ pub fn swelte_sse_emit_for(prefix string, qualifier string, req SwelteRequest, e
 		return o.join('\n')
 	}
 
-	function emitRouteFile(
-		mod: string,
-		route: string,
-		prefix: string,
-		src: string,
-		fns: RpcFn[],
-		chain: WrapperMw[],
-		loads: LoadFn[]
-	): string {
+function emitRouteFile(
+	mod: string,
+	route: string,
+	prefix: string,
+	src: string,
+	fns: RpcFn[],
+	chain: WrapperMw[],
+	loads: LoadFn[]
+): string {
+	// Hoisted-source note: `generate()` + `load()` call the single
+	// exported `routeFor`/`jsFetchFor`/`jsWasmFor` above (no closure copy).
 		const needRpc = fns.some((f) => f.attr === 'rpc')
 		const needVerb = fns.some(
 			(f) => f.attr !== 'rpc' && f.attr !== 'before' && f.attr !== 'after' && f.attr !== 'load'
@@ -1662,9 +1633,11 @@ ${body}
 			.join('\n')
 	}
 
-	/** Codegen: fetch stub for a `#routes/*.v` file. Big `v` template -
-	  verbatim JS with `${}` inserts (no per-line push/escaping). */
-	function jsFetchFor(route: string, fns: RpcFn[]): string {
+/** Codegen: fetch stub for a `#routes/*.v` file. Big `v` template -
+  verbatim JS with `${}` inserts (no per-line push/escaping).
+  Single exported source: `generate()`'s load path calls this directly
+  (no closure copy). Nested only because it reads `isBuild` + `list`. */
+function jsFetchFor(route: string, fns: RpcFn[]): string {
 		const hasDyn = route.includes('[')
 		const dynSeg = /\[\.\.\.([A-Za-z_][A-Za-z0-9_]*)\]|\[([A-Za-z_][A-Za-z0-9_]*)\]/
 		const dynHelper = hasDyn
@@ -1720,8 +1693,10 @@ ${dynHelper}${list(fns, (fn) => {
 })}`
 	}
 
-	/** Codegen: WASM stub for a `#lib/*.v` file. Big `v` template. */
-	function jsWasmFor(_root: string, mod: string, fns: RpcFn[]): string {
+/** Codegen: WASM stub for a `#lib/*.v` file. Big `v` template.
+ * Single exported contract: `isBuild` selects the prod bundle URL vs
+ * the dev per-module URL. Nested only because it reads `isBuild`+`list`. */
+function jsWasmFor(isBuild: boolean, mod: string, fns: RpcFn[]): string {
 		const wasmUrl = isBuild ? '/assets/app_lib.wasm' : '/@swelte-dev/' + mod + '.wasm'
 		return `// Auto-generated by swelte from ${mod}.v \u2014 do not edit.
 import { __swelteWasmCall } from '@swelte/core'
@@ -2178,7 +2153,7 @@ ${list(params, (p) => `\t${p.name}${p.optional ? '?' : ''}: ${p.tstype}\n`)}}
 								seen.set(h.qualifier, h.name)
 							}
 						}
-						const route = routeFor(routesAbs, f)
+						const route = routeFor(routesDir, routesAbs, f)
 						if (route === null) continue // wrapper-only (handled above); leaf always has a route
 						emitTypes('routes', mod, src, fns, route)
 						// Dynamic-shape clash (section 8): two files normalizing to the
@@ -2417,7 +2392,7 @@ ${list(params, (p) => `\t${p.name}${p.optional ? '?' : ''}: ${p.tstype}\n`)}}
 						mkdirSync(genModDir, { recursive: true })
 						writeFileSync(
 							join(genModDir, mod.split('/').pop() + '.js'),
-							jsWasmFor(root, mod, allFns)
+							jsWasmFor(isBuild, mod, allFns)
 						)
 						try {
 							const outWasm = join(devWasmDirFor(root), mod + '.wasm')
@@ -2919,7 +2894,7 @@ export function hydrateSwelteRoute(target, pathname, errorProps) {
 				// §7: middleware is server-only — strip it from the browser
 				// stub (it has no client binding). +route.v wrappers expose
 				// nothing: importing one from the browser is a build error.
-				const route = routeFor(routesAbs, abs)
+				const route = routeFor(routesDir, routesAbs, abs)
 				if (route === null) {
 					throw new Error(
 						`[swelte] ${abs} is a +route.v wrapper (@[before]/@[after] middleware only) and cannot be imported in browser code.`
@@ -2942,7 +2917,7 @@ export function hydrateSwelteRoute(target, pathname, errorProps) {
 				)
 				const allFns = [...rpcFns, ...verbFns]
 				if (allFns.length === 0) return 'export {}; // swelte: no RPC fns in this .v file'
-				return jsWasmFor(root, mod, allFns)
+				return jsWasmFor(isBuild, mod, allFns)
 			}
 			return null
 		},

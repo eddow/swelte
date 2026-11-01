@@ -183,6 +183,45 @@ export async function waitPort(port: number, ms: number): Promise<boolean> {
 	return !(await portFree(port))
 }
 
+/** Contract the build smoke probe asserts against a booted artifact:
+ * page HTML on `/` (browser accept), greet API when the route exists,
+ * JSON-accept shape otherwise. Exported for the smoke-matrix tests:
+ * pass a stub binary (`node -e` server) to exercise the matrix without
+ * a V toolchain. */
+export async function probeSmoke(
+	port: number,
+	hasGreetRoute: boolean,
+	log: (m: string) => void = () => {},
+): Promise<void> {
+	// Portable probe helper (no curl): fetch with a hard timeout.
+	const probeGet = async (path: string, accept: string): Promise<{ status: number; body: string }> => {
+		const ctrl = new AbortController()
+		const t = setTimeout(() => ctrl.abort(), 5000)
+		try {
+			const res = await fetch(`http://127.0.0.1:${port}${path}`, {
+				headers: { accept },
+				signal: ctrl.signal,
+			})
+			return { status: res.status, body: await res.text() }
+		} finally {
+			clearTimeout(t)
+		}
+	}
+	if (!(await waitPort(port, 15000))) throw new Error(`built binary did not listen on :${port} within 15s`)
+	const page = await probeGet('/', 'text/html')
+	if (page.status !== 200) throw new Error(`smoke page: HTTP ${page.status} (want 200)`)
+	// Empty scaffold has no api/greet.v — only probe the API when the
+	// route exists; otherwise the page probe + JSON check is the smoke.
+	if (hasGreetRoute) {
+		const api = await probeGet('/api/greet?payload=%22w%22', 'application/json')
+		if (!api.body.includes('Hello')) throw new Error(`smoke api: unexpected body ${api.body}`)
+		log(`smoke: page 200 + api ok (:${port})`)
+	} else {
+		const json = await probeGet('/', 'application/json')
+		log(`smoke: page 200 (no api/greet route; json ${json.status}) (:${port})`)
+	}
+}
+
 export async function runDev(ctx: Ctx): Promise<void> {
 	const root = resolve(String(ctx.opts.root ?? process.cwd()))
 	const port = takePort(ctx.opts.port, 5174)

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { join } from 'node:path'
 import {
 	modulePath,
-	routeForPublic,
+	routeFor,
 	vFileSafe,
 	vPrefix,
 	svelteModKind,
@@ -13,44 +13,44 @@ import {
 const R = (f: string) => join('/tmp/rr', 'src', 'routes', f)
 
 describe('route helpers', () => {
-	it('routeForPublic: leaf /x', () => {
-		assert.equal(routeForPublic('src/routes', '/tmp/rr/src/routes', R('greet.v')), '/greet')
+	it('routeFor: leaf /x', () => {
+		assert.equal(routeFor('src/routes', '/tmp/rr/src/routes', R('greet.v')), '/greet')
 	})
 
-	it('routeForPublic: api/ keeps path (dispatch strips leaf)', () => {
+	it('routeFor: api/ keeps path (dispatch strips leaf)', () => {
 		assert.equal(
-			routeForPublic('src/routes', '/tmp/rr/src/routes', R('api/greet.v')),
+			routeFor('src/routes', '/tmp/rr/src/routes', R('api/greet.v')),
 			'/api/greet'
 		)
 	})
 
-	it('routeForPublic: +page -> /, admin/+page -> /admin', () => {
-		assert.equal(routeForPublic('src/routes', '/tmp/rr/src/routes', R('+page.v')), '/')
+	it('routeFor: +page -> /, admin/+page -> /admin', () => {
+		assert.equal(routeFor('src/routes', '/tmp/rr/src/routes', R('+page.v')), '/')
 		assert.equal(
-			routeForPublic('src/routes', '/tmp/rr/src/routes', R('admin/+page.v')),
+			routeFor('src/routes', '/tmp/rr/src/routes', R('admin/+page.v')),
 			'/admin'
 		)
 	})
 
-	it('routeForPublic: dynamic [id] + [...rest] pass through', () => {
+	it('routeFor: dynamic [id] passes through; bare [...rest] leaf is malformed', () => {
 		assert.equal(
-			routeForPublic('src/routes', '/tmp/rr/src/routes', R('users/[id].v')),
+			routeFor('src/routes', '/tmp/rr/src/routes', R('users/[id].v')),
 			'/users/[id]'
 		)
-		assert.equal(
-			routeForPublic('src/routes', '/tmp/rr/src/routes', R('files/[...rest].v')),
-			'/files/[...rest]'
+		assert.throws(
+			() => routeFor('src/routes', '/tmp/rr/src/routes', R('files/[...rest].v')),
+			/malformed route/
 		)
 	})
 
-	it('routeForPublic: +route wrapper -> null; dynamic wrapper throws', () => {
-		assert.equal(routeForPublic('src/routes', '/tmp/rr/src/routes', R('+route.v')), null)
+	it('routeFor: +route wrapper -> null; dynamic wrapper throws', () => {
+		assert.equal(routeFor('src/routes', '/tmp/rr/src/routes', R('+route.v')), null)
 		assert.equal(
-			routeForPublic('src/routes', '/tmp/rr/src/routes', R('admin/+route.v')),
+			routeFor('src/routes', '/tmp/rr/src/routes', R('admin/+route.v')),
 			null
 		)
 		assert.throws(
-			() => routeForPublic('src/routes', '/tmp/rr/src/routes', R('[id]/+route.v')),
+			() => routeFor('src/routes', '/tmp/rr/src/routes', R('[id]/+route.v')),
 			/dynamic wrapper/
 		)
 	})

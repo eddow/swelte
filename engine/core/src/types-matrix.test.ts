@@ -14,7 +14,7 @@ describe('tsTypeFor projection matrix (docs/types.md)', () => {
 		['[]u8', 'string'],
 		['[]string', 'string[]'],
 		['[]int', 'number[]'],
-		['map[string]string', 'unknown'],
+		['map[string]string', 'Record<string, unknown>'],
 		['?string', 'string | null'],
 		['?int', 'number | null'],
 		['?json.Any', 'unknown'],
@@ -63,9 +63,9 @@ describe('tsTypeFor projection matrix (docs/types.md)', () => {
 				['c', 'number'],
 				['d', 'string'],
 				['e', 'string[]'],
-				// `map[string]int` keeps `unknown` today (prefix check is
-				// backslash-escaped, see tsTypeFor) — documented warn path.
-				['f', 'unknown'],
+				// `map[string]int` projects `Record<string, unknown>` (associative
+				// array shape — value type stays opaque, see docs/types.md).
+				['f', 'Record<string, unknown>'],
 				['g', 'string | null'],
 				['h', 'unknown'],
 				['i', 'Session'],

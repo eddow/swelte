@@ -7,7 +7,7 @@ import { execFileSync } from 'node:child_process'
 import { existsSync, readdirSync, statSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import type { Ctx } from './types.js'
-import { killPort, portFree, takePort, waitPort } from './dev.js'
+import { killPort, portFree, probeSmoke, takePort, waitPort } from './dev.js'
 
 function listDevWasm(root: string): string[] {
 	try {
@@ -131,20 +131,6 @@ export async function runBuild(ctx: Ctx): Promise<void> {
 	// Hand will proxy (its contract), but core sets nothing.
 	const probePort = takePort(ctx.opts.port, 4173)
 	await killPort(probePort, ctx.log)
-	// Portable probe helper (no curl): fetch with a hard timeout.
-	const probeGet = async (path: string, accept: string): Promise<{ status: number; body: string }> => {
-		const ctrl = new AbortController()
-		const t = setTimeout(() => ctrl.abort(), 5000)
-		try {
-			const res = await fetch(`http://127.0.0.1:${probePort}${path}`, {
-				headers: { accept },
-				signal: ctrl.signal,
-			})
-			return { status: res.status, body: await res.text() }
-		} finally {
-			clearTimeout(t)
-		}
-	}
 	const hasGreetRoute =
 		existsSync(join(root, cfg.routesDir, 'api', 'greet.v')) ||
 		existsSync(join(root, cfg.routesDir, 'api', 'greet', '+page.v')) ||
@@ -169,20 +155,10 @@ export async function runBuild(ctx: Ctx): Promise<void> {
 		logged += d.toString()
 	})
 	try {
-		if (!(await waitPort(probePort, 15000)))
-			throw new Error(`built binary did not listen on :${probePort} within 15s\n${logged}`)
-		const page = await probeGet('/', 'text/html')
-		if (page.status !== 200) throw new Error(`smoke page: HTTP ${page.status} (want 200)\n${logged}`)
-		// Empty scaffold has no api/greet.v — only probe the API when the
-		// route exists; otherwise the page probe + JSON check is the smoke.
-		if (hasGreetRoute) {
-			const api = await probeGet('/api/greet?payload=%22w%22', 'application/json')
-			if (!api.body.includes('Hello'))
-				throw new Error(`smoke api: unexpected body ${api.body}\n${logged}`)
-			ctx.log(`smoke: page 200 + api ok (:${probePort})`)
-		} else {
-			const json = await probeGet('/', 'application/json')
-			ctx.log(`smoke: page 200 (no api/greet route; json ${json.status}) (:${probePort})`)
+		try {
+			await probeSmoke(probePort, hasGreetRoute, ctx.log)
+		} catch (e) {
+			throw new Error(`${(e as Error).message}\n${logged}`)
 		}
 	} finally {
 		try {

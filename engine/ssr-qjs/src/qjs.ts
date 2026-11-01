@@ -142,6 +142,7 @@ export function buildQjsProd(opts: {
 	const timeoutMs = opts.timeoutMs ?? 50
 	const memoryMB = opts.memoryMB ?? 16
 	const bridge = join(genAbs, 'routes', 'swelte_qjs_bridge.v')
+	mkdirSync(dirname(bridge), { recursive: true })
 	writeFileSync(bridge, bridgeSrc(lib, cDir, timeoutMs, memoryMB))
 	const flags = `-I ${cDir} -L ${qjsDir} -lqjs -lm -lpthread -ldl`
 	return {

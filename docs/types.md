@@ -76,7 +76,8 @@ struct out, always `await`).
 ## Type table
 
 `string→string`, `bool→boolean`, ints/floats→`number`,
-`[]T→T[]`, `[]u8→string` (base64), `map[string]T→Record<string,T>`,
+`[]T→T[]`, `[]u8→string` (base64), `map[string]T→Record<string,unknown>`
+(value type stays opaque — `T` does not cross the TS boundary),
 `time.Time→number` (unix epoch, `json.encode` as-is — decided 2026-10-29),
 `?T→T|null`, `!T` strips to `T` + fallible flag,
 named `UpperCamel` structs pass through 1:1, else `unknown` + warning.

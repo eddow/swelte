@@ -373,7 +373,7 @@ export async function __swelteWasmCall<TResult>(
 			wasmUrl,
 			bare2,
 			0,
-			{ error: e instanceof Error ? e.message : String(e), fn: bare2, path: wasmUrl },
+			{ error: e instanceof Error ? e.message : String(e), fn: bare2, path: wasmUrl, available: [] },
 			''
 		)
 	}

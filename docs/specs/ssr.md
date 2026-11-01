@@ -29,8 +29,8 @@ This file keeps the binding constraints + what remains open.
    compat, opts out of single-artifact.
 4. **§5 gate as CI.** `runSsrCheck` covers sidecar + sidecar-via-Hand
    + prod-binary + 20× repeat-render halves (marker-only assertions,
-   no `<main>` assumption); remaining: `!T` → 500 HTML + server up,
-   bare-machine single artifact, HMR no-restart proof, bun streaming.
+   no `<main>` assumption) with unit tests on stubs; remaining: `!T` →
+   500 HTML + server up, bare-machine single artifact, bun streaming.
 
 ## Protocol (for implementers)
 
