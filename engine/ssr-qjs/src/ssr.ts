@@ -377,14 +377,44 @@ export async function transpileSiblingLoad(relFile: string, src: string): Promis
  * `import { a, b } from '#routes/x.v'` → `const a = () => { throw ... }; ...`.
  * Type-only imports (`import type`) vanish already (erased by compile). */
 export function stubSdkImports(code: string, relFile: string): string {
+	// `//`-comment guard: commented-out imports must survive untouched
+	// (the old regex rewrote `// import ... '@swelte/core'` inside
+	// comments — same class of fix as the sibling scanners, which strip
+	// comments first via stripForScan). `isCommentedOut` walks the line
+	// start for `//` outside string literals; URLs inside literals
+	// (`'https://…'`) never count as comment starts.
+	const isCommentedOut = (idx: number): boolean => {
+		let ls = code.lastIndexOf('\n', idx - 1) + 1
+		let quote: string | null = null
+		for (let j = ls; j < idx; j++) {
+			const ch = code[j]
+			const two = code.slice(j, j + 2)
+			if (quote) {
+				if (ch === '\\') {
+					j++
+					continue
+				}
+				if (ch === quote) quote = null
+				continue
+			}
+			if (two === '//') return true
+			if (ch === '"' || ch === "'" || ch === '`') quote = ch
+		}
+		return false
+	}
 	// `$app/environment` is the one SDK module with a *usable* SSR value:
 	// resolve `browser` (and friends) to server literals before stubbing.
 	// `$app/stores`/`$app/navigation`/`@swelte/core` stay throw-stubs —
 	// they must never fire during the sync render.
-	code = code.replace(
-		/import\s*\{\s*browser\s*\}\s*from\s*['"]\$app\/environment['"]/g,
-		'const browser = false;'
-	)
+	if (!isCommentedOut(code.search(/import\s*\{\s*browser\s*\}\s*from\s*['"]\$app\/environment['"]/))) {
+		code = code.replace(
+			/import\s*\{\s*browser\s*\}\s*from\s*['"]\$app\/environment['"]/g,
+			(match, ...rest: unknown[]) => {
+				const offset = rest[rest.length - 2] as number
+				return isCommentedOut(offset) ? match : 'const browser = false;'
+			},
+		)
+	}
 	const out: string[] = []
 	let last = 0
 	// Named SDK imports → render-time throw-stubs (must never fire in SSR).
@@ -398,6 +428,7 @@ export function stubSdkImports(code: string, relFile: string): string {
 		/import\s*['"](#routes\/[^'"]*|#lib\/[^'"]*|@swelte\/core|\$app\/[^'"]*)['"];?/g
 	let m: RegExpExecArray | null
 	while ((m = re.exec(code)) !== null) {
+		if (isCommentedOut(m.index)) continue
 		out.push(code.slice(last, m.index))
 		const defs: string[] = []
 		for (const part of (m[1] as string).split(',')) {
@@ -420,7 +451,15 @@ export function stubSdkImports(code: string, relFile: string): string {
 	out.push(code.slice(last))
 	let stubbed = out.join('')
 	// Drop bare SDK side-effect imports (no named bindings to stub).
-	stubbed = stubbed.replace(bare, '/* swelte:ssr-qjs: dropped bare SDK side-effect import (SSR has no router/stores) */')
+	stubbed = stubbed.replace(
+		bare,
+		(match, ...rest: unknown[]) => {
+			const offset = rest[rest.length - 2] as number
+			return isCommentedOut(offset)
+				? match
+				: '/* swelte:ssr-qjs: dropped bare SDK side-effect import (SSR has no router/stores) */'
+		},
+	)
 	return stubbed
 }
 

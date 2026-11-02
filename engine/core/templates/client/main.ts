@@ -12,8 +12,8 @@ import { hydrateSwelteRoute, mountSwelteRoute, initSwelteRouter } from './routes
 
 const target = document.getElementById('app')!
 if (target.dataset.swelteSsr === '1' || target.childNodes.length > 0) {
-	hydrateSwelteRoute(target, location.pathname)
+	hydrateSwelteRoute(target, location.pathname, undefined)
 } else {
-	mountSwelteRoute(target, location.pathname)
+	mountSwelteRoute(target, location.pathname, undefined)
 }
 initSwelteRouter(target)

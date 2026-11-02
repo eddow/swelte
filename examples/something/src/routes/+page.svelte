@@ -1,9 +1,10 @@
 <script lang="ts">
 import { tick } from 'svelte'
-import { get_greeting, save_name, greet_narrow } from '#routes/+page.v'
+import { get_greeting, save_name, save_fail, greet_narrow } from '#routes/+page.v'
 import type {
 	GetGreetingResult,
 	SaveNameResult,
+	SaveFailResult,
 	GreetNarrowResult,
 	SwelteRequest,
 } from '#routes/+page.v'
@@ -12,11 +13,13 @@ import { tick_items } from '#routes/api/ticks.v'
 import type { Session, SwelteResponse } from '#routes/api/greet.v'
 import { hash_string } from '#lib/crypto/hash.v'
 import type { HashStringResult } from '#lib/crypto/hash.v'
-import { SwelteRpcError } from '@swelte/core'
+import { SwelteRpcError, isFail, deserialize } from '@swelte/core'
 
 let name = $state('world')
 let greeting: GetGreetingResult = $state('')
 let saved: SaveNameResult = $state('')
+let saveFailNote = $state('')
+let deserNote = $state('')
 let session: Session | null = $state(null)
 let pureSession: Session | null = $state(null)
 let pdfInfo = $state('')
@@ -48,11 +51,43 @@ async function loadGreeting() {
 }
 async function saveName() {
 	lastError = ''
+	saveFailNote = ''
 	try {
 		saved = await save_name({ payload: name })
 	} catch (e) {
 		showError(e)
 	}
+}
+
+// Item 4: fail-lite — empty `?save` POST 422s with
+// `{ ok: false, fieldErrors }`; narrowed inline via `isFail(e, 422)`.
+async function saveFailLite() {
+	lastError = ''
+	saveFailNote = ''
+	try {
+		await save_fail({ payload: '' })
+		saveFailNote = 'unexpected ok (item 4)'
+	} catch (e) {
+		if (isFail(e, 422)) {
+			const fe = (e.body as { fieldErrors?: Record<string, string> }).fieldErrors ?? {}
+			saveFailNote = `inline fail-lite (item 4): ${Object.entries(fe).map(([k, v]) => `${k}=${v}`).join(', ')}`
+		} else {
+			showError(e)
+		}
+	}
+}
+
+// Item 4 (second assert, independent): `deserialize` on a SvelteKit
+// failure envelope. Raw verb JSON has no envelope (use
+// `__swelteActionResult` there) — this asserts the envelope shape.
+async function deserEnvelope() {
+	lastError = ''
+	const res = new Response(JSON.stringify({ type: 'failure', status: 422, data: { ok: false } }), {
+		status: 422,
+		headers: { 'content-type': 'application/json' },
+	})
+	const out = await deserialize(res)
+	deserNote = `deserialize envelope (item 4): ${out.type}/${out.status}`
 }
 async function hashName() {
 	lastError = ''
@@ -168,12 +203,20 @@ async function patchTouch() {
 		<button onclick={putRename}>Rename (@[put])</button>
 		<button onclick={patchTouch}>Touch (@[patch])</button>
 		<button onclick={loadNarrow}>Narrow (#routes GET narrow-args)</button>
+		<button onclick={saveFailLite}>Save fail-lite (item 4)</button>
+		<button onclick={deserEnvelope}>Deserialize (item 4)</button>
 	</div>
 	{#if greeting}
 		<p>{greeting}</p>
 	{/if}
 	{#if saved}
 		<p>{saved}</p>
+	{/if}
+	{#if saveFailNote}
+		<p>{saveFailNote}</p>
+	{/if}
+	{#if deserNote}
+		<p>{deserNote}</p>
 	{/if}
 	{#if hashed}
 		<p>{hashed}</p>
