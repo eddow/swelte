@@ -126,16 +126,17 @@ that would prove it**.
   `docs/[[slug]].v`/`.svelte` pair asserting zero-or-one
   (`/docs` and `/docs/x` both 200, `/docs/x/y` 404).
 
-## 9. `src/server.v` lifecycle (`@[startup]` / `@[reroute]`)
+## 9. `src/app.v` lifecycle (`@[startup]` / `@[reroute]`)
 
-* What: `@[startup] () void` runs once before `veb.run` (throw
-  aborts boot); `@[reroute] (host, path) string` runs after
+* What: `@[startup] () void|!void` (zero/one fn, no qualifier/params)
+  runs once before `veb.run` (throw aborts boot); `@[reroute] (host
+  string, path string) string` (zero/one fn, no qualifier) runs after
   `trailingSlash` normalization, before CORS/static/dispatch
   (`docs/config.md:70-74`).
 * Engine: harness template `engine/core/templates/harness/server.v`.
-* Gap: demo has no `src/server.v` at all (only the generated
+* Gap: demo has no `src/app.v` at all (only the generated
   `.swelte/server.v` harness).
-* Demo: `src/server.v` with `@[startup]` stamping a boot line and
+* Demo: `src/app.v` with `@[startup]` stamping a boot line and
   `@[reroute]` rewriting `/old` → `/router`; assert the rewrite
   serves `/router` content at `/old` with no redirect. (Stays
   clear of open `@[cron]`/`@[queue]` → `specs/moar.md`.)
@@ -148,7 +149,7 @@ that would prove it**.
   `SWELTE_CORS_ORIGIN` (preflight 204), `SWELTE_METHOD_OVERRIDE`
   (`?_method=`), trailing-slash 301s, `X-Swelte-Version`
   (`docs/config.md`, `docs/errors.md`).
-* Engine: harness `server.v` guards + `Hand` dispatch.
+* Engine: generated harness `.swelte/server.v` guards + `Hand` dispatch.
 * Gap: partially demoed only — uploads prove the 10MB cap and
   over-cap 413; `?slow` exists for the timeout watchdog but no doc
   line asserts it; rate-limit/CSRF/CORS/override/trailing-slash/
@@ -248,7 +249,7 @@ that would prove it**.
   (`build --target`, `export`).
 * Engine: `sdk.ts` `enhance`/`applyAction`/`__swelteActionResult`
   (+`SweltePageState.form`), `gen/config.ts` new knobs
-  (`prerender`/`isr`/`target`/`offline`), harness `server.v`
+  (`prerender`/`isr`/`target`/`offline`), generated harness `.swelte/server.v`
   ISR stamping + static-first comment, SW precache gate in
   `vite.ts generateBundle`.
 * Gap: zero demo usage — no form uses `use:enhance`, no

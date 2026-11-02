@@ -18,7 +18,8 @@ src/routes/admin/+page.svelte + +page.v     /admin leaf (admin_whoami GET, reads
 src/routes/router/+page.v + +page.ts + +page.svelte   /router (§1: server @[load] + swelte_fetch sibling rows + sync universal load + client router + $app/*)
 src/routes/router/live/+page.ts + +page.svelte        /router/live (§1: ssr=false twin — async universal load + <await> streaming, SPA shell)
 src/lib/crypto/hash.v               isomorphic (hash_string @[rpc] → WASM/dev fallback)
-server.v                            Hand + static + main() — calls generated routes/swelte_route
+src/app.v                           user lifecycle — @[startup]/@[reroute] inlined into the harness (absent in this demo)
+.swelte/server.v                    Hand + static + main() — calls generated routes/swelte_route
 routes/                             generated V dispatcher (regenerating, gitignored)
 vite.config.ts                     swelte({ vBackendUrl, routesDir, libDir }) + experimental.async (client <await>; SSR bundle stays sync)
 ```
@@ -29,7 +30,7 @@ vite.config.ts                     swelte({ vBackendUrl, routesDir, libDir }) + 
 node engine/core/dist/cli.js dev --port 5174 --backend 8131 --root examples/something
 # one command: V backend :8131 + Vite :5174, HMR reload on .v change, Ctrl-C kills both
 # manual two-terminal equivalent:
-#   PORT=8131 v run .              # V backend :8131 (server.v + generated routes/)
+#   PORT=8131 v run .swelte         # V backend :8131 (generated .swelte/server.v + routes/)
 #   npx vite --port 5174           # frontend :5174 → open it, not :8131
 ```
 

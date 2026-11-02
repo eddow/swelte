@@ -12,19 +12,27 @@ reads `.v` files as text and writes `.swelte/types/**` (`routes/`,
 add/change/unlink. Warnings (`unknown` types, orphans,
 `#lib/backend` misuse, stray `@[get/post]` in `#lib/`) go to
 console, never fail correct V programs. Errors (one-default-per-verb,
-unique qualifiers, folder-root double claim, `@[before]`/`@[after]`
-outside `+route.v`) fail the build with file+line.
+unknown `head`/`options` aliasing, unique qualifiers, folder-root
+double claim, `@[before]`/`@[after]` outside `+route.v`,
+`@[matcher]`/`@[startup]`/`@[reroute]` outside their own files) fail
+the build with file+line.
 
 ## What
 
-`parseVFile` extracts `@[rpc|get|post|put|delete|patch|sse|before|after] pub fn name(params) ret`
-(verb attributes take an optional `('qualifier')`; `@[sse]` is GET+`Accept: text/event-stream`, same qualifier rules) +
+`parseVFile` extracts all route/lifecycle attributes —
+`rpc`, `get`, `post`, `put`, `delete`, `patch`, `head` (alias → the `GET`
+arm, never a separate default), `options` (CORS-preflight-only, never a
+user fn), `sse` (GET+`Accept: text/event-stream`, same qualifier rules),
+`before`, `after`, `load`, `matcher`, `startup`, `reroute` —
+each stacked `@[...; ...]` item fans out to one entry
+(verb attributes take an optional `('qualifier')`) +
 `parseStructs` extracts `pub struct` fields. `@[rpc]` fns keep the
 single-args-struct rule (fn taking one struct param expands to that
 struct's fields, projected inline as an anonymous literal —
 `Parameters<typeof fn>[0]`-retrievable, no named import needed; the
 args struct is V-side only, not re-exported to TS); verb handlers
-take the framework `Request` (exact shape with the dispatcher) or narrow params (`(name string, age int)` → inline literal
+take the framework `SwelteRequest` (exact shape with the dispatcher, see
+`rpc.md`) or narrow params (`(name string, age int)` → inline literal
 with `number` coercion server-side); `@[before]`/`@[after]`
 middleware (`+route.v` only) exports no callables to TS —
 but the wrapper's `pub struct`s are still projected (wrapper is

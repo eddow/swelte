@@ -294,7 +294,8 @@ from extended configs, so no generated fragment — wildcards only).
 
 Only `#routes/` participates. `generate()` emits `routes/`
 (`module routes`: one file per routes file + `server_gen.v` with
-`SwelteRequest` + `swelte_route`), shared with `server.v` (`Hand` +
+`SwelteRequest` + `swelte_route`), shared with the generated harness
+`.swelte/server.v` (rendered from `templates/harness/server.v`; `Hand` +
 static + `main()`) via directory-mode `v run .` (`/` ->
 `src/routes/index.v`, `/api/greet` -> `src/routes/api/greet.v`,
 else 404; unknown fn -> 404 + available; missing carrier -> 400;

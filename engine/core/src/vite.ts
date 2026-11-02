@@ -1088,20 +1088,23 @@ export interface ServerHooks {
 	hasFile: boolean
 }
 
-/** Validate + collect `@[startup]`/`@[reroute]` from `src/server.v`.
+/** Validate + collect `@[startup]`/`@[reroute]` from `src/app.v`.
  * `@[startup]`: `() void|!void`, zero/one fn. `@[reroute]`:
  * `(host string, path string) string`, zero/one fn, no qualifier.
  * Missing file → no-op hooks (byte-identical harness when absent). No TS
  * callable; `pub struct`s are NOT projected (Hand-level, not layout). */
 export function loadServerHooks(root: string, srcDir = 'src'): ServerHooks {
-	const file = join(root, srcDir, 'server.v')
+	const file = join(root, srcDir, 'app.v')
+	const legacy = join(root, srcDir, 'server.v')
 	let src = ''
 	try {
 		src = readFileSync(file, 'utf8')
 	} catch {
+		if (existsSync(legacy))
+			throw new Error(`[swelte] src/server.v was renamed to src/app.v — move it (generated .swelte/server.v keeps its name).`)
 		return { hasFile: false }
 	}
-	const rel = `src/server.v`
+	const rel = `src/app.v`
 	const fns = parseVFile(src)
 	const out: ServerHooks = { hasFile: true }
 	let startup: RpcFn | undefined
@@ -2665,7 +2668,7 @@ ${tupleStat('res')}`
 					throw e
 				}
 				const knownMatchers = new Set(matchers.keys())
-				// Lifecycle hooks (`src/server.v`, `@[startup]`/`@[reroute]`).
+				// Lifecycle hooks (`src/app.v`, `@[startup]`/`@[reroute]`).
 				// Missing file → no-op hooks (harness byte-identical).
 				const hooks = loadServerHooks(root)
 
@@ -3019,7 +3022,7 @@ ${list(params, (p) => `\t${p.name}${p.optional ? '?' : ''}: ${p.tstype}\n`)}}
 						const mod = modulePath(routesAbs, f)
 						const rel = relPosix(routesAbs, f)
 					for (const bad of allFns.filter((x) => x.attr === 'matcher' || x.attr === 'startup' || x.attr === 'reroute'))
-						throw new Error(`[swelte] ${routesDir}/${rel}: @[${bad.attr}] ${bad.name} is only allowed in its own file (matcher → src/matchers.v, startup/reroute → src/server.v).`)
+						throw new Error(`[swelte] ${routesDir}/${rel}: @[${bad.attr}] ${bad.name} is only allowed in its own file (matcher → src/matchers.v, startup/reroute → src/app.v).`)
 						const isWrapper = mod === '+route' || mod.endsWith('/+route')
 						if (isWrapper) {
 							const loads = allFns.filter((x) => x.attr === 'load')
@@ -3978,7 +3981,7 @@ export function initSwelteRouter(target) {
 				} catch (e) {
 					warnings.push(`harness: ${(e as Error).message}`)
 				}
-				// Client entry (engine-owned, like server.v):
+				// Client entry (engine-owned, like .swelte/server.v):
 				// templates/client/main.ts → .swelte/entry-main.ts.
 				// transformIndexHtml below points the script tag at it;
 				// src/main.ts stays a user-owned shim.

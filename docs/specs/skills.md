@@ -1,7 +1,7 @@
 # Spec: skill pack — end product + maintenance contract
 
 The skill pack lives in `.agents/skills/` (VS Code discovery path).
-Five skills, each a `SKILL.md` following the [Agent Skills spec](https://agentskills.io/specification.md)
+Six skills, each a `SKILL.md` following the [Agent Skills spec](https://agentskills.io/specification.md)
 (`name` = directory name, `description` = trigger keywords).
 
 ## The pack
@@ -9,10 +9,11 @@ Five skills, each a `SKILL.md` following the [Agent Skills spec](https://agentsk
 | skill | covers | stable sources | spec dependency |
 |---|---|---|---|
 | `swelte-overview` | layout, CLI, SPA-first proxy | `docs/README.md`, `docs/example.md`, `docs/versus.md`, `README.md` | none — do not touch on spec changes |
-| `swelte-v-routes` | attributes, `SwelteRequest`, type table, errors, WASM purity, matchers, hooks, fail/deserialize/enhance | `docs/rpc.md`, `docs/types.md`, `docs/errors.md`, `docs/forms.md`, `docs/config.md` | `specs/moar.md` (`@[cron]`, `@[queue]`) |
+| `swelte-v-routes` | attributes, `SwelteRequest`, type table, errors, WASM purity, matchers, hooks | `docs/rpc.md`, `docs/types.md`, `docs/errors.md`, `docs/config.md` | `specs/moar.md` (`@[cron]`, `@[queue]` in `src/app.v`) |
 | `swelte-svelte5` | runes, imports, SSR component rule, `+error` | `docs/example.md`, `docs/ssr.md` | none — built: `docs/forms.md`, `docs/config.md`, `docs/coming-from-sveltekit.md` |
 | `swelte-ssr-load` | ownership, request path, `@[load]` cascade, budgets | `docs/ssr.md`, `docs/internal/load.md`, `docs/rpc.md` | `specs/ssr.md` |
 | `swelte-sveltekit-delta` | open parity gaps (`@cron`/`@queue`), built remainder index | `docs/versus.md` (stable) + built root docs (`forms.md`, `config.md`, `cli.md`) | `specs/moar.md` |
+| `swelte-mcp` | route tree, type contracts, diagnostics, scaffolding | `docs/mcp.md`, `docs/example.md` | none — tool wrapper over `swelte check` |
 
 ## Rule
 

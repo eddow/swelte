@@ -1,7 +1,11 @@
 # CLI: `swelte` commands
 
 Built behavior. Every command resolves the V toolchain itself
-(system `v`, else `@swelte/vvm` — no manual install).
+(system `v`, else `@swelte/vvm` — no manual install). Subcommand list
+is closed: `dev` / `build` / `preview` / `test` / `check` / `init` /
+`export` (+ `--help` / `--version`). No aliases — `build --target-os` /
+`--targetOs` are rejected as unknown options (cross-build is open work,
+see `specs/moar.md`); use the documented `--target` deploy shim.
 
 ## `swelte dev [--port N] [--backend N] [--root dir]`
 
@@ -17,7 +21,7 @@ so idle `dev` stays quiet (no phantom HMR), and the watcher ignores
 ## `swelte build [--root dir] [--output path] [--port N] [--target auto|static|node|edge]`
 
 1. `generate()` into `.swelte/` (`routes/*.v` + `server_gen.v` +
-   `server.v` harness). Emits dev `.swelte/dev/<mod>.wasm` per file
+   `.swelte/server.v` harness). Emits dev `.swelte/dev/<mod>.wasm` per file
    (mtime-guarded); the prod bundle compiles in `generateBundle`.
    Also writes `.swelte/entries.json` (prerender crawl list — static
    routes always, dynamics expanded from sibling `entries.ts` only when
@@ -80,7 +84,7 @@ build` first).
 generate-time warns (`gen/diagnostics.ts`), file+line entries for
 humans and `--format json` for agents.
 
-## `swelte init [<dir>] [--sample | --empty]`
+## `swelte init [<dir>] [--sample | --empty] [--template empty|sample] [--root dir] [--dir name]`
 
 Scaffold a project. `--sample` (default): the `something` example
 shape. `src/main.ts` ships as a thin user-owned shim; routers are

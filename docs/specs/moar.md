@@ -6,12 +6,14 @@ This file tracks TODO only. Built server-lifecycle behavior
 
 ## Use of swelte.contract.json
 
-Review how useful to commit a generated file
+Committed at the project root (`swelte.contract.json`) — drift detection
+survives a fresh clone; `.swelte/` stays derived. Fail on drift; re-run
+`swelte test --update-snapshot` after an intentional V type change.
 
-## `src/server.v` — remaining
+## `src/app.v` — remaining
 
 ```v
-module server
+module app
 
 // duration only ('60s' | '5m' | '1h') — no cron-expr parser in v1.
 // spawn + time.sleep loop, single-instance best-effort.
@@ -50,8 +52,10 @@ TODO: `swelte build [--target-os <os>]` (`linux`|`macos`|`windows`)
 
 ## Open decisions
 
-* File name: `src/server.v` clashes conceptually with generated
+* ~~File name: `src/server.v` clashes conceptually with generated
   `.swelte/server.v` + template `templates/harness/server.v`.
-  Candidates: `src/hooks.v`, `src/app.v`, `src/lifecycle.v`.
+  Candidates: `src/hooks.v`, `src/app.v`, `src/lifecycle.v`.~~
+  **Decided: `src/app.v`** (user lifecycle; generated `.swelte/server.v` +
+  template `templates/harness/server.v` keep their names).
 * `@[queue]` transport: in-process chan vs external broker — v1 is
   in-process; broker (if ever) is a later item, not this file's problem.

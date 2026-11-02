@@ -40,13 +40,14 @@ behind `./cli` so Vite never bundles `node:child_process` into the page
 
 Single `swelte` bin, subcommands (all implemented):
 
-```
+```sh
 swelte dev [--port N] [--backend N] [--root dir]
-swelte build [--root dir] [--output path] [--port N]
+swelte build [--root dir] [--output path] [--port N] [--target auto|static|node|edge]
 swelte preview [--port N] [--root dir] [--binary path]
-swelte init [<dir>] [--sample | --empty] [--template empty|sample]
+swelte init [<dir>] [--sample | --empty] [--template empty|sample] [--root dir] [--dir name]
 swelte check [--root dir] [--format text|json]
 swelte test [--root dir] [--update-snapshot | -u]
+swelte export [--root dir] [--out snapshot/]
 swelte --help | --version
 ```
 
@@ -72,4 +73,4 @@ npm run dev     # tsc --watch
 - `../../docs/types.md` — V → TS projection (built)
 - `../../docs/errors.md` — envelope, SPA-first rule (built)
 - `../../docs/internal/v-imports.md` — design rationale + decisions log
-- `../../docs/specs/sveltekit.md` + `../../docs/specs/moar.md` — forward work
+- `../../docs/specs/moar.md` + `../../docs/specs/ssr.md` — forward work

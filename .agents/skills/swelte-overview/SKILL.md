@@ -23,16 +23,17 @@ dist/server         — single self-contained prod binary + dist/ static
 ## Commands
 
 ```sh
-sh
 npx swelte init myapp && cd myapp
 npm install
 npx swelte dev      # Vite :5174 + V backend :8131, one command
 npx swelte build    # typecheck + dist/server + vite build + smoke probe
 npx swelte preview  # serve the build, no Vite involved
+npx swelte test     # v test + TS contract check (+ swelte.contract.json snapshot)
+npx swelte check    # diagnostics without side effects (text|json)
 ```
 
 `swelte dev` resolves V itself (system `v`, else `@swelte/vvm` toolchain).
-`vite.config.ts` wires `swelte({ vBackendUrl })`; dirs come from `svelte.config.js` `swelte` key (`routesDir`, `libDir`, `trailingSlash`, `csp`, `csrf`, `methodOverride`).
+`vite.config.ts` wires `swelte({ vBackendUrl })` (all other knobs live in the `svelte.config.js` `swelte` key: `routesDir`, `libDir`, `outDir`, `distDir`, `port`, `corsOrigin`, `trailingSlash`, `base`, `assets`, `csp`, `csrf`, `methodOverride`, `version`, `serviceWorker`, `prerender`, `isr`, `target`, `offline`).
 
 ## SPA-first proxy rule
 

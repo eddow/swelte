@@ -10,7 +10,8 @@ Open work (`ssr-bun`, gate-as-CI with wrapper-route asserts) stays in
 * `core` is engine-agnostic and stays that way. It provides: the
   `.svelte` route manifest (`.swelte/ssr-manifest.json`), the `Hand`
   SSR hook (`swelte_ssr_enabled()` / `swelte_render_page()` /
-  `swelte_page_props()` / `swelte_fill_ssr()` in `server.v`), marker
+  `swelte_page_props()` / `swelte_fill_ssr()` in the generated harness
+  `.swelte/server.v`), marker
   injection in `transformIndexHtml`, the generated client entry
   (`.swelte/entry-main.ts`), and the `loadPage` client twin in `sdk.ts`.
   Core never imports `svelte/compiler`, QuickJS, or bun; core's

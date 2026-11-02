@@ -92,7 +92,7 @@ export async function runBuild(ctx: Ctx): Promise<void> {
 		process.env.SWELTE_ISR = Object.entries(cfg.isr)
 			.map(([k, v]) => `${k}=${v}`)
 			.join(',')
-	// 1. generate into .swelte/ (routes/*.v + server_gen.v + server.v harness).
+	// 1. generate into .swelte/ (routes/*.v + server_gen.v + .swelte/server.v harness).
 	try {
 		const { swelte } = await import('../vite.js')
 		const plug = swelte({}) as unknown as {
@@ -130,7 +130,7 @@ export async function runBuild(ctx: Ctx): Promise<void> {
 	// 3b. QJS prod link, second generate pass (adapter-owned): the bridge
 	// (routes/swelte_qjs_bridge.v) did not exist during step 1 (it is
 	// emitted by generateBundle above) — regenerate so server_gen.v +
-	// server.v compile against it. Core-only projects: generate() is
+	// .swelte/server.v compile against it. Core-only projects: generate() is
 	// idempotent, no bridge, no QJS. Then rebuild libqjs.a (mtime-guarded).
 	try {
 		const { swelte } = await import('../vite.js')

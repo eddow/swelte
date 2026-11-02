@@ -7,8 +7,9 @@ attribute is a named export.
 Generated V dispatcher (`routes/`, `module routes`): `generate()` emits
 one file per routes file (routes/+page.v`, `routes/api_greet.v`) plus
 `routes/server_gen.v` (`SwelteRequest` + `swelte_route` + `err_*`
-helpers). `server.v` is `Hand` + static handlers + `main()` only, run
-via directory-mode `v run .`. Structs are prefixed per file
+helpers). `.swelte/server.v` (generated harness: `Hand` + static handlers
++ `main()` only, rendered from `templates/harness/server.v` + the
+`src/app.v` hooks) is compiled via directory-mode `v run .`. Structs are prefixed per file
 (`ApiGreet_LoginArgs`) to share one module; fns are `swelte_<mod>_*`
 (snake_case, V requirement).
 
@@ -59,12 +60,12 @@ JSON body. No `?fn=` anywhere (removed with the old model).
 | file | attribute | HTTP | routing |
 |---|---|---|---|
 | `#routes/` | `@[rpc]` | POST JSON `Accept: application/json` (or local WASM call in `#lib/`) | body `{ "fn", "args" }`; unlimited per file. **Protocol-ignorant:** typed args-struct in, typed value out (or throw → reject). No HTTP types (`SwelteRequest`/`SwelteResponse`/`[]u8`/`(int,string)` are build errors) |
-| `#routes/` | `@[get]` / `@[get('q')]` | GET `Accept: application/json` | query = args; default, or `?q` present |
+| `#routes/` | `@[get]` / `@[get('q')]` | GET `Accept: application/json` (+`HEAD` on the same arm) | query = args; default, or `?q` present (`@[head]` stacks as an alias — never a separate default) |
 | `#routes/` | `@[sse]` / `@[sse('q')]` | GET `Accept: text/event-stream` (true streaming via veb) | query = args; default, or `?q` present. Two shapes: list mode returns `[]string` (harness streams each per-event); emit mode takes trailing `emit fn (string) bool` + returns void — each `emit(e)` flushes one frame NOW (`if !emit(e) { return }` on disconnect). Client stub is `AsyncGenerator<string>` (`for await`); `!T` failures + unknown qualifiers stay JSON |
-| `#routes/` | `@[post]` / `@[post('q')]` | POST form (multipart / urlencoded) | form fields = args; default, or `?q` present. `File`/`Blob` stub args → multipart, filenames land in `Request.files` (bytes discarded); plain values → urlencoded |
+| `#routes/` | `@[post]` / `@[post('q')]` | POST form (multipart / urlencoded) | form fields = args; default, or `?q` present. `File`/`Blob` stub args → multipart, filenames land in `SwelteRequest.files` (bytes discarded); plain values → urlencoded |
 | `#routes/` | `@[put]`/`@[delete]`/`@[patch]` (+`('q')`) | respective method | same per-method rules |
 | `#routes/` | `@[before]` / `@[after]` (only in `+route.v`) | — (subtree middleware; root `+route.v` is the global head, chains into every leaf) | `@[before]`: root→leaf, `SwelteRequest -> !SwelteRequest`; `@[after]`: leaf→root, `(SwelteRequest, SwelteResponse) -> !SwelteResponse`; middleware fns never exported to TS, but the wrapper's `pub struct`s are (+layout-shaped shared types) |
-| `#routes/` leaf + `+route.v` | `@[load]` | — (page data, `Hand` HTML navigations only) | `(SwelteRequest[, parent T]) -> !R`. Zero/one per file. Level 0 takes `(req)`; deeper levels take `(req, parent T)` where T is the previous level's return struct (short or prefixed spelling — mismatch is a build error). The cascade threads typed values root-first; the leaf's return is encoded once at the edge → `props_json` for SSR. No JSON in `.v` files. Throw → `+error` props. On-click stubs stay — `load` is initial paint only |
+| `#routes/` leaf + `+route.v` | `@[load]` | — (page data, `Hand` HTML navigations only) | `(SwelteRequest[, parent T]) -> !R`. Zero/one per file, never stacked, no qualifier. Level 0 takes `(req)`; deeper levels take `(req, parent T)` where T is the previous level's return struct (short or prefixed spelling — mismatch is a build error). The cascade threads typed values root-first; the leaf's return is encoded once at the edge → `props_json` for SSR. No JSON in `.v` files. Throw → `+error` props. On-click stubs stay — `load` is initial paint only |
 | `#lib/` | `@[rpc]` | local WASM call | none (direct dispatch) |
 
 - No attribute = internal helper, never exported, never routed.
@@ -106,6 +107,10 @@ pub fn login(req SwelteRequest) !SwelteResponse { ... } // HTTP: sets sess cooki
 pub fn delete_account(req SwelteRequest) !SwelteResponse { ... }
 ```
 
+`@[put]` / `@[delete]` / `@[patch]` follow the same default/qualifier
+rules as `@[get]` / `@[post]` (one default per verb per file, qualifiers
+unique per verb).
+
 `@[rpc]` fns are protocol-ignorant typed calls (`pub fn f(args Args) !R`):
 one args-struct in, typed value out, throw → TS reject. They never see HTTP
 (`SwelteRequest`/`SwelteResponse` params or HTTP returns are build errors —
@@ -116,13 +121,13 @@ inline literal and the result interface project to TS). Verb handlers (HTTP) tak
 headers, cookies, route params — exact shape with the dispatcher) and return a
 response: `string`/`struct` (JSON), `[]u8` (binary, `Content-Type` required),
 `(int, string)` (status+text sugar), or `SwelteResponse` (full control:
-`status`, `headers`, `cookies`, `body`/`body_bytes`). `@[sse]` fns take the framework `Request`
+`status`, `headers`, `cookies`, `body`/`body_bytes`). `@[sse]` fns take the framework `SwelteRequest`
 like verbs in two shapes: list mode returns `[]string`, emit mode
 takes trailing `emit fn (string) bool` + returns void — the harness
 injects `emit`, each call flushes one frame NOW. The TS stub is an
 `AsyncGenerator<string>` (`for await … of`).
 `!T` = may reject with `SwelteRpcError` (status 0 for local `#lib/`
-calls). `?T` = `T | null`. `Request.params` carries dynamic-segment
+calls). `?T` = `T | null`. `SwelteRequest.params` carries dynamic-segment
 values (`req.params['id']` for `/users/[id]`); client stubs
 interpolate them into the URL and strip them from the payload.
 

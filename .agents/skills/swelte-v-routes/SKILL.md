@@ -15,14 +15,15 @@ Every `.v` file is an ES module. Every `pub fn` with an attribute is a named exp
 | `#routes/` | `@[get]` / `@[get('q')]` | GET `Accept: application/json` | query = args; default, or `?q` present |
 | `#routes/` | `@[sse]` / `@[sse('q')]` | GET `Accept: text/event-stream` | two shapes (below); same default/qualifier rules as verbs |
 | `#routes/` | `@[post]` / `@[put]` / `@[delete]` / `@[patch]` (+`('q')`) | respective method | form fields = args; default, or `?q` qualifier |
-| `#routes/` leaf + `+route.v` | `@[load]` | page data, `Hand` HTML navigations only | `(SwelteRequest[, parent T]) -> !R`; zero/one per file |
+| `#routes/` leaf + `+route.v` | `@[load]` | page data, `Hand` HTML navigations only | `(SwelteRequest[, parent T]) -> !R`; zero/one per file, never stacked, no qualifier |
 | `+route.v` only | `@[before]` / `@[after]` | subtree middleware; root `+route.v` = global head | `SwelteRequest -> !SwelteRequest` / observe-or-replace response; never exported to TS |
 | `#lib/` | `@[rpc]` | local WASM call | none (direct dispatch) |
 | `src/matchers.v` | `@[matcher]` | param matcher, both sides | `(s string) bool`, non-fallible, portable subset only; `integer` builtin |
-| `src/server.v` | `@[startup]` | once before `veb.run` | `() void`, zero/one fn; throw aborts boot |
-| `src/server.v` | `@[reroute]` | host/path rewrite pre-dispatch | `(host, path) string`, `''` = no-op; zero/one fn |
+| `src/app.v` | `@[startup]` | once before `veb.run` | `() void|!void`, zero/one fn, no qualifier, no params; throw aborts boot |
+| `src/app.v` | `@[reroute]` | host/path rewrite pre-dispatch | `(host string, path string) string`, `''` = no-op; zero/one fn, no qualifier |
+| `src/app.v` (open) | `@[cron]` / `@[queue]` | duration loop / in-process channel | `specs/moar.md` — not built yet; misplaced use in `src/routes/*` will be a build error |
 
-Rules: verbs stack (`@[get; post]`), one default per verb per file, qualifiers unique per verb per file. Never stack `@[sse]` with a verb/rpc on one fn. `@[load]` never stacked, no qualifier. Dynamic segments: `[id]` any segment, `[id=matcher]` constrained (`integer` builtin = digits, `Params: number`; custom `@[matcher]` fns in `src/matchers.v`, `Params: string`), `[[slug]]` last-segment optional, `[...rest]` catch-all last. `src/matchers.v` / `src/server.v` are never routed and never importable from browser code; `@[matcher]`/`@[startup]`/`@[reroute]` in `src/routes/*` is a build error.
+Rules: verbs stack (`@[get; post]`), one default per verb per file, qualifiers unique per verb per file. Never stack `@[sse]` with a verb/rpc on one fn. `@[load]` never stacked, no qualifier. Dynamic segments: `[id]` any segment, `[id=matcher]` constrained (`integer` builtin = digits, `Params: number`; custom `@[matcher]` fns in `src/matchers.v`, `Params: string`), `[[slug]]` last-segment optional, `[...rest]` catch-all last. `src/matchers.v` / `src/app.v` are never routed and never importable from browser code; `@[matcher]`/`@[startup]`/`@[reroute]` in `src/routes/*` is a build error.
 
 ## Handler shapes
 
@@ -90,12 +91,15 @@ Stable — no spec dependency for the above:
 - `docs/rpc.md` — imports, attributes, transport (source of truth)
 - `docs/types.md` — V → TS projection, codegen
 - `docs/errors.md` — error envelope, SPA-first rule
+- `docs/forms.md` — verbs + `?q` no-JS 303, `fail`-lite, `deserialize`, `use:enhance` / `applyAction` cycle
+- `docs/config.md` — routing knobs, `src/app.v` lifecycle, `+route.svelte` nesting, per-route types, `#app/*`, locals/cookies, `HEAD`/`OPTIONS`, no-JS
 
 ## Spec dependency
 
 ⚠️ This skill MUST be updated when these specs land:
 
 - `docs/specs/moar.md` — `@[cron]` (duration spawn loop) and `@[queue]`
-  (in-process channel). Same file/shape conventions as the built hooks.
+  (in-process channel). Same file/shape conventions as the built hooks
+  in `src/app.v`.
 - `docs/config.md` — per-route `ssr=false`-lite (manifest flag →
   `Hand` skips rendering, serves SPA shell).

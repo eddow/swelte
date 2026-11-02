@@ -132,9 +132,11 @@ immutable assets stay cached, API/SSE network-only (unchanged).
   (`__swelteUrl` guard + `matchSegs`). Custom matchers project
   `string` (only `integer` narrows to `number`). Unknown name/bad
   shape = build error with file+line.
-* **`src/server.v` lifecycle** (`@[startup]`, `@[reroute]`; never
-  routed/never importable from browser): `@[startup] () void` runs once
-  before `veb.run` (throw aborts boot); `@[reroute] (host, path) string`
+* **`src/app.v` lifecycle** (`@[startup]`, `@[reroute]`; never
+  routed/never importable from browser): `@[startup] () void|!void`
+  (zero/one fn, no qualifier, no params) runs once before `veb.run`
+  (throw aborts boot); `@[reroute] (host string, path string) string`
+  (zero/one fn, no qualifier)
   runs after `trailingSlash` normalization, before CORS/static/dispatch
   (`''` = no-op). `@[cron]`/`@[queue]` are open (→ `specs/moar.md`).
 * **`+route.svelte` nesting** (Svelte 5 `children` Snippet, not slots):
@@ -156,8 +158,10 @@ immutable assets stay cached, API/SSE network-only (unchanged).
 * **`SwelteRequest.locals` + cookie helpers**: `locals map[string]string`
   threaded dispatch → verbs/`load`; `swelte_cookie_get/set/set_full/delete` (+`swelte_text/json/status/bytes/redirect` constructors)
   emitted. `before_request` passes empty locals (middleware fills it).
-* **`HEAD`/`OPTIONS`**: `GET` arms also match `HEAD` (same handler).
-  `OPTIONS` is CORS-preflight-only (`204`, no `Allow:`-on-405 listing).
+* **`HEAD`/`OPTIONS`**: `GET` arms also match `HEAD` (same handler;
+  `@[head]` is an alias onto the `GET` arm, never a separate default).
+  `OPTIONS` is CORS-preflight-only — no user fn (`@[options]` on a
+  handler is a build error), `204` with no `Allow:`-on-405 listing.
 * **No-JS forms**: browser `Accept: text/html` POST → `303` + `Location`
   on success, HTML-escaped error page on failure. Fetch
   (`Accept: application/json`) keeps JSON. Same handler.

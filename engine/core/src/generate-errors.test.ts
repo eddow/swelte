@@ -123,26 +123,26 @@ describe('generate() validation errors (tmp scaffold, no V binary)', () => {
 		const { readFileSync, writeFileSync, mkdirSync } = await import('node:fs')
 		// Two @[startup] → build error.
 		let root = scaffold({ '+page.v': 'module p\n@[get] pub fn g() string { return "" }' })
-		writeFileSync(join(root, 'src', 'server.v'), 'module s\n@[startup]\npub fn a() { }\n@[startup]\npub fn b() { }')
+		writeFileSync(join(root, 'src', 'app.v'), 'module s\n@[startup]\npub fn a() { }\n@[startup]\npub fn b() { }')
 		await assert.rejects(() => buildStart(root), /two @\[startup\] fns/)
 		// @[reroute] wrong shape → build error.
 		root = scaffold({ '+page.v': 'module p\n@[get] pub fn g() string { return "" }' })
-		writeFileSync(join(root, 'src', 'server.v'), 'module s\n@[reroute]\npub fn r(host string) string { return host }')
+		writeFileSync(join(root, 'src', 'app.v'), 'module s\n@[reroute]\npub fn r(host string) string { return host }')
 		await assert.rejects(() => buildStart(root), /must take \(host string, path string\)/)
 		root = scaffold({ '+page.v': 'module p\n@[get] pub fn g() string { return "" }' })
-		writeFileSync(join(root, 'src', 'server.v'), 'module s\n@[reroute]\npub fn r(host string, path string) bool { return true }')
+		writeFileSync(join(root, 'src', 'app.v'), 'module s\n@[reroute]\npub fn r(host string, path string) bool { return true }')
 		await assert.rejects(() => buildStart(root), /must return string/)
 		// Happy path: startup + reroute inline into the harness.
 		root = scaffold({ '+page.v': 'module p\n@[get] pub fn g() string { return "" }' })
 		writeFileSync(
-			join(root, 'src', 'server.v'),
+			join(root, 'src', 'app.v'),
 			"module s\n@[startup]\npub fn init() {\n\tprintln('boot')\n}\n@[reroute]\npub fn rw(host string, path string) string {\n\tif host.starts_with('bills.') {\n\t\treturn '/bills'\n\t}\n\treturn ''\n}"
 		)
 		await buildStart(root)
 		const sv = readFileSync(join(root, '.swelte', 'server.v'), 'utf8')
-		assert.ok(sv.includes("@[startup] (src/server.v)"), sv.slice(0, 500))
+		assert.ok(sv.includes("@[startup] (src/app.v)"), sv.slice(0, 500))
 		assert.ok(sv.includes("println('boot')"), sv.slice(0, 2000))
-		assert.ok(sv.includes('@[reroute] (src/server.v)'), sv.slice(0, 5000))
+		assert.ok(sv.includes('@[reroute] (src/app.v)'), sv.slice(0, 5000))
 		assert.ok(sv.includes("starts_with('bills.')"), sv.slice(0, 8000))
 		assert.ok(sv.includes("if rerouted != '' { path = rerouted }"), sv.slice(0, 8000))
 		// No hooks → harness byte-identical to the template skeleton.
