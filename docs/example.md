@@ -12,6 +12,11 @@ src/routes/+page.svelte + +page.v   / (get_greeting GET, save_name POST)
 src/routes/api/greet.v              /api/greet (get_greeting GET, greet_pure @[rpc] → Session, login POST → Session+cookie, pdf/created probes)
 src/routes/boom/+page.svelte + +page.v   /boom (throw fixture: @[load] + @[get] both `return error('boom')` — SSR `!T` gate)
 src/routes/users/[id].v             /users/[id] ([id] → req.params['id'])
+src/routes/(mkt)/about.v            /about (item 8: route group — (mkt) is disk-only, stripped from URL; Params {} empty)
+src/routes/docs/[[slug]].v          /docs/[[slug]] (item 8: optional segment — /docs + /docs/x → 200, /docs/x/y → 404; Params { slug: string })
+src/routes/members/[id=integer].v   /members/[id=integer] (item 7: [id=integer] narrows Params.id to number; non-digits 404 on V dispatch)
+src/routes/posts/[slug=slug].v      /posts/[slug=slug] (item 7: custom matcher — lowercase-alpha only, 200 vs 404 on V dispatch + client matchSegs)
+src/matchers.v                      custom param matchers (@[matcher] (s string) bool, portable subset — for c in s.bytes(), byte compares, early returns, no time/os/net imports; `integer` builtin)
 src/routes/files/[...rest].v        /files/[...rest] (catch-all → req.params['rest'])
 src/routes/admin/+route.svelte + +route.v   /admin wrapper (nav + @[before] sess guard / @[after] passthrough)
 src/routes/admin/+page.svelte + +page.v     /admin leaf (admin_whoami GET, reads injected x-user)
@@ -19,7 +24,7 @@ src/routes/router/+page.v + +page.ts + +page.svelte   /router (§1: server @[loa
 src/routes/router/live/+page.ts + +page.svelte        /router/live (§1: ssr=false twin — async universal load + <await> streaming, SPA shell)
 src/routes/router/tags/+page.svelte + +page.v          /router/tags (item 1: depends/invalidate/invalidateAll tag registry — pure client, +page.v is a probe arm)
 src/lib/crypto/hash.v               isomorphic (hash_string @[rpc] → WASM/dev fallback)
-src/app.v                           user lifecycle — @[startup]/@[reroute] inlined into the harness (absent in this demo)
+src/app.v                           user lifecycle — @[startup] boot stamp + @[reroute] /old → /router (item 9; inlined into the harness)
 .swelte/server.v                    Hand + static + main() — calls generated routes/swelte_route
 routes/                             generated V dispatcher (regenerating, gitignored)
 vite.config.ts                     swelte({ vBackendUrl, routesDir, libDir }) + experimental.async (client <await>; SSR bundle stays sync)
@@ -51,6 +56,34 @@ node engine/core/dist/cli.js dev --port 5174 --backend 8131 --root examples/some
 - Dynamic segments proven: `/users/42` → `"user:42"`, `/users/` + `/users` →
   404, `/files/a/b/c` → `"files:a/b/c"` (`req.params`; static beats
   dynamic, `[...rest]` last).
+- Groups + optional proven (item 8): `(mkt)/about.v` serves `/about`
+  (`"about:mkt-group"` — the `(mkt)` segment strips disk-only via
+  `stripRouteGroups`, `RouteId "/about"`, empty `Params`; a group-only
+  `(mkt)/+page` would claim `/` and double-claim against the existing
+  `/` leaf, so the demo uses a distinct path); `docs/[[slug]].v` serves
+  `/docs/[[slug]]` (`"docs:" + slug` — `slug ''` on `/docs`, the segment
+  on `/docs/x`, no match on `/docs/x/y` per the generated
+  `swelte_match_route` optional-last-segment arm). Build green with both
+  leaves (match/no-match read off `server_gen.v` dispatch arms; no `v`
+  binary in this env for a live curl — same `swelte_match_route` table
+  the `/users` + `/files` curls already prove).
+- Matchers proven (item 7): `/members/42` → `"member-int:42"`, `/members/abc` →
+  404 (`[id=integer]` narrows `Params.id` to `number` on the client via
+  generated `.d.ts`, digits-only on V dispatch via `swelte_matcher_check`);
+  `/posts/hello` → `"post:hello"`, `/posts/Hello123` → no match (custom `slug`
+  matcher from `src/matchers.v` — portable subset transpiled to both the V
+  `swelte_matcher_slug` fn and the client `__swelteMatcherFns.slug` used by
+  `matchSegs`); same-dir `users/[id]` vs `users/[id=integer]` correctly
+  rejected as same-dynamic-shape build error, hence the integer leaf ships
+  under `members/`; fixed 2026-11-02 (`collectPrerenderEntries` called
+  `routeFor` without the matcher set, so every custom matcher failed the
+  build as `unknown matcher 'slug' (known: integer)` — now loads
+  `loadMatchers(root)` into the crawl, pinned in `route-helpers.test.ts`).
+  `Examples/something` build green with both matcher leaves (match/no-match
+  read off the generated `server_gen.v` `swelte_matcher_*` arms +
+  `routes.js` `__swelteMatcherFns`; no `v` binary in this env for a live
+  curl — the binary dispatch path is the same `swelte_match_route` table
+  the `/users` + `/files` curls already prove).
 - Uploads proven: multipart `POST /api/greet?upload` reads `req.files['file']` (fallible `!string`) → `"got:<name>"`; only filenames kept (bytes parsed then discarded, never persisted); JS stubs send `File`/`Blob` args as `FormData`; 5MB under the 10MB `SWELTE_BODY_LIMIT` cap → 200; over-cap body → 413.
 - Throw fixture proven (`/boom`, SSR `!T` gate): `@[load]` throws + `@[get]` throws → JSON `400 {"error":"boom"}` (bypass intact), HTML `400` +error render (marker, status), server stays up (`/` → 200 after); verified bare-machine (`SWELTE_SSR=1`, no sidecar) and sidecar-via-Hand via `runSsrCheck(throwRoute: '/boom')`.
 - No-JS proven: `Accept: text/html` POST → 303 + `Location` on success, rendered HTML error on failure; `Accept: application/json` keeps JSON (same handler, content-negotiated). Page has plain `<form method=post>` variants (save + upload).
@@ -91,6 +124,57 @@ node engine/core/dist/cli.js dev --port 5174 --backend 8131 --root examples/some
   assets · v{version}` footer, defaults `''` + package.json version);
   `isPageError` / `isPageData` narrowers (item 12 closed: `admin/+page.svelte`
   uses the narrowers instead of inline `result?.error`).
+- Backend-only guard proven (item 13: scratch `import lib.backend.secrets`
+  in `#lib/crypto/hash.v` → build error `[swelte]
+  src/lib/crypto/hash.v:3: imports backend module 'lib.backend.secrets' —
+  only #routes/*.v may import #lib/backend (V-to-V include at codegen
+  time)`; scratch deleted, file restored. `.svelte` never reaches the
+  guard (no `.v` import channel); `#routes/*.v` importing backend is the
+  allowed V-to-V include).
+- `loadPage` error branch (item 3 closed: `admin/+page.svelte` `forceFail()`
+  throws client-side → `loadPage` maps plain throw to `{ error: 500 }` →
+  `<ErrorPage status message>` branch renders, no full-page SSR `+error`;
+  SDK pinned, `tsc` clean, no live server needed).
+- Fail-lite + envelope (item 4 closed: `/` `@[post('save')]` `save_fail` 422
+  `{ ok: false, fieldErrors }` on empty payload → `saveFailLite()` narrows
+  inline with `isFail(e, 422)`; independent `deserEnvelope()` asserts
+  `deserialize()` on a synthetic SvelteKit failure envelope — never call it
+  on raw verb JSON, raw bodies go through `__swelteActionResult`).
+- Targets proven (item 15d: `writeTargetShim(root, 'dist', target, isr, log)`
+  — `auto` writes no extra files, `static` → `dist/.swelte-static`,
+  `node` → `dist/Dockerfile.swelte` (runs `dist/server`), `edge` →
+  `dist/_headers` with longest-prefix `Cache-Control: public, max-age=0,
+  s-maxage=N` per ISR entry; packaging-only, pinned in
+  `export-snapshot.test.ts`).
+- Export proven (item 15f: `runExport` on the demo tree reuses
+  `.swelte/entries.json` → `snapshot/entries.json` + copies every
+  `dist/**/*.html` → `snapshot/pages/<rel>.html` + copies
+  `swelte.contract.json` + writes `snapshot/snapshot.json`
+  (`{ version: 1, target, pages[], at }` — `pages[]` lists dist-relative
+  `.html` paths); demo run yields 1 page (`index.html`, prerender off so
+  no additive HTML yet); throwaway `snapshot/` deleted after assert).
+- Service worker proven (item 14): `SWELTE_SW=1` throwaway `vite build` →
+  `dist/sw.js` with `SW_PRECACHE ["/", "/assets/index-<hash>.js",
+  "/assets/app_lib-<hash>.wasm"]` + `dist/index.html` carries the
+  `serviceWorker.register("/sw.js")` snippet (auto mode); default rebuild
+  drops both (no `sw.js`, no snippet). Fixed 2026-11-02: the wasm emit
+  and the SW emit share one `generateBundle` hook — SW ran first so the
+  bundle scan missed the late wasm emit; now the hashed
+  `app_lib-*.wasm` name from `this.getFileName(ref)` is pushed into
+  precache explicitly. Live `curl /sw.js → 200 application/javascript`
+  not run here (no `v` binary) — the static-first exact-file arm in
+  `server.v` (`dist + path` exists → serve with `application/javascript`
+  for `.js`, ahead of Accept routing) is the serving path. `svelte.config.js`
+  untouched (default OFF).
+- Lifecycle proven (item 9): `src/app.v` ships `@[startup] boot()` (no
+  params, `void` — throw aborts boot) + `@[reroute] rewrite(host, path)`
+  (`/old` → `/router`, `''` = no-op); generate inlines the bodies into
+  `.swelte/server.v` (startup once before `veb.run`, reroute in
+  `before_request` after the path split, before trailingSlash/CORS/static/
+  dispatch). No `v` binary in this env for a live curl — proven by the
+  generated harness arms + `loadServerHooks` shape pins in
+  `generate-errors.test.ts` (startup/ reroute arity, qualifier, and
+  return-type rejections).
 
 ## Stubs (see `rpc.md`, `types.md`)
 

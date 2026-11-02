@@ -549,8 +549,16 @@ export async function collectPrerenderEntries(
 			}
 		}
 		// V-only routes (no .svelte): routeFor leaf/dir rules (abs path form).
+		// §7: pass the custom matcher set — bare `routeFor` without it treats
+		// every `[x=y]` as `unknown matcher` (only `integer` builtin known).
+		let crawlMatchers: Set<string> | undefined
+		try {
+			crawlMatchers = new Set(loadMatchers(root).keys())
+		} catch {
+			crawlMatchers = undefined
+		}
 		for (const f of listVFiles(routesAbs)) {
-			const r = routeFor(routesDir, routesAbs, f)
+			const r = routeFor(routesDir, routesAbs, f, crawlMatchers)
 			if (r && !seen.has(r)) {
 				seen.add(r)
 				patterns.push(r)
@@ -4431,31 +4439,10 @@ export function initSwelteRouter(target) {
 		},
 		generateBundle(_opts, bundle) {
 			const root = activeRoot || process.cwd()
-			// Service worker emit (opt-in, additive): dist/sw.js only. Never
-			// changes the single-artifact default — off means zero SW bytes.
-			try {
-				if (appSw.enabled === true) {
-					const precache = serviceWorkerPrecache(
-						bundle as unknown as Record<string, { type?: string; fileName?: string }>,
-					)
-					// Offline fallback page (item 5): only precached when
-					// configured AND the prerender pass wrote it. Shell +
-					// immutable assets stay cached; API/SSE network-only.
-					if (appOffline.fallback !== 'off') {
-						try {
-							const fb = appOffline.fallback.replace(/^\/+/, '')
-							if (existsSync(join(root, 'dist', fb))) precache.push(`/${fb}`)
-						} catch {
-							/* best-effort */
-						}
-					}
-					const sw = renderServiceWorker({ version: appVersion, precache, base: appBase })
-					this.emitFile({ type: 'asset', fileName: 'sw.js', source: sw })
-					console.log(`[swelte] service worker: dist/sw.js (+${precache.length} precache)`)
-				}
-			} catch (e) {
-				console.warn(`[swelte] service worker emit failed: ${(e as Error).message}`)
-			}
+			// Production WASM bundle first (`v -b wasm` → dist/assets/app_lib-*.wasm):
+			// its hashed name is captured below for the SW precache (item 14 —
+			// the wasm `emitFile` lands too late for the bundle scan to see it).
+			let wasmAsset: string | null = null
 			const libAbs = resolve(root, libDir)
 			if (existsSync(libAbs)) {
 				// Tree-shaking: only bundle #lib/ files actually imported
@@ -4548,6 +4535,7 @@ pub fn swelte_alloc(n int) &u8 {
 						const bytes = readFileSync(tmpWasm)
 						const ref = this.emitFile({ type: 'asset', name: prodWasmName, source: bytes })
 						const fileName = this.getFileName(ref)
+						wasmAsset = fileName.startsWith('/') ? fileName : '/' + fileName
 						// Bundle name map (stays in .swelte/, never emitted):
 						// fn -> source module for trap resolution.
 						writeIfChanged(
@@ -4589,6 +4577,35 @@ pub fn swelte_alloc(n int) &u8 {
 						}
 					}
 				}
+			}
+			// Service worker emit (opt-in, additive): dist/sw.js only. Never
+			// changes the single-artifact default — off means zero SW bytes.
+			// Runs AFTER the wasm emit above; the hashed app_lib-*.wasm name
+			// is pushed explicitly since the bundle scan can't see the late
+			// wasm emit (item 14).
+			try {
+				if (appSw.enabled === true) {
+					const precache = serviceWorkerPrecache(
+						bundle as unknown as Record<string, { type?: string; fileName?: string }>,
+					)
+					if (wasmAsset !== null && !precache.includes(wasmAsset)) precache.push(wasmAsset)
+					// Offline fallback page (item 5): only precached when
+					// configured AND the prerender pass wrote it. Shell +
+					// immutable assets stay cached; API/SSE network-only.
+					if (appOffline.fallback !== 'off') {
+						try {
+							const fb = appOffline.fallback.replace(/^\/+/, '')
+							if (existsSync(join(root, 'dist', fb))) precache.push(`/${fb}`)
+						} catch {
+							/* best-effort */
+						}
+					}
+					const sw = renderServiceWorker({ version: appVersion, precache, base: appBase })
+					this.emitFile({ type: 'asset', fileName: 'sw.js', source: sw })
+					console.log(`[swelte] service worker: dist/sw.js (+${precache.length} precache)`)
+				}
+			} catch (e) {
+				console.warn(`[swelte] service worker emit failed: ${(e as Error).message}`)
 			}
 			void _opts
 			void bundle

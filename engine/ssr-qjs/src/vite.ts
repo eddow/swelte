@@ -30,20 +30,12 @@ export interface SsrQjsOptions {
 }
 
 export function swelte(options: SsrQjsOptions = {}): Plugin[] {
-	const coreOpts: Parameters<typeof coreSwelte>[0] = {
-		vBackendUrl: options.vBackendUrl,
-		routesDir: options.routesDir,
-		libDir: options.libDir,
-		outDir: options.outDir,
-		serviceWorker: options.serviceWorker,
-		trailingSlash: options.trailingSlash,
-		base: options.base,
-		assets: options.assets,
-		csp: options.csp,
-		csrf: options.csrf,
-		methodOverride: options.methodOverride,
-		version: options.version,
-	}
+	// Adapter-owned keys stay here (QJS link budget, consumed below by
+	// buildQjsProd); everything else passes through to core. Rest-spread
+	// keeps explicit `undefined`s, which core treats as unset — same as
+	// the pre-experiment HEAD. Plain Object.assign({}, options) would
+	// leak renderTimeoutMs/renderMemoryMB into core's options.
+	const { renderTimeoutMs, renderMemoryMB, ...coreOpts } = options
 	// Env wins for the SW gate even when the adapter wraps core statically:
 	// forward the live env read so SWELTE_SW=1 emits without touching config.
 	if (process.env.SWELTE_SW === '1' && coreOpts.serviceWorker?.enabled === undefined) {
@@ -82,8 +74,8 @@ export function swelte(options: SsrQjsOptions = {}): Plugin[] {
 					root,
 					renderJs: outFile,
 					outDir,
-					timeoutMs: options.renderTimeoutMs,
-					memoryMB: options.renderMemoryMB,
+					timeoutMs: renderTimeoutMs,
+					memoryMB: renderMemoryMB,
 				})
 				console.log(`[swelte:ssr-qjs] QJS bridge: ${prod.bridge}`)
 				if (prod.qjscNote) console.log(`[swelte:ssr-qjs] ${prod.qjscNote}`)

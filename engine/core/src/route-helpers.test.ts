@@ -16,6 +16,7 @@ import {
 	dynSegName,
 	dynSegMatcher,
 	jsFetchFor,
+	collectPrerenderEntries,
 } from './vite.js'
 
 const R = (f: string) => join('/tmp/rr', 'src', 'routes', f)
@@ -196,6 +197,15 @@ describe('route helpers', () => {
 			() => routeFor('src/routes', '/tmp/rr/src/routes', R('users/[id=nope].v'), new Set(ms.keys())),
 			/unknown matcher 'nope'/
 		)
+		// Item 7 regression: the prerender crawl (`collectPrerenderEntries`)
+		// loads the same matcher set — a custom `[x=slug]` leaf must survive
+		// crawl validation, not just direct routeFor (fixed 2026-11-02:
+		// crawl called routeFor without the set, so every custom matcher
+		// failed as `unknown matcher 'slug' (known: integer)` at build).
+		mkdirSync(join(root, 'src', 'routes', 'posts'), { recursive: true })
+		writeFileSync(join(root, 'src', 'routes', 'posts', '[slug=slug].v'), 'module p\n@[get]\npub fn post_detail() string { return "" }')
+		const crawl = await collectPrerenderEntries(root, 'src/routes', 'static')
+		assert.ok(crawl.routes.includes('/posts/[slug=slug]') || crawl.dynamics.includes('/posts/[slug=slug]'))
 	})
 
 	it('roadmap §1.4 RouteId + Params types', async () => {
