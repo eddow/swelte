@@ -15,8 +15,9 @@ src/routes/users/[id].v             /users/[id] ([id] → req.params['id'])
 src/routes/files/[...rest].v        /files/[...rest] (catch-all → req.params['rest'])
 src/routes/admin/+route.svelte + +route.v   /admin wrapper (nav + @[before] sess guard / @[after] passthrough)
 src/routes/admin/+page.svelte + +page.v     /admin leaf (admin_whoami GET, reads injected x-user)
-src/routes/router/+page.v + +page.ts + +page.svelte   /router (§1: server @[load] + swelte_fetch sibling rows + sync universal load + client router + $app/*)
+src/routes/router/+page.v + +page.ts + +page.svelte   /router (§1: server @[load] + swelte_fetch sibling rows + sync universal load + client router + $app/* + #app/* + $updated stub)
 src/routes/router/live/+page.ts + +page.svelte        /router/live (§1: ssr=false twin — async universal load + <await> streaming, SPA shell)
+src/routes/router/tags/+page.svelte + +page.v          /router/tags (item 1: depends/invalidate/invalidateAll tag registry — pure client, +page.v is a probe arm)
 src/lib/crypto/hash.v               isomorphic (hash_string @[rpc] → WASM/dev fallback)
 src/app.v                           user lifecycle — @[startup]/@[reroute] inlined into the harness (absent in this demo)
 .swelte/server.v                    Hand + static + main() — calls generated routes/swelte_route
@@ -38,13 +39,14 @@ node engine/core/dist/cli.js dev --port 5174 --backend 8131 --root examples/some
 
 - `/` GET/POST (`get_greeting`/`save_name`), `/api/greet` GET + `greet_pure @[rpc] → Session{id,user,remember,expires_at}` + `login POST → Session+cookie` (verb, HTTP) + `?pdf` (binary) + `?created` (201),
   empty payload → 400, unknown fn → 404 + available, `vite build` green.
-- Page buttons: Greet / Save / Hash (`#lib` real WASM) / Login / Stream (`@[sse]` `tick_stream`).
-- SSE proven (true streaming via veb, emit mode): `Accept: text/event-stream` on `/api/greet` → 200 with per-event flush (`data: tick 1` ~0.5s, `tick 2` ~1.0s, `tick 3` ~1.5s with `?wait_ms=500` — pacing proves zero buffering); plain JSON GETs keep hitting `@[get]` on the same URL.
+- Page buttons: Greet / Save / Hash (`#lib` real WASM) / Login / Stream (`@[sse]` `tick_stream` emit mode) / List (`@[sse]` `tick_items` list mode) / Rename (`@[put]`) / Touch (`@[patch]`).
+- SSE proven (true streaming via veb, both shapes): emit mode on `/api/greet` (`data: tick 1` ~0.5s pacing, `?wait_ms=500` proves zero buffering; plain JSON GETs keep hitting `@[get]` on the same URL) + list mode on `/api/ticks` (`[]string` `['a','b','c']` → `data: a/b/c` frames, identical `for await` consumption). Mixed emit+list in one file is unservable (per-file `swelte_sse_is_emit`), hence separate files — item 5 closed.
 - `hash_string` compiles to real WASM (`v -b wasm -os browser`):
   dev `.swelte/dev/crypto/hash.wasm` + prod `dist/assets/app_lib-*.wasm`.
-- Generated dispatcher proven: `routes/_page.v` + `routes/api_greet.v` +
+- Generated dispatcher proven: `routes/_page.v` + `routes/api_greet.v` + `routes/api_ticks.v` +
   `routes/admin__page.v` + `routes/server_gen.v` (`module routes`,
-  `SwelteRequest` + `swelte_route`), one-default-per-verb +
+  `SwelteRequest` + `swelte_route`), full verb set (`get/post/put/patch/delete` — item 6 closed:
+  `PUT /api/greet` → `"renamed:alice"`, `PATCH` → `"touched:bob"`, 405 arm quiet) +
   unique-qualifier enforced at generate time.
 - Dynamic segments proven: `/users/42` → `"user:42"`, `/users/` + `/users` →
   404, `/files/a/b/c` → `"files:a/b/c"` (`req.params`; static beats
@@ -60,7 +62,7 @@ node engine/core/dist/cli.js dev --port 5174 --backend 8131 --root examples/some
   Error matrix: unknown fn → 404 + available, bad JSON → 400,
   missing fn → 400, `!T` → 400 `err.msg()`, unknown path → 404,
   method without handler → 405.
-- §1 data-loading / client-router (`/router`, `/router/live`): server
+- §1 data-loading / client-router (`/router`, `/router/live`, `/router/tags`): server
   `@[load]` paints initial props + pulls sibling rows in-process via
   `swelte_fetch` (V-only, non-fallible, cookie/auth forwarded — all async
   lives in `.v`, `.svelte` top level stays pure-sync per the SSR guards);
@@ -71,15 +73,24 @@ node engine/core/dist/cli.js dev --port 5174 --backend 8131 --root examples/some
   (`applyUniversalLoad`, `LOADEDMODS['/router']` in `dist/ssr/render.js`);
   client router (`goto` / `preloadData` / `pushState` /
   cancellable `beforeNavigate` in `onMount` / `afterNavigate`,
-  `page` / `navigating` stores, `$app/stores` + `$app/navigation`
-  aliases) navigates without reload, preloaded JSON merges as
+  `page` / `navigating` / `updated` stores, `$app/stores` +
+  `$app/navigation` aliases) navigates without reload, preloaded JSON merges as
   `leafProps = { params, ...data }`; `ssr=false` twin `/router/live`
   (sibling `export const ssr = false` → `swelte_no_ssr()` → SPA shell,
   `hasUniversalLoad: 'async'` excluded from `render.js`) resolves its
   async universal load + `<await>` boundary client-side
   (client bundle compiles with `experimental.async`;
   the SSR `generate: 'server'` pass still rejects top-level await —
-  `swelte check` clean).
+  `swelte check` clean);
+  tag registry (`/router/tags`, item 1 closed: `depends('user')` /
+  `invalidate('user')` selective re-run + `invalidateAll()`, HTML 200 via
+  probe-arm `.v`, no full `goto`);
+  `updated` stub-lit (item 2 documented: renders `false`, never flips —
+  no version feed yet);
+  `#app/paths` + `#app/environment` (item 11 closed: `{base}/router ·
+  assets · v{version}` footer, defaults `''` + package.json version);
+  `isPageError` / `isPageData` narrowers (item 12 closed: `admin/+page.svelte`
+  uses the narrowers instead of inline `result?.error`).
 
 ## Stubs (see `rpc.md`, `types.md`)
 

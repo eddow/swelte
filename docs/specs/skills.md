@@ -9,10 +9,10 @@ Six skills, each a `SKILL.md` following the [Agent Skills spec](https://agentski
 | skill | covers | stable sources | spec dependency |
 |---|---|---|---|
 | `swelte-overview` | layout, CLI, SPA-first proxy | `docs/README.md`, `docs/example.md`, `docs/versus.md`, `README.md` | none — do not touch on spec changes |
-| `swelte-v-routes` | attributes, `SwelteRequest`, type table, errors, WASM purity, matchers, hooks | `docs/rpc.md`, `docs/types.md`, `docs/errors.md`, `docs/config.md` | `specs/moar.md` (`@[cron]`, `@[queue]` in `src/app.v`) |
+| `swelte-v-routes` | attributes, `SwelteRequest`, type table, errors, WASM purity, matchers, hooks | `docs/rpc.md`, `docs/types.md`, `docs/errors.md`, `docs/config.md` | none — do not touch on spec changes |
 | `swelte-svelte5` | runes, imports, SSR component rule, `+error` | `docs/example.md`, `docs/ssr.md` | none — built: `docs/forms.md`, `docs/config.md`, `docs/coming-from-sveltekit.md` |
-| `swelte-ssr-load` | ownership, request path, `@[load]` cascade, budgets | `docs/ssr.md`, `docs/internal/load.md`, `docs/rpc.md` | `specs/ssr.md` |
-| `swelte-sveltekit-delta` | open parity gaps (`@cron`/`@queue`), built remainder index | `docs/versus.md` (stable) + built root docs (`forms.md`, `config.md`, `cli.md`) | `specs/moar.md` |
+| `swelte-ssr-load` | ownership, request path, `@[load]` cascade, budgets | `docs/ssr.md`, `docs/internal/load.md`, `docs/rpc.md` | none — `specs/ssr.md` is open work only, skill is fully usable without it |
+| `swelte-sveltekit-delta` | open parity gaps, built remainder index | `docs/versus.md` (stable) + built root docs (`forms.md`, `config.md`, `cli.md`) | none — do not touch on spec changes |
 | `swelte-mcp` | route tree, type contracts, diagnostics, scaffolding | `docs/mcp.md`, `docs/example.md` | none — tool wrapper over `swelte check` |
 
 ## Rule
@@ -21,8 +21,6 @@ Six skills, each a `SKILL.md` following the [Agent Skills spec](https://agentski
 spec-driven update. Every skill section derived from `docs/specs/*`
 carries a `## Spec dependency` / `⚠️` marker naming the exact spec
 file + item, so the skill can be refreshed when the spec lands.
-`swelte-sveltekit-delta` is fully spec-derived — re-read the spec
-on every use.
 
 ## When a spec item lands
 

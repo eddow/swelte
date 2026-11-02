@@ -4361,6 +4361,12 @@ export function initSwelteRouter(target) {
 								method: req.method,
 								headers,
 								body: body.length ? body : undefined,
+								// No-JS forms: Hand answers POST with 303 + Location.
+								// Node fetch follows redirects by default, which would
+								// consume the 303 (turning it into the GET body the
+								// browser then renders as a full-page answer). Preserve
+								// the redirect so the browser navigates itself.
+								redirect: 'manual',
 							})
 							res.statusCode = upstream.status
 							upstream.headers.forEach((v, k) => {

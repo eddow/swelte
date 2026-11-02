@@ -73,10 +73,23 @@ pub fn upload_file(req SwelteRequest) !string {
 	return 'got:' + names
 }
 
-// SSE probe (roadmap §14, emit mode): GET + Accept: text/event-stream
-// takes over the conn; each `emit` flushes one frame immediately —
-// sleeps pace the frames (real incremental flush, nothing buffered).
-// Plain JSON GETs keep hitting `get_greeting` above.
+// Item 6 proof: full verb set — `@[put]` + `@[patch]` arms alongside
+// get/post/delete. Default one-per-verb, JSON round-trip, 405 arm quiet.
+@[put]
+pub fn rename_greeting(req SwelteRequest) string {
+	name := req.query['payload'] or { req.form['payload'] or { '' } }
+	return 'renamed:' + name
+}
+
+@[patch]
+pub fn touch_greeting(req SwelteRequest) string {
+	name := req.query['payload'] or { req.form['payload'] or { '' } }
+	return 'touched:' + name
+}
+
+// Item 5 proof: list-mode SSE on its own headless URL (the mixed
+// emit+list file shape is unservable — `swelte_sse_is_emit()` is
+// per-file, so one mode per file. Full stream below, Qualifier 404s).
 @[sse]
 pub fn tick_stream(req SwelteRequest, emit fn (string) bool) {
 	n := req.query['n'] or { '3' }
@@ -98,6 +111,11 @@ pub fn tick_stream(req SwelteRequest, emit fn (string) bool) {
 		}
 	}
 }
+
+// Item 5 proof, list mode on a SEPARATE file (per-file mode —
+// mixed emit+list in one file is unservable, engine picks one).
+// `api/ticks.v` below: `@[sse] ... []string`, harness streams each
+// per-event; client consumes with the identical `for await` shape.
 
 // Binary probe: serves bytes with Content-Type passthrough.
 @[get('pdf')]

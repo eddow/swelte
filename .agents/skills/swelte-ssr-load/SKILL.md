@@ -55,15 +55,12 @@ Single global `src/routes/+error.svelte`, `{ status?: number; message?: string }
 
 ## Sources
 
-Stable — no spec dependency for the above:
+Stable — all built including per-route `ssr=false`-lite:
 
 - `docs/ssr.md` — ownership, request path, cascade, contract, budgets, gate (source of truth)
 - `docs/internal/load.md` — cascade design rationale (ephemeral; contract lives in `rpc.md`)
 - `docs/rpc.md` — `@[load]` attribute rule
+- `docs/config.md` — per-route `ssr=false`-lite (`export const ssr = false` → manifest flag → `Hand` skips rendering, serves SPA shell; async universal `load` stays client-only)
+- `docs/coming-from-sveltekit.md` — `ssr=false`-lite rendering row
 
-## Spec dependency
-
-⚠️ This skill MUST be updated when these specs land:
-
-- `docs/specs/ssr.md` — `ssr-bun` (async/streaming renderer, same `POST {route, props} → {html, head}` protocol), dev auto-sidecar UX, gate-as-CI (wrapper-route asserts in the prod half). The no-async rule and ownership section change when `ssr-bun` exists.
-- `docs/config.md` — per-route `ssr=false`-lite (manifest flag → `Hand` skips rendering, serves SPA shell).
+- `docs/specs/ssr.md` — open work only (`ssr-bun`, dev auto-sidecar UX, gate-as-CI); not required to use this skill

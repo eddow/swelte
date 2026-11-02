@@ -745,15 +745,6 @@ fn swelte_min_shell() string {
 	return '<!doctype html><html><head><meta charset="utf-8"><!--ssr-head--></head><body><div id="app"><!--ssr-body--></div></body></html>'
 }
 
-// `swelte_page_head` is superseded by `swelte_page_head_split` (the head
-// rides the render return, split once at the call site). Kept as a stub
-// for source-compat; always ''.
-fn swelte_page_head(route string, props_json string) string {
-	_ = route
-	_ = props_json
-	return ''
-}
-
 // Page-data path: resolve `path` to a routes prefix (same precedence as
 // swelte_route), build a SwelteRequest, run the load cascade.
 // Any throw → '{}' (renderer falls back to +error via its own path);

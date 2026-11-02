@@ -7,7 +7,8 @@ import type {
 	GreetNarrowResult,
 	SwelteRequest,
 } from '#routes/+page.v'
-import { login, greet_pure, serve_pdf, make_created, tick_stream } from '#routes/api/greet.v'
+import { login, greet_pure, serve_pdf, make_created, tick_stream, rename_greeting, touch_greeting } from '#routes/api/greet.v'
+import { tick_items } from '#routes/api/ticks.v'
 import type { Session, SwelteResponse } from '#routes/api/greet.v'
 import { hash_string } from '#lib/crypto/hash.v'
 import type { HashStringResult } from '#lib/crypto/hash.v'
@@ -24,6 +25,9 @@ let hashed: HashStringResult = $state('')
 let narrow: GreetNarrowResult = $state('')
 let lastError = $state('')
 let ticks: string[] = $state([])
+let listed: string[] = $state([])
+let renamed = $state('')
+let touched = $state('')
 
 function showError(e: unknown) {
 	console.error(e)
@@ -106,10 +110,42 @@ async function streamTicks() {
 	lastError = ''
 	ticks = []
 	try {
+		// SSE emit mode (item 5): `?live` qualifier, paced frames.
 		for await (const t of tick_stream({ n: '3', wait_ms: '500' })) {
 			ticks = [...ticks, t]
 			await tick()
 		}
+	} catch (e) {
+		showError(e)
+	}
+}
+async function streamList() {
+	lastError = ''
+	listed = []
+	try {
+		// SSE list mode (item 5): separate file, identical `for await` shape.
+		for await (const t of tick_items({})) {
+			listed = [...listed, t]
+			await tick()
+		}
+	} catch (e) {
+		showError(e)
+	}
+}
+async function putRename() {
+	lastError = ''
+	try {
+		// Item 6: `@[put]` verb — JSON round-trip, 405 arm stays quiet.
+		renamed = await rename_greeting({ payload: name })
+	} catch (e) {
+		showError(e)
+	}
+}
+async function patchTouch() {
+	lastError = ''
+	try {
+		// Item 6: `@[patch]` verb — JSON round-trip.
+		touched = await touch_greeting({ payload: name })
 	} catch (e) {
 		showError(e)
 	}
@@ -128,6 +164,9 @@ async function streamTicks() {
 		<button onclick={loadPdf}>PDF (verb binary)</button>
 		<button onclick={loadCreated}>Created (verb 201)</button>
 		<button onclick={streamTicks}>Stream (#routes SSE)</button>
+		<button onclick={streamList}>List (SSE []string)</button>
+		<button onclick={putRename}>Rename (@[put])</button>
+		<button onclick={patchTouch}>Touch (@[patch])</button>
 		<button onclick={loadNarrow}>Narrow (#routes GET narrow-args)</button>
 	</div>
 	{#if greeting}
@@ -153,6 +192,15 @@ async function streamTicks() {
 	{/if}
 	{#if ticks.length}
 		<p>stream: {ticks.join(' | ')}</p>
+	{/if}
+	{#if listed.length}
+		<p>list: {listed.join(' | ')}</p>
+	{/if}
+	{#if renamed}
+		<p>{renamed}</p>
+	{/if}
+	{#if touched}
+		<p>{touched}</p>
 	{/if}
 	{#if narrow}
 		<p>{narrow}</p>

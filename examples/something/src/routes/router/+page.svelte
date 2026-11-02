@@ -1,8 +1,9 @@
 <script lang="ts">
 import { onMount } from 'svelte'
-import { goto, preloadData, pushState, beforeNavigate, afterNavigate, page, navigating } from '@swelte/core'
-import { page as appPage } from '$app/stores'
-import { goto as navGoto } from '$app/navigation'
+import { goto, preloadData, pushState, beforeNavigate, afterNavigate, page, navigating, updated } from '@swelte/core'
+import { page as appPage, updated as appUpdated } from '$app/stores'
+import { base, assets } from '#app/paths'
+import { browser, dev, version } from '#app/environment'
 
 // §1 props contract: `leafProps = { params, ...data }` — server @[load]
 // (RouterProps: greeting/ts, incl.iblingRows from swelte_fetch) merged with
@@ -12,9 +13,9 @@ let { greeting = 'none', ts = '', siblingRows = '', viewModel = 'none', paramsEc
 	greeting?: string; ts?: string; siblingRows?: string; viewModel?: string; paramsEcho?: string; urlEcho?: string; params?: Record<string, string>
 } = $props()
 
-let probe = ''
-let navigations: string[] = []
-let guardNote = 'guard: armed (blocks /boom)'
+let probe = $state('')
+let navigations: string[] = $state([])
+let guardNote = $state('guard: armed (blocks /boom)')
 
 async function doGoto() {
 	probe = ''
@@ -36,7 +37,9 @@ async function doPush() {
 // NOTE: plain onMount still fires inside Svelte's sync server render,
 // so guard with a browser check (false on the server output, so the
 // calls are tree-shaken before QJS ever sees them).
-import { browser } from '$app/environment'
+// `#app/*` imports are SSR-safe (server literals in the sync bundle);
+// only `@swelte/core` store *values* ($page/$navigating/$updated) and
+// router fns need the browser gate (throw-stubs in QJS).
 if (browser) {
 	onMount(() => {
 		const offBefore = beforeNavigate((nav) => {
@@ -74,18 +77,22 @@ if (browser) {
 	{/if}
 
 	<!-- §1.4 guards + stores.
-	     NOTE: $page/$navigating auto-subscriptions are client-only (the sync
-	     QJS bundle has no store implementations — the imports are throw-stubs
-	     there). They sit behind the same browser gate as the guards so SSR
-	     never subscribes. -->
+	     NOTE: $page/$navigating/$updated auto-subscriptions are client-only
+	     (the sync QJS bundle has no store implementations — the imports are
+	     throw-stubs there). They sit behind the same browser gate as the
+	     guards so SSR never subscribes. -->
 	{#if browser}
 		<p>{guardNote} — <button onclick={() => goto('/boom')}>try goto(/boom)</button></p>
 		{#if $navigating}
 			<p>navigating {$navigating.from} → {$navigating.to}…</p>
 		{/if}
 		<p>page store: {$page.url} (route={$page.route})</p>
-		<p>$app/stores + $app/navigation aliases resolve: {typeof appPage} / {typeof navGoto}</p>
+		<p>$app/stores alias resolves: {typeof appPage}</p>
+		<!-- items 2+11: $updated is a stub flag (no version feed yet — always
+		     false); #app/paths + #app/environment render build-time constants. -->
+		<p>updated stub: {$updated} ({typeof appUpdated}) — never flips until the snapshot feed lands</p>
 	{/if}
+	<p>paths: {base}/router · assets {assets === '' ? '(=base)' : assets} · v{version}{dev ? ' (dev)' : ''}</p>
 
 	{#if navigations.length}
 		<ul>
