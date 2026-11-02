@@ -204,6 +204,9 @@ fn serve_static(dist string, path string) (int, string, string) {
 	if rel.contains('..') {
 		return 403, 'application/json', '{"error":"forbidden"}'
 	}
+	// serve_static is the SPA-shell source: missing files fall back to
+	// dist/index.html (200). API-ish callers (JSON/EventSource probes)
+	// must never receive the shell — see the no-ssr bypass below.
 	full := dist + '/' + rel
 	if !os.exists(full) || os.is_dir(full) {
 		index := dist + '/index.html'
@@ -415,7 +418,10 @@ fn (mut app App) before_request(mut ctx Ctx) veb.Result {
 	// `accept.contains('text/html')` (in `wants_html`): only a real browser
 	// Accept enters SSR. Bare curl (no Accept, or */*) keeps the old
 	// JSON/static paths — including the §12 no-JS form redirect chain.
-	if wants_html && !wants_json && swelte_ssr_enabled() {
+	// §4 ssr=false-lite: `export const ssr = false` routes skip the
+	// QJS/sidecar entirely — Hand serves the SPA shell; async universal
+	// loads + client router take over in the browser.
+	if wants_html && !wants_json && swelte_ssr_enabled() && !routes.swelte_no_ssr(path) {
 		if status == 200 {
 			props_json := swelte_page_props(path, query, headers, cookies, map[string]string{})
 			joined, ok := swelte_render_page(path, props_json)
@@ -454,11 +460,32 @@ fn (mut app App) before_request(mut ctx Ctx) veb.Result {
 			}
 		}
 	}
+	// Static/SPA fallback (after SSR attempt above): dist/index.html for
+	// / and unknown non-api paths, raw assets otherwise.
+	// §4 ssr=false-lite: SSR was deliberately skipped above
+	// (swelte_no_ssr) — still serve the SPA shell (200), not 404: the
+	// async universal load + client router take over in the browser.
+	// This bypass runs BEFORE the wants_html error page so no-ssr
+	// routes never see the 404/error HTML — only the SPA shell.
+	// Fetch stubs keep JSON (Accept: application/json or ?q probes):
+	// only real navigations (HTML, no JSON, no event-stream) get the shell.
+	// SSE intent (bare `GET` + `Accept: text/event-stream`, no qualifier)
+	// also skips the shell — the dispatcher/SSE takeover owns that shape.
+	// Bare curl (no Accept at all) is a probe, not a navigation: it keeps
+	// the old status/body contract (404 JSON here), never the SPA shell.
+	// Only a real browser Accept (contains text/html) enters the shell.
+	mut is_sse := accept.contains('text/event-stream')
+	if routes.swelte_no_ssr(path) && ctx.req.method == .get && !wants_json && wants_html && !is_sse {
+		_, ct, sb := serve_static(dist, '/index.html')
+		ctx.res.set_status(http.status_from_int(200))
+		return ctx.send_response_to_client(ct, sb)
+	}
 	if wants_html && status == 200 && ctx.req.method != .get {
 		ctx.res.set_status(.see_other)
 		return ctx.redirect(path, typ: .see_other)
 	}
 	if wants_html && status >= 400 {
+		// no-ssr routes already returned above — this is a real error.
 		mut msg := body.all_after('"error":"')
 		if msg != body {
 			msg = msg.all_before('"')
@@ -469,6 +496,20 @@ fn (mut app App) before_request(mut ctx Ctx) veb.Result {
 	// Static/SPA fallback (after SSR attempt above): dist/index.html for
 	// / and unknown non-api paths, raw assets otherwise.
 	if dist != '' && ctx.req.method == .get && !path.starts_with('/api/') && (path == '/' || (status == 404 && body.contains('not found'))) {
+		// Probes (bare curl: Accept */* or missing) must see the dispatcher
+		// contract (JSON/statics), never the SPA shell — the shell is a
+		// document response for real navigations only.
+		if !wants_html && !wants_json && !is_sse {
+			ctx.res.set_status(http.status_from_int(status))
+			mut probe_ct := out.res.headers['Content-Type'] or { out.res.headers['content-type'] or { '' } }
+			if probe_ct == '' {
+				probe_ct = if out.res.is_bytes { 'application/octet-stream' } else { 'application/json' }
+			}
+			if out.res.is_bytes {
+				return ctx.send_response_to_client(probe_ct, out.res.body_bytes.bytestr())
+			}
+			return ctx.send_response_to_client(probe_ct, body)
+		}
 		s, ct, sb := serve_static(dist, path)
 		ctx.res.set_status(http.status_from_int(s))
 		return ctx.send_response_to_client(ct, sb)

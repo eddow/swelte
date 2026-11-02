@@ -4,7 +4,11 @@
 // Route through `.swelte/routes.js` so +route.svelte wrappers nest
 // automatically (no manual import in +page.svelte).
 // SSR: hydrate when Hand filled the SSR body marker, else mount the SPA shell.
-import { hydrateSwelteRoute, mountSwelteRoute } from './routes.js'
+// Then boot the §1.4 client router (goto/preloadData/pushState + guards).
+// The SDK bridge (`globalThis.__swelteRouterSdk`) is wired by the app
+// bundle — entry-main never imports @swelte/core directly (keeps the
+// generated entry resolvable without workspace symlinks).
+import { hydrateSwelteRoute, mountSwelteRoute, initSwelteRouter } from './routes.js'
 
 const target = document.getElementById('app')!
 if (target.dataset.swelteSsr === '1' || target.childNodes.length > 0) {
@@ -12,3 +16,4 @@ if (target.dataset.swelteSsr === '1' || target.childNodes.length > 0) {
 } else {
 	mountSwelteRoute(target, location.pathname)
 }
+initSwelteRouter(target)

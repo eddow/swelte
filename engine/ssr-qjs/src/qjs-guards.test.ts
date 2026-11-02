@@ -3,9 +3,14 @@ import assert from 'node:assert/strict'
 import {
 	assertQjsCompatible,
 	assertNoNodeExternals,
+	assertNoSdkTopLevelCalls,
 	assertNoTopLevelStubCalls,
+	assertUniversalLoadSync,
+	readUniversalSsrFlag,
+	transpileSiblingLoad,
 	stubSdkImports,
 	compileSsrComponent,
+	composeRenderJs,
 } from './ssr.js'
 import { mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -56,6 +61,25 @@ describe('item 17 — QJS-compat guards (file+line)', () => {
 		// No SDK imports at all → no-op.
 		await assert.doesNotReject(() => assertNoTopLevelStubCalls('a', 'r', '<h1>plain</h1>'))
 	})
+
+	it('$app/* calls: top-level goto/page rejected, onMount/handler calls pass', async () => {
+		const bad = `<script>import { goto } from '$app/navigation'; goto('/x');</script><h1>x</h1>`
+		await assert.rejects(() => assertNoSdkTopLevelCalls('a', 'r', bad), /top-level stub call \(goto\)/)
+		const badStore = `<script>import { page } from '$app/stores'; const u = $page.url;</script><h1>x</h1>`
+		// `$page` auto-subscription is a store read, not a stub call — allowed
+		// at top level (the store import itself is dropped in the sync bundle,
+		// so Svelte compiles it against the client bundle only when mounted).
+		await assert.doesNotReject(() => assertNoSdkTopLevelCalls('a', 'r', badStore))
+		const okMount = `<script>import { goto } from '$app/navigation'; import { onMount } from 'svelte'; onMount(() => goto('/x'));</script><h1>x</h1>`
+		await assert.doesNotReject(() => assertNoSdkTopLevelCalls('a', 'r', okMount))
+		const okHandler = `<script>import { goto } from '$app/navigation';</script><button onclick={() => goto('/x')}>x</button>`
+		await assert.doesNotReject(() => assertNoSdkTopLevelCalls('a', 'r', okHandler))
+		// Aliased import tracked by local name.
+		const aliased = `<script>import { goto as g } from '$app/navigation'; g('/x');</script><h1>x</h1>`
+		await assert.rejects(() => assertNoSdkTopLevelCalls('a', 'r', aliased), /top-level stub call \(g\)/)
+		// Non-SDK calls never flagged.
+		await assert.doesNotReject(() => assertNoSdkTopLevelCalls('a', 'r', `<script>function go() {} go();</script><h1>x</h1>`))
+	})
 })
 
 describe('item 18 — stubSdkImports rewrite + compileSsrComponent', () => {
@@ -66,6 +90,14 @@ describe('item 18 — stubSdkImports rewrite + compileSsrComponent', () => {
 		assert.ok(out.includes('src/routes/+page.svelte'))
 		assert.ok(!out.includes('#routes/greet.v'))
 		assert.ok(out.includes(`from './local.js'`))
+	})
+
+	it('$app/* client imports become throw-stubs (never in the sync bundle)', () => {
+		const code = `import { goto, page } from '$app/navigation';\nimport { page as p } from '$app/stores';\nimport '$app/state';\n`
+		const out = stubSdkImports(code, 'src/routes/router/+page.svelte')
+		assert.ok(out.includes('goto() called during SSR render'))
+		assert.ok(out.includes('page() called during SSR render'))
+		assert.ok(!out.includes('$app/'))
 	})
 
 	it('aliased SDK names use the local name; import type not matched', () => {
@@ -93,5 +125,251 @@ describe('item 18 — stubSdkImports rewrite + compileSsrComponent', () => {
 		const abs3 = join(dir, 'bad.svelte')
 		writeFileSync(abs3, `<script>fetch("/x")</script><h1>x</h1>`)
 		await assert.rejects(() => compileSsrComponent(abs3, 'bad.svelte'), /top-level fetch/)
+	})
+})
+
+describe('universal load — sync subset (§1.1)', () => {
+	it('sync load passes; async/fetch/SDK/await rejected when ssr=true', () => {
+		assert.doesNotThrow(() =>
+			assertUniversalLoadSync(
+				'src/routes/admin.ts',
+				`export function load({ params, props }) { return { title: String(props?.user ?? 'anon') } }`
+			)
+		)
+		assert.throws(
+			() =>
+				assertUniversalLoadSync(
+					'src/routes/admin.ts',
+					`export async function load({ params }) { return { x: 1 } }`
+				),
+			/async load is forbidden/
+		)
+		assert.throws(
+			() =>
+				assertUniversalLoadSync(
+					'src/routes/+page.ts',
+					`export function load({ url }) { return fetch(url).then((r) => r.text()) }`
+				),
+			/top-level fetch|fetch\(\) is forbidden/
+		)
+		assert.throws(
+			() =>
+				assertUniversalLoadSync(
+					'src/routes/admin.ts',
+					`import { admin_whoami } from '#routes/admin/+page.v';\nexport function load({ props }) { return { x: 1 } }`
+				),
+			/SDK import/
+		)
+	})
+
+	it('async load allowed when ssr=false (client-only)', () => {
+		assert.doesNotThrow(() =>
+			assertUniversalLoadSync(
+				'src/routes/admin.ts',
+				`export async function load({ params }) { const r = await fetch('/api/x'); return { x: 1 } }`,
+				{ ssr: false }
+			)
+		)
+	})
+
+	it('non-load .ts is a no-op', () => {
+		assert.doesNotThrow(() =>
+			assertUniversalLoadSync('src/routes/util.ts', `export const x = 1`)
+		)
+	})
+
+	it('export const ssr flag (ssr-qjs owned): absent/true = sync, false = async-ok', () => {
+		assert.equal(readUniversalSsrFlag(`export function load() { return {} }`), true)
+		assert.equal(readUniversalSsrFlag(`export const ssr = true\nexport function load() { return {} }`), true)
+		assert.equal(readUniversalSsrFlag(`export const ssr = false\nexport async function load() { return {} }`), false)
+		assert.doesNotThrow(() =>
+			assertUniversalLoadSync(
+				'src/routes/admin.ts',
+				`export const ssr = false\nexport async function load() { const r = await fetch('/api/x'); return { x: 1 } }`,
+				{ ssr: readUniversalSsrFlag(`export const ssr = false`) }
+			)
+		)
+		assert.throws(
+			() =>
+				assertUniversalLoadSync(
+					'src/routes/admin.ts',
+					`export const ssr = false\nexport async function load() { return { x: 1 } }`,
+					{ ssr: true }
+				),
+			/async load is forbidden/
+		)
+	})
+
+	it('ssr=false async load is excluded from the sync QJS bundle (client-only)', async () => {
+		const dir = mkdtempSync(join(tmpdir(), 'swelte-ssr-nossr-'))
+		const routesDir = join(dir, 'src', 'routes')
+		const { mkdirSync } = await import('node:fs')
+		mkdirSync(routesDir, { recursive: true })
+		writeFileSync(
+			join(routesDir, '+page.svelte'),
+			`<script>let { title } = $props();</script><h1>{title ?? 'shell'}</h1>`
+		)
+		writeFileSync(
+			join(routesDir, '+page.ts'),
+			`export const ssr = false;\nexport async function load() { const r = await fetch('/api/x'); return { title: 'async' } }`
+		)
+		const code = await composeRenderJs(
+			{
+				version: 1,
+				hasError: false,
+				routes: [
+					{
+						route: '/',
+						svelte: '+page.svelte',
+						kind: 'page',
+						hasData: false,
+						hasUniversalLoad: true,
+					},
+				],
+				error: null,
+				wrappers: [],
+			},
+			{ root: dir }
+		)
+		// No load import, no LOADEDMODS entry, no fetch in the sync bundle.
+		assert.ok(!/import \{ load as LOAD_/.test(code), 'async load must not be imported')
+		const mods = code.slice(code.indexOf('const LOADEDMODS'))
+		assert.ok(!/LOAD_\d/.test(mods.split('};')[0]), 'no LOADEDMODS entries')
+		assert.ok(!/fetch\(/.test(code), 'no fetch leaks into the sync bundle')
+	})
+
+	it('composeRenderJs applies sync load before render', async () => {
+		const dir = mkdtempSync(join(tmpdir(), 'swelte-ssr-load-'))
+		const routesDir = join(dir, 'src', 'routes')
+		const { mkdirSync } = await import('node:fs')
+		mkdirSync(routesDir, { recursive: true })
+		writeFileSync(join(routesDir, '+page.svelte'), `<script>let { title } = $props();</script><h1>{title}</h1>`)
+		writeFileSync(
+			join(routesDir, '+page.ts'),
+			`export function load({ props }) { return { title: 'from-load:' + String(props?.greet ?? '') } }`
+		)
+		const code = await composeRenderJs(
+			{
+				version: 1,
+				hasError: false,
+				routes: [
+					{
+						route: '/',
+						svelte: '+page.svelte',
+						kind: 'page',
+						hasData: false,
+						hasUniversalLoad: true,
+					},
+				],
+				error: null,
+				wrappers: [],
+			},
+			{ root: dir }
+		)
+		assert.ok(code.includes('applyUniversalLoad'), 'render bundle must apply the universal load')
+		assert.ok(code.includes('LOADEDMODS'), 'render bundle must map loads by route')
+		// End-to-end through the real bundle: universal load merges V props
+		// into the rendered page (the §1.1 contract, not just code shape).
+		const { pathToFileURL } = await import('node:url')
+		const probeFile = join(dir, 'render.check.mjs')
+		writeFileSync(probeFile, code)
+		const mod = (await import(pathToFileURL(probeFile).href)) as unknown as {
+			renderRoute: (route: string, props: string) => { head: string; body: string }
+		}
+		const out = mod.renderRoute('/', JSON.stringify({ greet: 'hi' }))
+		assert.ok(out.body.includes('from-load:hi'), `sync load must merge V props, got: ${out.body.slice(0, 160)}`)
+	})
+
+	it('transpileSiblingLoad strips TS types (.ts sibling with annotations bundles as JS)', async () => {
+		const js = await transpileSiblingLoad(
+			'router/+page.ts',
+			`export function load({ params, props, url }: { params: Record<string, string>; props: Record<string, unknown>; url: string }) { return { v: String(params.x ?? '') + url } }`
+		)
+		assert.ok(!/:\s*\{[^}]*params/.test(js), `types must be stripped, got: ${js.slice(0, 160)}`)
+		assert.ok(/export function load/.test(js), 'load export must survive')
+		// `.js` siblings pass through untouched (no TS transform).
+		const plain = `export function load({ params }) { return { v: params.x } }`
+		assert.equal(await transpileSiblingLoad('router/+page.js', plain), plain)
+	})
+
+	it('composeRenderJs bundles a TYPED .ts sibling (annotations never reach QJS)', async () => {
+		const dir = mkdtempSync(join(tmpdir(), 'swelte-ssr-ts-sib-'))
+		const routesDir = join(dir, 'src', 'routes')
+		const { mkdirSync } = await import('node:fs')
+		mkdirSync(routesDir, { recursive: true })
+		writeFileSync(join(routesDir, '+page.svelte'), `<script>let { title } = $props();</script><h1>{title}</h1>`)
+		writeFileSync(
+			join(routesDir, '+page.ts'),
+			`export function load({ props }: { props: Record<string, unknown> }): { title: string } { return { title: 'typed:' + String((props as { greet?: string }).greet ?? '') } }`
+		)
+		const code = await composeRenderJs(
+			{
+				version: 1,
+				hasError: false,
+				routes: [
+					{
+						route: '/',
+						svelte: '+page.svelte',
+						kind: 'page',
+						hasData: false,
+						hasUniversalLoad: true,
+					},
+				],
+				error: null,
+				wrappers: [],
+			},
+			{ root: dir }
+		)
+		assert.ok(code.includes('applyUniversalLoad'), 'typed sibling must still register')
+		assert.ok(!/props:\s*Record</.test(code), 'no TS annotations leak into render.js')
+		const { pathToFileURL } = await import('node:url')
+		const probeFile = join(dir, 'render.check.mjs')
+		writeFileSync(probeFile, code)
+		const mod = (await import(pathToFileURL(probeFile).href)) as unknown as {
+			renderRoute: (route: string, props: string) => { head: string; body: string }
+		}
+		const out = mod.renderRoute('/', JSON.stringify({ greet: 'yo' }))
+		assert.ok(out.body.includes('typed:yo'), `typed load must run, got: ${out.body.slice(0, 160)}`)
+	})
+
+	it('composeRenderJs bundles a page importing $app/* (client-only stubs, no specifier leak)', async () => {
+		const dir = mkdtempSync(join(tmpdir(), 'swelte-ssr-app-'))
+		const routesDir = join(dir, 'src', 'routes')
+		const { mkdirSync } = await import('node:fs')
+		mkdirSync(routesDir, { recursive: true })
+		writeFileSync(
+			join(routesDir, '+page.svelte'),
+			`<script>import { goto } from '$app/navigation'; let { title } = $props();</script><h1>{title}</h1><button onclick={() => goto('/x')}>x</button>`
+		)
+		const code = await composeRenderJs(
+			{
+				version: 1,
+				hasError: false,
+				routes: [
+					{
+						route: '/',
+						svelte: '+page.svelte',
+						kind: 'page',
+						hasData: false,
+						hasUniversalLoad: false,
+					},
+				],
+				error: null,
+				wrappers: [],
+			},
+			{ root: dir }
+		)
+		assert.ok(!code.includes('$app/'), 'no $app specifier may survive into render.js')
+		// Unused client-only imports are tree-shaken (the stub fires when
+		// a handler path keeps the binding alive); either way the sync
+		// bundle can never touch the router at render time.
+		const { pathToFileURL } = await import('node:url')
+		const probeFile = join(dir, 'render.check.mjs')
+		writeFileSync(probeFile, code)
+		const mod = (await import(pathToFileURL(probeFile).href)) as unknown as {
+			renderRoute: (route: string, props: string) => { head: string; body: string }
+		}
+		const out = mod.renderRoute('/', JSON.stringify({ title: 'app-ok' }))
+		assert.ok(out.body.includes('app-ok'), `page must render, got: ${out.body.slice(0, 160)}`)
 	})
 })

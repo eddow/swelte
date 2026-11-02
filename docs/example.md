@@ -15,10 +15,12 @@ src/routes/users/[id].v             /users/[id] ([id] → req.params['id'])
 src/routes/files/[...rest].v        /files/[...rest] (catch-all → req.params['rest'])
 src/routes/admin/+route.svelte + +route.v   /admin wrapper (nav + @[before] sess guard / @[after] passthrough)
 src/routes/admin/+page.svelte + +page.v     /admin leaf (admin_whoami GET, reads injected x-user)
+src/routes/router/+page.v + +page.ts + +page.svelte   /router (§1: server @[load] + swelte_fetch sibling rows + sync universal load + client router + $app/*)
+src/routes/router/live/+page.ts + +page.svelte        /router/live (§1: ssr=false twin — async universal load + <await> streaming, SPA shell)
 src/lib/crypto/hash.v               isomorphic (hash_string @[rpc] → WASM/dev fallback)
 server.v                            Hand + static + main() — calls generated routes/swelte_route
 routes/                             generated V dispatcher (regenerating, gitignored)
-vite.config.ts                     swelte({ vBackendUrl, routesDir, libDir })
+vite.config.ts                     swelte({ vBackendUrl, routesDir, libDir }) + experimental.async (client <await>; SSR bundle stays sync)
 ```
 
 ## Run
@@ -57,6 +59,26 @@ node engine/core/dist/cli.js dev --port 5174 --backend 8131 --root examples/some
   Error matrix: unknown fn → 404 + available, bad JSON → 400,
   missing fn → 400, `!T` → 400 `err.msg()`, unknown path → 404,
   method without handler → 405.
+- §1 data-loading / client-router (`/router`, `/router/live`): server
+  `@[load]` paints initial props + pulls sibling rows in-process via
+  `swelte_fetch` (V-only, non-fallible, cookie/auth forwarded — all async
+  lives in `.v`, `.svelte` top level stays pure-sync per the SSR guards);
+  sync universal sibling `+page.ts load({ params, props, url })`
+  (typed TS — ssr-qjs `transpileSiblingLoad` strips types before the
+  QJS bundle, mirror of the `.svelte` preprocessing step)
+  merges a view-model in `renderRoute` before render
+  (`applyUniversalLoad`, `LOADEDMODS['/router']` in `dist/ssr/render.js`);
+  client router (`goto` / `preloadData` / `pushState` /
+  cancellable `beforeNavigate` in `onMount` / `afterNavigate`,
+  `page` / `navigating` stores, `$app/stores` + `$app/navigation`
+  aliases) navigates without reload, preloaded JSON merges as
+  `leafProps = { params, ...data }`; `ssr=false` twin `/router/live`
+  (sibling `export const ssr = false` → `swelte_no_ssr()` → SPA shell,
+  `hasUniversalLoad: 'async'` excluded from `render.js`) resolves its
+  async universal load + `<await>` boundary client-side
+  (client bundle compiles with `experimental.async`;
+  the SSR `generate: 'server'` pass still rejects top-level await —
+  `swelte check` clean).
 
 ## Stubs (see `rpc.md`, `types.md`)
 

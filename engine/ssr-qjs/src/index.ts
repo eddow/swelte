@@ -11,8 +11,12 @@ export { VERSION } from '@swelte/core'
 export { swelte } from './vite.js'
 export {
 	assertNoNodeExternals,
+	assertNoSdkTopLevelCalls,
 	assertNoTopLevelStubCalls,
 	assertQjsCompatible,
+	assertUniversalLoadSync,
+	readUniversalSsrFlag,
+	transpileSiblingLoad,
 	bundleSsr,
 	compileSsrComponent,
 	composeRenderJs,

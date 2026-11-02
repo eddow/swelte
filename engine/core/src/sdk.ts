@@ -426,6 +426,180 @@ export function isPageData<T>(r: SwelteLoadResult<T>): r is { data: T } {
 	return (r as { error?: unknown }).error === undefined
 }
 
+// §1.2 depends/invalidate + §1.4 client-router navigation stores.
+// Pure-TS client state (no V side, no SSR): tracks the current page,
+// navigation status, and per-route load cache tags. `updated` is a stub
+// flag (no version check yet — §4 snapshot export will feed it).
+
+export interface SweltePageState {
+	url: string
+	params: Record<string, string>
+	route: string | null
+	data?: unknown
+	error?: SweltePageError
+}
+
+export interface SwelteNavigatingState {
+	from: string | null
+	to: string | null
+}
+
+export type SwelteBeforeNavigate = (nav: {
+	from: SweltePageState | null
+	to: string
+	cancel: () => void
+}) => void | Promise<void>
+export type SwelteAfterNavigate = (nav: {
+	from: string | null
+	to: SweltePageState
+}) => void | Promise<void>
+
+export interface SwelteStore<T> {
+	subscribe: (fn: (v: T) => void) => () => void
+	set: (v: T) => void
+	get: () => T
+}
+
+type Listener<T> = (v: T) => void
+
+function swelteStore<T>(initial: T): {
+	subscribe: (fn: Listener<T>) => () => void
+	set: (v: T) => void
+	get: () => T
+} {
+	let cur = initial
+	const subs = new Set<Listener<T>>()
+	return {
+		subscribe: (fn) => {
+			subs.add(fn)
+			fn(cur)
+			return () => {
+				subs.delete(fn)
+			}
+		},
+		set: (v) => {
+			cur = v
+			for (const fn of [...subs]) fn(cur)
+		},
+		get: () => cur,
+	}
+}
+
+export const page: SwelteStore<SweltePageState> = swelteStore<SweltePageState>({
+	url: typeof location !== 'undefined' ? location.pathname : '/',
+	params: {},
+	route: null,
+})
+
+export const navigating: SwelteStore<SwelteNavigatingState | null> = swelteStore<SwelteNavigatingState | null>(null)
+
+export const updated: SwelteStore<boolean> = swelteStore<boolean>(false)
+
+const beforeNav: SwelteBeforeNavigate[] = []
+const afterNav: SwelteAfterNavigate[] = []
+
+export function beforeNavigate(fn: SwelteBeforeNavigate): () => void {
+	beforeNav.push(fn)
+	return () => {
+		const i = beforeNav.indexOf(fn)
+		if (i >= 0) beforeNav.splice(i, 1)
+	}
+}
+
+export function afterNavigate(fn: SwelteAfterNavigate): () => void {
+	afterNav.push(fn)
+	return () => {
+		const i = afterNav.indexOf(fn)
+		if (i >= 0) afterNav.splice(i, 1)
+	}
+}
+
+export function onNavigate(fn: SwelteAfterNavigate): () => void {
+	return afterNavigate(fn)
+}
+
+// section 1.4 navigation: thin async wrappers delegating to the
+// generated routes.js router at call time (no import cycle: sdk never
+// imports generated code; entry-main wires the bridge). Outside the
+// browser (SSR/Node) they reject with a clear error.
+function __routerFn(name: string): ((...a: unknown[]) => Promise<unknown>) | null {
+	try {
+		const g = globalThis as unknown as Record<string, Record<string, unknown>>
+		const mod = (g.__swelteRoutes ?? g.__swelteRouter) as unknown as Record<string, unknown> | undefined
+		const fn = mod?.[name]
+		return typeof fn === 'function' ? (fn as (...a: unknown[]) => Promise<unknown>) : null
+	} catch { return null }
+}
+export async function goto(url: string | URL, opts: { replaceState?: boolean; noPreload?: boolean } = {}): Promise<void> {
+	const fn = __routerFn('goto')
+	if (!fn) throw new Error('swelte: goto() needs the client router (browser + entry-main boot)')
+	await fn(url, opts)
+}
+export async function preloadData(url: string | URL): Promise<{ route: string; params: Record<string, string>; data: unknown; status: number } | null> {
+	const fn = __routerFn('preloadData')
+	if (!fn) throw new Error('swelte: preloadData() needs the client router (browser + entry-main boot)')
+	return (await fn(url)) as { route: string; params: Record<string, string>; data: unknown; status: number } | null
+}
+export async function pushState(url: string | URL, state: Record<string, unknown> = {}): Promise<void> {
+	const fn = __routerFn('pushState')
+	if (!fn) throw new Error('swelte: pushState() needs the client router (browser + entry-main boot)')
+	await fn(url, state)
+}
+
+// §1.2 load cache: route-key → tags. `depends()` registers the current
+// load's tags during execution; `invalidate(tag)` re-runs loads that
+// declared the tag; `invalidateAll()` clears everything.
+const loadTags = new Map<string, Set<string>>()
+let activeCollect: Set<string> | null = null
+
+export function depends(...tags: string[]): void {
+	if (activeCollect) for (const t of tags) activeCollect.add(t)
+}
+
+export function invalidate(...tags: string[]): string[] {
+	const hit: string[] = []
+	for (const [key, set] of loadTags) {
+		if (tags.some((t) => set.has(t))) hit.push(key)
+	}
+	for (const k of hit) loadTags.delete(k)
+	return hit
+}
+
+export function invalidateAll(): void {
+	loadTags.clear()
+}
+
+export function __swelteTrackLoad(key: string, fn: () => unknown): unknown {
+	const prev = activeCollect
+	const tags = new Set<string>()
+	activeCollect = tags
+	try {
+		return fn()
+	} finally {
+		activeCollect = prev
+		loadTags.set(key, tags)
+	}
+}
+
+// Router bridge: generated routes.js reads these lazily via
+// `globalThis.__swelteRouterSdk` (routes.js never imports the SDK bundle
+// directly — entry-main wires it once at boot).
+export const __beforeNav = beforeNav
+export const __afterNav = afterNav
+
+if (typeof globalThis !== 'undefined') {
+	const g = globalThis as Record<string, unknown>
+	if (!g.__swelteRouterSdk) {
+		g.__swelteRouterSdk = {
+			page,
+			navigating,
+			updated,
+			__beforeNav: beforeNav,
+			__afterNav: afterNav,
+		}
+	}
+}
+
 // §2.11 `fail`-lite: form/action failure convention. V side throws `!T`
 // with a `{ ok: false, fieldErrors: {...} }` JSON body (status 422 by
 // convention; any 4xx works). Client side narrows it without parsing:

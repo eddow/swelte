@@ -10,7 +10,7 @@ that bites during migration. Only built behavior is documented here; open work l
 | SvelteKit | Swelte | Notes |
 |---|---|---|
 | `+page.svelte` | `+page.svelte` | Same. Component per URL leaf. |
-| `+page.ts` / `+page.server.ts` | `+page.v` (`@[load]`) | Server-only `load`, HTML-navigation initial paint. No universal `load`. `parent T` param replaces `parent()`. |
+| `+page.ts` / `+page.server.ts` | `+page.v` (`@[load]`) + `+page.ts` (universal) | Server-only `load` = HTML-navigation initial paint (`parent T` param replaces `parent()`); universal sibling `load({ params, props, url })` = sync view-model transform inside `renderRoute` (typed TS — ssr-qjs transpiles via `transpileSiblingLoad`, mirror of the `.svelte` `generate: 'server'` step; async only when `ssr=false`). |
 | `+layout.svelte` | `+route.svelte` | Wrapper per subtree (nav + chrome), Svelte 5 `children` Snippet + `{@render children?.()}` outlet (not slots). SPA mount nests automatically; SSR `renderRoute` composes the chain server-side; client `hydrateSwelteRoute` hydrates the whole chain in place (SSR DOM adopted, leaf interactive; mismatch falls back to mount). |
 | `+layout.server.ts` | `+route.v` (`@[load]`) | Same cascade position. Level 0 takes `(req)`; deeper takes `(req, parent T)` — typed parent value instead of `await parent()`. Mismatch is a build error. |
 | `+server.ts` | `SwelteResponse` in the leaf `.v` | No standalone file. `@[get]`/`@[post]`/`@[put]`/`@[patch]`/`@[delete]` on the route file; one default per verb, `?q` qualifiers for many-per-file. Returns `string`/struct (JSON), `[]u8` (binary), `(int, string)` (status+text), or `SwelteResponse{ status, headers, cookies, body/body_bytes }` — full header/cookie/status/binary control, translated 1:1 into veb by `Hand`. |
@@ -46,13 +46,35 @@ that bites during migration. Only built behavior is documented here; open work l
   Interaction data comes from stubs (`@[get]`/`@[rpc]` in handlers).
   Components must not call stubs at top level during SSR (build error) —
   move load-time data into `$props()`, keep stubs for handlers.
+* Universal load: sibling `<basename>.ts` (`admin.ts` for `admin.svelte`,
+  `+page.ts` for `+page.svelte`, typed — ssr-qjs transpiles with
+  `transpileSiblingLoad`, the mirror of the `.svelte`
+  `generate: 'server'` preprocessing step, so annotations never reach
+  the QJS bundle; JSDoc-only `.js` still accepted as fallback)
+  exporting `load({ params, props, url })` runs inside sync
+  `renderRoute` before render; return merges into the
+  component props. Sync-only when SSR is on (`fetch`/`await`/`node:`/SDK
+  imports are build errors — move fetches to `@[load]` in the `.v`).
+  `export const ssr = false` opts the route out (async load allowed,
+  client-only). File pairing in `coming-from-sveltekit.md#Files`:
+  `admin.v` (API+`@[load]`) + `admin.ts` (universal) + `admin.svelte`.
 * No `parent()` — the parent value arrives as a typed fn param.
-* No `depends()`/`invalidate()`/`invalidateAll()`, no `goto()`/
-  `preloadData()`/`pushState()`, no `beforeNavigate`/`afterNavigate`/
-  `navigating`/`page`/`updated` stores. No client router beyond
-  mount/hydrate by pathname.
-* No server `fetch` wrapper with cookie/auth forwarding in `load`.
-* Async `load` only when SSR is off (same rule as SvelteKit).
+* Cache tags: `depends(...tags)` inside a load registers tags;
+  `invalidate(...tags)` clears matching load keys, `invalidateAll()`
+  clears all (`sdk.ts`, client-side).
+* Client router (history-driven, entry-main boots `initSwelteRouter`):
+  link-click interception + `popstate`; `goto(url, { replaceState?,
+  noPreload? })`, `preloadData(url)` (JSON probe, no DOM write),
+  `pushState(url, state)`; `beforeNavigate` (cancellable via `cancel()`),
+  `afterNavigate`/`onNavigate`; `page`/`navigating`/`updated` stores.
+  `page` shape: `{ url, params, route, data?, error? }`.
+  Client mounts merge preloaded JSON into leaf props automatically
+  (`{ params, ...data }`, same shape as SSR props).
+* Server `fetch` in `load`: `swelte_fetch(req, mut out_cookies, method,
+  path, body, content_type, qualifier)` dispatches sibling routes
+  in-process (no loopback socket), forwards `Cookie`/`Authorization`
+  (+`x-user`), returns `SwelteFetchOut{ status, body, headers }`, merges
+  `Set-Cookie` into the out list. V-only (never projected to TS/WASM).
 
 ## Forms
 
@@ -72,9 +94,11 @@ that bites during migration. Only built behavior is documented here; open work l
 * SSR is runtime-only: embedded QuickJS (`SWELTE_SSR=1`) or sidecar
   (`SWELTE_SSR_URL`), 50ms/16MB budgets, fallback to SPA shell.
   Never emits prerendered `.html`. Default is SPA/static + JSON.
-* No per-route `ssr`/`csr`/`prerender` flags — `ssr=false`-lite is open
-  (→ `specs/sveltekit.md` §4, manifest flag → skip renderer, serve shell).
-* No SSG/ISR/adapters, no service worker, no offline story.
+* Per-route `ssr=false`-lite: `export const ssr = false` in the
+  sibling `.ts` opts the route out — `Hand` skips the renderer
+  (`swelte_no_ssr()`), serves the SPA shell; async universal `load`
+  + client router take over. No `csr=false` islands, no SSG/ISR yet.
+  No service worker, no offline story.
 * Per-route `Params` types generated (`RouteId` + `Params` in every
   `types/routes/*.d.ts`) — the `$types`-lite.
 
@@ -82,7 +106,16 @@ that bites during migration. Only built behavior is documented here; open work l
 
 * Aliases are `#routes` / `#lib` (hash, current SvelteKit style), not
   `$lib`. `#app/paths` + `#app/environment` virtual stubs generated
-  from config. No `$app/forms`, no `$env/static|dynamic/*`.
+  from config. `$app/stores` + `$app/state` re-export
+  `page`/`navigating`/`updated` from `@swelte/core`;
+  `$app/navigation` re-exports
+  `goto`/`preloadData`/`pushState`/`beforeNavigate`/`afterNavigate`/`onNavigate`.
+  No `$app/forms`, no `$env/static|dynamic/*`.
+* Streaming: client bundles compile with
+  `compilerOptions.experimental.async` (see `templates/base/vite.config.ts`),
+  so `<await>` Suspense resolves in the browser. SSR stays sync
+  (ssr-qjs `generate: 'server'`, no async) — the SSR compile pass rejects
+  top-level `await`/`fetch` with file+line.
 * `svelte.config.js` `swelte` key holds: `routesDir`, `libDir`,
   `outDir`, `distDir`, `port`, `corsOrigin`, `trailingSlash`, `base`,
   `assets`, `csp`, `csrf`, `methodOverride`, `version`. Env wins at

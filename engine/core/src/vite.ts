@@ -11,7 +11,7 @@ import {
 	writeFileSync,
 } from 'node:fs'
 import { dirname, join, relative, resolve, sep } from 'node:path'
-import { loadConfig, renderClientEntry, renderHarness } from './gen/config.js'
+import { loadConfig, renderAppDts, renderClientEntry, renderHarness } from './gen/config.js'
 import { isBackendMod } from './gen/paths.js'
 import { resolveV, toolchainEnv } from './toolchain.js'
 
@@ -325,6 +325,17 @@ export interface SvelteRouteEntry {
 	svelte: string
 	kind: 'page' | 'plain' | 'error' | 'wrapper'
 	hasData: boolean
+	/** Sibling universal load (`<basename>.ts` next to the `.svelte`,
+	 * e.g. `admin.ts` for `admin.svelte`, `+page.ts` for `+page.svelte`).
+	 * `'sync'` = SSR-applied in renderRoute; `'async'` = client-only
+	 * (`export const ssr = false`); `false` = no sibling load. Core reads
+	 * only the `export const ssr` marker (regex, no engine deps) — ssr-qjs
+	 * owns the sync-subset validation. */
+	hasUniversalLoad: 'sync' | 'async' | false
+	/** Per-route SSR flag for Hand: `export const ssr = false` in the
+	 * sibling `.ts` (or wrapper `.ts`) opts the route out — Hand serves
+	 * the SPA shell (§4 ssr=false-lite). Absent = SSR on. */
+	ssr: boolean
 }
 
 function relPosixTop(abs: string, f: string): string {
@@ -332,6 +343,36 @@ function relPosixTop(abs: string, f: string): string {
 		.slice(abs.length + 1)
 		.split(sep)
 		.join('/')
+}
+
+/** Classify a sibling universal-load (`.ts` preferred, `.js` accepted):
+ * `false` (absent or no `load` export), `'sync'` (SSR-applied), `'async'`
+ * (`export const ssr = false`, client-only). Core reads the sibling source
+ * plus the `export const ssr` marker by regex — engine-agnostic;
+ * ssr-qjs owns the sync-subset build errors. */
+/** Resolve the sibling universal-load source: `<basename>.ts` preferred,
+ * `<basename>.js` accepted (plain-JS sibling: raw-bundled into sync
+ * render.js with no TS transform, and skipped by user `tsc --strict`). */
+export function siblingLoadSource(tsAbs: string): string | null {
+	if (existsSync(tsAbs)) return tsAbs
+	const jsAbs = tsAbs.replace(/\.ts$/, '.js')
+	if (jsAbs !== tsAbs && existsSync(jsAbs)) return jsAbs
+	return null
+}
+
+export function universalLoadKind(tsAbs: string): 'sync' | 'async' | false {
+	const found = siblingLoadSource(tsAbs)
+	if (!found) return false
+	let src = ''
+	try {
+		src = readFileSync(found, 'utf8')
+	} catch {
+		return false
+	}
+	if (!/\bexport\s+(async\s+)?function\s+load\b|\bexport\s+const\s+load\b/.test(src)) return false
+	const m = /export\s+const\s+ssr\s*=\s*(true|false)/.exec(src)
+	if (m && m[1] === 'false') return 'async'
+	return 'sync'
 }
 
 /** Collect `.svelte` siblings under routesAbs into a URL manifest.
@@ -362,7 +403,7 @@ export function collectSvelteManifest(
 				)
 			}
 			hasError = true
-			entries.push({ route: '/+error', svelte: rel, kind: 'error', hasData: false })
+			entries.push({ route: '/+error', svelte: rel, kind: 'error', hasData: false, hasUniversalLoad: false, ssr: true })
 			continue
 		}
 		if (kind === 'wrapper') {
@@ -371,6 +412,16 @@ export function collectSvelteManifest(
 				svelte: rel,
 				kind: 'wrapper',
 				hasData: vMods.has(mod),
+				hasUniversalLoad: universalLoadKind(f.replace(/\.svelte$/, '.ts')),
+				ssr: (() => {
+					const found = siblingLoadSource(f.replace(/\.svelte$/, '.ts'))
+					if (!found) return true
+					try {
+						return !/export\s+const\s+ssr\s*=\s*false/.test(readFileSync(found, 'utf8'))
+					} catch {
+						return true
+					}
+				})(),
 			})
 			continue
 		}
@@ -397,6 +448,16 @@ export function collectSvelteManifest(
 			svelte: rel,
 			kind: kind as 'page' | 'plain',
 			hasData: vMods.has(mod),
+			hasUniversalLoad: universalLoadKind(f.replace(/\.svelte$/, '.ts')),
+			ssr: (() => {
+				const found = siblingLoadSource(f.replace(/\.svelte$/, '.ts'))
+				if (!found) return true
+				try {
+					return !/export\s+const\s+ssr\s*=\s*false/.test(readFileSync(found, 'utf8'))
+				} catch {
+					return true
+				}
+			})(),
 		})
 	}
 	return { entries, hasError }
@@ -1328,6 +1389,11 @@ pub fn swelte_alloc(n int) &u8 {
 				`[swelte] ${rel}: @[load] ${m.name} must return a value (the level's page data).`
 			)
 		if (parentRet === null) {
+			if (m.attr !== 'load')
+				throw new Error(
+					`[swelte] ${rel}: @[${m.attr}] ${m.name} is a verb/rpc handler, not a page loader — rename it (only @[load] fns join the cascade).`
+				)
+
 			if (m.params.length !== 1 || m.params[0].vtype !== 'SwelteRequest')
 				throw new Error(
 					`[swelte] ${rel}: @[load] ${m.name} is the first loader — it takes exactly one SwelteRequest param (no parent at root).`
@@ -1499,7 +1565,8 @@ ${fns}`
 	function emitServerGen(
 		dispatched: { route: string; mod: string; prefix: string }[],
 		sseMods: Set<string> = new Set(),
-		matcherDefs?: Map<string, MatcherDef>
+		matcherDefs?: Map<string, MatcherDef>,
+		noSsrRoutes: string[] = []
 	): string {
 		/** Dynamic route arms (section 8): static beats dynamic; among dynamics,
 		 * fewer [segs] first, [...rest] catch-all last (stable sort). */
@@ -1641,6 +1708,54 @@ pub fn swelte_redirect(location string, status int) SwelteResponse {
 // writes append to the response cookie list.
 fn swelte_cookie_get(req SwelteRequest, name string) string {
 	return req.cookies[name] or { '' }
+}
+
+// §1.5 server fetch wrapper (V-only, never projected to TS, never in WASM):
+// @[load]/@[before] fns call sibling routes in-process via the
+// dispatcher (no loopback socket, single-artifact preserved), with the
+// caller Cookie/Authorization headers forwarded. Returns the sub-request
+// status + body; Set-Cookie headers from the sub-response are merged into
+// the out list so session flows survive internal fetches.
+pub struct SwelteFetchOut {
+pub mut:
+	status int
+	body string
+	headers map[string]string
+}
+
+fn swelte_fetch(req SwelteRequest, mut out []SwelteCookie, method string, path string, body string, content_type string, qualifier string) SwelteFetchOut {
+	mut fwd_headers := map[string]string{}
+	for k, v in req.headers {
+		lk := k.to_lower()
+		if lk == 'cookie' || lk == 'authorization' {
+			fwd_headers[k] = v
+		}
+		if lk == 'x-user' {
+			fwd_headers[k] = v
+		}
+	}
+	mut path_part := path
+	mut query := map[string]string{}
+	if path.contains('?') {
+		parts := path.split('?')
+		path_part = parts[0]
+		if parts.len > 1 {
+			for kv in parts[1].split('&') {
+				if kv == '' { continue }
+				eq := kv.index('=') or { -1 }
+				if eq < 0 { query[kv] = '' } else { query[kv[..eq]] = kv[eq + 1..] }
+			}
+		}
+	}
+	res := swelte_route(path_part, method, query, fwd_headers, req.cookies, req.locals, body, content_type, qualifier)
+	for c in res.cookies {
+		out << c
+	}
+	mut merged := map[string]string{}
+	for k2, v2 in res.headers {
+		merged[k2] = v2
+	}
+	return SwelteFetchOut{ status: res.status, body: res.body, headers: merged }
 }
 
 fn swelte_cookie_set(mut out []SwelteCookie, name string, value string) {
@@ -1863,6 +1978,13 @@ pub fn swelte_sse_emit_for(prefix string, qualifier string, req SwelteRequest, e
 			`\treturn '', map[string]string{}
 }
 `,
+			// ssr=false-lite: Hand skips QJS/sidecar per route (export const ssr = false),
+			// serves the SPA shell; async universal loads stay client-only.
+			`pub fn swelte_no_ssr(path string) bool {
+\tnorm_path := swelte_normalize_path(path)`,
+			...noSsrRoutes.map((r) => `\tif norm_path == ${vJsonStr(r)} { return true }`),
+			`\treturn false
+}`,
 		]
 		return o.join('\n')
 	}
@@ -2007,7 +2129,7 @@ module routes
 		for k, fs in swelte_raw_before {
 			mut swelte_names := []string{}
 			mut swelte_data := []u8{}
-			for f in fs { swelte_names << f.filename; swelte_data = f.data }
+			for f in fs { swelte_names << f.filename; swelte_data = f.data.bytes() }
 			files_before[k] = swelte_names.join(';')
 			files_bytes_before[k] = swelte_data
 		}
@@ -2023,9 +2145,19 @@ module routes
 
 fn ${prefix}dispatch_verbs(path string, method string, query map[string]string, params map[string]string, headers map[string]string, cookies map[string]string, body string, content_type string, qualifier string, swelte_req SwelteRequest) SwelteResponse {`,
 			// `req` outlives the method arm (assigned per-arm below, read by
-			// handler calls): declare once at function scope.
-			`\t_ = body
+			// handler calls): declare once at function scope. All params are
+			// consumed downstream (reqHead arms rebuild `req` per verb), but
+			// files with no body/query arms would warn — silence them all up
+			// front (`_ =` marks intentional use in V, no runtime cost).
+			`\t_ = path
+	_ = method
+	_ = query
+	_ = params
+	_ = headers
+	_ = cookies
+	_ = body
 	_ = content_type
+	_ = qualifier
 	mut req := swelte_req`,
 			dispatchBody(prefix, mod, fns, 'swelte_req'),
 			emitSseEvents(prefix, mod, fns),
@@ -2149,22 +2281,35 @@ ${chained}
 		// no `o.push` scaffolding, joined once at the end like emitServerGen.
 		const rpcFns = fns.filter((f) => f.attr === 'rpc')
 		const sseFns = fns.filter((f) => f.attr === 'sse')
+		// V multi-return shape: hoisted, visible to both rpcArm and wrapVerb.
+		const isTupleRet = /^\(\s*int\s*,\s*string\s*\)$/
 		const rpcArm = (fn: RpcFn): string => {
 			const rs = fn.singleArgsStruct ? vType(fn.singleArgsStruct, mod) : null
 			const dec = rs
 				? `json.decode(${rs}, args_json) or { return swelte_err_bad(path, fn_name, 'bad args') }`
 				: `args_json`
+			const uid = `${prefix}${fn.name}_rpc`.replace(/[^A-Za-z0-9_]/g, '_')
 			const call = `${prefix}${fn.name}(${dec})`
 			const resExpr = 'res'
 			const wrapRet = (expr: string): string => {
 				if (fn.vret === 'void') return `swelte_json('{}')`
 				if (fn.vret === 'SwelteResponse') return expr
 				if (fn.vret === '[]u8') return `swelte_bytes(${expr}, 'application/octet-stream')`
-				if (/^\(\s*int\s*,\s*string\s*\)$/.test(fn.vret)) return `swelte_status(${expr}.0, ${expr}.1)`
+					// Tuple arms bypass wrapRet (statement destructure in body below).
 				return `swelte_json(json.encode(${expr}))`
 			}
-			const body = fn.fallible
-				? `\t\t\tres := ${call} or { return swelte_err_bad(path, fn_name, err.msg()) }
+			// V multi-return: no tuple indexing (`(f()).0` is extra args on V 0.5.2)
+			// and no IIFE (anon `fn ()` captures nothing). Plain-statement destructure.
+			const tupleBody = (src: string): string =>
+				`\t\t\ts_${uid}, b_${uid} := ${src}
+\t\t\treturn swelte_status(s_${uid}, b_${uid})`
+			const body = isTupleRet.test(fn.vret)
+				? fn.fallible
+					? `\t\t\tres := ${call} or { return swelte_err_bad(path, fn_name, err.msg()) }
+${tupleBody(resExpr)}`
+					: `${tupleBody(`(${call})`)}`
+				: fn.fallible
+					? `\t\t\tres := ${call} or { return swelte_err_bad(path, fn_name, err.msg()) }
 \t\t\treturn ${wrapRet(resExpr)}`
 				: fn.vret === 'void'
 					? `\t\t\t${call}
@@ -2212,7 +2357,7 @@ ${body}
 		const reqHead = (vb: string): string =>
 			sharedReq != null
 				? `\t\treq = ${sharedReq}\n\t\treq.method = '${vb.toUpperCase()}'`
-				: `\t\tmut form := map[string]string{}\n\t\tmut files := map[string]string{}\n\t\tmut files_bytes := map[string][]u8{}\n\t\tif content_type.contains('multipart/form-data') {\n\t\t\tmut boundary := ''\n\t\t\tfor part in content_type.split(';') {\n\t\t\t\tp := part.trim_space()\n\t\t\t\tif p.starts_with('boundary=') { boundary = p.all_after('boundary=').trim('"') }\n\t\t\t}\n\t\t\tmut swelte_raw_files := map[string][]http.FileData{}\n\t\t\tif boundary != '' { form, swelte_raw_files = http.parse_multipart_form(body, boundary) }\n\t\t\tfor k, fs in swelte_raw_files {\n\t\t\t\tmut swelte_names := []string{}\n\t\t\t\tfor f in fs { swelte_names << f.filename; files_bytes[k] = f.data }\n\t\t\t\tfiles[k] = swelte_names.join(';')\n\t\t}\n\t\t} else if content_type.contains('application/x-www-form-urlencoded') || body != '' {\n\t\t\tform = http.parse_form(body)\n\t\t}\n\t\tmut req := SwelteRequest{ query: query, form: form, files: files, files_bytes: files_bytes, raw_body: body.bytes(), headers: headers, cookies: cookies, params: params, locals: locals, method: '${vb.toUpperCase()}', path: path, qualifier: qualifier }`
+				: `\t\tmut form := map[string]string{}\n\t\tmut files := map[string]string{}\n\t\tmut files_bytes := map[string][]u8{}\n\t\tif content_type.contains('multipart/form-data') {\n\t\t\tmut boundary := ''\n\t\t\tfor part in content_type.split(';') {\n\t\t\t\tp := part.trim_space()\n\t\t\t\tif p.starts_with('boundary=') { boundary = p.all_after('boundary=').trim('"') }\n\t\t\t}\n\t\t\tmut swelte_raw_files := map[string][]http.FileData{}\n\t\t\tif boundary != '' { form, swelte_raw_files = http.parse_multipart_form(body, boundary) }\n\t\t\tfor k, fs in swelte_raw_files {\n\t\t\t\tmut swelte_names := []string{}\n\t\t\t\tfor f in fs { swelte_names << f.filename; files_bytes[k] = f.data.bytes() }\n\t\t\t\tfiles[k] = swelte_names.join(';')\n\t\t}\n\t\t} else if content_type.contains('application/x-www-form-urlencoded') || body != '' {\n\t\t\tform = http.parse_form(body)\n\t\t}\n\t\tmut req := SwelteRequest{ query: query, form: form, files: files, files_bytes: files_bytes, raw_body: body.bytes(), headers: headers, cookies: cookies, params: params, locals: locals, method: '${vb.toUpperCase()}', path: path, qualifier: qualifier }`
 		const verbArm = (vb: string): string => {
 			const hs = fns.filter((f) => f.attr === vb)
 			if (hs.length === 0) return ''
@@ -2231,7 +2376,7 @@ ${body}
 			if (vret === 'void') return `swelte_json('{}')`
 			if (vret === 'SwelteResponse') return expr
 			if (vret === '[]u8') return `swelte_bytes(${expr}, 'application/octet-stream')`
-			if (/^\(\s*int\s*,\s*string\s*\)$/.test(vret)) return `swelte_status(${expr}.0, ${expr}.1)`
+				// Tuple arms bypass wrapVerb (statement destructure in verbBranch).
 			return `swelte_json(json.encode(${expr}))`
 		}
 		const verbBranch = (h: RpcFn): string => {
@@ -2240,9 +2385,21 @@ ${body}
 			const built = isReq ? null : narrowCall(`${prefix}${h.name}`, h.params)
 			const call = isReq ? `${prefix}${h.name}(req)` : built!.call
 			const stmts = list(built?.stmts ?? [], (st) => `\t\t\t${st}\n`)
+			// Unique suffix per (verb, qualifier) arm — one destructure per tuple arm.
+			// Plain statements (no IIFE: anon `fn ()` captures nothing, `req` undefined).
+			const uid = `${prefix}${h.name}_${h.qualifier || 'default'}`.replace(/[^A-Za-z0-9_]/g, '_')
 			const wrap = (expr: string): string => wrapVerb(expr, h.vret)
-			const body = h.fallible
-				? `\t\t\tres := ${call} or { return swelte_err_bad(path, ${vJsonStr(h.name)}, err.msg()) }\n\t\t\treturn ${wrap('res')}`
+			const tupleStat = (src: string): string =>
+				`\t\t\ts_${uid}, b_${uid} := ${src}
+\t\t\treturn swelte_status(s_${uid}, b_${uid})`
+			const body = isTupleRet.test(h.vret)
+				? h.fallible
+				? `\t\t\tres := ${call} or { return swelte_err_bad(path, ${vJsonStr(h.name)}, err.msg()) }
+${tupleStat('res')}`
+				: `${tupleStat(`(${call})`)}`
+			: h.fallible
+				? `\t\t\tres := ${call} or { return swelte_err_bad(path, ${vJsonStr(h.name)}, err.msg()) }
+\t\t\treturn ${wrap('res')}`
 				: h.vret === 'void'
 					? `\t\t\t${call}\n\t\t\treturn swelte_json('{}')`
 					: `\t\t\treturn ${wrap(`(${call})`)}`
@@ -2757,7 +2914,7 @@ ${list(params, (p) => `\t${p.name}${p.optional ? '?' : ''}: ${p.tstype}\n`)}}
 						for (const v of fns.filter((x) => ['get', 'post', 'put', 'delete', 'patch'].includes(x.attr))) validateVerbFn(`${routesDir}/${rel}`, v)
 						const route = routeFor(routesDir, routesAbs, f, knownMatchers)
 						if (route === null) continue // wrapper-only (handled above); leaf always has a route
-						emitTypes('routes', mod, src, fns, route)
+						emitTypes('routes', mod, src, fns.filter((x) => x.attr !== 'load'), route)
 						// Dynamic-shape clash (section 8): two files normalizing to the
 						// same shape (`users/[id]` vs `users/[slug]`) are ambiguous —
 						// build error naming both files.
@@ -2788,7 +2945,7 @@ ${list(params, (p) => `\t${p.name}${p.optional ? '?' : ''}: ${p.tstype}\n`)}}
 						mkdirSync(genModDir, { recursive: true })
 						writeFileSync(
 							join(genModDir, `${mod.split('/').pop()}.js`),
-							jsFetchFor(route, fns, trailingSlash, matchers)
+							jsFetchFor(route, fns.filter((x) => x.attr !== 'load'), trailingSlash, matchers)
 						)
 					}
 					// Per-file dispatchers: one `module routes` file per routes file,
@@ -2833,7 +2990,7 @@ ${list(params, (p) => `\t${p.name}${p.optional ? '?' : ''}: ${p.tstype}\n`)}}
 							})
 							for (const l of lds) loads.push({ ...l, mod: wmod, file: `${routesDir}/${wmod}.v` })
 						}
-						const fns = parseVFile(src).filter((x) => x.attr !== 'before' && x.attr !== 'after')
+						const fns = parseVFile(src).filter((x) => x.attr !== 'before' && x.attr !== 'after' && x.attr !== 'load')
 						for (const l of parseVFile(src).filter((x) => x.attr === 'load'))
 							loads.push({ ...l, mod: d.mod, file: `${routesDir}/${d.mod}.v` })
 						// Chain validation: level 0 takes (req); deeper levels
@@ -2896,7 +3053,33 @@ ${list(params, (p) => `\t${p.name}${p.optional ? '?' : ''}: ${p.tstype}\n`)}}
 								/* ignore */
 							}
 						}
-						writeFileSync(join(routesGenDir, `server_gen.v`), emitServerGen(dispatched, sseMods, matchers))
+						// §4 ssr=false-lite: sibling `export const ssr = false`
+						// opts the route out — Hand serves the SPA shell
+						// (swelte_no_ssr predicate in server_gen.v).
+						const noSsrRoutes: string[] = []
+						try {
+							for (const f of listFilesWithExt(routesAbs, '.svelte')) {
+								const rel = relPosixTop(routesAbs, f)
+								const mod = rel.replace(/\.svelte$/, '')
+								const route = svelteRouteFor(mod)
+								if (route === null) continue
+								const sib = siblingLoadSource(f.replace(/\.svelte$/, '.ts'))
+								if (!sib) continue
+								let src = ''
+								try {
+									src = readFileSync(sib, 'utf8')
+								} catch {
+									continue
+								}
+								if (/export\s+const\s+ssr\s*=\s*false/.test(src)) noSsrRoutes.push(route)
+							}
+						} catch {
+							/* no svelte routes */
+						}
+						writeFileSync(
+							join(routesGenDir, `server_gen.v`),
+							emitServerGen(dispatched, sseMods, matchers, noSsrRoutes)
+						)
 					}
 					// Leaf-vs-index clash: foo.v + foo/index.v (or +page.v) both exist.
 					// Warn-only here (the hard build error lives in the per-file
@@ -3120,6 +3303,42 @@ declare module '*.v' {
 						`	export const building: boolean;`,
 						`	export const version: string;`,
 						`}`,
+						``,
+						`declare module '$app/stores' {`,
+						`\texport const page: unknown;`,
+						`\texport const navigating: unknown;`,
+						`\texport const updated: unknown;`,
+						`\texport function goto(url: string, opts?: unknown): Promise<void>;`,
+						`\texport function preloadData(url: string): Promise<unknown>;`,
+						`\texport function pushState(url: string, state?: unknown): Promise<void>;`,
+						`\texport function beforeNavigate(fn: unknown): () => void;`,
+						`\texport function afterNavigate(fn: unknown): () => void;`,
+						`\texport function onNavigate(fn: unknown): () => void;`,
+						`}`,
+						``,
+						`declare module '$app/state' {`,
+						`\texport const page: unknown;`,
+						`\texport const navigating: unknown;`,
+						`\texport const updated: unknown;`,
+						`\texport function goto(url: string, opts?: unknown): Promise<void>;`,
+						`\texport function preloadData(url: string): Promise<unknown>;`,
+						`\texport function pushState(url: string, state?: unknown): Promise<void>;`,
+						`\texport function beforeNavigate(fn: unknown): () => void;`,
+						`\texport function afterNavigate(fn: unknown): () => void;`,
+						`\texport function onNavigate(fn: unknown): () => void;`,
+						`}`,
+						``,
+						`declare module '$app/navigation' {`,
+						`\texport const page: unknown;`,
+						`\texport const navigating: unknown;`,
+						`\texport const updated: unknown;`,
+						`\texport function goto(url: string, opts?: unknown): Promise<void>;`,
+						`\texport function preloadData(url: string): Promise<unknown>;`,
+						`\texport function pushState(url: string, state?: unknown): Promise<void>;`,
+						`\texport function beforeNavigate(fn: unknown): () => void;`,
+						`\texport function afterNavigate(fn: unknown): () => void;`,
+						`\texport function onNavigate(fn: unknown): () => void;`,
+						`}`,
 						``
 					)
 					writeFileSync(join(genDir, 'v-shim.d.ts'), decls.join('\n'))
@@ -3160,6 +3379,38 @@ declare module '*.v' {
 						join(genDir, 'version.js'),
 						`// Auto-generated by swelte. Do not edit.\nexport const version = ${esc(appVersion)};\nexport const buildTime = ${esc(new Date().toISOString())};\n`
 					)
+				}
+				// SvelteKit `$app/*` stubs (re-export @swelte/core stores/router).
+				// `$app/stores` + `$app/state` (stores), `$app/navigation` (router fns).
+				// Aliased in resolve.alias below; declared in v-shim.d.ts above.
+				{
+					const appDir = join(genDir, 'app')
+					mkdirSync(appDir, { recursive: true })
+					// `$app/*` compat stubs (SvelteKit `$app/*` equivalent).
+					// JS bodies inlined via JSON.stringify (no quote-escaping
+					// hazards); the .d.ts bundle comes from renderAppDts().
+					const GEN_STORES_JS = `// Auto-generated by swelte. Do not edit.
+export { page, navigating, updated } from '@swelte/core'
+`
+					const GEN_NAV_JS = `// Auto-generated by swelte. Do not edit.
+export { goto, preloadData, pushState, beforeNavigate, afterNavigate, onNavigate } from '@swelte/core'
+`
+					const GEN_ENV_JS = `// Auto-generated by swelte. Do not edit.
+export const browser = typeof window !== 'undefined';
+export const dev = true;
+`
+					const GEN_ENV_DTS = `// Auto-generated by swelte. Do not edit.
+export declare const browser: boolean;
+export declare const dev: boolean;
+`
+					writeFileSync(join(appDir, 'stores.js'), GEN_STORES_JS)
+					writeFileSync(join(appDir, 'state.js'), GEN_STORES_JS)
+					writeFileSync(join(appDir, 'navigation.js'), GEN_NAV_JS)
+					writeFileSync(join(appDir, 'stores.d.ts'), renderAppDts())
+					writeFileSync(join(appDir, 'state.d.ts'), renderAppDts())
+					writeFileSync(join(appDir, 'navigation.d.ts'), renderAppDts())
+					writeFileSync(join(appDir, 'environment.js'), GEN_ENV_JS)
+					writeFileSync(join(appDir, 'environment.d.ts'), GEN_ENV_DTS)
 				}
 				for (const w of warnings) console.warn(`[swelte] ${w}`)
 				// Roadmap 7: client router — UI composition without manual imports.
@@ -3275,8 +3526,11 @@ export function mountSwelteRoute(target, pathname, errorProps) {
 		// Leaf-first: page mounts into host[0]; each wrapper mounts with \`children\`
 		// as a Snippet appending the inner host — leaf renders inside wrapper
 		// nav/chrome with no manual import in +page.svelte.
-		const hosts = [document.createElement('div')]
-		mount(r.page, { target: hosts[0], props: { params } })
+	// Client mounts merge preloaded JSON into leaf props (same shape as SSR props).
+	const leafData = (errorProps && typeof errorProps === 'object' && errorProps.data && typeof errorProps.data === 'object') ? errorProps.data : {}
+	const leafProps = { params, ...leafData }
+	const hosts = [document.createElement('div')]
+		mount(r.page, { target: hosts[0], props: leafProps })
 		for (let i = r.wrappers.length - 1; i >= 0; i--) {
 			const host = document.createElement('div')
 			const inner = hosts[hosts.length - 1]
@@ -3311,7 +3565,9 @@ export function hydrateSwelteRoute(target, pathname, errorProps) {
 				// children snippet, down to the leaf page. Each level runs
 				// while Svelte's hydration cursor sits on its SSR slot, so
 				// the whole tree adopts SSR DOM instead of remounting.
-				const leafProps = errorProps ?? { params }
+				const leafData = (errorProps && typeof errorProps === 'object' && errorProps.data && typeof errorProps.data === 'object') ? errorProps.data : {}
+				const leafExtra = (errorProps && typeof errorProps === 'object' && !errorProps.data) ? errorProps : {}
+				const leafProps = { params, ...leafData, ...leafExtra }
 				let child = (anchor) => { r.page(anchor, leafProps) }
 				for (let i = r.wrappers.length - 1; i >= 1; i--) {
 					const Wrap = r.wrappers[i]
@@ -3321,7 +3577,7 @@ export function hydrateSwelteRoute(target, pathname, errorProps) {
 				hydrate(r.wrappers[0], { target, props: { params, children: child } })
 				return { params, path: r.path, hydrated: true }
 			}
-			hydrate(r.page, { target, props: { params } })
+			hydrate(r.page, { target, props: (() => { const d = (errorProps && typeof errorProps === 'object' && errorProps.data && typeof errorProps.data === 'object') ? errorProps.data : {}; const x = (errorProps && typeof errorProps === 'object' && !errorProps.data && !(errorProps.status || errorProps.message)) ? errorProps : {}; return { params, ...d, ...x }; })() })
 			return { params, path: r.path, hydrated: true }
 		}
 		if (typeof SwelteErrorPage !== 'undefined') {
@@ -3330,6 +3586,107 @@ export function hydrateSwelteRoute(target, pathname, errorProps) {
 		}
 	} catch { /* fall through to mount */ }
 	return { ...mountSwelteRoute(target, pathname, errorProps), hydrated: false }
+}
+
+// §1.4 client router: history-driven navigation with data preloading,
+// cancellable guards, and reactive stores (wired lazily so routes.js
+// never hard-depends on the SDK bundle shape).
+let __routerTarget = null
+let __routerMounted = null
+function __routerSdk() { return (typeof globalThis !== 'undefined' && globalThis.__swelteRouterSdk) || null }
+function __setPage(s) { const sdk = __routerSdk(); if (sdk && sdk.page) sdk.page.set(s) }
+function __setNavigating(s) { const sdk = __routerSdk(); if (sdk && sdk.navigating) sdk.navigating.set(s) }
+async function __runGuards(kind, arg) {
+	const sdk = __routerSdk(); if (!sdk) return false
+	const fns = kind === 'before' ? (sdk.__beforeNav || []) : (sdk.__afterNav || [])
+	for (const fn of fns) {
+		let cancelled = false
+		const extra = kind === 'before' ? { cancel: () => { cancelled = true } } : {}
+		await fn({ ...arg, ...extra })
+		if (kind === 'before' && cancelled) return true
+	}
+	return false
+}
+function __matchRoute(pathname) {
+	const path = pathname !== '/' && pathname.endsWith('/') ? pathname.slice(0, -1) : pathname
+	for (const r of ROUTES) {
+		const params = matchSegs(r.path, path)
+		if (params) return { route: r, params }
+	}
+	return null
+}
+export async function goto(url, opts) {
+	opts = opts || {}
+	const to = typeof url === 'string' ? url : url.pathname
+	const from = __routerMounted ? __routerMounted.url : null
+	__setNavigating({ from, to })
+	const cancelled = await __runGuards('before', { from: __routerMounted, to })
+	if (cancelled) { __setNavigating(null); return }
+	if (!opts.replaceState) history.pushState({}, '', to)
+	else history.replaceState({}, '', to)
+	await __navigateTo(to, opts)
+}
+export async function preloadData(url) {
+	const to = typeof url === 'string' ? url : url.pathname
+	const hit = __matchRoute(to)
+	if (!hit) return null
+	try {
+		const res = await fetch(to, { headers: { accept: 'application/json' } })
+		const data = res.ok ? await res.json().catch(() => null) : null
+		return { route: hit.route.path, params: hit.params, data, status: res.status }
+	} catch (e) { return { route: hit.route.path, params: hit.params, data: null, status: 0 } }
+}
+export async function pushState(url, state) {
+	history.pushState(state ?? {}, '', typeof url === 'string' ? url : url.pathname)
+	if (state && state.page) __setPage(state.page)
+}
+async function __navigateTo(pathname, opts) {
+	opts = opts || {}
+	const target = __routerTarget || document.getElementById('app')
+	if (!target) return
+	const hit = __matchRoute(pathname)
+	const from = __routerMounted ? __routerMounted.url : null
+	target.innerHTML = ''
+	if (!hit) {
+		if (typeof SwelteErrorPage !== 'undefined') {
+			const { mount: doMount } = await import('svelte')
+			doMount(SwelteErrorPage, { target, props: { status: 404, message: 'not found' } })
+			__routerMounted = { url: pathname, params: {}, route: null }
+			__setPage(__routerMounted); __setNavigating(null)
+			await __runGuards('after', { from, to: __routerMounted })
+			return
+		}
+		throw new Error('swelte: no route for ' + pathname)
+	}
+	let data = null
+	if (!opts.noPreload) {
+		try {
+			const res = await fetch(pathname, { headers: { accept: 'application/json' } })
+			if (res.ok) data = await res.json().catch(() => null)
+		} catch { /* offline/static — mount with params only */ }
+	}
+	const out = mountSwelteRoute(target, pathname, data ? { params: hit.params, data } : undefined)
+	__routerMounted = { url: pathname, params: out.params ?? hit.params, route: out.path ?? hit.route.path, data }
+	__setPage(__routerMounted); __setNavigating(null)
+	await __runGuards('after', { from, to: __routerMounted })
+}
+export function initSwelteRouter(target) {
+	__routerTarget = target || document.getElementById('app')
+	if (typeof globalThis !== 'undefined') { globalThis.__swelteRoutes = { goto, preloadData, pushState, initSwelteRouter } }
+	if (typeof window === 'undefined' || !__routerTarget) return () => {}
+	const onClick = (e) => {
+		const a = e.target && e.target.closest ? e.target.closest('a[href]') : null
+		if (!a) return
+		const href = a.getAttribute('href')
+		if (!href || href.startsWith('#') || href.includes(':') || a.target === '_blank') return
+		if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return
+		e.preventDefault()
+		goto(href)
+	}
+	const onPop = () => { __navigateTo(location.pathname) }
+	window.addEventListener('click', onClick)
+	window.addEventListener('popstate', onPop)
+	return () => { window.removeEventListener('click', onClick); window.removeEventListener('popstate', onPop) }
 }
 `)
 					writeFileSync(join(genDir, 'routes.js'), o.join('\n'))
@@ -3378,6 +3735,8 @@ export function hydrateSwelteRoute(target, pathname, errorProps) {
 								svelte: e.svelte,
 								kind: e.kind,
 								hasData: e.hasData,
+								hasUniversalLoad: e.hasUniversalLoad,
+								ssr: e.ssr,
 							}))
 							.sort((a, b) => a.route.localeCompare(b.route)),
 						error: svelteEntries.some((e) => e.kind === 'error')
@@ -3440,6 +3799,10 @@ export function hydrateSwelteRoute(target, pathname, errorProps) {
 						{
 							find: '#app/environment',
 							replacement: join(resolve(root, outDir), 'environment.js'),
+						},
+						{
+							find: '$app',
+							replacement: join(resolve(root, outDir), 'app'),
 						},
 					],
 				},
@@ -3634,7 +3997,7 @@ export function hydrateSwelteRoute(target, pathname, errorProps) {
 						`[swelte] ${abs} is a +route.v wrapper (@[before]/@[after] middleware only) and cannot be imported in browser code.`
 					)
 				}
-				const fns = parseVFile(src).filter((x) => x.attr !== 'before' && x.attr !== 'after')
+				const fns = parseVFile(src).filter((x) => x.attr !== 'before' && x.attr !== 'after' && x.attr !== 'load')
 				if (fns.length === 0) return 'export {}; // swelte: no RPC fns in this .v file'
 				return jsFetchFor(route, fns, trailingSlash, routeMatchers)
 			}

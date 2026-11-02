@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { collectSvelteManifest, svelteRouteFor } from './vite.js'
+import { collectSvelteManifest, svelteRouteFor, siblingLoadSource, universalLoadKind } from './vite.js'
 import type { SvelteRouteEntry } from './vite.js'
 
 function tmpRoutes(files: Record<string, string>): string {
@@ -42,6 +42,27 @@ describe('collectSvelteManifest (tmp routes)', () => {
 		)
 	})
 
+	it('basename sibling .ts flags hasUniversalLoad (+page + plain)', () => {
+		const routesAbs = tmpRoutes({
+			'admin/+page.svelte': '<h1>a</h1>',
+			'admin/+page.ts': 'export function load() { return {} }',
+			'dash.svelte': '<h1>d</h1>',
+			'dash.ts': 'export function load() { return {} }',
+			'bare.svelte': '<h1>b</h1>',
+			'nojs.svelte': '<h1>n</h1>',
+			'nojs.ts': 'export const ssr = false;\nexport async function load() { return {} }',
+		})
+		const { entries } = collectSvelteManifest(routesAbs, 'src/routes', new Set())
+		const by = (svelte: string) => entries.find((e: SvelteRouteEntry) => e.svelte === svelte)
+		assert.equal(by('admin/+page.svelte')?.hasUniversalLoad, 'sync')
+		assert.equal(by('dash.svelte')?.hasUniversalLoad, 'sync')
+		assert.equal(by('bare.svelte')?.hasUniversalLoad, false)
+		assert.equal(by('nojs.svelte')?.hasUniversalLoad, 'async')
+		// ssr flag: false only when opted out; wrappers inherit the same read.
+		assert.equal(by('admin/+page.svelte')?.ssr, true)
+		assert.equal(by('nojs.svelte')?.ssr, false)
+	})
+
 	it('+error global-only: nested throws', () => {
 		const routesAbs = tmpRoutes({ 'admin/+error.svelte': '<p>e</p>' })
 		assert.throws(
@@ -63,5 +84,22 @@ describe('collectSvelteManifest (tmp routes)', () => {
 		const { entries } = collectSvelteManifest(routesAbs, 'src/routes', new Set())
 		assert.equal(entries[0]?.route, '/users/[id]')
 		assert.equal(svelteRouteFor('files/[...rest]/+page'), '/files/[...rest]')
+	})
+
+	it('.js sibling accepted (plain-JS: raw-bundled into sync render.js, skipped by tsc --strict)', () => {
+		const routesAbs = tmpRoutes({
+			'router/+page.svelte': '<h1>r</h1>',
+			'router/+page.js': 'export function load({ props }) { return { v: String(props?.g ?? "") } }',
+			'live/+page.svelte': '<h1>l</h1>',
+			'live/+page.js': 'export const ssr = false;\nexport async function load() { return {} }',
+		})
+		const { entries } = collectSvelteManifest(routesAbs, 'src/routes', new Set())
+		const by = (svelte: string) => entries.find((e: SvelteRouteEntry) => e.svelte === svelte)
+		assert.equal(by('router/+page.svelte')?.hasUniversalLoad, 'sync')
+		assert.equal(by('router/+page.svelte')?.ssr, true)
+		assert.equal(by('live/+page.svelte')?.hasUniversalLoad, 'async')
+		assert.equal(by('live/+page.svelte')?.ssr, false)
+		assert.ok(siblingLoadSource(join(routesAbs, 'router', '+page.ts'))?.endsWith('+page.js'))
+		assert.equal(universalLoadKind(join(routesAbs, 'router', '+page.ts')), 'sync')
 	})
 })

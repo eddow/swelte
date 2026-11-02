@@ -226,6 +226,20 @@ describe('codegen shape snapshots (fetch/SSE/dispatcher)', () => {
 		assert.ok(disp.includes('pub fn swelte_load_for('))
 	})
 
+	it('§1.5 server fetch helper is V-only (dispatch-local, cookie-forwarding)', async () => {
+		const root = scaffold()
+		await generate(root)
+		const disp = readFileSync(join(root, '.swelte', 'routes', 'server_gen.v'), 'utf8')
+		assert.ok(disp.includes('pub struct SwelteFetchOut'), 'SwelteFetchOut emitted')
+		assert.ok(disp.includes('fn swelte_fetch('), 'swelte_fetch emitted')
+		assert.ok(disp.includes('swelte_route('), 'fetch dispatches in-process (no loopback)')
+		// Never projected to TS: browser stubs only carry user fns.
+		const stub = readFileSync(join(root, '.swelte', 'generated', 'routes', 'api', 'greet.js'), 'utf8')
+		assert.ok(!stub.includes('swelte_fetch'), 'swelte_fetch never leaks to #routes fetch stubs')
+		const dts = readFileSync(join(root, '.swelte', 'types', 'routes', 'api', 'greet.d.ts'), 'utf8')
+		assert.ok(!dts.includes('SwelteFetchOut'), 'SwelteFetchOut never leaks to .d.ts')
+	})
+
 	it('fetch stub has dyn params + SSE generator + qualifier plumbing', async () => {
 		const root = scaffold()
 		mkdirSync(join(root, 'src', 'routes', 'users'), { recursive: true })
@@ -419,6 +433,7 @@ describe('item 11 — codegen golden project (sample-overlay variant + routes.js
 		assert.ok(entry.includes("from './routes.js'"), 'entry must route through routes.js')
 		assert.ok(entry.includes('hydrateSwelteRoute'), 'entry must hydrate SSR')
 		assert.ok(entry.includes('mountSwelteRoute'), 'entry must mount SPA shell')
+		assert.ok(entry.includes('initSwelteRouter'), 'entry must boot the client router')
 		// lib stub points at the dev per-module wasm url (prod bundle swaps in generateBundle)
 		const stub = readFileSync(join(root, '.swelte', 'generated', 'lib', 'crypto', 'hash.js'), 'utf8')
 		assert.ok(stub.includes('/@swelte-dev/crypto/hash.wasm'), stub.slice(0, 400))
@@ -438,4 +453,89 @@ describe('item 11 — codegen golden project (sample-overlay variant + routes.js
 		assert.equal(after, before)
 		assert.equal(afterV, beforeV)
 	})
+
+describe('§1.2 router stores + invalidation (§1.2/§1.4)', () => {
+	it('page/navigating/updated subscribe with current value', async () => {
+		const { page, navigating, updated } = await import('./sdk.js')
+		const seen: unknown[] = []
+		const unsub = page.subscribe((v) => seen.push(v))
+		unsub()
+		assert.ok(seen.length >= 1)
+		assert.equal(navigating.get(), null)
+		assert.equal(updated.get(), false)
+	})
+
+	it('depends/invalidate track tags per load key', async () => {
+		const { depends, invalidate, invalidateAll, __swelteTrackLoad } = await import('./sdk.js')
+		__swelteTrackLoad('/a', () => {
+			depends('app:data')
+		})
+		__swelteTrackLoad('/b', () => {
+			depends('other')
+		})
+		assert.deepEqual(invalidate('app:data'), ['/a'])
+		assert.deepEqual(invalidate('app:data'), [])
+		__swelteTrackLoad('/c', () => {
+			depends('x')
+		})
+		invalidateAll()
+		assert.deepEqual(invalidate('x'), [])
+	})
+
+	it('beforeNavigate/afterNavigate register + unregister', async () => {
+		const { beforeNavigate, afterNavigate } = await import('./sdk.js')
+		let calls = 0
+		const off = beforeNavigate(() => {
+			calls++
+		})
+		off()
+		const off2 = afterNavigate(() => {
+			calls++
+		})
+		off2()
+		assert.equal(calls, 0)
+	})
+
+	it('routes.js emits goto/preloadData/pushState/initSwelteRouter', async () => {
+		const root = scaffold()
+		await generate(root)
+		const js = readFileSync(join(root, '.swelte', 'routes.js'), 'utf8')
+		for (const fn of [
+			'export async function goto(',
+			'export async function preloadData(',
+			'export async function pushState(',
+			'export function initSwelteRouter(',
+		]) {
+			assert.ok(js.includes(fn), `routes.js must export ${fn}`)
+	}
+})
+})
+
+	it('§4/§1 Hand predicate + client props merge', async () => {
+		const root = scaffold()
+		await generate(root)
+		const disp = readFileSync(join(root, '.swelte', 'routes', 'server_gen.v'), 'utf8')
+		assert.ok(disp.includes('pub fn swelte_no_ssr('), 'no-ssr predicate emitted')
+		const js = readFileSync(join(root, '.swelte', 'routes.js'), 'utf8')
+		assert.ok(js.includes('leafData'), 'mount merges preloaded JSON into leaf props')
+		assert.ok(js.includes('__swelteRoutes'), 'router handle published for sdk goto()')
+	})
+
+	it('ssr=false sibling flags predicate per route', async () => {
+		const root = scaffold()
+		mkdirSync(join(root, 'src', 'routes', 'nojs'), { recursive: true })
+		writeFileSync(join(root, 'src', 'routes', 'nojs', '+page.svelte'), '<h1>n</h1>')
+		writeFileSync(
+			join(root, 'src', 'routes', 'nojs', '+page.ts'),
+			`export const ssr = false;\nexport async function load() { return {} }`
+		)
+		await generate(root)
+		const disp = readFileSync(join(root, '.swelte', 'routes', 'server_gen.v'), 'utf8')
+		assert.ok(disp.includes('/nojs'), 'no-ssr route registered in predicate')
+		const mani = JSON.parse(readFileSync(join(root, '.swelte', 'ssr-manifest.json'), 'utf8'))
+		const nojs = (mani.routes as { route: string; ssr: boolean; hasUniversalLoad: unknown }[]).find((r) => r.route === '/nojs')
+		assert.equal(nojs?.ssr, false, 'manifest marks ssr=false')
+		assert.equal(nojs?.hasUniversalLoad, 'async', 'async load classified')
+	})
+
 })

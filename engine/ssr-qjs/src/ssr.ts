@@ -35,11 +35,85 @@ export interface SsrComposeOptions {
 export interface SsrManifest {
 	version: 1 | 2
 	hasError: boolean
-	routes: { route: string; svelte: string; kind: string; hasData: boolean }[]
+	routes: { route: string; svelte: string; kind: string; hasData: boolean; hasUniversalLoad?: boolean | 'sync' | 'async'; ssr?: boolean }[]
 	error: string | null
 	wrappers: string[]
 	/** Wrapper chain per page (`./`-relative svelte path → root→leaf wrappers). v2+. */
 	wrappersByRoute?: Record<string, string[]>
+}
+
+/** `export const ssr` per-route flag (ssr-qjs validated, core stays
+ * engine-agnostic: core only records `hasUniversalLoad` presence).
+ * `false` = `ssr=false`-lite: `Hand` skips QJS/sidecar, serves the SPA
+ * shell; the universal load may be `async` (client-only). Any other value
+ * (absent, `true`) = SSR-enabled, sync subset enforced. */
+export function readUniversalSsrFlag(src: string): boolean {
+	const m = /export\s+const\s+ssr\s*=\s*(true|false)/.exec(src)
+	if (!m) return true
+	return m[1] === 'true'
+}
+
+/** Sync-only universal-load guard: `<basename>.ts` sibling of a route
+ * (e.g. `admin.ts` for `admin.svelte`, `+page.ts` for `+page.svelte`)
+ * exporting `load` must run inside sync `renderRoute`, so when the route
+ * is SSR-enabled it forbids `fetch(`, `await`, `node:` externals, and
+ * `#routes/`/`#lib/`/`loadPage` SDK calls — same QJS-compat rule as
+ * components. `async load` is allowed only when `ssr=false` (client-only). */
+export function assertUniversalLoadSync(
+	file: string,
+	src: string,
+	opts: { ssr: boolean } = { ssr: true }
+): void {
+	if (!/\bexport\s+(async\s+)?function\s+load\b|\bexport\s+const\s+load\b/.test(src)) return
+	if (!opts.ssr) {
+		const { code, lineOf } = stripForScan(src)
+		const at = (idx: number) => `${file}:${lineOf(idx)}`
+		for (const m of code.matchAll(/\bfrom\s+['"]node:/g)) {
+			throw new Error(
+				`[swelte:ssr-qjs] ${at(m.index ?? 0)}: node: externals are forbidden in universal load (ships to sync renderRoute)`
+			)
+		}
+		return
+	}
+	// SSR path: async load is client-only (ssr=false). The `async` marker
+	// itself is the signal — a body may not even contain a bare `await`.
+	if (/\bexport\s+async\s+function\s+load\b|\bexport\s+const\s+load\s*=\s*async\b/.test(src)) {
+		const { code, lineOf } = stripForScan(src)
+		const m = code.match(/\basync\b/)
+		throw new Error(
+			`[swelte:ssr-qjs] ${file}:${lineOf(m?.index ?? 0)}: async load is forbidden in sync universal load (renderRoute is pure-sync; use async load only when ssr=false)`
+		)
+	}
+	assertQjsCompatible(file, src)
+	if (/\bawait\b/.test(stripForScan(src).code)) {
+		const { code, lineOf } = stripForScan(src)
+		for (const m of code.matchAll(/\bawait\s+/g)) {
+			throw new Error(
+				`[swelte:ssr-qjs] ${file}:${lineOf(m.index ?? 0)}: await is forbidden in sync universal load (renderRoute is pure-sync; use async load only when ssr=false)`
+			)
+		}
+	}
+	if (/(^|[^A-Za-z0-9_$])fetch\s*\(/m.test(stripForScan(src).code)) {
+		const { code, lineOf } = stripForScan(src)
+		for (const m of code.matchAll(/(^|[^A-Za-z0-9_$])fetch\s*\(/gm)) {
+			throw new Error(
+				`[swelte:ssr-qjs] ${file}:${lineOf(m.index ?? 0)}: fetch() is forbidden in sync universal load (renderRoute is pure-sync; move fetches to @[load] in the .v)`
+			)
+		}
+	}
+	const sdkRe =
+		/import\s*\{([^}]*)\}\s*from\s*['"](#routes\/[^'"]*|#lib\/[^'"]*|@swelte\/core)['"]/g
+	let sm: RegExpExecArray | null
+	while ((sm = sdkRe.exec(src)) !== null) {
+		const names = [...sm[1].split(',')]
+			.map((p) => p.trim().split(/\s+as\s+/).pop()?.trim())
+			.filter((n) => n && n !== 'type' && /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(n))
+		if (names.length) {
+			throw new Error(
+				`[swelte:ssr-qjs] ${file}: SDK import (${names.join(', ')}) is forbidden in sync universal load (no fetch/WASM inside renderRoute; derive from props instead)`
+			)
+		}
+	}
 }
 
 /** Strip comments + string literals so the QJS-compat scan doesn't flag
@@ -266,12 +340,13 @@ export function assertWrapperChildren(absFile: string, relFile: string): void {
 }
 
 export async function compileSsrComponent(absFile: string, relFile: string): Promise<string> {
-	assertQjsCompatible(relFile, readFileSync(absFile, 'utf8'))
+	const raw = readFileSync(absFile, 'utf8')
+	assertQjsCompatible(relFile, raw)
 	if (absFile.replace(/\\/g, '/').endsWith('/+route.svelte')) assertWrapperChildren(absFile, relFile)
-	await assertNoTopLevelStubCalls(absFile, relFile, readFileSync(absFile, 'utf8'))
+	await assertNoTopLevelStubCalls(absFile, relFile, raw)
+	await assertNoSdkTopLevelCalls(absFile, relFile, raw)
 	const { compile } = (await import('svelte/compiler')) as typeof import('svelte/compiler')
-	const src = readFileSync(absFile, 'utf8')
-	const out = compile(src, { generate: 'server', dev: false, filename: absFile })
+	const out = compile(raw, { generate: 'server', dev: false, filename: absFile })
 	for (const w of out.warnings ?? []) {
 		if (String(w.code ?? '').includes('a11y')) continue
 		console.warn(`[swelte:ssr-qjs] ${relFile}: svelte ${w.code}: ${w.message}`)
@@ -279,13 +354,48 @@ export async function compileSsrComponent(absFile: string, relFile: string): Pro
 	return stubSdkImports(out.js.code, relFile)
 }
 
+/** Transpile a sibling universal-load `.ts` to plain JS for the sync
+ * QJS bundle — the mirror of the `.svelte` preprocessing step
+ * (`compileSsrComponent`: svelte `generate: 'server'` compile).
+ * Dynamic-imports `typescript` (a real dep of ssr-qjs, not a peer:
+ * needed at build time to compose `render.js`) and strips types only
+ * (`transpileModule`, no typecheck — user `tsc` owns diagnostics).
+ * `.js` siblings pass through untouched. Runs AFTER
+ * `assertUniversalLoadSync` so guard errors cite the TS lines the
+ * user wrote. */
+export async function transpileSiblingLoad(relFile: string, src: string): Promise<string> {
+	if (!relFile.endsWith('.ts')) return src
+	const { transpileModule } = (await import('typescript')) as typeof import('typescript')
+	const out = transpileModule(src, {
+		compilerOptions: { module: 99 /* ESNext */, target: 99 /* ESNext */ },
+		fileName: relFile,
+	})
+	return out.outputText
+}
+
 /** Rewrite SDK stub imports to render-time throw-stubs.
  * `import { a, b } from '#routes/x.v'` → `const a = () => { throw ... }; ...`.
  * Type-only imports (`import type`) vanish already (erased by compile). */
 export function stubSdkImports(code: string, relFile: string): string {
+	// `$app/environment` is the one SDK module with a *usable* SSR value:
+	// resolve `browser` (and friends) to server literals before stubbing.
+	// `$app/stores`/`$app/navigation`/`@swelte/core` stay throw-stubs —
+	// they must never fire during the sync render.
+	code = code.replace(
+		/import\s*\{\s*browser\s*\}\s*from\s*['"]\$app\/environment['"]/g,
+		'const browser = false;'
+	)
 	const out: string[] = []
 	let last = 0
-	const re = /import\s*\{([^}]*)\}\s*from\s*['"](#routes\/[^'"]*|#lib\/[^'"]*|@swelte\/core)['"]/g
+	// Named SDK imports → render-time throw-stubs (must never fire in SSR).
+	// Single RegExp literal: `$app` needs one backslash escape here.
+	const re =
+		/import\s*\{([^}]*)\}\s*from\s*['"](#routes\/[^'"]*|#lib\/[^'"]*|@swelte\/core|\$app\/[^'"]*)['"]/g
+	// Bare side-effect SDK imports (`import '$app/navigation'`: the Svelte
+	// compiler preserves them when no named binding is used) → drop: the
+	// client bundle resolves them for real; the sync bundle needs no trace.
+	const bare =
+		/import\s*['"](#routes\/[^'"]*|#lib\/[^'"]*|@swelte\/core|\$app\/[^'"]*)['"];?/g
 	let m: RegExpExecArray | null
 	while ((m = re.exec(code)) !== null) {
 		out.push(code.slice(last, m.index))
@@ -308,11 +418,68 @@ export function stubSdkImports(code: string, relFile: string): string {
 		last = m.index + m[0].length
 	}
 	out.push(code.slice(last))
-	return out.join('')
+	let stubbed = out.join('')
+	// Drop bare SDK side-effect imports (no named bindings to stub).
+	stubbed = stubbed.replace(bare, '/* swelte:ssr-qjs: dropped bare SDK side-effect import (SSR has no router/stores) */')
+	return stubbed
+}
+
+/** Build guard: stub-SDK *calls* (`goto()`, `page()`, …) at component
+ * top level would fire during sync renderRoute — the QJS bundle has no
+ * router or stores (imports above are render-time throw-stubs / dropped).
+ * Calls nested in handlers (`onclick`), lifecycle (`onMount`), or
+ * `<svelte:boundary>` client fragments are fine — they never run in SSR.
+ * Same brace-walk as isTopLevelCall, but tracks imported local names
+ * (incl. `as` aliases) instead of a fixed `fetch(` spelling. */
+export async function assertNoSdkTopLevelCalls(
+	absFile: string,
+	relFile: string,
+	src: string
+): Promise<void> {
+	const sdkNames = new Set<string>()
+	const imre = /import\s*\{([^}]*)\}\s*from\s*['"](#routes\/[^'"]*|#lib\/[^'"]*|@swelte\/core|\$app\/[^'"]*)['"]/g
+	let im: RegExpExecArray | null
+	while ((im = imre.exec(src)) !== null) {
+		for (const part of (im[1] as string).split(',')) {
+			const bits = part.trim().split(/\s+as\s+/)
+			const nm = (bits[bits.length - 1] as string).trim()
+			if (!nm || !/^[A-Za-z_$][A-Za-z0-9_$]*$/.test(nm) || nm === 'type') continue
+			sdkNames.add(nm)
+		}
+	}
+	if (sdkNames.size === 0) return
+	const { code, lineOf } = stripForScan(src)
+	const at = (idx: number) => `${relFile}:${lineOf(idx)}`
+	for (const m of code.matchAll(/\b([A-Za-z_$][A-Za-z0-9_$]*)\s*\(/g)) {
+		const nm = m[1] as string
+		if (!sdkNames.has(nm)) continue
+		const callEnd = (m.index ?? 0) + m[0].length
+		if (!isTopLevelCall(code, callEnd)) continue
+		throw new Error(
+			`[swelte:ssr-qjs] ${at(m.index ?? 0)}: top-level stub call (${nm}) is forbidden in SSR components (QJS-compat: stub SDK calls only inside handlers/onMount — never at setup top level)`
+		)
+	}
+}
+
+// Generated `.swelte/app/environment.js` is browser-shaped
+// (`typeof window !== 'undefined'`). The sync QJS bundle needs the
+// server value (`false`) — resolve it to a literal at bundle time.
+function resolveSdkShim(id: string, _importer: string): string | null {
+	// `$app/*` + `#app/*` compat stubs live in `.swelte/app/` + `.swelte/`.
+	if (id === '$app/environment' || id === '#app/environment') {
+		return `export const browser = false;\nexport const dev = true;\nexport const building = false;\nexport const version = '';\n`
+	}
+	if (id === '$app/paths' || id === '#app/paths') {
+		return `export const base = '';\nexport const assets = '';\n`
+	}
+	if (id === '$app/stores' || id === '$app/state' || id === '$app/navigation') {
+		return `export const page = undefined;\nexport const navigating = undefined;\nexport const updated = undefined;\nexport function goto() { throw new Error('[swelte:ssr-qjs] goto() called during SSR render'); }\nexport function preloadData() { throw new Error('[swelte:ssr-qjs] preloadData() called during SSR render'); }\nexport function pushState() { throw new Error('[swelte:ssr-qjs] pushState() called during SSR render'); }\nexport function beforeNavigate() { return () => {}; }\nexport function afterNavigate() { return () => {}; }\nexport function onNavigate() { return () => {}; }\n`
+	}
+	return null
 }
 
 /** Bundle compiled route modules + svelte runtime into one ESM module. */
-export async function bundleSsr(modules: Map<string, string>, entry: string): Promise<string> {
+export async function bundleSsr(modules: Map<string, string>, entry: string, bundleRoot = '', bundleRoutesDir = 'src/routes'): Promise<string> {
 	const { rollup } = (await import('rollup')) as typeof import('rollup')
 	// svelte resolves from the adapter's own install (peer dep), falling
 	// back to cwd — the fixture dir may not have node_modules.
@@ -335,6 +502,28 @@ export async function bundleSsr(modules: Map<string, string>, entry: string): Pr
 		name: 'swelte-ssr-resolve',
 		async resolveId(id: string, importer: string | undefined) {
 			if (modules.has(id)) return id
+			// `$app/*` / `#app/*` compat stubs: inline the server-shaped
+			// source (no disk read — the browser bundle resolves the real
+			// files via Vite aliases independently).
+			if (id.startsWith('$app/') || id.startsWith('#app/')) {
+				const src = resolveSdkShim(id, importer ?? '')
+				if (src !== null) {
+					const key = '\0swelte-sdk-shim:' + id
+					if (!modules.has(key)) modules.set(key, src)
+					return key
+				}
+				return null
+			}
+		// Universal-load sibling imports: resolve relative ids from the route dir on disk.
+		if (importer && importer.endsWith('.ts') && id.startsWith('.')) {
+			const { existsSync: ex2, readFileSync: rd2 } = await import('node:fs')
+			const cand = join(bundleRoot || process.cwd(), bundleRoutesDir, posixNormalize(importer, id))
+			if (ex2(cand) && !cand.includes('\0')) {
+				const key2 = './' + posixNormalize(importer, id)
+				if (!modules.has(key2)) modules.set(key2, rd2(cand, 'utf8'))
+				return key2
+			}
+		}
 			// QJS-safe substitutes (shims/): crypto + render-context carry
 			// lazy `node:` imports that never fire on the sync path but
 			// break qjsc as strings. Substituted at bundle time; upstream
@@ -442,7 +631,7 @@ export async function composeRenderJs(
 	const routesDir = opts.routesDir ?? 'src/routes'
 	const modules = new Map<string, string>()
 
-	const compileFile = async (rel: string): Promise<string> => {
+	const compileFile = async (rel: string, routeSsr = true): Promise<string> => {
 		const abs = join(root, routesDir, rel)
 		// Module keys are `./`-prefixed posix paths (`./+error.svelte`):
 		// posixNormalize('./admin/+page.svelte', '../+error.svelte')
@@ -455,6 +644,29 @@ export async function composeRenderJs(
 		// form), not the raw relative id Rollup would hand the resolver.
 		// Order matters: error + wrappers first so every forward reference
 		// already has a key when a page is compiled.
+		//
+		// ssr=false-lite: sibling (`<basename>.ts` preferred, `.js` accepted)
+		// `export const ssr = false` opts the route out of sync renderRoute —
+		// Hand serves the SPA shell, async <await>/fetch in the .svelte stays
+		// client-only (client bundle compiles with experimental.async).
+		// Skip the sync QJS guards AND the `generate: 'server'` compile:
+		// the .svelte never renders server-side, so emitting a stub keeps
+		// dist/ssr/render.js renderable (unknown route → +error path)
+		// instead of failing the whole build.
+		const resolveSibling = async (baseRel: string): Promise<{ rel: string; abs: string } | null> => {
+			for (const ext of ['.ts', '.js']) {
+				const candRel = baseRel.replace(/\.svelte$/, ext)
+				const candAbs = join(root, routesDir, candRel)
+				if (existsSync(candAbs)) return { rel: candRel, abs: candAbs }
+			}
+			return null
+		}
+		const early = await resolveSibling(rel)
+		if (early) {
+			const { readFileSync: readTsEarly } = await import('node:fs')
+			if (!readUniversalSsrFlag(readTsEarly(early.abs, 'utf8'))) return key
+		}
+		if (!routeSsr) return key
 		let code = await compileSsrComponent(abs, `${routesDir}/${rel}`)
 		code = code.replace(/from\s*(['"])(\.[^'"]*)\1/g, (full, q: string, id: string) => {
 			const norm = withDot(posixNormalize(key, id))
@@ -462,14 +674,53 @@ export async function composeRenderJs(
 			return full
 		})
 		modules.set(key, code)
+		// Sibling universal load (`<basename>.ts` preferred, `.js` accepted,
+		// e.g. `admin.ts` for `admin.svelte` / `+page.js` for `+page.svelte`):
+		// read the `export const ssr` flag (ssr-qjs owned — core stays
+		// engine-agnostic), then validate the sync subset when SSR is on
+		// (fetch/await/SDK forbidden — renderRoute is pure-sync) and
+		// compile it as a module.
+		const sib = await resolveSibling(rel)
+		if (sib) {
+			const { readFileSync: readTs } = await import('node:fs')
+			const tsSrc = readTs(sib.abs, 'utf8')
+			const wantSsr = readUniversalSsrFlag(tsSrc)
+			assertUniversalLoadSync(`${routesDir}/${sib.rel}`, tsSrc, { ssr: wantSsr })
+			if (!wantSsr) return key // ssr=false: async load stays client-only, never enters the sync QJS bundle
+		}
+		if (modules.has(key)) return key
 		return key
 	}
 
 	// Error page + wrappers first: pages import them relatively (`../+error`),
 	// so their keys must exist before page sources are normalized above.
+	// ssr=false routes skip the sync compile (SPA shell only — see above).
 	if (manifest.error) await compileFile(manifest.error)
 	for (const w of manifest.wrappers) await compileFile(w)
-	for (const r of manifest.routes) await compileFile(r.svelte)
+	for (const r of manifest.routes) await compileFile(r.svelte, r.ssr !== false)
+
+	// Universal-load modules: one compiled module per route whose manifest
+	// entry flags `hasUniversalLoad` (sibling `<basename>.ts`/`.js`).
+	// Each module is imported ONLY for its named `load` export (never as
+	// a default) — importing sources through the page-module path would
+	// demand a default. Registration is idempotent (compileFile may run first).
+	for (const r of manifest.routes) {
+		if (!r.hasUniversalLoad) continue // 'sync' | 'async' | true all count as present
+		let tsRel = r.svelte.replace(/\.svelte$/, '.ts')
+		let tsAbs = join(root, routesDir, tsRel)
+		if (!existsSync(tsAbs)) {
+			tsRel = r.svelte.replace(/\.svelte$/, '.js')
+			tsAbs = join(root, routesDir, tsRel)
+		}
+		if (!existsSync(tsAbs)) continue
+		const tsSrc = readFileSync(tsAbs, 'utf8')
+		if (!readUniversalSsrFlag(tsSrc)) continue // ssr=false: client-only, never bundled into sync renderRoute
+		// Mirror the `.svelte` preprocessing step: strip TS types so the
+		// raw sibling source parses as JS in the rollup/QJS bundle.
+		// Guard already ran on the TS source above (line numbers intact).
+		const key = './' + tsRel.split(sep).join('/').replace(/^\.\//, '')
+		if (!modules.has(key)) modules.set(key, await transpileSiblingLoad(tsRel, tsSrc))
+	}
 
 	const table = manifest.routes
 		.map(
@@ -480,10 +731,37 @@ export async function composeRenderJs(
 	const chainTable = Object.entries(manifest.wrappersByRoute ?? {})
 		.map(([page, chain]) => `  ${JSON.stringify(page)}: ${JSON.stringify(chain)},`)
 		.join('\n')
-	const entrySrc = `import { render } from 'svelte/internal/server';
-${[...modules.keys()].map((key, i) => `import C${i} from ${JSON.stringify(key)};`).join('\n')}
+	const loadTsKey = (svelteRel: string): string => {
+		// Module key follows the sibling that exists on disk (.ts preferred,
+		// .js accepted) — must match the registration loop above.
+		const jsRel = svelteRel.replace(/\.svelte$/, '.js')
+		if (existsSync(join(root, routesDir, jsRel))) return withDot(jsRel.split('/').join('/'))
+		return withDot(svelteRel.replace(/\.svelte$/, '.ts').split('/').join('/'))
+	}
+	const loadTable = manifest.routes
+		.filter((r) => r.hasUniversalLoad === true || r.hasUniversalLoad === 'sync')
+		.map((r) => {
+			const tsKey = loadTsKey(r.svelte)
+			return `  ${JSON.stringify(r.route)}: ${JSON.stringify(tsKey)},`
+		})
+		.join('\n')
+	const __compKeys = [...modules.keys()].filter((k) => !k.endsWith('.ts') && !k.endsWith('.js'))
+const entrySrc = `import { render } from 'svelte/internal/server';
+${__compKeys.map((key, i) => `import C${i} from ${JSON.stringify(key)};`).join('\n')}
+${(() => {
+	let __li = 0;
+	return manifest.routes
+		.filter((r) => r.hasUniversalLoad === true || r.hasUniversalLoad === 'sync')
+		.map((r) => {
+			const tsKey = loadTsKey(r.svelte)
+			if (![...modules.keys()].includes(tsKey)) return ''
+			return `import { load as LOAD_${__li++} } from ${JSON.stringify(tsKey)};`
+		})
+		.filter(Boolean)
+		.join('\n')
+	})()}
 const PAGES = {
-${[...modules.keys()].map((key, i) => `  ${JSON.stringify(key)}: C${i},`).join('\n')}
+${__compKeys.map((key, i) => `  ${JSON.stringify(key)}: C${i},`).join('\n')}
 };
 const ROUTES = {
 ${table}
@@ -491,22 +769,49 @@ ${table}
 const CHAINS = {
 ${chainTable}
 };
+const LOADS = {
+${loadTable}
+};
+const LOADEDMODS = {
+${(() => {
+	let __lj = 0;
+	return manifest.routes
+		.filter((r) => r.hasUniversalLoad === true || r.hasUniversalLoad === 'sync')
+		.map((r) => {
+			const tsKey = loadTsKey(r.svelte)
+			if (![...modules.keys()].includes(tsKey)) return ''
+			return `  ${JSON.stringify(r.route)}: LOAD_${__lj++},`
+		})
+		.filter(Boolean)
+		.join('\n')
+	})()}
+};
 const ERROR = ${manifest.error ? JSON.stringify(withDot(manifest.error.split('/').join('/'))) : 'null'};
-function run(Component, props) {
-  const out = render(Component, { props });
-  return { head: out.head, body: '<div data-swelte-ssr="1">' + out.body + '</div>' };
+function applyUniversalLoad(route, props) {
+  const fn = LOADEDMODS[route];
+  if (typeof fn !== 'function') return props;
+  try {
+    const out = fn({ params: props?.params ?? {}, props, url: route });
+    return out && typeof out === 'object' ? { ...props, ...out } : props;
+  } catch (e) { throw e; }
 }
+function run(Component, props, route) {
+  const merged = route && LOADEDMODS[route] ? applyUniversalLoad(route, props) : props;
+  const out = render(Component, { props: merged });
+  return { head: out.head, body: '<div data-swelte-ssr="1">' + out.body + '</div>' };
+};
 // Nested-page run: page renders inside its wrapper chain (root to leaf) via
 // the same snippet contract the client router uses — each wrapper's
 // children prop is a snippet fn (renderer) that renders the inner level.
-function runNested(keys, props) {
+function runNested(keys, props, route) {
   if (!keys.length) return null;
   const last = keys[keys.length - 1];
   if (!PAGES[last]) return null;
   for (const k of keys) if (!PAGES[k]) return null;
   const renderLevel = (i) => {
     if (i === keys.length - 1) {
-      const out = render(PAGES[keys[i]], { props });
+      const merged = route && LOADEDMODS[route] ? applyUniversalLoad(route, props) : props;
+      const out = render(PAGES[keys[i]], { props: merged });
       return () => out.body;
     }
     const innerBody = renderLevel(i + 1)();
@@ -527,10 +832,10 @@ export function renderRoute(route, props_json) {
       const wc = CHAINS[abs];
       if (wc && wc.length) {
         const keys = [...wc.slice().reverse(), abs];
-        const nested = runNested(keys, props);
+        const nested = runNested(keys, props, route);
         if (nested) return nested;
       }
-      return run(PAGES[abs], props);
+      return run(PAGES[abs], props, route);
     } catch (e) { /* fall to +error */ }
   }
   if (ERROR && PAGES[ERROR]) {
@@ -546,7 +851,7 @@ export function renderRoute(route, props_json) {
 `
 	const entryAbs = join(root, '.swelte', 'ssr-entry.js')
 	modules.set(entryAbs, entrySrc)
-	return bundleSsr(modules, entryAbs)
+	return bundleSsr(modules, entryAbs, root, routesDir)
 }
 
 /** Write `dist/ssr/render.js` (prod) or `<outDir>/dev/render.js` (dev).
@@ -576,11 +881,11 @@ export async function emitRenderJs(
 	return outFile
 }
 
-/** Collect stub names imported from SDK dirs (#routes/#lib, @swelte/core). */
+/** Collect stub names imported from SDK dirs (#routes/#lib, @swelte/core, $app/*). */
 function stubImportNames(src: string): Set<string> {
 	const names = new Set<string>()
 	const re =
-		/import\s*\{([^}]*)\}\s*from\s*['\"](#routes\/[^'\"]*|#lib\/[^'\"]*|@swelte\/core)['\"]/g
+		/import\s*\{([^}]*)\}\s*from\s*['"](#routes\/[^'"]*|#lib\/[^'"]*|@swelte\/core|\$app\/[^'"]*)['"]/g
 	for (const m of src.matchAll(re)) {
 		for (const part of m[1].split(',')) {
 			const nm = part
