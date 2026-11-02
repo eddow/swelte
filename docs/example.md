@@ -205,13 +205,15 @@ node engine/core/dist/cli.js dev --port 5174 --backend 8131 --root examples/some
   15d targets + 15f export proved earlier (see above).
 - Lifecycle proven (item 9): `src/app.v` ships `@[startup] boot()` (no
   params, `void` — throw aborts boot) + `@[reroute] rewrite(host, path)`
-  (`/old` → `/router`, `''` = no-op); generate inlines the bodies into
+  (`/old` → `/router`, `''` = no-op) + `@[cron('60s')] tick()`
+  (spawn + `time.sleep(60)` loop, `swelte_cron_1`/`swelte_cron_loop_1`
+  in `main`); generate inlines the bodies into
   `.swelte/server.v` (startup once before `veb.run`, reroute in
   `before_request` after the path split, before trailingSlash/CORS/static/
   dispatch). No `v` binary in this env for a live curl — proven by the
   generated harness arms + `loadServerHooks` shape pins in
-  `generate-errors.test.ts` (startup/ reroute arity, qualifier, and
-  return-type rejections).
+  `generate-errors.test.ts` (startup/ reroute/ cron arity, qualifier, and
+  return-type rejections; misplaced `@[cron]` in routes rejected).
 
 ## Stubs (see `rpc.md`, `types.md`)
 

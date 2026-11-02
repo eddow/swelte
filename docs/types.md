@@ -14,7 +14,7 @@ add/change/unlink. Warnings (`unknown` types, orphans,
 console, never fail correct V programs. Errors (one-default-per-verb,
 unknown `head`/`options` aliasing, unique qualifiers, folder-root
 double claim, `@[before]`/`@[after]` outside `+route.v`,
-`@[matcher]`/`@[startup]`/`@[reroute]` outside their own files) fail
+`@[matcher]`/`@[startup]`/`@[reroute]`/`@[cron]` outside their own files) fail
 the build with file+line.
 
 ## What

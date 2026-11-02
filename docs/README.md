@@ -30,5 +30,5 @@ Internal docs to modify Swelte (design rationale, decisions, ephemeral notes):
 
 Specifications of what has to be done (plans, open work only):
 
-- `specs/moar.md` — server lifecycle: startup, cron, queue, reroute, cross-build (open)
+- `specs/app.md` — `src/app.v` lifecycle (`@[startup]`/`@[reroute]`/`@[cron]` contracts + dropped ideas)
 - `specs/ssr.md` — SSR open work (dev sidecar, `ssr-bun`, CI)

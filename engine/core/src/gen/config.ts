@@ -256,11 +256,12 @@ export function templatesDir(fromUrl: string): string {
 
 /** Render the server harness: skeleton from templates/ + user hooks from
  *  `src/app.v` (`@[startup]` runs once in main, `@[reroute]` rewrites
- *  host/path in before_request). Absent hooks → byte-identical skeleton. */
+ *  host/path in before_request, `@[cron]` spawn loops in main).
+ *  Absent hooks → byte-identical skeleton. */
 export function renderHarness(
 	_config: Required<SwelteOptions>,
 	fromUrl: string,
-	hooks?: { startupBody?: string; rerouteBody?: string }
+	hooks?: { startupBody?: string; rerouteBody?: string; crons?: { seconds: number; body: string; fallible: boolean }[] }
 ): string {
 	const file = join(templatesDir(fromUrl), 'harness', 'server.v')
 	let src = readFileSync(file, 'utf8')
@@ -269,6 +270,37 @@ export function renderHarness(
 			.split('\n')
 			.map((l) => (l.trim() === '' ? '' : '\t' + l))
 			.join('\n')
+	if (hooks?.crons?.length) {
+		const anchor = 'fn main() {'
+		let defs = ''
+		let spawns = ''
+		let n = 0
+		for (const c of hooks.crons) {
+			n++
+			const sig = c.fallible ? `fn swelte_cron_${n}() !void {` : `fn swelte_cron_${n}() {`
+			const call = c.fallible
+				? `swelte_cron_${n}() or { eprintln('[swelte:cron] ' + err.msg()) }`
+				: `swelte_cron_${n}()`
+			defs +=
+				`// @[cron] tick ${n} (src/app.v) — user body, top-level so fallible fns compile.\n` +
+				`${sig}\n` +
+				indent(c.body) +
+				'\n}\n' +
+				`fn swelte_cron_loop_${n}() {\n\tfor {\n\t\ttime.sleep(${c.seconds} * time.second)\n` +
+				indent(call) +
+				'\n\t}\n}\n'
+			spawns += `\tspawn swelte_cron_loop_${n}()\n`
+		}
+		const cronBlock =
+			'// @[cron] (src/app.v) — spawn + time.sleep loops, single-instance best-effort.\n' +
+			'// No watchdog: long-lived by design. Bodies must be idempotent.\n' +
+			spawns
+		if (src.includes(anchor)) src = src.replace(anchor, defs + anchor)
+		else src += '\n// @[cron] anchor missing — harness template changed.\n'
+		const mainAnchor = '\tmut app := &App{}'
+		if (src.includes(mainAnchor)) src = src.replace(mainAnchor, cronBlock + mainAnchor)
+		else src += '\n// @[cron] spawn anchor missing — harness template changed.\n'
+	}
 	if (hooks?.startupBody !== undefined) {
 		const anchor = '\tmut app := &App{}'
 		const inject =

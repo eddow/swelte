@@ -130,16 +130,17 @@ that would prove it**.
 
 * What: `@[startup] () void|!void` (zero/one fn, no qualifier/params)
   runs once before `veb.run` (throw aborts boot); `@[reroute] (host
-  string, path string) string` (zero/one fn, no qualifier) runs after
-  `trailingSlash` normalization, before CORS/static/dispatch
-  (`docs/config.md:70-74`).
+  string, path string) string` (zero/one fn, no qualifier) runs first
+  in `before_request`, before `trailingSlash` normalization,
+  CSRF/CORS/static/dispatch
+  (`docs/config.md` lifecycle bullet).
 * Engine: harness template `engine/core/templates/harness/server.v`.
 * Gap: demo has no `src/app.v` at all (only the generated
   `.swelte/server.v` harness).
 * Demo: `src/app.v` with `@[startup]` stamping a boot line and
   `@[reroute]` rewriting `/old` → `/router`; assert the rewrite
   serves `/router` content at `/old` with no redirect. (Stays
-  clear of open `@[cron]`/`@[queue]` → `specs/moar.md`.)
+  clear of `@[cron]` ticks → `specs/app.md`.)
 
 ## 10. Request hardening knobs (env-gated, all built)
 

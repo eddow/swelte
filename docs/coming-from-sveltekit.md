@@ -3,7 +3,7 @@
 Swelte keeps Svelte 5 on the frontend and replaces the Node backend with V
 (native binary). File names look familiar on purpose — but the runtimes,
 data flow, and a few conventions differ. This page lists every difference
-that bites during migration. Only built behavior is documented here; open work lives in `specs/moar.md`.
+that bites during migration. Only built behavior is documented here; open work lives in `specs/`.
 
 ## Files
 
@@ -16,7 +16,7 @@ that bites during migration. Only built behavior is documented here; open work l
 | `+server.ts` | `SwelteResponse` in the leaf `.v` | No standalone file. `@[get]`/`@[post]`/`@[put]`/`@[patch]`/`@[delete]` on the route file; one default per verb, `?q` qualifiers for many-per-file. Returns `string`/struct (JSON), `[]u8` (binary), `(int, string)` (status+text), or `SwelteResponse{ status, headers, cookies, body/body_bytes }` — full header/cookie/status/binary control, translated 1:1 into veb by `Hand`. |
 | `+error.svelte` (per-dir) | single global `+error.svelte` | By design — no per-directory inheritance. Props `{ status?, message? }`, renders server-side and client-side (via `loadPage`). |
 | `params/*.ts` matchers | `src/matchers.v` `@[matcher]` | Central file, V-only + codegen'd JS mirrors. `[id=integer]` builtin (digits, `Params` narrows to `number`); custom `@[matcher] (s string) bool` fns in the portable subset inline into `swelte_matcher_check` + both JS mirrors. Unknown name / bad shape / `time\|os\|net` import = build error. |
-| `hooks.server.ts` | `+route.v` `@[before]`/`@[after]` + `src/app.v` | Subtree middleware stays in `+route.v`; root `+route.v` is already the global head. `src/app.v` (`@[startup] () void|!void` once before `veb.run`, zero/one fn, no qualifier/params; `@[reroute](host, path)` to rewritten path or empty string, zero/one fn, no qualifier) handles boot + rewrite; `@[cron]`/`@[queue]` are open (→ `specs/moar.md`). No `handle/handleFetch/handleError`; `transformPageChunk` = `@[after]` string rewrite. |
+| `hooks.server.ts` | `+route.v` `@[before]`/`@[after]` + `src/app.v` | Subtree middleware stays in `+route.v`; root `+route.v` is already the global head. `src/app.v` (`@[startup] () void|!void` once before `veb.run`, zero/one fn, no qualifier/params; `@[reroute](host, path)` to rewritten path or empty string, zero/one fn, no qualifier) handles boot + rewrite; `@[cron('60s'|'5m'|'1h')]` ticks (one-or-more fns, qualifier required) run on spawn loops (→ `specs/app.md`). No `handle/handleFetch/handleError`; `transformPageChunk` = `@[after]` string rewrite. |
 | `src/lib/server/*` | `src/lib/**/backend/*.v` or `*_backend.v` | Physical: backend-only files are a build error from browser/`#lib/` WASM imports. Same V compiles native + WASM for non-backend `#lib/`. |
 | `+page.v` naming | `+page.v` / legacy `index.v` | `foo/+page.v` (or `foo/index.v`) claims `/foo`. `foo.v` + `foo/+page.v` together is a build error (one file per URL). |
 

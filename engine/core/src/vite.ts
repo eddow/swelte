@@ -95,7 +95,7 @@ export interface RpcParam {
 
 export interface RpcFn {
 	name: string
-	attr: 'get' | 'post' | 'rpc' | 'put' | 'delete' | 'patch' | 'sse' | 'before' | 'after' | 'load' | 'matcher' | 'startup' | 'reroute'
+	attr: 'get' | 'post' | 'rpc' | 'put' | 'delete' | 'patch' | 'sse' | 'before' | 'after' | 'load' | 'matcher' | 'startup' | 'reroute' | 'cron'
 	qualifier?: string
 	params: RpcParam[]
 	vret: string
@@ -188,7 +188,7 @@ export function parseVFile(src: string): RpcFn[] {
 		const verbs: { verb: string; qualifier?: string }[] = []
 		for (const p of attrParts) {
 			const pm =
-				/^\s*([A-Za-z_][A-Za-z0-9_]*)\s*(?:\(\s*'([A-Za-z_][A-Za-z0-9_]*)'\s*\))?\s*$/.exec(p)
+				/^\s*([A-Za-z_][A-Za-z0-9_]*)\s*(?:\(\s*'([^']*)'\s*\))?\s*$/.exec(p)
 			if (pm && pm[1] === 'sets_cookie' && !pm[2]) {
 				throw new Error(
 					`[swelte] @[sets_cookie] was removed — return SwelteResponse{ cookies: [...] } instead.`
@@ -210,6 +210,7 @@ export function parseVFile(src: string): RpcFn[] {
 					'matcher',
 					'startup',
 					'reroute',
+					'cron',
 				].includes(pm[1])
 			) {
 				verbs.push({ verb: pm[1], qualifier: pm[2] })
@@ -270,7 +271,7 @@ export function parseVFile(src: string): RpcFn[] {
 		// Brace-balanced walk from the `{` that opens the fn body.
 		let body: string | undefined
 		let hookBody: string | undefined
-		if (verbs.some((vb) => ['matcher', 'startup', 'reroute'].includes(vb.verb))) {
+		if (verbs.some((vb) => ['matcher', 'startup', 'reroute', 'cron'].includes(vb.verb))) {
 			const afterRet = i + (retMatch?.[0].length ?? 0)
 			const openIdx = merged.indexOf('{', afterRet)
 			if (openIdx >= 0) {
@@ -286,7 +287,7 @@ export function parseVFile(src: string): RpcFn[] {
 				if (bdepth === 0) {
 					const inner = merged.slice(openIdx + 1, j)
 					if (verbs.some((vb) => vb.verb === 'matcher')) body = inner
-					else hookBody = inner
+					else if (verbs.some((vb) => ['startup', 'reroute', 'cron'].includes(vb.verb))) hookBody = inner
 				}
 			}
 		}
@@ -1106,19 +1107,43 @@ export function loadMatchers(root: string, srcDir = 'src'): Map<string, MatcherD
 	}
 	return out
 }
+export interface CronHook {
+	/** Duration qualifier as written: '60s' | '5m' | '1h'. */
+	every: string
+	/** Interval in seconds (validated). */
+	seconds: number
+	/** Raw V body of the tick fn (inlined into a spawn loop). */
+	body: string
+	/** Whether the fn is fallible (`!void` — error logged, loop continues). */
+	fallible: boolean
+}
+
 export interface ServerHooks {
 	/** Raw V body of `@[startup]` (inlined into main before veb.run). */
 	startupBody?: string
 	/** Raw V body of `@[reroute]` (inlined into before_request). */
 	rerouteBody?: string
+	/** `@[cron]` tick fns (spawn loop per fn in main). */
+	crons: CronHook[]
 	hasFile: boolean
 }
 
-/** Validate + collect `@[startup]`/`@[reroute]` from `src/app.v`.
- * `@[startup]`: `() void|!void`, zero/one fn. `@[reroute]`:
+/** Duration literal for `@[cron]`: digits + s|m|h, nonzero (`'60s'`, `'5m'`, `'1h'`). */
+export function cronSeconds(every: string): number {
+	const m = /^([1-9][0-9]*)(s|m|h)$/.exec(every)
+	if (!m) return 0
+	const n = parseInt(m[1], 10)
+	const mult = m[2] === 's' ? 1 : m[2] === 'm' ? 60 : 3600
+	return n * mult
+}
+
+/** Validate + collect `@[startup]`/`@[reroute]`/`@[cron]` from `src/app.v`.
+ * `@[startup]`: `() void|!void`, zero/one fn, no qualifier. `@[reroute]`:
  * `(host string, path string) string`, zero/one fn, no qualifier.
- * Missing file → no-op hooks (byte-identical harness when absent). No TS
- * callable; `pub struct`s are NOT projected (Hand-level, not layout). */
+ * `@[cron('60s'|'5m'|'1h')]`: `() void|!void`, one-or-more fns, qualifier
+ * required and must be a duration literal. Missing file → no-op hooks
+ * (byte-identical harness when absent). No TS callable; `pub struct`s are
+ * NOT projected (Hand-level, not layout). */
 export function loadServerHooks(root: string, srcDir = 'src'): ServerHooks {
 	const file = join(root, srcDir, 'app.v')
 	const legacy = join(root, srcDir, 'server.v')
@@ -1128,15 +1153,32 @@ export function loadServerHooks(root: string, srcDir = 'src'): ServerHooks {
 	} catch {
 		if (existsSync(legacy))
 			throw new Error(`[swelte] src/server.v was renamed to src/app.v — move it (generated .swelte/server.v keeps its name).`)
-		return { hasFile: false }
+		return { hasFile: false, crons: [] }
 	}
 	const rel = `src/app.v`
 	const fns = parseVFile(src)
-	const out: ServerHooks = { hasFile: true }
+	const out: ServerHooks = { hasFile: true, crons: [] }
 	let startup: RpcFn | undefined
 	let reroute: RpcFn | undefined
 	for (const fn of fns) {
-		if (fn.attr !== 'startup' && fn.attr !== 'reroute') continue
+		if (fn.attr !== 'startup' && fn.attr !== 'reroute' && fn.attr !== 'cron') continue
+		if (fn.attr === 'cron') {
+			if (!fn.qualifier)
+				throw new Error(`[swelte] ${rel}: @[cron] ${fn.name} needs a duration qualifier — @[cron('60s')] ('60s' | '5m' | '1h'), no cron-expr parser in v1.`)
+			const seconds = cronSeconds(fn.qualifier)
+			if (!seconds)
+				throw new Error(`[swelte] ${rel}: @[cron] ${fn.name} has a bad duration ('${fn.qualifier}') — want digits + s|m|h, nonzero ('60s' | '5m' | '1h').`)
+			if (fn.params.length !== 0)
+				throw new Error(`[swelte] ${rel}: @[cron] ${fn.name} takes no params (got ${fn.params.length}).`)
+			if (fn.vret !== 'void')
+				throw new Error(`[swelte] ${rel}: @[cron] ${fn.name} must return void (got ${fn.vret || 'none'}).`)
+			if (fn.hookBody === undefined)
+				throw new Error(`[swelte] ${rel}: @[cron] ${fn.name} has no body to inline.`)
+			if (out.crons.some((c) => c.every === fn.qualifier && c.body === fn.hookBody))
+				throw new Error(`[swelte] ${rel}: duplicate @[cron('${fn.qualifier}')] body on ${fn.name} — one loop per fn.`)
+			out.crons.push({ every: fn.qualifier as string, seconds, body: fn.hookBody as string, fallible: fn.fallible })
+			continue
+		}
 		if (fn.qualifier)
 			throw new Error(`[swelte] ${rel}: @[${fn.attr}] ${fn.name} takes no qualifier (one hook per kind).`)
 		if (fn.attr === 'startup') {
@@ -3059,8 +3101,8 @@ ${list(params, (p) => `\t${p.name}${p.optional ? '?' : ''}: ${p.tstype}\n`)}}
 						const verbFns = fns.filter((x) => x.attr !== 'rpc')
 						const mod = modulePath(routesAbs, f)
 						const rel = relPosix(routesAbs, f)
-					for (const bad of allFns.filter((x) => x.attr === 'matcher' || x.attr === 'startup' || x.attr === 'reroute'))
-						throw new Error(`[swelte] ${routesDir}/${rel}: @[${bad.attr}] ${bad.name} is only allowed in its own file (matcher → src/matchers.v, startup/reroute → src/app.v).`)
+					for (const bad of allFns.filter((x) => x.attr === 'matcher' || x.attr === 'startup' || x.attr === 'reroute' || x.attr === 'cron'))
+						throw new Error(`[swelte] ${routesDir}/${rel}: @[${bad.attr}] ${bad.name} is only allowed in its own file (matcher → src/matchers.v, startup/reroute/cron → src/app.v).`)
 						const isWrapper = mod === '+route' || mod.endsWith('/+route')
 						if (isWrapper) {
 							const loads = allFns.filter((x) => x.attr === 'load')
