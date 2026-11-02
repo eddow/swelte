@@ -1,10 +1,30 @@
 # Swelte
 
+[![npm version](https://img.shields.io/npm/v/@swelte/core.svg)](https://www.npmjs.com/package/@swelte/core)
+[![npm downloads](https://img.shields.io/npm/dm/@swelte/core.svg)](https://www.npmjs.com/package/@swelte/core)
+
 V + Svelte full-stack framework. V is the compute engine (native server binary, WASM client modules). Svelte 5 is the UI. One RPC protocol bridges them.
 
 Added a V in Svelte: Built for agents work in, optimized code out.
 
 **Core stack:** V (vlang) + Svelte 5 + WebAssembly + Vite.
+
+## Packages
+
+Published on npm under the [`@swelte` scope](https://www.npmjs.com/org/swelte):
+
+| Package | npm | Description |
+|---|---|---|
+| `@swelte/core` | [![npm version](https://img.shields.io/npm/v/@swelte/core.svg)](https://www.npmjs.com/package/@swelte/core) | Framework core — V + Svelte RPC bridge (Vite plugin, SDK generator, CLI: `swelte`) |
+| `@swelte/ssr-qjs` | [![npm version](https://img.shields.io/npm/v/@swelte/ssr-qjs.svg)](https://www.npmjs.com/package/@swelte/ssr-qjs) | SSR adapter — embedded QuickJS engine (default) |
+| `@swelte/mcp` | [![npm version](https://img.shields.io/npm/v/@swelte/mcp.svg)](https://www.npmjs.com/package/@swelte/mcp) | MCP server — route tree, type contracts, diagnostics for IDE agents (`swelte-mcp`) |
+| `@swelte/vvm` | [![npm version](https://img.shields.io/npm/v/@swelte/vvm.svg)](https://www.npmjs.com/package/@swelte/vvm) | V Version Manager — installs and manages V toolchains (`vvm`, `v` shim) |
+
+```sh
+npm install @swelte/core
+# SSR (default engine), MCP server, V toolchain come along as needed:
+npm install @swelte/ssr-qjs @swelte/mcp @swelte/vvm
+```
 
 - `src/routes/` — server RPC (`.v` = route handler, `#routes/...` import → fetch)
 - `src/lib/` — isomorphic lib (`.v` = local compute, `#lib/...` import → WASM call; `backend/` subdirs (or `*_backend.v`) are backend-only)

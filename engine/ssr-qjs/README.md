@@ -1,5 +1,8 @@
 # `@swelte/ssr-qjs`
 
+[![npm version](https://img.shields.io/npm/v/@swelte/ssr-qjs.svg)](https://www.npmjs.com/package/@swelte/ssr-qjs)
+[![npm downloads](https://img.shields.io/npm/dm/@swelte/ssr-qjs.svg)](https://www.npmjs.com/package/@swelte/ssr-qjs)
+
 Swelte SSR adapter — embedded QuickJS engine (the default engine).
 
 Re-exports everything from `@swelte/core` so user code swaps one import:

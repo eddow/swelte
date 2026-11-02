@@ -1,5 +1,8 @@
 # `@swelte/vvm`
 
+[![npm version](https://img.shields.io/npm/v/@swelte/vvm.svg)](https://www.npmjs.com/package/@swelte/vvm)
+[![npm downloads](https://img.shields.io/npm/dm/@swelte/vvm.svg)](https://www.npmjs.com/package/@swelte/vvm)
+
 V Version Manager — installs and manages V toolchains inside `node_modules` (nvm for V).
 
 ## Why

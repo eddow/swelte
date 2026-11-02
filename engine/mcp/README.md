@@ -1,5 +1,8 @@
 # `@swelte/mcp`
 
+[![npm version](https://img.shields.io/npm/v/@swelte/mcp.svg)](https://www.npmjs.com/package/@swelte/mcp)
+[![npm downloads](https://img.shields.io/npm/dm/@swelte/mcp.svg)](https://www.npmjs.com/package/@swelte/mcp)
+
 Swelte MCP server — route tree, type contracts, and diagnostics for IDE agents (stdio).
 
 ## Usage

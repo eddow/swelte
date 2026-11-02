@@ -1,25 +1,9 @@
 # `@swelte/core`
 
+[![npm version](https://img.shields.io/npm/v/@swelte/core.svg)](https://www.npmjs.com/package/@swelte/core)
+[![npm downloads](https://img.shields.io/npm/dm/@swelte/core.svg)](https://www.npmjs.com/package/@swelte/core)
+
 Swelte framework core — V + Svelte unified RPC bridge (Vite plugin, client runtime, CLI).
-
-## Layout
-
-```
-src/
-  sdk.ts        browser runtime: SwelteRpcError, __swelteFetch (#routes/*),
-                __swelteWasmCall (#lib/*). No node:* imports — bundled to browsers.
-  vite.ts       Vite plugin: *.v resolveId/load codegen, #routes/#lib aliases,
-                types + stub emit into .swelte/, dev RPC proxy, #lib/backend guard.
-  toolchain.ts  node-only: V binary resolution (PATH or @swelte/vvm).
-  cli.ts        `main(argv)`: dispatch to commands/*.
-  commands/     one module per subcommand (dev|build|preview|init|check|test) + types.ts (argv parser).
-  gen/          config.ts (svelte.config.js loading), diagnostics.ts (swelte check),
-                paths.ts (pure backend-path helper, browser-safe).
-  index.ts      browser entry: sdk only (never import node code here).
-bin/
-  swelte.js     ~6-line shim importing ../dist/cli.js (npm needs a runnable file
-                before tsc runs; tracked in git — only dist/ is ignored).
-```
 
 ## Entry points (`package.json` exports)
 
