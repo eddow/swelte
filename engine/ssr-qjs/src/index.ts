@@ -7,7 +7,6 @@
 // (svelte/compiler for generate:'server', qjs at runtime). Core never
 // imports svelte/compiler, quickjs, or bun.
 export * from '@swelte/core'
-export { VERSION } from '@swelte/core'
 export { swelte } from './vite.js'
 export {
 	assertNoNodeExternals,

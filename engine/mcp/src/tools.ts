@@ -474,8 +474,8 @@ async function explainBytecodeError(
 				if (!e.name.endsWith('.wasm.map')) continue
 				try {
 					const raw = JSON.parse(readFileSync(p, 'utf8')) as
-						| { version: number; mod: string; file: string; functions: { name: string }[] }
-						| { version: number; modules: { mod: string; file: string; functions: string[] }[] }
+						| { mod: string; file: string; functions: { name: string }[] }
+						| { modules: { mod: string; file: string; functions: string[] }[] }
 					if ('modules' in raw) found.push(...raw.modules)
 					else found.push(raw)
 				} catch {

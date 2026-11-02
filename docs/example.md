@@ -151,7 +151,7 @@ node engine/core/dist/cli.js dev --port 5174 --backend 8131 --root examples/some
   `.swelte/entries.json` → `snapshot/entries.json` + copies every
   `dist/**/*.html` → `snapshot/pages/<rel>.html` + copies
   `swelte.contract.json` + writes `snapshot/snapshot.json`
-  (`{ version: 1, target, pages[], at }` — `pages[]` lists dist-relative
+  (`{ target, pages[], at }` — `pages[]` lists dist-relative
   `.html` paths); demo run yields 1 page (`index.html`, prerender off so
   no additive HTML yet); throwaway `snapshot/` deleted after assert).
 - Service worker proven (item 14): `SWELTE_SW=1` throwaway `vite build` →

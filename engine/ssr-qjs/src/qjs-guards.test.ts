@@ -215,7 +215,6 @@ describe('universal load — sync subset (§1.1)', () => {
 		)
 		const code = await composeRenderJs(
 			{
-				version: 1,
 				hasError: false,
 				routes: [
 					{
@@ -228,6 +227,7 @@ describe('universal load — sync subset (§1.1)', () => {
 				],
 				error: null,
 				wrappers: [],
+			wrappersByRoute: {},
 			},
 			{ root: dir }
 		)
@@ -250,7 +250,6 @@ describe('universal load — sync subset (§1.1)', () => {
 		)
 		const code = await composeRenderJs(
 			{
-				version: 1,
 				hasError: false,
 				routes: [
 					{
@@ -263,6 +262,7 @@ describe('universal load — sync subset (§1.1)', () => {
 				],
 				error: null,
 				wrappers: [],
+			wrappersByRoute: {},
 			},
 			{ root: dir }
 		)
@@ -304,7 +304,6 @@ describe('universal load — sync subset (§1.1)', () => {
 		)
 		const code = await composeRenderJs(
 			{
-				version: 1,
 				hasError: false,
 				routes: [
 					{
@@ -317,6 +316,7 @@ describe('universal load — sync subset (§1.1)', () => {
 				],
 				error: null,
 				wrappers: [],
+			wrappersByRoute: {},
 			},
 			{ root: dir }
 		)
@@ -343,7 +343,6 @@ describe('universal load — sync subset (§1.1)', () => {
 		)
 		const code = await composeRenderJs(
 			{
-				version: 1,
 				hasError: false,
 				routes: [
 					{
@@ -356,6 +355,7 @@ describe('universal load — sync subset (§1.1)', () => {
 				],
 				error: null,
 				wrappers: [],
+			wrappersByRoute: {},
 			},
 			{ root: dir }
 		)

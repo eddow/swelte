@@ -11,7 +11,7 @@ describe('sveltekit remainder: export snapshot + target shims', () => {
 		const root = mkdtempSync(join(tmpdir(), 'swelte-export-'))
 		try {
 			mkdirSync(join(root, '.swelte'), { recursive: true })
-			writeFileSync(join(root, '.swelte', 'entries.json'), JSON.stringify({ version: 1, mode: 'static', routes: ['/', '/about'], dynamics: [], expanded: [] }))
+			writeFileSync(join(root, '.swelte', 'entries.json'), JSON.stringify({ mode: 'static', routes: ['/', '/about'], dynamics: [], expanded: [] }))
 			mkdirSync(join(root, 'dist', 'about'), { recursive: true })
 			writeFileSync(join(root, 'dist', 'index.html'), '<html>shell</html>')
 			writeFileSync(join(root, 'dist', 'about', 'index.html'), '<html>about</html>')

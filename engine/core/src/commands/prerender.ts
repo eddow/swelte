@@ -16,7 +16,6 @@ import { join, resolve } from 'node:path'
 import { freePortUnix, killPort, takePort, waitPort } from './dev.js'
 
 interface CrawlFile {
-	version: number
 	mode: string
 	routes: string[]
 	dynamics: string[]

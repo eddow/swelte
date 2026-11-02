@@ -18,7 +18,6 @@ function fixture(): { root: string; manifest: SsrManifest } {
 	)
 	writeFileSync(join(routes, '+error.svelte'), `<h1>oops</h1>`)
 	const manifest: SsrManifest = {
-		version: 1,
 		hasError: true,
 		routes: [
 			{ route: '/', svelte: '+page.svelte', kind: 'page', hasData: false },

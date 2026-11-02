@@ -1,7 +1,7 @@
 {
   "name": "@swelte/core",
   "version": "0.1.0",
-  "description": "Swelte framework core \u2014 V + Svelte unified RPC bridge (Vite plugin, SDK generator, CLI)",
+  "description": "Swelte framework core — V + Svelte unified RPC bridge (Vite plugin, SDK generator, CLI)",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -19,7 +19,9 @@
   "files": [
     "dist",
     "bin",
-    "templates"
+    "templates",
+    "LICENSE-MIT",
+    "package.json"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
@@ -59,5 +61,31 @@
         "./dist/toolchain.d.ts"
       ]
     }
-  }
+  },
+  "author": {
+    "name": "François Marie De Mey",
+    "email": "fmdm@emedware.dev",
+    "url": "https://github.com/eddow"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/eddow/swelte.git"
+  },
+  "homepage": "https://github.com/eddow/swelte",
+  "publishConfig": {
+    "access": "public"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "keywords": [
+    "vlang",
+    "svelte",
+    "sveltekit",
+    "vite",
+    "rpc",
+    "wasm",
+    "fullstack"
+  ]
 }

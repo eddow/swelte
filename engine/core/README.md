@@ -15,7 +15,7 @@ src/
   commands/     one module per subcommand (dev|build|preview|init|check|test) + types.ts (argv parser).
   gen/          config.ts (svelte.config.js loading), diagnostics.ts (swelte check),
                 paths.ts (pure backend-path helper, browser-safe).
-  index.ts      browser entry: sdk + VERSION only (never import node code here).
+  index.ts      browser entry: sdk only (never import node code here).
 bin/
   swelte.js     ~6-line shim importing ../dist/cli.js (npm needs a runnable file
                 before tsc runs; tracked in git — only dist/ is ignored).
@@ -67,10 +67,22 @@ npm run build   # tsc -p tsconfig.json → dist/
 npm run dev     # tsc --watch
 ```
 
+## V toolchain (`@swelte/vvm`)
+
+`swelte dev`/`build` resolve `v` itself: system `v` on PATH first, else
+the `@swelte/vvm` toolchain (downloaded once into
+`node_modules/@swelte/vvm/versions/`). To opt out of the download
+(offline CI, pinned system `v`):
+
+```sh
+VVM_SKIP_INSTALL=1 npm install
+```
+
+Set `SWELTE_V_VERSION=<ver>` to pin a different V version at install time
+(default `0.5.2`).
+
 ## Design docs
 
-- `../../docs/rpc.md` — `.v` imports, attributes, transport (built)
-- `../../docs/types.md` — V → TS projection (built)
-- `../../docs/errors.md` — envelope, SPA-first rule (built)
-- `../../docs/internal/v-imports.md` — design rationale + decisions log
-- `../../docs/specs/moar.md` + `../../docs/specs/ssr.md` — forward work
+- [RPC](https://github.com/eddow/swelte/blob/main/docs/rpc.md) — `.v` imports, attributes, transport (built)
+- [Types](https://github.com/eddow/swelte/blob/main/docs/types.md) — V → TS projection (built)
+- [Errors](https://github.com/eddow/swelte/blob/main/docs/errors.md) — envelope, SPA-first rule (built).

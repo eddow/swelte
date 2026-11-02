@@ -8,8 +8,11 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { pipeline } from 'node:stream/promises';
+import { createRequire } from 'node:module';
 
-export const VVM_VERSION = '0.1.0';
+const require = createRequire(import.meta.url);
+// Single truth: package.json version. No hardcoded VVM_VERSION constant.
+export const VVM_VERSION = require('../package.json').version;
 export const DEFAULT_V_VERSION = '0.5.2';
 
 const HERE = dirname(fileURLToPath(import.meta.url));

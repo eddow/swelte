@@ -1,19 +1,40 @@
 {
   "name": "@swelte/vvm",
   "version": "0.1.0",
-  "description": "V Version Manager \u2014 installs and manages V toolchains inside node_modules (nvm for V)",
+  "description": "V Version Manager — installs and manages V toolchains inside node_modules (nvm for V)",
   "type": "module",
   "bin": {
     "vvm": "./bin/vvm.js",
     "v": "./bin/v-shim.js"
   },
   "files": [
-    "bin"
+    "bin",
+    "LICENSE-MIT",
+    "package.json"
   ],
   "scripts": {
     "postinstall": "node ./bin/postinstall.js"
   },
   "engines": {
-    "node": ">=18"
-  }
+    "node": ">=20"
+  },
+  "author": {
+    "name": "François Marie De Mey",
+    "email": "fmdm@emedware.dev",
+    "url": "https://github.com/eddow"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/eddow/swelte.git"
+  },
+  "homepage": "https://github.com/eddow/swelte",
+  "publishConfig": {
+    "access": "public"
+  },
+  "keywords": [
+    "vlang",
+    "toolchain",
+    "version-manager"
+  ]
 }

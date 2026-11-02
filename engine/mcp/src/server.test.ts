@@ -223,7 +223,6 @@ describe('server', async () => {
 		writeFileSync(
 			join(root, '.swelte', 'dev', 'crypto', 'hash.wasm.map'),
 			JSON.stringify({
-				version: 1,
 				mod: 'crypto/hash',
 				file: 'src/lib/crypto/hash.v',
 				functions: [{ name: 'hash_string', params: ['input'] }],

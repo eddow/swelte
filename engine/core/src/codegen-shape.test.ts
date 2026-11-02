@@ -407,7 +407,7 @@ describe('codegen shape snapshots (fetch/SSE/dispatcher)', () => {
 		const mf = JSON.parse(readFileSync(join(root, '.swelte', 'ssr-manifest.json'), 'utf8'))
 		assert.deepEqual(mf.wrappersByRoute, { './admin/+page.svelte': ['./admin/+route.svelte'] })
 		// Page without wrappers has no entry.
-		assert.ok(!('./+page.svelte' in (mf.wrappersByRoute ?? {})))
+		assert.ok(!('./+page.svelte' in mf.wrappersByRoute))
 	})
 
 	it('dispatch covers every page route in the manifest (item 15, presence)', async () => {

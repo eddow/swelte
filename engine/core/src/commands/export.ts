@@ -47,7 +47,6 @@ export async function runExport(ctx: Ctx): Promise<void> {
 	const contract = join(root, 'swelte.contract.json')
 	if (existsSync(contract)) copyFileSync(contract, join(outDir, 'swelte.contract.json'))
 	const summary = {
-		version: 1,
 		target: cfg.target,
 		pages: pages.map((p) => p.slice(distAbs.length + 1)).sort(),
 		at: new Date().toISOString(),

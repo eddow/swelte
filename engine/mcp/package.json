@@ -9,8 +9,11 @@
     "swelte-mcp": "./bin/swelte-mcp.js"
   },
   "files": [
+    "README.md",
     "dist",
-    "bin"
+    "bin",
+    "LICENSE-MIT",
+    "package.json"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
@@ -27,7 +30,27 @@
     "typescript": "^5.0.0"
   },
   "engines": {
-    "node": ">=18"
+    "node": ">=20"
   },
-  "license": "MIT"
+  "license": "MIT",
+  "author": {
+    "name": "François Marie De Mey",
+    "email": "fmdm@emedware.dev",
+    "url": "https://github.com/eddow"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/eddow/swelte.git"
+  },
+  "homepage": "https://github.com/eddow/swelte",
+  "publishConfig": {
+    "access": "public"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "svelte",
+    "ai",
+    "agents"
+  ]
 }

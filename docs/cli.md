@@ -74,7 +74,7 @@ exists (detection only — core never starts an engine).
 Snapshot the crawl (packaging only, reuses the build output — no new
 enumeration): copies `.swelte/entries.json` + every additive
 `dist/*.html` (as `pages/…`) + `swelte.contract.json` into
-`<out>/` with a `snapshot.json` manifest (`{ version, target, pages,
+`<out>/` with a `snapshot.json` manifest (`{ target, pages,
 at }`). Fails when `.swelte/entries.json` is missing (run `swelte
 build` first).
 

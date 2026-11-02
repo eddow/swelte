@@ -33,13 +33,12 @@ export interface SsrComposeOptions {
 }
 
 export interface SsrManifest {
-	version: 1 | 2
 	hasError: boolean
 	routes: { route: string; svelte: string; kind: string; hasData: boolean; hasUniversalLoad?: boolean | 'sync' | 'async'; ssr?: boolean }[]
 	error: string | null
 	wrappers: string[]
-	/** Wrapper chain per page (`./`-relative svelte path → root→leaf wrappers). v2+. */
-	wrappersByRoute?: Record<string, string[]>
+	/** Wrapper chain per page (`./`-relative svelte path → root→leaf wrappers). */
+	wrappersByRoute: Record<string, string[]>
 }
 
 /** `export const ssr` per-route flag (ssr-qjs validated, core stays
@@ -774,7 +773,7 @@ export async function composeRenderJs(
 				`  ${JSON.stringify(r.route)}: ${JSON.stringify(withDot(r.svelte.split('/').join('/')))},`
 		)
 		.join('\n')
-	const chainTable = Object.entries(manifest.wrappersByRoute ?? {})
+	const chainTable = Object.entries(manifest.wrappersByRoute)
 		.map(([page, chain]) => `  ${JSON.stringify(page)}: ${JSON.stringify(chain)},`)
 		.join('\n')
 	const loadTsKey = (svelteRel: string): string => {

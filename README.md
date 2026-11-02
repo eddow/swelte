@@ -38,19 +38,16 @@ toolchain — no manual install). `swelte build` typechecks, compiles
 
 ## Docs
 
-`docs/` describes built behavior; `docs/internal/` holds contributor design notes;
-`docs/specs/` holds TODOs and design for what is not yet built:
+Built behavior, user-facing only:
 
-- `docs/ssr.md` — SSR, built (ownership, request path, `@[load]`
-  cascade, `+error` contract, measured budgets, gate)
-- `docs/rpc.md` — `.v` imports, attributes, transport (implemented)
-- `docs/types.md` — V → TS projection, codegen (implemented)
-- `docs/errors.md` — error envelope, `SwelteRpcError`, SPA-first rule (implemented)
-- `docs/config.md` — `svelte.config.js` (`swelte` key) + `SWELTE_*` env knobs, routing, per-route types (implemented)
-- `docs/forms.md` — verbs + `?q`, no-JS 303, `fail`-lite, `deserialize` (implemented)
-- `docs/cli.md` — `dev`/`build`/`preview`/`test`/`check`/`init` (implemented)
-- `docs/example.md` — the `something` example (implemented)
-- `docs/versus.md` — Swelte vs. other full-stack paradigms (positioning)
-- `docs/coming-from-sveltekit.md` — SvelteKit → Swelte migration map
-- `docs/internal/` — design rationale.
-- `docs/specs/` — open work.
+- [SSR](https://github.com/eddow/swelte/blob/main/docs/ssr.md) — ownership, request path, `@[load]`
+  cascade, `+error` contract, measured budgets, gate
+- [RPC](https://github.com/eddow/swelte/blob/main/docs/rpc.md) — `.v` imports, attributes, transport
+- [Types](https://github.com/eddow/swelte/blob/main/docs/types.md) — V → TS projection, codegen
+- [Errors](https://github.com/eddow/swelte/blob/main/docs/errors.md) — error envelope, `SwelteRpcError`, SPA-first rule
+- [Config](https://github.com/eddow/swelte/blob/main/docs/config.md) — `svelte.config.js` (`swelte` key) + `SWELTE_*` env knobs, routing, per-route types
+- [Forms](https://github.com/eddow/swelte/blob/main/docs/forms.md) — verbs + `?q`, no-JS 303, `fail`-lite, `deserialize`
+- [CLI](https://github.com/eddow/swelte/blob/main/docs/cli.md) — `dev`/`build`/`preview`/`test`/`check`/`init`
+- [Example](https://github.com/eddow/swelte/blob/main/docs/example.md) — the `something` example
+- [Versus](https://github.com/eddow/swelte/blob/main/docs/versus.md) — Swelte vs. other full-stack paradigms (positioning)
+- [Coming from SvelteKit](https://github.com/eddow/swelte/blob/main/docs/coming-from-sveltekit.md) — migration map

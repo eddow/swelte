@@ -507,7 +507,6 @@ export function collectSvelteManifest(
 	return { entries, hasError }
 }
 export interface PrerenderCrawl {
-	version: 1
 	mode: 'off' | 'static' | 'all'
 	routes: string[]
 	/** Dynamics that need sibling `entries` expansion (`entries: 'all'`). */
@@ -570,7 +569,7 @@ export async function collectPrerenderEntries(
 	patterns.sort()
 	const routes = patterns.filter(isStaticRoute)
 	const dynamics = patterns.filter((p) => !isStaticRoute(p))
-	const out: PrerenderCrawl = { version: 1, mode, routes, dynamics, expanded: [] }
+	const out: PrerenderCrawl = { mode, routes, dynamics, expanded: [] }
 	if (mode !== 'all') return out
 	// Dynamic expansion: sibling `entries.ts` next to the dynamic leaf.
 	// Accepted shapes: `string[]`, `{ slug: string }[]`-ish rows, or
@@ -1458,7 +1457,6 @@ pub fn swelte_alloc(n int) &u8 {
 			mapFile,
 			JSON.stringify(
 				{
-					version: 1,
 					mod,
 					file: libRel,
 					compiled: `${stem}.compile.v`,
@@ -3957,7 +3955,6 @@ export function initSwelteRouter(target) {
 						if (chain.length) wrappersByRoute['./' + e.svelte] = chain.map((w) => './' + w)
 					}
 					const manifest = {
-						version: 1,
 						hasError,
 						routes: svelteEntries
 							.filter((e) => e.kind !== 'wrapper' && e.kind !== 'error')
@@ -4542,7 +4539,6 @@ pub fn swelte_alloc(n int) &u8 {
 							join(resolve(root, outDir), 'app_lib.wasm.map'),
 							JSON.stringify(
 								{
-									version: 1,
 									modules: mods.map((mod, i) => ({
 										mod,
 										file: `${libDir}/${mod}.v`,
