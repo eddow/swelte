@@ -2215,15 +2215,28 @@ pub fn swelte_sse_emit_for(prefix string, qualifier string, req SwelteRequest, e
 		// Hoisted-source note: `generate()` + `load()` call the single
 		// exported `routeFor`/`jsFetchFor`/`jsWasmFor` above (no closure copy).
 		const needRpc = fns.some((f) => f.attr === 'rpc')
-		const needVerb = fns.some(
-			(f) => f.attr !== 'rpc' && f.attr !== 'before' && f.attr !== 'after' && f.attr !== 'load'
+		// Real verbs (sse excluded): only these build a reqHead with the
+		// multipart/form parser (net.http) and json.encode value arms.
+		// SSE-only routes (ticks.v) use neither — V warns on unused imports.
+		const verbFns = fns.filter(
+			(f) => f.attr === 'get' || f.attr === 'post' || f.attr === 'put' || f.attr === 'delete' || f.attr === 'patch'
 		)
+		const needHttp = verbFns.length > 0
+		// json.encode sites in this file: rpc decode/encode arms, verb value
+		// arms (non-void/non-envelope/non-bytes/non-tuple), load cascade leaf.
+		// void/SwelteResponse/[]u8/tuple-only verbs skip the generic wrapper.
+		const verbNeedsJson = (h: RpcFn): boolean => {
+			if (/^\(\s*int\s*,\s*string\s*\)$/.test(h.vret)) return false
+			return h.vret !== 'void' && h.vret !== 'SwelteResponse' && h.vret !== '[]u8'
+		}
+		const needJson =
+			needRpc || loads.length > 0 || verbFns.some(verbNeedsJson)
 		// Only what this file's dispatch branch uses: rpc -> json+json2,
 		// verbs -> json+http. Never emit an unused import (V warns).
 		const baseImports = [
-			'import json',
+			...(needJson ? ['import json'] : []),
 			...(needRpc ? ['import x.json2'] : []),
-			...(needVerb ? ['import net.http'] : []),
+			...(needHttp ? ['import net.http'] : []),
 			'',
 		]
 		const seenImp = new Set<string>()
@@ -3878,8 +3891,7 @@ async function __navigateTo(pathname, opts) {
 	target.innerHTML = ''
 	if (!hit) {
 		if (typeof SwelteErrorPage !== 'undefined') {
-			const { mount: doMount } = await import('svelte')
-			doMount(SwelteErrorPage, { target, props: { status: 404, message: 'not found' } })
+			mount(SwelteErrorPage, { target, props: { status: 404, message: 'not found' } })
 			__routerMounted = { url: pathname, params: {}, route: null }
 			__setPage(__routerMounted); __setNavigating(null)
 			await __runGuards('after', { from, to: __routerMounted })
@@ -4372,6 +4384,8 @@ export function initSwelteRouter(target) {
 								ctype.includes('application/json') ||
 								(req.method === 'GET' && accept.includes('application/json')) ||
 								(req.method === 'GET' && accept.includes('text/event-stream')) ||
+								((req.method === 'PUT' || req.method === 'PATCH' || req.method === 'DELETE') &&
+									accept.includes('application/json')) ||
 								ctype.includes('multipart/form-data') ||
 								ctype.includes('application/x-www-form-urlencoded')
 							if (!looksRpc) return next()
