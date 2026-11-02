@@ -491,6 +491,7 @@ export interface SweltePageState {
 	route: string | null
 	data?: unknown
 	error?: SweltePageError
+	form?: unknown
 }
 
 export interface SwelteNavigatingState {
@@ -716,6 +717,181 @@ export async function deserialize(res: Response): Promise<SwelteActionResult> {
 	}
 	throw new Error(`swelte: deserialize failed — unknown type ${JSON.stringify(type)}`)
 }
+
+// Forms-lite: `use:enhance` / `applyAction` (docs (built) section 1).
+// No-JS still works untouched: without JS the browser submits natively and
+// `Hand` answers `303` + `Location` (or an HTML-escaped error page). With
+// JS, `enhance` intercepts the submit, replays it as `fetch` with
+// `Accept: application/json` (so `Hand` keeps the JSON branch), and
+// `applyAction` folds the result into the client stores. Verbs return raw
+// JSON - never the SvelteKit envelope - so the mapping is
+// `deserialize`-first with a raw-JSON fallback (`ok` maps to `success`,
+// `!ok` maps to `failure`, a followed redirect maps to `redirect`).
+
+async function swelteSafeJson(res: Response): Promise<unknown> {
+	const text = await res.text()
+	if (text === '') return null
+	try {
+		return JSON.parse(text) as unknown
+	} catch {
+		return text
+	}
+}
+
+/** Map a raw verb `fetch` response onto a `SwelteActionResult`.
+ *  `deserialize` wins when the server speaks the SvelteKit envelope;
+ *  otherwise raw bodies map by status (`2xx` to `success`, else to
+ *  `failure` with the decoded body as `data`, so `isFail` narrows it
+ *  inline). Not user API - `enhance` calls this. */
+export async function __swelteActionResult(res: Response): Promise<SwelteActionResult> {
+	if (typeof res.redirected === 'boolean' && res.redirected && typeof res.url === 'string' && res.url !== '') {
+		return { type: 'redirect', status: res.status, location: res.url }
+	}
+	let probe: SwelteActionResult | null = null
+	try {
+		const clone = typeof res.clone === 'function' ? res.clone() : res
+		probe = await deserialize(clone)
+	} catch {
+		probe = null
+	}
+	if (probe) return probe
+	if (res.ok) return { type: 'success', status: res.status, data: await swelteSafeJson(res) }
+	return { type: 'failure', status: res.status, data: await swelteSafeJson(res) }
+}
+
+export interface SwelteEnhanceSubmit {
+	action: URL
+	formData: FormData
+	formElement: HTMLFormElement
+	submitter: HTMLElement | null
+	cancelled: boolean
+	cancel: () => void
+}
+
+export interface SwelteEnhanceUpdateOptions {
+	reset?: boolean
+	invalidate?: boolean
+}
+
+export type SwelteEnhanceResultHandler = (
+	result: SwelteActionResult,
+	update: (opts?: SwelteEnhanceUpdateOptions) => Promise<void>,
+) => void | Promise<void>
+
+export type SwelteEnhanceCallback = (
+	input: SwelteEnhanceSubmit,
+) => void | SwelteEnhanceResultHandler | Promise<void | SwelteEnhanceResultHandler>
+
+async function swelteGotoOrReload(location: string): Promise<void> {
+	const fn = __routerFn('goto')
+	if (fn) {
+		await fn(location)
+		return
+	}
+	if (typeof globalThis.location !== 'undefined') globalThis.location.href = location
+}
+
+/** Default result handling for `enhance` - also usable standalone:
+ *  `success` invalidates cached loads (default) and publishes the payload
+ *  on `page.form`, `failure`/`error` publish on `page.form` too (action
+ *  failures stay inline per the `loadPage` contract - never `page.error`),
+ *  `redirect` navigates via the client router (`goto`, `location.href`
+ *  fallback outside the browser router). */
+export async function applyAction(result: SwelteActionResult, opts: { invalidate?: boolean } = {}): Promise<void> {
+	const doInvalidate = opts.invalidate ?? true
+	if (result.type === 'redirect') {
+		navigating.set(null)
+		await swelteGotoOrReload(result.location)
+		return
+	}
+	if (result.type === 'success') {
+		if (doInvalidate) invalidateAll()
+		page.set({ ...page.get(), form: result.data ?? null })
+		navigating.set(null)
+		return
+	}
+	page.set({ ...page.get(), form: result.type === 'failure' ? (result.data ?? null) : null })
+	navigating.set(null)
+}
+
+/** Svelte action: `use:enhance` (no-arg) or `use:enhance(cb)` with the
+ *  SvelteKit callback shape (`({ action, formData, cancel }) =>
+ *  async ({ result, update }) => ...`). The default `update()` is
+ *  `applyAction` + form reset. Structural typing only - no `svelte/*`
+ *  import, so `sdk.ts` stays dependency-free. */
+export function enhance(
+	node: HTMLFormElement,
+	cb?: SwelteEnhanceCallback,
+): { update?: (next?: SwelteEnhanceCallback) => void; destroy: () => void } {
+	let current = cb
+	const onSubmit = (e: Event) => {
+		void (async () => {
+			const submit = e as SubmitEvent & { submitter?: HTMLElement | null }
+			const formData = new FormData(node, submit.submitter ?? undefined)
+			const rawAction = node.getAttribute('action') ?? ''
+			const base = typeof globalThis.location !== 'undefined' ? globalThis.location.href : 'http://localhost/'
+			const action = new URL(rawAction === '' ? base : rawAction, base)
+			const method = (node.getAttribute('method') ?? 'post').toUpperCase()
+			const input: SwelteEnhanceSubmit = {
+				action,
+				formData,
+				formElement: node,
+				submitter: submit.submitter ?? null,
+				cancelled: false,
+				cancel: () => {
+					input.cancelled = true
+				},
+			}
+			let onResult: SwelteEnhanceResultHandler | void = undefined
+			try {
+				if (current) onResult = await current(input)
+			} catch {
+				return
+			}
+			if (input.cancelled) return
+			e.preventDefault()
+			const from = typeof globalThis.location !== 'undefined' ? globalThis.location.pathname : null
+			navigating.set({ from, to: action.pathname })
+			let res: Response
+			try {
+				res = await fetch(action.toString(), {
+					method,
+					body: formData,
+					headers: { accept: 'application/json' },
+				})
+			} catch {
+				navigating.set(null)
+				return
+			}
+			const result = await __swelteActionResult(res)
+			const update = async (updateOpts: SwelteEnhanceUpdateOptions = {}): Promise<void> => {
+				if (updateOpts.reset ?? true) {
+					try {
+						node.reset()
+					} catch {
+						/* non-DOM stub */
+					}
+				}
+				await applyAction(result, { invalidate: updateOpts.invalidate })
+			}
+			if (onResult) {
+				await onResult(result, update)
+				return
+			}
+			await update()
+		})()
+	}
+	node.addEventListener('submit', onSubmit)
+	return {
+		update: (next?: SwelteEnhanceCallback) => {
+			current = next
+		},
+		destroy: () => {
+			node.removeEventListener('submit', onSubmit)
+		},
+	}
+}
+
 
 /** True when a `#lib` rel path is backend-only: a `backend` path segment
  * at any depth, or a V-native `_backend.v` suffix. Kept name

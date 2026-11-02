@@ -66,10 +66,11 @@ that would prove it**.
   `deserialize`.
 * Demo: add a `@[post('save')]` arm returning a fail body on empty
   payload (`{ ok: false, fieldErrors: { name: 'required' } }` with
-  422), a form posting to `?save`, and an inline
+  422), a form posting to `?save` with `use:enhance` (see item 15 —
+  the cycle is built, the demo only needs the wiring), and an inline
   `if (isFail(e, 422)) showInline(e.body.fieldErrors)` branch;
   plus one `deserialize(await fetch(...))` call asserting the
-  `success` envelope shape. (`use:enhance` itself is open — §2.)
+  `success` envelope shape.
 
 ## 5. SSE list mode (`[]string` return)
 
@@ -227,7 +228,40 @@ that would prove it**.
   `dist/index.html` carries the register snippet, `curl /sw.js` →
   `200 application/javascript`, default rebuild drops both.
   Record the four asserts in `docs/example.md` "Proved" and delete
-  this item. (Offline fallback page + SSG interplay stay open —
-  `specs/sveltekit.md` §2.)
+  this item. (Offline fallback page + SSG interplay were open —
+  now built as item 15 below.)
+
+## 15. SvelteKit remainder — `use:enhance`, prerender/ISR, targets, offline fallback, export (to be illustrated)
+
+* What: the six built SvelteKit-parity items — `use:enhance` /
+  `applyAction` (`sdk.ts`, `docs/forms.md`), `entries` crawl +
+  `.swelte/entries.json` (`vite.ts collectPrerenderEntries`),
+  additive SSG (`commands/prerender.ts` → `dist/<route>/index.html`)
+  + ISR-lite headers (`SWELTE_ISR`, `Hand` stamps `Cache-Control`
+  s-maxage + `X-Swelte-Revalidate`), deploy-target shims
+  (`--target` / `swelte.target` → `dist/.swelte-static`,
+  `dist/Dockerfile.swelte`, `dist/_headers`), offline fallback page
+  (`offline.fallback` → `dist/offline.html` + SW precache), and
+  `swelte export` (`entries.json` + `dist/*.html` + contract →
+  `snapshot/`). Docs: `docs/forms.md` §`use:enhance`,
+  `docs/config.md` §§Prerender/Targets/Offline, `docs/cli.md`
+  (`build --target`, `export`).
+* Engine: `sdk.ts` `enhance`/`applyAction`/`__swelteActionResult`
+  (+`SweltePageState.form`), `gen/config.ts` new knobs
+  (`prerender`/`isr`/`target`/`offline`), harness `server.v`
+  ISR stamping + static-first comment, SW precache gate in
+  `vite.ts generateBundle`.
+* Gap: zero demo usage — no form uses `use:enhance`, no
+  `svelte.config.js` enables `prerender`/`isr`/`offline`, no `dist/`
+  proof of additive HTML, no `export` snapshot, no target shim
+  output. `docs/example.md` has no "Proved" lines for any of the six.
+* Demo: a `/router/enhance` leaf (plain `<form method=post
+  use:enhance>` asserting `page.form` publish + reset without reload);
+  a `prerender.entries: 'static'` throwaway build asserting
+  `dist/about/index.html` exists while `dist/index.html` stays the
+  shell; `isr: { '/about': 60 }` asserting the s-maxage headers on
+  `GET /about`; `--target node|edge|static` asserting the shim file;
+  `swelte export` asserting `snapshot/snapshot.json` pages list.
+  Promote each to `docs/example.md` "Proved" as asserted.
 
 

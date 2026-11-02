@@ -63,13 +63,9 @@ Single global `src/routes/+error.svelte`, props `{ status?: number; message?: st
 
 ## Sources
 
-Stable — no spec dependency for the above:
+Stable — no spec dependency for the above
+(`use:enhance`/`applyAction` and `ssr=false` are built —
+see `docs/forms.md`, `docs/config.md`, `docs/coming-from-sveltekit.md`):
 
 - `docs/example.md` — canonical component patterns
 - `docs/ssr.md` — SSR component rule, `+error` contract
-
-## Spec dependency
-
-⚠️ This skill MUST be updated when these specs land:
-
-- `docs/specs/sveltekit.md` §§1–2, 5 (client router: `goto()`, `invalidate()`, `beforeNavigate`, `$app/navigation|stores|state`, streaming `<await>`, `use:enhance` cycle, server `fetch` wrapper) — navigation and data-refresh patterns change fundamentally once a client router exists. (`#app/forms`-lite `deserialize` is built — see `docs/forms.md`; the remaining form gap is only the `use:enhance` cycle.)

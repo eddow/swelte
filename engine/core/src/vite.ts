@@ -11,6 +11,7 @@ import {
 	writeFileSync,
 } from 'node:fs'
 import { dirname, join, relative, resolve, sep } from 'node:path'
+import { pathToFileURL } from 'node:url'
 import { loadConfig, renderAppDts, renderClientEntry, renderHarness } from './gen/config.js'
 import { isBackendMod } from './gen/paths.js'
 import { resolveV, toolchainEnv } from './toolchain.js'
@@ -65,6 +66,14 @@ export interface SweltePluginOptions {
 	version?: string
 	/** Opt-in service worker. Default off. Env SWELTE_SW=1 forces on. */
 	serviceWorker?: { enabled?: boolean; register?: 'auto' | 'manual' }
+	/** Prerender/SSG crawl: 'off' (default) | { entries: 'static'|'all'|'off', concurrency }. */
+	prerender?: { entries?: 'static' | 'all' | 'off'; concurrency?: number }
+	/** ISR lite: path-prefix to seconds, stamp Cache-Control headers. */
+	isr?: Record<string, number>
+	/** Offline fallback page: 'off' (default) | 'offline.html' | custom path. */
+	offline?: { fallback?: boolean | string }
+	/** Deploy target shim (packaging only): 'auto' (default) | 'static' | 'node' | 'edge'. */
+	target?: 'auto' | 'static' | 'node' | 'edge'
 }
 
 /** Re-export the unified config type + helper so projects can
@@ -483,6 +492,149 @@ export function collectSvelteManifest(
 	}
 	return { entries, hasError }
 }
+export interface PrerenderCrawl {
+	version: 1
+	mode: 'off' | 'static' | 'all'
+	routes: string[]
+	/** Dynamics that need sibling `entries` expansion (`entries: 'all'`). */
+	dynamics: string[]
+	/** Resolved dynamic URLs (only when `mode: 'all'`). */
+	expanded: string[]
+}
+
+/** Static-route test: no `[param]`, `[...rest]`, or `[[optional]]`. */
+export function isStaticRoute(route: string): boolean {
+	return !route.includes('[')
+}
+
+/** Enumerate the prerender crawl list (docs (built) item 2).
+ *  Static routes are always listed. `mode: 'all'` also executes sibling
+ *  `entries.ts` exports (`export function entries()` returning string[]
+ *  or `{ slug }[]`-ish) for dynamic segments; bad shape = build error
+ *  with file+line. No prerender implied - just the route list for crawl. */
+export async function collectPrerenderEntries(
+	root: string,
+	routesDir: string,
+	mode: 'off' | 'static' | 'all'
+): Promise<PrerenderCrawl> {
+	const routesAbs = join(resolve(root), routesDir)
+	let patterns: string[] = []
+	try {
+		const mods = new Set<string>()
+		for (const f of listVFiles(routesAbs)) {
+			const rel = relPosixTop(routesAbs, f).replace(/\.v$/, '')
+			mods.add(rel)
+		}
+		const { entries } = collectSvelteManifest(routesAbs, routesDir, mods)
+		const seen = new Set<string>()
+		for (const e of entries) {
+			if (e.kind === 'wrapper' || e.kind === 'error') continue
+			if (!seen.has(e.route)) {
+				seen.add(e.route)
+				patterns.push(e.route)
+			}
+		}
+		// V-only routes (no .svelte): routeFor leaf/dir rules (abs path form).
+		for (const f of listVFiles(routesAbs)) {
+			const r = routeFor(routesDir, routesAbs, f)
+			if (r && !seen.has(r)) {
+				seen.add(r)
+				patterns.push(r)
+			}
+		}
+	} catch (e) {
+		throw e
+	}
+	patterns.sort()
+	const routes = patterns.filter(isStaticRoute)
+	const dynamics = patterns.filter((p) => !isStaticRoute(p))
+	const out: PrerenderCrawl = { version: 1, mode, routes, dynamics, expanded: [] }
+	if (mode !== 'all') return out
+	// Dynamic expansion: sibling `entries.ts` next to the dynamic leaf.
+	// Accepted shapes: `string[]`, `{ slug: string }[]`-ish rows, or
+	// `{ params: Record<string,string> }[]`. Anything else = build error.
+	for (const pattern of dynamics) {
+		const sibling = dynamicEntriesSibling(routesAbs, pattern)
+		if (!sibling) continue
+		let mod: Record<string, unknown>
+		try {
+			mod = (await import(pathToFileURL(sibling).href + `?t=${Date.now()}`)) as Record<string, unknown>
+		} catch (e) {
+			throw new Error(`[swelte] ${relative(resolve(root), sibling)}: entries() import failed - ${(e as Error).message}`)
+		}
+		const fn = mod['entries']
+		if (typeof fn !== 'function') {
+			throw new Error(`[swelte] ${relative(resolve(root), sibling)}: no \`export function entries()\` - dynamics need it when prerender.entries is 'all'.`)
+		}
+		let rows: unknown
+		try {
+			rows = await (fn as () => unknown)()
+		} catch (e) {
+			throw new Error(`[swelte] ${relative(resolve(root), sibling)}: entries() threw - ${(e as Error).message}`)
+		}
+		if (!Array.isArray(rows)) {
+			throw new Error(`[swelte] ${relative(resolve(root), sibling)}: entries() must return an array (got ${typeof rows}).`)
+		}
+		for (const row of rows) {
+			out.expanded.push(expandDynamicPattern(pattern, row, relative(resolve(root), sibling)))
+		}
+	}
+	out.expanded.sort()
+	return out
+}
+
+/** Locate the sibling `entries.ts` for a dynamic pattern: strip groups,
+ *  map segments back to disk names (`[id]` literal dir). */
+function dynamicEntriesSibling(routesAbs: string, pattern: string): string | null {
+	const segs = pattern.split('/').filter(Boolean)
+	const disk = segs.map((s) => s)
+	const candTs = join(routesAbs, ...disk, 'entries.ts')
+	if (existsSync(candTs)) return candTs
+	const candJs = join(routesAbs, ...disk, 'entries.js')
+	if (existsSync(candJs)) return candJs
+	return null
+}
+
+function expandDynamicPattern(pattern: string, row: unknown, file: string): string {
+	const fail = (why: string): never => {
+		throw new Error(`[swelte] ${file}: entries() row ${JSON.stringify(row)} ${why}.`)
+	}
+	let params: Record<string, string>
+	if (typeof row === 'string') {
+		const names = [...pattern.matchAll(/\[\.\.\.(\w+)\]|`\[\[(\w+)\]\]`|\[(\w+)(?:=[^\]]+)?\]/g)].map((m) => m[1] ?? m[2] ?? m[3])
+		if (names.length === 1) params = { [names[0]]: row }
+		else fail(`must be an object when the pattern has ${names.length} params`)
+		params = params!
+	} else if (row && typeof row === 'object' && !Array.isArray(row)) {
+		const r = row as Record<string, unknown>
+		const inner = r['params']
+		const src = inner && typeof inner === 'object' && !Array.isArray(inner) ? (inner as Record<string, unknown>) : r
+		params = {}
+		for (const [k, v] of Object.entries(src)) {
+			if (typeof v !== 'string' && typeof v !== 'number') fail(`param '${k}' must be string/number`)
+			params[k] = String(v)
+		}
+	} else {
+		fail('must be a string or params object')
+		params = {}
+	}
+	let url = pattern
+	url = url.replace(/\[\.\.\.(\w+)\]/g, (_, n: string) => {
+		const v = params[n]
+		if (v === undefined) fail(`missing param '${n}'`)
+		return v
+	})
+	url = url.replace(/\[\[(\w+)\]\]/g, (_, n: string) => params[n] ?? '')
+	url = url.replace(/\[(\w+)(?:=[^\]]+)?\]/g, (_, n: string) => {
+		const v = params[n]
+		if (v === undefined) fail(`missing param '${n}'`)
+		return v
+	})
+	if (url.includes('[')) fail(`unresolved pattern '${url}'`)
+	return url === '' ? '/' : url.startsWith('/') ? url : `/${url}`
+}
+
+
 
 export function modulePath(root: string, file: string): string {
 	return relative(root, file).replace(/\.v$/, '').split(sep).join('/')
@@ -1130,6 +1282,16 @@ export function swelte(options: SweltePluginOptions = {}): Plugin {
 		enabled: options.serviceWorker?.enabled === true,
 		register: options.serviceWorker?.register === 'manual' ? 'manual' : 'auto',
 	}
+	let appPrerender: { entries: 'off' | 'static' | 'all'; concurrency: number } = {
+		entries: options.prerender?.entries === 'all' ? 'all' : options.prerender?.entries === 'static' ? 'static' : 'off',
+		concurrency: typeof options.prerender?.concurrency === 'number' && options.prerender.concurrency > 0 ? Math.floor(options.prerender.concurrency) : 4,
+	}
+	let appIsr: Record<string, number> = options.isr && typeof options.isr === 'object' ? { ...options.isr } : {}
+	let appOffline: { fallback: string } = {
+		fallback: options.offline?.fallback === true ? 'offline.html' : typeof options.offline?.fallback === 'string' && options.offline.fallback !== '' ? options.offline.fallback : 'off',
+	}
+	let appTarget: 'auto' | 'static' | 'node' | 'edge' =
+		options.target === 'static' || options.target === 'node' || options.target === 'edge' ? options.target : 'auto'
 	// Resolved per-generate() against the Vite root (never at construction:
 	// outDir is relative and the cwd at plugin-construction time is not the
 	// project root when loaded via vite.config.ts).
@@ -2478,6 +2640,13 @@ ${tupleStat('res')}`
 					if (process.env.SWELTE_SW === '1') appSw.enabled = true
 					if (options.serviceWorker?.register === undefined)
 						appSw.register = cfg.serviceWorker.register
+					if (options.prerender === undefined && cfg.prerender.entries !== 'off') {
+						appPrerender = { entries: cfg.prerender.entries, concurrency: cfg.prerender.concurrency }
+					}
+					if (options.isr === undefined && Object.keys(cfg.isr).length > 0) appIsr = { ...cfg.isr }
+					if (options.offline === undefined && cfg.offline.fallback !== 'off')
+						appOffline = { fallback: cfg.offline.fallback }
+					if (options.target === undefined && cfg.target !== 'auto') appTarget = cfg.target
 				} catch {
 					/* defaults stand */
 				}
@@ -3786,6 +3955,16 @@ export function initSwelteRouter(target) {
 						wrappersByRoute,
 					}
 					writeIfChanged(join(genDir, 'ssr-manifest.json'), JSON.stringify(manifest, null, 2))
+					// Prerender/entries crawl list (docs (built) item 2):
+					// static routes always enumerated; `entries: 'all'` also
+					// executes sibling `entries.ts` exports for dynamics.
+					// No prerender implied - just the crawl source.
+					try {
+						const crawl = await collectPrerenderEntries(root, routesDir, appPrerender.entries)
+						writeIfChanged(join(genDir, 'entries.json'), JSON.stringify(crawl, null, 2))
+					} catch (e) {
+						throw e
+					}
 				} catch (e) {
 					throw e
 				}
@@ -4224,6 +4403,17 @@ export function initSwelteRouter(target) {
 					const precache = serviceWorkerPrecache(
 						bundle as unknown as Record<string, { type?: string; fileName?: string }>,
 					)
+					// Offline fallback page (item 5): only precached when
+					// configured AND the prerender pass wrote it. Shell +
+					// immutable assets stay cached; API/SSE network-only.
+					if (appOffline.fallback !== 'off') {
+						try {
+							const fb = appOffline.fallback.replace(/^\/+/, '')
+							if (existsSync(join(root, 'dist', fb))) precache.push(`/${fb}`)
+						} catch {
+							/* best-effort */
+						}
+					}
 					const sw = renderServiceWorker({ version: appVersion, precache, base: appBase })
 					this.emitFile({ type: 'asset', fileName: 'sw.js', source: sw })
 					console.log(`[swelte] service worker: dist/sw.js (+${precache.length} precache)`)

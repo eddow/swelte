@@ -88,6 +88,39 @@ describe('config normalization (tmp roots)', () => {
 		const cfg = await loadConfig(root)
 		assert.equal(cfg.trailingSlash, 'ignore')
 	})
+	it('sveltekit remainder knobs normalize (prerender/isr/target/offline)', async () => {
+		const root = mkdtempSync(join(tmpdir(), 'swelte-cfg-'))
+		const off = await loadConfig(root)
+		assert.equal(off.prerender.entries, 'off')
+		assert.equal(off.prerender.concurrency, 4)
+		assert.deepEqual(off.isr, {})
+		assert.equal(off.target, 'auto')
+		assert.equal(off.offline.fallback, 'off')
+		writeFileSync(
+			join(root, 'svelte.config.js'),
+			`export default { swelte: { prerender: { entries: 'all', concurrency: 2 }, isr: { '/blog': 60, '/x': -1 }, target: 'node', offline: { fallback: true } } }`
+		)
+		const on = await loadConfig(root)
+		assert.equal(on.prerender.entries, 'all')
+		assert.equal(on.prerender.concurrency, 2)
+		assert.deepEqual(on.isr, { '/blog': 60 })
+		assert.equal(on.target, 'node')
+		assert.equal(on.offline.fallback, 'offline.html')
+	})
+
+	it('bad prerender/target/offline fall back to defaults', async () => {
+		const root = mkdtempSync(join(tmpdir(), 'swelte-cfg-'))
+		writeFileSync(
+			join(root, 'svelte.config.js'),
+			`export default { swelte: { prerender: { entries: 'sometimes', concurrency: 0 }, target: 'vercel', offline: { fallback: 42 } } }`
+		)
+		const cfg = await loadConfig(root)
+		assert.equal(cfg.prerender.entries, 'off')
+		assert.equal(cfg.prerender.concurrency, 4)
+		assert.equal(cfg.target, 'auto')
+		assert.equal(cfg.offline.fallback, 'off')
+	})
+
 
 	it('renderClientEntry prepends hook only when src/client.ts exists', async () => {
 		const { templatesDir } = await import('./config.js')

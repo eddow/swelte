@@ -35,7 +35,26 @@ export interface SwelteOptions {
 	 *  same-origin registration snippet; `manual` emits the file but skips
 	 *  the snippet so the app registers itself. Env `SWELTE_SW=1` forces on. */
 	serviceWorker?: { enabled?: boolean; register?: 'auto' | 'manual' }
+	/** Prerender/SSG crawl (SvelteKit `entries` + `prerender` lite). Default off.
+	 *  `entries?: 'static' | 'all'` — `static` crawls only static routes
+	 *  (no `[param]`), `all` also executes sibling `entries.ts` exports for
+	 *  dynamic segments. `concurrency` bounds the crawl. Additive
+	 *  `dist/*.html` only - runtime/SPA-first defaults never change. */
+	prerender?: SweltePrerenderOptions
+	/** ISR lite: `[path]: seconds` map stamping `Cache-Control:
+	 *  public, max-age=0, s-maxage=N` + `X-Swelte-Revalidate` on matching
+	 *  GET HTML responses. Additive headers only. */
+	isr?: Record<string, number>
+	/** Deploy-target shims (packaging only, no Node runtime). `static`
+	 *  asserts no `dist/server` consumer is needed... (see normalize). */
+	target?: 'auto' | 'static' | 'node' | 'edge'
+	/** Offline fallback page (opt-in service worker remainder): precached
+	 *  `dist/offline.html` served by `sw.js` on navigation failure. */
+	offline?: SwelteOfflineOptions
 }
+
+/** Back-compat alias: the `swelte` key payload. */
+export type { SwelteOptions as SwelteConfigOptions }
 
 /** Project config: standard Svelte config + our `swelte` key. */
 export type SwelteConfig = SvelteBaseConfig & {
@@ -43,7 +62,22 @@ export type SwelteConfig = SvelteBaseConfig & {
 }
 
 /** Back-compat alias: the `swelte` key payload. */
-export type { SwelteOptions as SwelteConfigOptions }
+export interface SweltePrerenderOptions {
+	entries?: 'static' | 'all' | 'off'
+	concurrency?: number
+}
+
+export interface SwelteOfflineOptions {
+	fallback?: boolean | string
+}
+
+/** Resolved config: optionals filled, nested unions widened so `Required`
+ *  stays sound (TS `Required` does not distribute into nested optionals). */
+export interface ResolvedSwelteOptions extends Omit<Required<SwelteOptions>, 'prerender' | 'offline' | 'target'> {
+	prerender: { entries: 'static' | 'all' | 'off'; concurrency: number }
+	offline: { fallback: string }
+	target: 'auto' | 'static' | 'node' | 'edge'
+}
 
 /** Build the project config: `preprocess` + friends stay enumerable for the
  * svelte() vite plugin, while the `swelte` key is attached NON-enumerable.
@@ -76,7 +110,7 @@ const DEFAULTS: Required<Pick<SwelteOptions, 'routesDir' | 'libDir' | 'outDir' |
 	distDir: 'dist',
 }
 
-function normalize(raw: SwelteOptions | null | undefined): Required<SwelteOptions> {
+function normalize(raw: SwelteOptions | null | undefined): ResolvedSwelteOptions {
 	const r = (raw ?? {}) as SwelteOptions
 	return {
 		name: String(r.name ?? ''),
@@ -97,7 +131,46 @@ function normalize(raw: SwelteOptions | null | undefined): Required<SwelteOption
 		methodOverride: r.methodOverride === true,
 		version: String(r.version ?? ''),
 		serviceWorker: normalizeServiceWorker(r.serviceWorker),
+		prerender: normalizePrerender(r.prerender),
+		isr: normalizeIsr(r.isr),
+			target: normalizeTarget(r.target),
+		offline: normalizeOffline(r.offline),
+	} as ResolvedSwelteOptions
+}
+
+function normalizePrerender(raw: SwelteOptions['prerender']): { entries: 'static' | 'all' | 'off'; concurrency: number } {
+	const r = (raw ?? {}) as { entries?: unknown; concurrency?: unknown }
+	const c = typeof r.concurrency === 'number' && Number.isFinite(r.concurrency) && r.concurrency > 0 ? Math.floor(r.concurrency) : 4
+	return {
+		entries: r.entries === 'all' ? 'all' : r.entries === 'static' ? 'static' : 'off',
+		concurrency: c,
 	}
+}
+
+function normalizeIsr(raw: SwelteOptions['isr']): Record<string, number> {
+	if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {}
+	const out: Record<string, number> = {}
+	for (const [k, v] of Object.entries(raw)) {
+		if (typeof k !== 'string' || k === '') continue
+		const n = typeof v === 'number' ? v : Number(v)
+		if (!Number.isFinite(n) || n <= 0) continue
+		out[k] = Math.floor(n)
+	}
+	return out
+}
+
+function normalizeTarget(raw: SwelteOptions['target']): ResolvedSwelteOptions['target'] {
+	if (raw === 'static' || raw === 'node' || raw === 'edge') return raw
+	return 'auto'
+}
+
+function normalizeOffline(raw: SwelteOptions['offline']): { fallback: string } {
+	const r = (raw ?? {}) as { fallback?: unknown }
+	// Disabled unless explicitly configured: `true` = default `offline.html`,
+	// string = custom precache path. `false`/missing/anything else = off.
+	if (r.fallback === true) return { fallback: 'offline.html' }
+	if (typeof r.fallback === 'string' && r.fallback !== '') return { fallback: r.fallback }
+	return { fallback: 'off' }
 }
 
 function normalizeServiceWorker(
@@ -113,7 +186,7 @@ function normalizeServiceWorker(
 /** Load `<root>/svelte.config.js` (default export), reading the `swelte` key;
  *  missing file/key falls back to defaults. Also honors a legacy
  *  `<root>/swelte.config.ts` default export during migration. */
-export async function loadConfig(root: string): Promise<Required<SwelteOptions>> {
+export async function loadConfig(root: string): Promise<ResolvedSwelteOptions> {
 	const dir = resolve(root)
 	const files = [
 		join(dir, 'svelte.config.js'),

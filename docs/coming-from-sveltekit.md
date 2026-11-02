@@ -3,7 +3,7 @@
 Swelte keeps Svelte 5 on the frontend and replaces the Node backend with V
 (native binary). File names look familiar on purpose — but the runtimes,
 data flow, and a few conventions differ. This page lists every difference
-that bites during migration. Only built behavior is documented here; open work lives in `specs/sveltekit.md` and `specs/moar.md`.
+that bites during migration. Only built behavior is documented here; open work lives in `specs/moar.md`.
 
 ## Files
 
@@ -86,22 +86,36 @@ that bites during migration. Only built behavior is documented here; open work l
 * No `fail(422, {fieldErrors})` helper — convention is
   `{ ok: false, fieldErrors: map[string]string }` thrown as `!T` +
   `sdk.ts isFail(e, status?)` narrowing.
-* No `use:enhance`/`applyAction` cycle yet — only the `deserialize`
-  port exists (pure TS in `sdk.ts`, no client router needed).
+* `use:enhance` / `applyAction` progressive-enhancement cycle (see
+  `forms.md`): no-JS untouched (`303` / error page), with-JS replays
+  as `fetch` + folds into `page.form` (`failure` stays inline, never
+  `page.error`).
 
 ## Rendering
 
 * SSR is runtime-only: embedded QuickJS (`SWELTE_SSR=1`) or sidecar
   (`SWELTE_SSR_URL`), 50ms/16MB budgets, fallback to SPA shell.
-  Never emits prerendered `.html`. Default is SPA/static + JSON.
+  Default is SPA/static + JSON; SSG is additive (`prerender.entries`
+  → `dist/*.html`, root shell never overwritten — see `config.md`).
 * Per-route `ssr=false`-lite: `export const ssr = false` in the
   sibling `.ts` opts the route out — `Hand` skips the renderer
   (`swelte_no_ssr()`), serves the SPA shell; async universal `load`
-  + client router take over. No `csr=false` islands, no SSG/ISR yet.
+  + client router take over. No `csr=false` islands.
 * Service worker: opt-in (`swelte.serviceWorker.enabled` or
   `SWELTE_SW=1`) → additive `dist/sw.js`, auto/manual register —
-  see `config.md` §Service worker. Offline story partial: shell +
-  immutable assets cached, API/SSE network-only.
+  see `config.md` §Service worker. Offline fallback page
+  (`offline.fallback`) precached when the prerender pass wrote it;
+  API/SSE stay network-only.
+* ISR-lite: `swelte.isr` (`{ '/blog': 60 }` → `SWELTE_ISR`) stamps
+  `Cache-Control: public, max-age=0, s-maxage=N` +
+  `X-Swelte-Revalidate` on matching GET HTML. Headers only.
+* Deploy targets: `--target` / `swelte.target` (`auto`|`static`|`node`|
+  `edge`) — packaging-only shims (`dist/.swelte-static`,
+  `dist/Dockerfile.swelte`, `dist/_headers`). Single artifact holds.
+* `swelte export` snapshots the crawl (`entries.json` + `dist/*.html`
+  + contract → `snapshot/`).
+* `entries.ts` sibling (`export function entries()`) expands dynamic
+  segments for the crawl when `prerender.entries: 'all'`.
 * Per-route `Params` types generated (`RouteId` + `Params` in every
   `types/routes/*.d.ts`) — the `$types`-lite.
 
@@ -123,7 +137,8 @@ that bites during migration. Only built behavior is documented here; open work l
   `outDir`, `distDir`, `port`, `corsOrigin`, `trailingSlash`, `base`,
   `assets`, `csp`, `csrf`, `methodOverride`, `version`,
   `serviceWorker` (`{ enabled, register }` → additive `dist/sw.js`,
-  `SWELTE_SW=1` forces on). Env wins at
+  `SWELTE_SW=1` forces on), `prerender` (`{ entries, concurrency }`),
+  `isr`, `target`, `offline` (`{ fallback }`). Env wins at
   runtime (`SWELTE_*`), defaults when unset/invalid.
 * `CSP` injected as meta, `CSRF` origin-check, `_method` override,
   `X-Swelte-Version` header.

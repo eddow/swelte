@@ -97,4 +97,5 @@ Stable — no spec dependency for the above:
 
 - `docs/specs/moar.md` — `@[cron]` (duration spawn loop) and `@[queue]`
   (in-process channel). Same file/shape conventions as the built hooks.
-- `docs/specs/sveltekit.md` — per-route `ssr=false`-lite.
+- `docs/config.md` — per-route `ssr=false`-lite (manifest flag →
+  `Hand` skips rendering, serves SPA shell).

@@ -28,6 +28,32 @@ const swelte_default_rate_limit = 120
 const swelte_default_rate_window_ms = i64(60 * 1000)
 const swelte_default_handler_timeout_ms = i64(10 * 1000)
 
+// ISR lite header table: `SWELTE_ISR` = `prefix=seconds,...` (build-time
+// env from the `isr` config). Longest prefix wins; 0 = no match.
+fn swelte_isr_seconds(path string) int {
+	raw := os.getenv_opt('SWELTE_ISR') or { return 0 }
+	if raw == '' {
+		return 0
+	}
+	mut best := 0
+	mut best_len := -1
+	for part in raw.split(',') {
+		eq := part.index('=') or { continue }
+		prefix := part[..eq].trim_space()
+		seconds := part[eq + 1..].trim_space().int()
+		if prefix == '' || seconds <= 0 {
+			continue
+		}
+		p := if prefix == '/' { '/' } else { '/' + prefix.trim('/ \t') }
+		hit := if p == '/' { true } else { path == p || path.starts_with(p + '/') }
+		if hit && p.len > best_len {
+			best_len = p.len
+			best = seconds
+		}
+	}
+	return best
+}
+
 fn swelte_env_int(key string, fallback i64) i64 {
 	raw := os.getenv_opt(key) or { return fallback }
 	v := strconv.parse_int(raw, 10, 64) or { return fallback }
@@ -187,6 +213,10 @@ fn swelte_fill_ssr(shell string, head string, body string) string {
 	return out
 }
 
+// Serve order (SPA-first proxy rule, unchanged): exact `dist/` file wins
+// (incl. additive prerendered `dist/<route>/index.html` — a real file, so
+// `serve_static` returns it before the SPA fallback below; `/` keeps the
+// shell because `runPrerender` never overwrites `dist/index.html`).
 fn serve_static(dist string, path string) (int, string, string) {
 	mut rel := path
 	if rel.contains('?') {
@@ -528,6 +558,19 @@ fn (mut app App) before_request(mut ctx Ctx) veb.Result {
 		s, ct, sb := serve_static(dist, path)
 		ctx.res.set_status(http.status_from_int(s))
 		return ctx.send_response_to_client(ct, sb)
+	}
+	// ISR lite (specs/sveltekit.md item 3): additive response headers only.
+	// `SWELTE_ISR` = comma list `prefix=seconds` (written by `swelte build`
+	// from the `isr` config; longest prefix wins per request). Stamps
+	// `Cache-Control: public, max-age=0, s-maxage=N` +
+	// `X-Swelte-Revalidate: N` on matching GET HTML 200s. Headers only —
+	// no background revalidation, runtime default unchanged.
+	if ctx.req.method == .get && status == 200 && wants_html && !wants_json {
+		seconds := swelte_isr_seconds(path)
+		if seconds > 0 {
+			ctx.res.header.set_custom('Cache-Control', 'public, max-age=0, s-maxage=' + seconds.str()) or {}
+			ctx.res.header.set_custom('X-Swelte-Revalidate', seconds.str()) or {}
+		}
 	}
 	// API response: Hand translates the SwelteResponse envelope 1:1 into
 	// veb calls (set_status, custom headers, cookies already set above).

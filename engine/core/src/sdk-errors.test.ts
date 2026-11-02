@@ -2,14 +2,19 @@ import { describe, it, beforeEach, afterEach } from 'node:test'
 import assert from 'node:assert/strict'
 import {
 	SwelteRpcError,
+	__swelteActionResult,
+	applyAction,
+	enhance,
+	isFail,
 	loadPage,
 	isPageError,
 	isPageData,
-	isFail,
 	deserialize,
 	__swelteFetch,
 	__swelteWasmCall,
 	__registerLibFallback,
+	page,
+	navigating,
 } from './sdk.js'
 
 describe('SDK error contract', () => {
@@ -150,4 +155,103 @@ describe('SDK error contract', () => {
 			/unknown type/
 		)
 	})
+
+	it('§1 enhance maps raw verb JSON (envelope-first, raw fallback)', async () => {
+		const env = await __swelteActionResult(
+			new Response(JSON.stringify({ type: 'success', status: 200, data: { id: 1 } }), { status: 200 }),
+		)
+		assert.equal(env.type, 'success')
+		const rawOk = await __swelteActionResult(new Response(JSON.stringify({ ok: true }), { status: 200 }))
+		assert.equal(rawOk.type, 'success')
+		const rawFail = await __swelteActionResult(
+			new Response(JSON.stringify({ error: 'bad', ok: false, fieldErrors: { name: 'required' } }), { status: 422 }),
+		)
+		assert.equal(rawFail.type, 'failure')
+		if (rawFail.type === 'failure') assert.ok(isFail(new SwelteRpcError('/b', 'save', 422, rawFail.data as never, '')))
+	})
+
+	it('§1 applyAction folds success/failure/redirect into stores', async () => {
+		page.set({ url: '/', params: {}, route: '/' })
+		await applyAction({ type: 'success', status: 200, data: { id: 7 } })
+		assert.deepEqual(page.get().form, { id: 7 })
+		assert.equal(navigating.get(), null)
+		await applyAction({ type: 'failure', status: 422, data: { ok: false, fieldErrors: { n: 'req' } } })
+		assert.deepEqual((page.get().form as { ok: boolean }).ok, false)
+		const g = globalThis as Record<string, unknown>
+		const prev = g.__swelteRoutes
+		let went = ''
+		g.__swelteRoutes = { goto: async (u: string) => { went = String(u) } }
+		await applyAction({ type: 'redirect', status: 303, location: '/done' })
+		assert.equal(went, '/done')
+		if (prev === undefined) delete g.__swelteRoutes
+		else g.__swelteRoutes = prev
+	})
+
+	it('§1 enhance intercepts submit and defaults to applyAction+reset', async () => {
+		let fetched = ''
+		let accepted = ''
+		globalThis.fetch = (async (url: unknown, init?: { headers?: Record<string, string> }) => {
+			fetched = String(url)
+			accepted = init?.headers?.['accept'] ?? ''
+			return new Response(JSON.stringify({ ok: true, id: 3 }), { status: 200 })
+		}) as typeof fetch
+		let reset = 0
+		const listeners = new Map<string, (e: Event) => void>()
+		const form = {
+			getAttribute: (k: string) => (k === 'action' ? '/save' : k === 'method' ? 'post' : null),
+			addEventListener: (t: string, fn: (e: Event) => void) => { listeners.set(t, fn) },
+			removeEventListener: (t: string) => { listeners.delete(t) },
+			reset: () => { reset++ },
+		} as unknown as HTMLFormElement
+		const origFD = globalThis.FormData
+		class FakeFD {
+			append(): void {}
+		}
+		;(globalThis as Record<string, unknown>).FormData = FakeFD as unknown as typeof FormData
+		try {
+			const ctl = enhance(form)
+			let prevented = false
+			listeners.get('submit')?.({ preventDefault: () => { prevented = true } } as unknown as Event)
+			await new Promise((r) => setTimeout(r, 20))
+			assert.equal(fetched, 'http://localhost/save')
+			assert.equal(accepted, 'application/json')
+			assert.ok(prevented)
+			assert.equal(reset, 1)
+			assert.deepEqual(page.get().form, { ok: true, id: 3 })
+			ctl.destroy()
+			assert.ok(!listeners.has('submit'))
+		} finally {
+			;(globalThis as Record<string, unknown>).FormData = origFD
+		}
+	})
+
+	it('§1 enhance cancel() skips the fetch', async () => {
+		let calls = 0
+		globalThis.fetch = (async () => {
+			calls++
+			return new Response('{}', { status: 200 })
+		}) as typeof fetch
+		const listeners = new Map<string, (e: Event) => void>()
+		const form = {
+			getAttribute: () => null,
+			addEventListener: (t: string, fn: (e: Event) => void) => { listeners.set(t, fn) },
+			removeEventListener: (t: string) => { listeners.delete(t) },
+			reset: () => {},
+		} as unknown as HTMLFormElement
+		const origFD = globalThis.FormData
+		class FakeFD {
+			append(): void {}
+		}
+		;(globalThis as Record<string, unknown>).FormData = FakeFD as unknown as typeof FormData
+		try {
+			const ctl = enhance(form, ({ cancel }) => { cancel() })
+			listeners.get('submit')?.({ preventDefault: () => {} } as unknown as Event)
+			await new Promise((r) => setTimeout(r, 20))
+			assert.equal(calls, 0)
+			ctl.destroy()
+		} finally {
+			;(globalThis as Record<string, unknown>).FormData = origFD
+		}
+	})
+
 })

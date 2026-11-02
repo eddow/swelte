@@ -27,6 +27,10 @@ export default defineConfig({
     methodOverride: false,   // honor `?_method=` on POST
     version: '',             // '' = package.json version
     serviceWorker: { enabled: false, register: 'auto' }, // opt-in SW → additive dist/sw.js
+    prerender: { entries: 'off', concurrency: 4 }, // 'off' | 'static' | 'all' → entries.json + dist/*.html
+    isr: {},                  // { '/blog': 60 } → Cache-Control s-maxage + X-Swelte-Revalidate
+    target: 'auto',           // 'auto' | 'static' | 'node' | 'edge' — packaging only
+    offline: { fallback: 'off' }, // 'off' | 'offline.html' | custom — SW precache + dist file
   },
 });
 ```
@@ -54,6 +58,44 @@ unchanged. When `swelte.serviceWorker.enabled` is `true` (or
 * `Hand` serves exact `dist/` files (incl. `sw.js`) regardless of
   Accept — the SPA-first proxy rule is about routes, real files win.
 
+## Prerender / SSG + ISR (additive `dist/*.html` only)
+
+Default is runtime-only (no prerendered `.html`); `prerender.entries`
+enables the crawl. `generate()` writes `.swelte/entries.json`
+(`{ version, mode, routes, dynamics, expanded }`): static routes always
+listed, sibling `entries.ts` (`export function entries()` returning
+`string[]` | `{ slug }[]`-ish | `{ params }[]`) expands dynamics only
+when `entries: 'all'`. Bad shape = build error with file+line. No
+prerender implied — just the crawl source.
+
+`swelte build` then boots the built `dist/server` on an ephemeral port
+and GETs each crawl URL with browser Accept: 200 HTML →
+`dist/<route>/index.html` (root `/` never overwritten —
+`dist/index.html` stays the SPA shell). JSON probes and error pages
+skipped, never written. Concurrency = `prerender.concurrency`.
+
+`isr: { '/blog': 60 }` freezes to `SWELTE_ISR=/blog=60` for the crawl env
+(`Hand` reads it per request): matching GET HTML 200s stamp
+`Cache-Control: public, max-age=0, s-maxage=N` +
+`X-Swelte-Revalidate: N` (longest prefix wins). Headers only — no
+background revalidation, runtime default unchanged.
+
+## Deploy targets (packaging only, no Node runtime)
+
+`--target` flag wins, else `swelte.target`. `auto` (default) = no extra
+files. `static` → `dist/.swelte-static` (pure `dist/` signal);
+`node` → `dist/Dockerfile.swelte` (runs `./dist/server`, no Node);
+`edge` → `dist/_headers` (`/* → X-Swelte-Target: edge` + per-`isr`
+`Cache-Control` lines). Single artifact `dist/server` + `dist/` holds
+in every mode.
+
+## Offline fallback page (service-worker remainder)
+
+`offline.fallback: 'offline.html'` (or a custom path; default `'off'`)
+writes `dist/<fallback>` from the first crawled page (best-effort, never
+overwrites) and — when the SW is enabled — precaches it. Shell +
+immutable assets stay cached, API/SSE network-only (unchanged).
+
 ## Env vars (what the V `Hand` actually reads)
 
 | Var | Default | Effect |
@@ -71,6 +113,7 @@ unchanged. When `swelte.serviceWorker.enabled` is `true` (or
 | `SWELTE_HANDLER_TIMEOUT_MS` | `10000` | Handler budget via `spawn` + `select`. Over → `500` (server stays up; timed-out thread still runs to completion in the background). |
 | `SWELTE_SSE_MAX_EVENTS` | `10000` | Caps runaway SSE streams. |
 | `SWELTE_SSR` / `SWELTE_SSR_URL` | unset | `1` = embedded QuickJS; URL = sidecar proxy. Unset = SPA/static + JSON always. `preview` auto-sets `SWELTE_SSR=1` when the QJS bridge artifact exists. See `ssr.md`. |
+| `SWELTE_ISR` | unset | `prefix=seconds,...` (frozen by `swelte build` from `swelte.isr`). Longest prefix wins; matching GET HTML 200s stamp `Cache-Control: public, max-age=0, s-maxage=N` + `X-Swelte-Revalidate`. Headers only. |
 | `SWELTE_SW` | unset (off) | `1` = force the opt-in service worker emit (`dist/sw.js` + registration snippet) without touching `svelte.config.js`. See `config.md` §Service worker. |
 | `SWELTE_V_BACKEND_URL` | unset | Dev RPC proxy target for Vite (injected by `swelte dev`). Unset = no proxy. |
 | `SWELTE_CLIENT` | unset | `1` = `check` typechecks the client stubs too (default: server-only). |

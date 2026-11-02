@@ -14,11 +14,14 @@ passes the CSRF guard; config knobs forward to env (env wins when set).
 so idle `dev` stays quiet (no phantom HMR), and the watcher ignores
 `.swelte/` output — regenerating never re-triggers itself.
 
-## `swelte build [--root dir] [--output path] [--port N]`
+## `swelte build [--root dir] [--output path] [--port N] [--target auto|static|node|edge]`
 
 1. `generate()` into `.swelte/` (`routes/*.v` + `server_gen.v` +
    `server.v` harness). Emits dev `.swelte/dev/<mod>.wasm` per file
    (mtime-guarded); the prod bundle compiles in `generateBundle`.
+   Also writes `.swelte/entries.json` (prerender crawl list — static
+   routes always, dynamics expanded from sibling `entries.ts` only when
+   `prerender.entries: 'all'`).
 2. `vite build` (wipes `dist/` first — never put the binary inside it
    before this step).
 3. QJS bridge pass: adapter's `generateBundle` emits
@@ -27,16 +30,18 @@ so idle `dev` stays quiet (no phantom HMR), and the watcher ignores
    Rebuild `libqjs.a` (mtime-guarded).
 4. `v -o dist/server .swelte/server.v` (single artifact; QJS projects
    add `-enable-globals -cc <system-gcc>`).
-5. Smoke: boot the binary, probe `/` + `/api/greet` (when the route
+5. Prerender crawl (only when `prerender.entries` is `static`|`all`):
+   boot the binary on an ephemeral port, GET each crawl URL, write
+   additive `dist/<route>/index.html` (root `/` shell never
+   overwritten). `isr` freezes to `SWELTE_ISR` for this env.
+   Offline `fallback` file written best-effort from the first page.
+6. Target shim (packaging only): `--target` wins, else `swelte.target`
+   (`static` → `dist/.swelte-static`, `node` →
+   `dist/Dockerfile.swelte`, `edge` → `dist/_headers`).
+7. Smoke: boot the binary, probe `/` + `/api/greet` (when the route
    exists), stop. Static shell + JSON only — SSR HTML is the adapter's
    proof, core never starts an engine. `SWELTE_SSR_URL` in the env is
    honored by `Hand` but core sets nothing.
-
-## `swelte preview [--port N] [--root dir] [--binary path]`
-
-Run the built V binary only (Vite-less prod run). Serves `dist/` +
-API on one port. Auto-sets `SWELTE_SSR=1` when the QJS bridge artifact
-exists (detection only — core never starts an engine).
 
 ## `swelte test [--root dir] [--update-snapshot | -u]`
 
@@ -53,6 +58,21 @@ exists (detection only — core never starts an engine).
 
 `SWELTE_CLIENT=1` additionally typechecks the client stubs (default:
 server-only).
+
+## `swelte preview [--port N] [--root dir] [--binary path]`
+
+Run the built V binary only (Vite-less prod run). Serves `dist/` +
+API on one port. Auto-sets `SWELTE_SSR=1` when the QJS bridge artifact
+exists (detection only — core never starts an engine).
+
+## `swelte export [--root dir] [--out snapshot/]`
+
+Snapshot the crawl (packaging only, reuses the build output — no new
+enumeration): copies `.swelte/entries.json` + every additive
+`dist/*.html` (as `pages/…`) + `swelte.contract.json` into
+`<out>/` with a `snapshot.json` manifest (`{ version, target, pages,
+at }`). Fails when `.swelte/entries.json` is missing (run `swelte
+build` first).
 
 ## `swelte check [--root dir] [--format text|json]`
 

@@ -1,4 +1,4 @@
-// Service worker (specs/sveltekit.md slice, additive + opt-in).
+// Service worker (docs (built) slice, additive + opt-in).
 import { describe as describeSw, it as itSw } from 'node:test'
 import assertSw from 'node:assert/strict'
 import {

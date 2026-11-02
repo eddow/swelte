@@ -4,6 +4,7 @@ import { runBuild } from './build.js'
 import { runPreview } from './preview.js'
 import { runInit } from './init.js'
 import { runTest } from './test.js'
+import { runExport } from './export.js'
 
 export const VERSION = '0.1.0'
 
@@ -27,6 +28,7 @@ const buildCmd: Command = {
 		{ name: 'root', help: 'Project root', value: 'string' },
 		{ name: 'output', short: 'o', help: 'Server binary output path', value: 'string' },
 		{ name: 'port', short: 'p', help: 'Smoke-probe port', value: 'number' },
+		{ name: 'target', short: 't', help: 'Deploy target shim: auto | static | node | edge', value: 'string' },
 	],
 	async run(ctx: Ctx) {
 		await runBuild(ctx)
@@ -103,7 +105,19 @@ const testCmd: Command = {
 	},
 }
 
-export const COMMANDS: Command[] = [devCmd, buildCmd, previewCmd, initCmd, checkCmd, testCmd]
+const exportCmd: Command = {
+	name: 'export',
+	summary: 'Snapshot the crawl: entries.json + rendered dist/*.html + contract -> snapshot/.',
+	args: [
+		{ name: 'root', help: 'Project root', value: 'string' },
+		{ name: 'out', short: 'o', help: 'Snapshot output dir', value: 'string' },
+	],
+	async run(ctx: Ctx) {
+		await runExport(ctx)
+	},
+}
+
+export const COMMANDS: Command[] = [devCmd, buildCmd, previewCmd, initCmd, checkCmd, testCmd, exportCmd]
 
 export function findCommand(name: string): Command | undefined {
 	return COMMANDS.find((c) => c.name === name)

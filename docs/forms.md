@@ -43,7 +43,42 @@ catch (e) { if (isFail(e)) showInline(e.body.fieldErrors) }
 Pure TS port of SvelteKit's `deserialize` in `sdk.ts` — parses the
 action-result envelope
 (`{"type":"success"|"failure"|"error"|"redirect",…}`) from a `fetch`
-response. No client router needed: `use:enhance` calls this on the
-fetch response. `redirect` carries `{ status, location }`; unknown
-`type` or non-JSON throws.
+response. Verbs return raw JSON — never the envelope — so
+`__swelteActionResult` tries `deserialize` first, then maps raw bodies
+by status (`2xx` → `success`, else `failure`). `redirect` carries
+`{ status, location }`; unknown `type` or non-JSON throws.
+
+## `use:enhance` / `applyAction` (progressive-enhancement cycle)
+
+No-JS still works untouched (browser submits natively, `Hand` answers
+`303` / error page). With JS, `use:enhance` intercepts the submit and
+replays it as `fetch` with `Accept: application/json`:
+
+```svelte
+<script>
+  import { enhance } from '@swelte/core';
+</script>
+
+<form method="post" use:enhance>
+  …
+</form>
+
+<form method="post" use:enhance={({ formData, cancel }) => {
+  if (!formData.get('name')) cancel();
+  return async ({ result, update }) => {
+    if (result.type === 'redirect') await update({ reset: false });
+    else await update();
+  };
+}}>
+```
+
+Behavior: default `update()` is `applyAction` + form reset. `success`
+publishes the payload on `page.form` and invalidates cached loads
+(`update({ invalidate: false })` skips); `failure`/`error` publish on
+`page.form` too (action failures stay inline — never `page.error`,
+which remains load-time only); `redirect` navigates via the client
+router (`goto`, `location.href` fallback outside the router).
+`applyAction(result)` is also usable standalone. Out of scope:
+file-upload progress, `invalidateAll` outside the default update,
+multi-form ordering — same lite line as the rest of this page.
 
