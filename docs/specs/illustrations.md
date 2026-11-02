@@ -203,4 +203,31 @@ that would prove it**.
   `docs/example.md` and delete the scratch import. Do NOT wire
   it into a shipping route (it must stay unimportable).
 
+## 14. Opt-in service worker (`serviceWorker.enabled` → `dist/sw.js`)
+
+* What: `swelte build` with `serviceWorker.enabled` (or `SWELTE_SW=1`)
+  emits additive `dist/sw.js` (hand-rolled, no workbox dep): precaches
+  `/` + hashed `assets/*.js|wasm`, cache versioned by `version`,
+  auto/manual register snippet; GET navigations/assets cache-first
+  with shell fallback, API/JSON/SSE/POST network-only
+  (`docs/config.md` §Service worker, `docs/errors.md` SPA-first).
+* Engine: `renderServiceWorker` / `renderServiceWorkerRegister` /
+  `serviceWorkerPrecache` in `engine/core/src/vite.ts`
+  (+`generateBundle` emit, `transformIndexHtml` register,
+  `Hand` static-first guard); tests
+  `engine/core/src/codegen-shape.test.ts` (SW block)
+  + `engine/core/src/gen/config-norm.test.ts` (SW knob).
+* Gap: `examples/something/` never enables it — no `serviceWorker`
+  key in `svelte.config.js`, no `dist/sw.js` in the default build,
+  no doc claim in `docs/example.md`.
+* Demo: keep default OFF (single-artifact default must stay clean —
+  do NOT enable in the shipped `svelte.config.js`); prove in a
+  throwaway pass instead: `SWELTE_SW=1 swelte build` →
+  `dist/sw.js` exists with `SW_PRECACHE` shell+hashes,
+  `dist/index.html` carries the register snippet, `curl /sw.js` →
+  `200 application/javascript`, default rebuild drops both.
+  Record the four asserts in `docs/example.md` "Proved" and delete
+  this item. (Offline fallback page + SSG interplay stay open —
+  `specs/sveltekit.md` §2.)
+
 

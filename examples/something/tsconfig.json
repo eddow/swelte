@@ -21,6 +21,13 @@
       ],
       "#lib/*": [
         "./src/lib/*"
+      ],
+      "$app/*": [
+        "./.swelte/app/*"
+      ],
+      "#app/*": [
+        "./.swelte/app/*",
+        "./.swelte/*.d.ts"
       ]
     }
   },
@@ -28,6 +35,9 @@
     "src",
     "vite.config.ts",
     ".swelte/types",
-    ".swelte/v-shim.d.ts"
+    ".swelte/v-shim.d.ts",
+    ".swelte/app/*.d.ts",
+    ".swelte/paths.d.ts",
+    ".swelte/environment.d.ts"
   ]
 }

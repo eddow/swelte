@@ -98,7 +98,10 @@ that bites during migration. Only built behavior is documented here; open work l
   sibling `.ts` opts the route out — `Hand` skips the renderer
   (`swelte_no_ssr()`), serves the SPA shell; async universal `load`
   + client router take over. No `csr=false` islands, no SSG/ISR yet.
-  No service worker, no offline story.
+* Service worker: opt-in (`swelte.serviceWorker.enabled` or
+  `SWELTE_SW=1`) → additive `dist/sw.js`, auto/manual register —
+  see `config.md` §Service worker. Offline story partial: shell +
+  immutable assets cached, API/SSE network-only.
 * Per-route `Params` types generated (`RouteId` + `Params` in every
   `types/routes/*.d.ts`) — the `$types`-lite.
 
@@ -118,7 +121,9 @@ that bites during migration. Only built behavior is documented here; open work l
   top-level `await`/`fetch` with file+line.
 * `svelte.config.js` `swelte` key holds: `routesDir`, `libDir`,
   `outDir`, `distDir`, `port`, `corsOrigin`, `trailingSlash`, `base`,
-  `assets`, `csp`, `csrf`, `methodOverride`, `version`. Env wins at
+  `assets`, `csp`, `csrf`, `methodOverride`, `version`,
+  `serviceWorker` (`{ enabled, register }` → additive `dist/sw.js`,
+  `SWELTE_SW=1` forces on). Env wins at
   runtime (`SWELTE_*`), defaults when unset/invalid.
 * `CSP` injected as meta, `CSRF` origin-check, `_method` override,
   `X-Swelte-Version` header.

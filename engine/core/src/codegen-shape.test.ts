@@ -1,3 +1,71 @@
+// Service worker (specs/sveltekit.md slice, additive + opt-in).
+import { describe as describeSw, it as itSw } from 'node:test'
+import assertSw from 'node:assert/strict'
+import {
+	renderServiceWorker as renderSw,
+	renderServiceWorkerRegister as renderSwRegister,
+	serviceWorkerEnabled as swEnabled,
+	serviceWorkerPrecache as swPrecache,
+	serviceWorkerRegisterMode as swMode,
+} from './vite.js'
+
+describeSw('service worker (opt-in, additive)', () => {
+	itSw('off by default: config + plugin + env all gate', () => {
+		delete process.env.SWELTE_SW
+		assertSw.equal(swEnabled({ serviceWorker: { enabled: false } }, {}), false)
+		assertSw.equal(swEnabled(undefined, undefined), false)
+		assertSw.equal(swMode({}, {}), 'auto')
+	})
+
+	itSw('on via config, plugin, or SWELTE_SW=1', () => {
+		assertSw.equal(swEnabled({ serviceWorker: { enabled: true } }, {}), true)
+		assertSw.equal(swEnabled({}, { enabled: true }), true)
+		process.env.SWELTE_SW = '1'
+		try {
+			assertSw.equal(swEnabled({}, {}), true)
+		} finally {
+			delete process.env.SWELTE_SW
+		}
+	})
+
+	itSw('manual register skips auto snippet', () => {
+		assertSw.equal(swMode({ serviceWorker: { register: 'manual' } }, {}), 'manual')
+		assertSw.equal(swMode({}, { register: 'manual' }), 'manual')
+		assertSw.equal(swMode({ serviceWorker: { register: 'auto' } }, {}), 'auto')
+	})
+
+	itSw('renderServiceWorker: caches shell + hashed assets, never API/JSON/SSE', () => {
+		const src = renderSw({ version: '1.2.3', precache: ['/', '/assets/index-ABC.js'], base: '' })
+		assertSw.ok(src.includes(`'swelte-' + SW_VERSION`))
+		assertSw.ok(src.includes('["/","/assets/index-ABC.js"]'))
+		assertSw.ok(src.includes('application/json'))
+		assertSw.ok(src.includes('text/event-stream'))
+		assertSw.ok(src.includes('/api/'))
+		assertSw.ok(src.includes('mode === \'navigate\''))
+	})
+
+	itSw('renderServiceWorkerRegister: same-origin /sw.js, load-deferred', () => {
+		const snippet = renderSwRegister('')
+		assertSw.ok(snippet.includes('/sw.js'))
+		assertSw.ok(snippet.includes('serviceWorker'))
+		assertSw.ok(snippet.includes('load'))
+		assertSw.ok(renderSwRegister('/app').includes('/app/sw.js'))
+	})
+
+	itSw('serviceWorkerPrecache: shell + hashed js/assets only', () => {
+		const got = swPrecache({
+			'index.html': { type: 'asset', fileName: 'index.html' },
+			'js': { type: 'chunk', fileName: 'assets/index-ABC.js' },
+			'wasm': { type: 'asset', fileName: 'assets/app_lib-XYZ.wasm' },
+			'sw': { type: 'asset', fileName: 'sw.js' },
+		})
+		assertSw.ok(got.includes('/'))
+		assertSw.ok(got.includes('/assets/index-ABC.js'))
+		assertSw.ok(got.includes('/assets/app_lib-XYZ.wasm'))
+		assertSw.ok(!got.includes('/sw.js'))
+		assertSw.ok(!got.includes('/index.html'))
+	})
+})
 import { describe as describeGoldens, it as itGolden } from 'node:test'
 import assertGolden from 'node:assert/strict'
 import { jsFetchFor as jsFetchForGolden, jsWasmFor as jsWasmForGolden } from './vite.js'
@@ -294,6 +362,18 @@ describe('codegen shape snapshots (fetch/SSE/dispatcher)', () => {
 		const vjs = readFileSync(join(root, '.swelte', 'version.js'), 'utf8')
 		assert.ok(vjs.includes('export const version'), vjs.slice(0, 200))
 		assert.ok(vjs.includes('export const buildTime'), vjs.slice(0, 300))
+	})
+
+	it('rerun touches no mtimes except version.js (HMR hygiene)', async () => {
+		const root = scaffold()
+		await generate(root)
+		const watch = ['routes.js', 'entry-main.ts', 'routes/server_gen.v', 'generated/routes/api/greet.js']
+		const mtime = (f: string) => statSync(join(root, '.swelte', f)).mtimeMs
+		const before = new Map(watch.map((f) => [f, mtime(f)]))
+		// Sleep past filesystem mtime granularity so a rewrite would show.
+		await new Promise((r) => setTimeout(r, 1100))
+		await generate(root)
+		for (const f of watch) assert.equal(mtime(f), before.get(f), `${f} rewritten with identical content`)
 	})
 
 	it('ssr-manifest lists svelte pages; headless api stays out of entries', async () => {

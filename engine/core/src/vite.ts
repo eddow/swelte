@@ -19,6 +19,25 @@ function list<T>(collection: readonly T[], fn: (item: T, i: number) => unknown):
 	return collection.map(fn).join('')
 }
 
+// Write only when bytes differ (HMR hygiene): every generate() rewrites
+// ~20 files under .swelte/, and Vite HMR watches several of them
+// (routes.js, entry-main.ts) plus the .v dispatcher files feed the plugin's
+// own regen filter. Unconditional writes bump mtimes on identical content —
+// phantom HMR updates, page reloads, and (via .swelte/routes/*.v events
+// re-entering regen) a self-sustaining generate loop. Compare-then-write
+// keeps mtimes stable when nothing changed.
+function writeIfChanged(file: string, content: string): boolean {
+	let prev: string | null = null
+	try {
+		prev = readFileSync(file, 'utf8')
+	} catch {
+		/* missing — write it */
+	}
+	if (prev === content) return false
+	writeFileSync(file, content)
+	return true
+}
+
 // Lazy V binary for `v -b wasm` (resolved on first compile).
 // (module import must not throw when the caller passes a plain path).
 let vBin = ''
@@ -44,6 +63,8 @@ export interface SweltePluginOptions {
 	methodOverride?: boolean
 	/** App version stamp. Defaults to package.json version. Env SWELTE_VERSION wins. */
 	version?: string
+	/** Opt-in service worker. Default off. Env SWELTE_SW=1 forces on. */
+	serviceWorker?: { enabled?: boolean; register?: 'auto' | 'manual' }
 }
 
 /** Re-export the unified config type + helper so projects can
@@ -1105,6 +1126,10 @@ export function swelte(options: SweltePluginOptions = {}): Plugin {
 	let csrfMode: 'ignore' | 'enforce' = options.csrf === 'enforce' ? 'enforce' : 'ignore'
 	let methodOverride = options.methodOverride === true
 	let appVersion = String(options.version ?? '')
+	let appSw: { enabled?: boolean; register?: 'auto' | 'manual' } = {
+		enabled: options.serviceWorker?.enabled === true,
+		register: options.serviceWorker?.register === 'manual' ? 'manual' : 'auto',
+	}
 	// Resolved per-generate() against the Vite root (never at construction:
 	// outDir is relative and the cwd at plugin-construction time is not the
 	// project root when loaded via vite.config.ts).
@@ -1235,14 +1260,14 @@ pub fn swelte_alloc(n int) &u8 {
 		const stem = mod.split('/').pop() as string
 		const keepV = join(dirname(outWasm), `${stem}.compile.v`)
 		const mapFile = outWasm.replace(/\.wasm$/, '.wasm.map')
-		writeFileSync(keepV, compiled)
+		writeIfChanged(keepV, compiled)
 		if (!vBin) vBin = resolveV(import.meta.url)
 		execVSync(vBin, ['-b', 'wasm', '-os', 'browser', '-o', outWasm, keepV], {
 			stdio: ['ignore', 'pipe', 'pipe'],
 			env: toolchainEnv(),
 		})
 		const size = statSync(outWasm).size
-		writeFileSync(
+		writeIfChanged(
 			mapFile,
 			JSON.stringify(
 				{
@@ -2445,6 +2470,14 @@ ${tupleStat('res')}`
 					if (options.csrf === undefined && cfg.csrf === 'enforce') csrfMode = 'enforce'
 					if (options.methodOverride === undefined && cfg.methodOverride) methodOverride = true
 					if (options.version === undefined && cfg.version !== '') appVersion = cfg.version
+					// SW gate: config can only turn ON (never force off) — the
+					// live SWELTE_SW=1 env read in config() must survive this
+					// fallback (env wins over config unset/off).
+					if (options.serviceWorker?.enabled === undefined && cfg.serviceWorker.enabled)
+						appSw.enabled = true
+					if (process.env.SWELTE_SW === '1') appSw.enabled = true
+					if (options.serviceWorker?.register === undefined)
+						appSw.register = cfg.serviceWorker.register
 				} catch {
 					/* defaults stand */
 				}
@@ -2743,7 +2776,7 @@ ${list(params, (p) => `\t${p.name}${p.optional ? '?' : ''}: ${p.tstype}\n`)}}
 						out.push(`export function ${fn.name}(args: ${Arg}): Promise<${Res}>`)
 						out.push('')
 					}
-					writeFileSync(file, out.join('\n'))
+					writeIfChanged(file, out.join('\n'))
 					return file
 				}
 
@@ -2947,7 +2980,7 @@ ${list(params, (p) => `\t${p.name}${p.optional ? '?' : ''}: ${p.tstype}\n`)}}
 							mod.split('/').slice(0, -1).join('/')
 						)
 						mkdirSync(genModDir, { recursive: true })
-						writeFileSync(
+						writeIfChanged(
 							join(genModDir, `${mod.split('/').pop()}.js`),
 							jsFetchFor(route, fns.filter((x) => x.attr !== 'load'), trailingSlash, matchers)
 						)
@@ -3012,7 +3045,7 @@ ${list(params, (p) => `\t${p.name}${p.optional ? '?' : ''}: ${p.tstype}\n`)}}
 							}
 						}
 						mkdirSync(routesGenDir, { recursive: true })
-						writeFileSync(
+						writeIfChanged(
 							join(routesGenDir, `${vFileSafe(d.mod)}.v`),
 							emitRouteFile(d.mod, d.route, d.prefix, src, fns, chain, loads)
 						)
@@ -3080,7 +3113,7 @@ ${list(params, (p) => `\t${p.name}${p.optional ? '?' : ''}: ${p.tstype}\n`)}}
 						} catch {
 							/* no svelte routes */
 						}
-						writeFileSync(
+						writeIfChanged(
 							join(routesGenDir, `server_gen.v`),
 							emitServerGen(dispatched, sseMods, matchers, noSsrRoutes)
 						)
@@ -3176,7 +3209,7 @@ ${list(params, (p) => `\t${p.name}${p.optional ? '?' : ''}: ${p.tstype}\n`)}}
 							mod.split('/').slice(0, -1).join('/')
 						)
 						mkdirSync(genModDir, { recursive: true })
-						writeFileSync(
+						writeIfChanged(
 							join(genModDir, mod.split('/').pop() + '.js'),
 							jsWasmFor(isBuild, mod, allFns)
 						)
@@ -3345,7 +3378,7 @@ declare module '*.v' {
 						`}`,
 						``
 					)
-					writeFileSync(join(genDir, 'v-shim.d.ts'), decls.join('\n'))
+					writeIfChanged(join(genDir, 'v-shim.d.ts'), decls.join('\n'))
 				}
 				// Roadmap §1.5 + §1.9: virtual `#app/paths` + `#app/environment`
 				// modules and the version stamp — generated from loadConfig()
@@ -3363,23 +3396,23 @@ declare module '*.v' {
 						}
 					}
 					const esc = (s: string) => JSON.stringify(s)
-					writeFileSync(
+					writeIfChanged(
 						join(genDir, 'paths.js'),
 						`// Auto-generated by swelte. Do not edit.\nexport const base = ${esc(appBase)};\nexport const assets = ${esc(appAssets)};\n`
 					)
-					writeFileSync(
+					writeIfChanged(
 						join(genDir, 'paths.d.ts'),
 						`// Auto-generated by swelte. Do not edit.\nexport declare const base: string;\nexport declare const assets: string;\n`
 					)
-					writeFileSync(
+					writeIfChanged(
 						join(genDir, 'environment.js'),
 						`// Auto-generated by swelte. Do not edit.\nexport const browser = typeof window !== 'undefined';\nexport const dev = ${process.env.NODE_ENV === 'production' ? 'false' : 'true'};\nexport const building = false;\nexport const version = ${esc(appVersion)};\n`
 					)
-					writeFileSync(
+					writeIfChanged(
 						join(genDir, 'environment.d.ts'),
 						`// Auto-generated by swelte. Do not edit.\nexport declare const browser: boolean;\nexport declare const dev: boolean;\nexport declare const building: boolean;\nexport declare const version: string;\n`
 					)
-					writeFileSync(
+					writeIfChanged(
 						join(genDir, 'version.js'),
 						`// Auto-generated by swelte. Do not edit.\nexport const version = ${esc(appVersion)};\nexport const buildTime = ${esc(new Date().toISOString())};\n`
 					)
@@ -3407,14 +3440,14 @@ export const dev = true;
 export declare const browser: boolean;
 export declare const dev: boolean;
 `
-					writeFileSync(join(appDir, 'stores.js'), GEN_STORES_JS)
-					writeFileSync(join(appDir, 'state.js'), GEN_STORES_JS)
-					writeFileSync(join(appDir, 'navigation.js'), GEN_NAV_JS)
-					writeFileSync(join(appDir, 'stores.d.ts'), renderAppDts())
-					writeFileSync(join(appDir, 'state.d.ts'), renderAppDts())
-					writeFileSync(join(appDir, 'navigation.d.ts'), renderAppDts())
-					writeFileSync(join(appDir, 'environment.js'), GEN_ENV_JS)
-					writeFileSync(join(appDir, 'environment.d.ts'), GEN_ENV_DTS)
+					writeIfChanged(join(appDir, 'stores.js'), GEN_STORES_JS)
+					writeIfChanged(join(appDir, 'state.js'), GEN_STORES_JS)
+					writeIfChanged(join(appDir, 'navigation.js'), GEN_NAV_JS)
+					writeIfChanged(join(appDir, 'stores.d.ts'), renderAppDts())
+					writeIfChanged(join(appDir, 'state.d.ts'), renderAppDts())
+					writeIfChanged(join(appDir, 'navigation.d.ts'), renderAppDts())
+					writeIfChanged(join(appDir, 'environment.js'), GEN_ENV_JS)
+					writeIfChanged(join(appDir, 'environment.d.ts'), GEN_ENV_DTS)
 				}
 				for (const w of warnings) console.warn(`[swelte] ${w}`)
 				// Roadmap 7: client router — UI composition without manual imports.
@@ -3693,7 +3726,7 @@ export function initSwelteRouter(target) {
 	return () => { window.removeEventListener('click', onClick); window.removeEventListener('popstate', onPop) }
 }
 `)
-					writeFileSync(join(genDir, 'routes.js'), o.join('\n'))
+					writeIfChanged(join(genDir, 'routes.js'), o.join('\n'))
 				} catch (e) {
 					console.warn(`[swelte] routes.js emit failed: ${(e as Error).message}`)
 				}
@@ -3752,17 +3785,17 @@ export function initSwelteRouter(target) {
 							.sort(),
 						wrappersByRoute,
 					}
-					writeFileSync(join(genDir, 'ssr-manifest.json'), JSON.stringify(manifest, null, 2))
+					writeIfChanged(join(genDir, 'ssr-manifest.json'), JSON.stringify(manifest, null, 2))
 				} catch (e) {
 					throw e
 				}
-				writeFileSync(join(genDir, 'sdk.ts'), '// Auto-generated by swelte. Do not edit.\n')
+				writeIfChanged(join(genDir, 'sdk.ts'), '// Auto-generated by swelte. Do not edit.\n')
 				// Server harness: verbatim skeleton from templates/ (node_modules),
 				// rendered into `.swelte/server.v`. `dev`/`build` compile `.swelte/`
 				// as one V unit (harness `module main` + `routes/` + `server_gen.v`).
 				try {
 					const cfg = await loadConfig(root)
-					writeFileSync(join(genDir, 'server.v'), renderHarness(cfg, import.meta.url, hooks))
+					writeIfChanged(join(genDir, 'server.v'), renderHarness(cfg, import.meta.url, hooks))
 				} catch (e) {
 					warnings.push(`harness: ${(e as Error).message}`)
 				}
@@ -3771,7 +3804,7 @@ export function initSwelteRouter(target) {
 				// transformIndexHtml below points the script tag at it;
 				// src/main.ts stays a user-owned shim.
 				try {
-					writeFileSync(join(genDir, 'entry-main.ts'), renderClientEntry(root, import.meta.url))
+					writeIfChanged(join(genDir, 'entry-main.ts'), renderClientEntry(root, import.meta.url))
 				} catch (e) {
 					warnings.push(`entry: ${(e as Error).message}`)
 				}
@@ -3789,6 +3822,9 @@ export function initSwelteRouter(target) {
 		enforce: 'pre',
 		config(userConfig, env) {
 			isBuild = (env as { command?: string } | undefined)?.command === 'build'
+			// Env wins at runtime AND at build time for the SW gate: SWELTE_SW=1
+			// forces the additive dist/sw.js emit without touching config.
+			if (process.env.SWELTE_SW === '1') appSw.enabled = true
 			// Resolve dirs against the Vite root (not process.cwd()) — the
 			// language server loads vite.config.ts with cwd elsewhere.
 			const root = (userConfig && (userConfig as { root?: string }).root) || process.cwd()
@@ -3855,6 +3891,20 @@ export function initSwelteRouter(target) {
 					if (out.includes('</head>')) out = out.replace('</head>', `${tag}</head>`)
 					else out = `${tag}${out}`
 				}
+			}
+			// Service worker registration (opt-in, additive): when enabled and
+			// register mode is auto, inject the same-origin register snippet.
+			// `manual` emits dist/sw.js but skips the snippet (app registers).
+			// Default off — no SW bytes, no registration, SPA-first unchanged.
+			if (
+				appSw.enabled === true &&
+				appSw.register !== 'manual' &&
+				!out.includes('serviceWorker.register') &&
+				!out.includes('/sw.js')
+			) {
+				const snippet = renderServiceWorkerRegister(appBase)
+				if (out.includes('</body>')) out = out.replace('</body>', `${snippet}</body>`)
+				else out = `${out}${snippet}`
 			}
 			return out
 		},
@@ -4030,6 +4080,15 @@ export function initSwelteRouter(target) {
 			server.watcher.add(watch)
 			const regen = (file: string) => {
 				if (!file.endsWith('.v')) return
+				// HMR loop guard: generate() emits .v dispatchers under
+				// <outDir>/routes/ (*.v suffix). Vite watches the whole root,
+				// so our own output re-enters this handler → generate() →
+				// rewrites → events → … a self-sustaining loop with phantom
+				// HMR updates + page reloads and "nothing changing".
+				// Only user sources (routesDir/libDir) may trigger regen.
+				const norm = file.split(sep).join('/')
+				const outNorm = resolve(server.config.root, outDir).split(sep).join('/')
+				if (norm === outNorm || norm.startsWith(outNorm + '/')) return
 				void generate(server.config.root).catch(() => {
 					/* ignore */
 				})
@@ -4158,6 +4217,20 @@ export function initSwelteRouter(target) {
 		},
 		generateBundle(_opts, bundle) {
 			const root = activeRoot || process.cwd()
+			// Service worker emit (opt-in, additive): dist/sw.js only. Never
+			// changes the single-artifact default — off means zero SW bytes.
+			try {
+				if (appSw.enabled === true) {
+					const precache = serviceWorkerPrecache(
+						bundle as unknown as Record<string, { type?: string; fileName?: string }>,
+					)
+					const sw = renderServiceWorker({ version: appVersion, precache, base: appBase })
+					this.emitFile({ type: 'asset', fileName: 'sw.js', source: sw })
+					console.log(`[swelte] service worker: dist/sw.js (+${precache.length} precache)`)
+				}
+			} catch (e) {
+				console.warn(`[swelte] service worker emit failed: ${(e as Error).message}`)
+			}
 			const libAbs = resolve(root, libDir)
 			if (existsSync(libAbs)) {
 				// Tree-shaking: only bundle #lib/ files actually imported
@@ -4240,7 +4313,7 @@ pub fn swelte_alloc(n int) &u8 {
 						...parts,
 					].join('\n')
 					const tmpEntry = join(resolve(root, outDir), '.bundle.compile.v')
-					writeFileSync(tmpEntry, entry)
+					writeIfChanged(tmpEntry, entry)
 					try {
 						const tmpWasm = join(resolve(root, outDir), '.' + prodWasmName)
 						if (!vBin) vBin = resolveV(import.meta.url)
@@ -4252,7 +4325,7 @@ pub fn swelte_alloc(n int) &u8 {
 						const fileName = this.getFileName(ref)
 						// Bundle name map (stays in .swelte/, never emitted):
 						// fn -> source module for trap resolution.
-						writeFileSync(
+						writeIfChanged(
 							join(resolve(root, outDir), 'app_lib.wasm.map'),
 							JSON.stringify(
 								{
@@ -4296,6 +4369,105 @@ pub fn swelte_alloc(n int) &u8 {
 			void bundle
 		},
 	}
+}
+
+/** Service worker scope (additive offline shell). Hand-rolled template —
+ *  no workbox dep. Keep the surface small: precache shell + immutable
+ *  hashed assets, network-first API, SPA-shell fallback for navigations.
+ *  `version` busts the cache; `precache` is baked at build time. */
+export function renderServiceWorker(opts: {
+	version: string
+	precache: string[]
+	base?: string
+}): string {
+	const version = JSON.stringify(opts.version || 'dev')
+	const base = JSON.stringify(opts.base ?? '')
+	const precache = JSON.stringify(opts.precache ?? [])
+	return `/* Auto-generated by swelte (serviceWorker.enabled). Do not edit. */
+const SW_VERSION = ${version};
+const SW_BASE = ${base};
+const SW_PRECACHE = ${precache};
+const SW_CACHE = 'swelte-' + SW_VERSION;
+const withBase = (p) => SW_BASE + p;
+self.addEventListener('install', (event) => {
+  event.waitUntil(
+    caches.open(SW_CACHE).then((cache) => cache.addAll(SW_PRECACHE.map(withBase))).then(() => self.skipWaiting()),
+  );
+});
+self.addEventListener('activate', (event) => {
+  event.waitUntil(
+    caches.keys().then((keys) => Promise.all(keys.filter((k) => k !== SW_CACHE).map((k) => caches.delete(k)))).then(() => self.clients.claim()),
+  );
+});
+self.addEventListener('fetch', (event) => {
+  const url = new URL(event.request.url);
+  if (url.origin !== self.location.origin) return;
+  if (event.request.method !== 'GET') return;
+  const accept = event.request.headers.get('accept') || '';
+  // Never cache API/JSON/SSE — network only (offline => caller sees the failure).
+  if (url.pathname.startsWith(withBase('/api/')) || accept.includes('application/json') || accept.includes('text/event-stream')) return;
+  event.respondWith(
+    caches.match(event.request, { ignoreSearch: false }).then((hit) => {
+      if (hit) return hit;
+      return fetch(event.request).then((res) => {
+        const copy = res.clone();
+        // Cache immutable hashed assets + shell opportunistically.
+        if (res.ok && (url.pathname.startsWith(withBase('/assets/')) || url.pathname === withBase('/'))) {
+          caches.open(SW_CACHE).then((cache) => cache.put(event.request, copy)).catch(() => {});
+        }
+        return res;
+      }).catch(() => {
+        // Offline fallback: shell for navigations, cached asset when present.
+        if (event.request.mode === 'navigate' || accept.includes('text/html')) {
+          return caches.match(withBase('/')).then((shell) => shell || Response.error());
+        }
+        return caches.match(event.request).then((cached) => cached || Response.error());
+      });
+    }),
+  );
+});
+`
+}
+
+/** Registration snippet injected into `transformIndexHtml` when enabled. */
+export function renderServiceWorkerRegister(base = ''): string {
+	const swUrl = JSON.stringify(`${base}/sw.js`)
+	return `<script>if('serviceWorker' in navigator){window.addEventListener('load',function(){navigator.serviceWorker.register(${swUrl}).catch(function(){})})}</script>`
+}
+
+/** Resolve whether the service worker is on: config, plugin option, or env. */
+export function serviceWorkerEnabled(
+	cfg: { serviceWorker?: { enabled?: boolean } } | null | undefined,
+	opt?: { enabled?: boolean },
+): boolean {
+	if (process.env.SWELTE_SW === '1') return true
+	if (opt?.enabled === true) return true
+	return cfg?.serviceWorker?.enabled === true
+}
+
+export function serviceWorkerRegisterMode(
+	cfg: { serviceWorker?: { register?: string } } | null | undefined,
+	opt?: { register?: string },
+): 'auto' | 'manual' {
+	if (opt?.register === 'manual') return 'manual'
+	if (cfg?.serviceWorker?.register === 'manual') return 'manual'
+	return 'auto'
+}
+
+/** Precache list for the SW: shell + hashed immutable assets from the Vite bundle. */
+export function serviceWorkerPrecache(
+	bundle: Record<string, { type?: string; fileName?: string }>,
+): string[] {
+	const out = new Set<string>(['/'])
+	for (const info of Object.values(bundle)) {
+		if (info?.type === 'asset' && typeof info.fileName === 'string' && info.fileName.startsWith('assets/')) {
+			out.add('/' + info.fileName)
+		}
+		if (info?.type === 'chunk' && typeof info.fileName === 'string' && info.fileName.endsWith('.js')) {
+			out.add('/' + info.fileName)
+		}
+	}
+	return [...out].sort()
 }
 
 export default swelte

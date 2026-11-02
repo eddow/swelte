@@ -26,12 +26,33 @@ export default defineConfig({
     csrf: 'ignore',          // 'ignore' | 'enforce'
     methodOverride: false,   // honor `?_method=` on POST
     version: '',             // '' = package.json version
+    serviceWorker: { enabled: false, register: 'auto' }, // opt-in SW → additive dist/sw.js
   },
 });
 ```
 
 `defineConfig` keeps `swelte` non-enumerable: invisible to `svelte()`
 (no "invalid plugin options" warning) but readable by `loadConfig`.
+
+## Service worker (opt-in offline shell)
+
+Disabled by default — zero SW bytes, zero registration, SPA-first
+unchanged. When `swelte.serviceWorker.enabled` is `true` (or
+`SWELTE_SW=1` in the env, which wins):
+
+* `swelte build` emits additive `dist/sw.js` (hand-rolled, no workbox
+  dep): precaches `/` + hashed `assets/*.js` + `assets/*.wasm`, cache
+  version = `version` stamp, old caches purged on activate.
+* `transformIndexHtml` injects a same-origin registration snippet
+  (`register: 'auto'`, the default); `register: 'manual'` emits the
+  file but skips the snippet so the app registers itself.
+* Runtime behavior: GET navigations + immutable assets are
+  cache-first with SPA-shell offline fallback; `Accept:
+  application/json` / `text/event-stream` / POST / `/api/*` are
+  network-only (offline → the caller sees the failure, never stale
+  JSON). `#lib/` WASM rides the same immutable-asset cache.
+* `Hand` serves exact `dist/` files (incl. `sw.js`) regardless of
+  Accept — the SPA-first proxy rule is about routes, real files win.
 
 ## Env vars (what the V `Hand` actually reads)
 
@@ -50,6 +71,7 @@ export default defineConfig({
 | `SWELTE_HANDLER_TIMEOUT_MS` | `10000` | Handler budget via `spawn` + `select`. Over → `500` (server stays up; timed-out thread still runs to completion in the background). |
 | `SWELTE_SSE_MAX_EVENTS` | `10000` | Caps runaway SSE streams. |
 | `SWELTE_SSR` / `SWELTE_SSR_URL` | unset | `1` = embedded QuickJS; URL = sidecar proxy. Unset = SPA/static + JSON always. `preview` auto-sets `SWELTE_SSR=1` when the QJS bridge artifact exists. See `ssr.md`. |
+| `SWELTE_SW` | unset (off) | `1` = force the opt-in service worker emit (`dist/sw.js` + registration snippet) without touching `svelte.config.js`. See `config.md` §Service worker. |
 | `SWELTE_V_BACKEND_URL` | unset | Dev RPC proxy target for Vite (injected by `swelte dev`). Unset = no proxy. |
 | `SWELTE_CLIENT` | unset | `1` = `check` typechecks the client stubs too (default: server-only). |
 

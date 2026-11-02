@@ -68,6 +68,20 @@ describe('config normalization (tmp roots)', () => {
 		assert.equal(cfg.version, '1.2.3')
 	})
 
+	it('serviceWorker defaults off, normalizes manual/auto', async () => {
+		const root = mkdtempSync(join(tmpdir(), 'swelte-cfg-'))
+		const off = await loadConfig(root)
+		assert.equal(off.serviceWorker.enabled, false)
+		assert.equal(off.serviceWorker.register, 'auto')
+		writeFileSync(
+			join(root, 'svelte.config.js'),
+			`export default { swelte: { serviceWorker: { enabled: true, register: 'manual' } } }`
+		)
+		const on = await loadConfig(root)
+		assert.equal(on.serviceWorker.enabled, true)
+		assert.equal(on.serviceWorker.register, 'manual')
+	})
+
 	it('bad trailingSlash falls back to ignore', async () => {
 		const root = mkdtempSync(join(tmpdir(), 'swelte-cfg-'))
 		writeFileSync(join(root, 'svelte.config.js'), `export default { swelte: { trailingSlash: 'sometimes' } }`)

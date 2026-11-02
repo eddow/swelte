@@ -38,10 +38,14 @@ available: save_name`. `#lib/` misses use the same shape with
 status 0 (WASM never touches HTTP) — e.g. `WASM compile failed`,
 `unknown fn` + available exports, `bad string return`, wasm traps.
 
-## SPA-first proxy rule (vite.ts)
+## SPA-first proxy rule (vite.ts + `Hand` static-first)
 
 `GET /` (no `?q=`, no `Accept: application/json`) always serves Vite
 (page), regardless of `Accept`. Only proxied to V:
 `Accept: application/json` GETs, JSON bodies, form bodies
 (multipart/urlencoded). Result: browser refresh never hits the API;
 curl does.
+
+Exact `dist/` files (incl. `dist/sw.js`) win over both: `Hand`
+serves them `200` regardless of `Accept`, so the service-worker
+registration fetch and precache never see dispatcher 404/shell HTML.

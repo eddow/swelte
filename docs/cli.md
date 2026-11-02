@@ -10,6 +10,9 @@ One command: V backend (`:backend`) + Vite (`:port`), HMR reload on
 `.swelte/` exists before the V backend boots. Dev sets same-origin
 `SWELTE_CORS_ORIGIN` (`http://localhost:<port>`) so the Vite proxy
 passes the CSRF guard; config knobs forward to env (env wins when set).
+`generate()` is compare-then-write: unchanged output keeps its mtime,
+so idle `dev` stays quiet (no phantom HMR), and the watcher ignores
+`.swelte/` output — regenerating never re-triggers itself.
 
 ## `swelte build [--root dir] [--output path] [--port N]`
 

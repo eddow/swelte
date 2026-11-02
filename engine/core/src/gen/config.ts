@@ -29,6 +29,12 @@ export interface SwelteOptions {
 	methodOverride?: boolean
 	/** App version stamp (SvelteKit `version` equivalent). Defaults to package.json version. */
 	version?: string
+	/** Opt-in service worker (SvelteKit `serviceWorker` lite). Default off.
+	 *  `register?: 'auto' | 'manual'` — when enabled, `swelte build` emits
+	 *  additive `dist/sw.js` (hand-rolled, no workbox dep) and injects a
+	 *  same-origin registration snippet; `manual` emits the file but skips
+	 *  the snippet so the app registers itself. Env `SWELTE_SW=1` forces on. */
+	serviceWorker?: { enabled?: boolean; register?: 'auto' | 'manual' }
 }
 
 /** Project config: standard Svelte config + our `swelte` key. */
@@ -90,6 +96,17 @@ function normalize(raw: SwelteOptions | null | undefined): Required<SwelteOption
 		csrf: r.csrf === 'enforce' ? 'enforce' : 'ignore',
 		methodOverride: r.methodOverride === true,
 		version: String(r.version ?? ''),
+		serviceWorker: normalizeServiceWorker(r.serviceWorker),
+	}
+}
+
+function normalizeServiceWorker(
+	raw: SwelteOptions['serviceWorker'],
+): Required<Required<SwelteOptions>['serviceWorker']> {
+	const r = (raw ?? {}) as { enabled?: unknown; register?: unknown }
+	return {
+		enabled: r.enabled === true,
+		register: r.register === 'manual' ? 'manual' : 'auto',
 	}
 }
 

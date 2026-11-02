@@ -18,15 +18,38 @@ export interface SsrQjsOptions {
 	renderTimeoutMs?: number
 	/** QJS memory cap in MB (default 16). */
 	renderMemoryMB?: number
+	/** Opt-in service worker (core-owned, additive dist/sw.js). Same shape as core. */
+	serviceWorker?: { enabled?: boolean; register?: 'auto' | 'manual' }
+	trailingSlash?: 'always' | 'never' | 'ignore'
+	base?: string
+	assets?: string
+	csp?: string
+	csrf?: 'ignore' | 'enforce'
+	methodOverride?: boolean
+	version?: string
 }
 
 export function swelte(options: SsrQjsOptions = {}): Plugin[] {
-	const core = coreSwelte({
+	const coreOpts: Parameters<typeof coreSwelte>[0] = {
 		vBackendUrl: options.vBackendUrl,
 		routesDir: options.routesDir,
 		libDir: options.libDir,
 		outDir: options.outDir,
-	})
+		serviceWorker: options.serviceWorker,
+		trailingSlash: options.trailingSlash,
+		base: options.base,
+		assets: options.assets,
+		csp: options.csp,
+		csrf: options.csrf,
+		methodOverride: options.methodOverride,
+		version: options.version,
+	}
+	// Env wins for the SW gate even when the adapter wraps core statically:
+	// forward the live env read so SWELTE_SW=1 emits without touching config.
+	if (process.env.SWELTE_SW === '1' && coreOpts.serviceWorker?.enabled === undefined) {
+		coreOpts.serviceWorker = { ...(coreOpts.serviceWorker ?? {}), enabled: true }
+	}
+	const core = coreSwelte(coreOpts)
 
 	const adapter: Plugin = {
 		name: 'swelte:ssr-qjs',

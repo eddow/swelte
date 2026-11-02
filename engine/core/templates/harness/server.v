@@ -386,6 +386,21 @@ fn (mut app App) before_request(mut ctx Ctx) veb.Result {
 		return ctx.send_response_to_client('application/json', '{"error":"forbidden"}')
 	}
 	dist := os.getenv_opt('SWELTE_DIST') or { '' }
+	// Static-first for exact dist files (sw.js, hashed assets): serve the
+	// file regardless of Accept. The SPA-first proxy rule is about ROUTES
+	// (page navigations vs API dispatch) — real files always win so the SW
+	// registration fetch and precache never see dispatcher 404/shell HTML.
+	if dist != '' && ctx.req.method == .get {
+		full := dist + path
+		if !path.contains('..') && os.exists(full) && !os.is_dir(full) {
+			data := os.read_bytes(full) or { return ctx.send_response_to_client('application/json', '{"error":"read failed"}') }
+			fname := if path.contains('/') { path.all_after_last('/') } else { path }
+			ext := if fname.contains('.') { fname.all_after_last('.').to_lower() } else { '' }
+			ct := if ext == 'js' { 'application/javascript' } else { mime_for(path) }
+			ctx.res.set_status(http.status_from_int(200))
+			return ctx.send_response_to_client(ct, data.bytestr())
+		}
+	}
 	// SSR first (when enabled + HTML navigation): render → fill shell.
 	// On render miss/failure, fall through to no-JS/static/SPA below.
 	// (Static used to win here — SSR never ran when dist/ existed.)
