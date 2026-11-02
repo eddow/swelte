@@ -23,6 +23,7 @@ src/routes/admin/+page.svelte + +page.v     /admin leaf (admin_whoami GET, reads
 src/routes/router/+page.v + +page.ts + +page.svelte   /router (§1: server @[load] + swelte_fetch sibling rows + sync universal load + client router + $app/* + #app/* + $updated stub)
 src/routes/router/live/+page.ts + +page.svelte        /router/live (§1: ssr=false twin — async universal load + <await> streaming, SPA shell)
 src/routes/router/tags/+page.svelte + +page.v          /router/tags (item 1: depends/invalidate/invalidateAll tag registry — pure client, +page.v is a probe arm)
+src/routes/router/enhance/+page.svelte + +page.v        /router/enhance (item 15a: plain <form method=post use:enhance> → page.form publish + reset, no reload)
 src/lib/crypto/hash.v               isomorphic (hash_string @[rpc] → WASM/dev fallback)
 src/app.v                           user lifecycle — @[startup] boot stamp + @[reroute] /old → /router (item 9; inlined into the harness)
 .swelte/server.v                    Hand + static + main() — calls generated routes/swelte_route
@@ -166,6 +167,42 @@ node engine/core/dist/cli.js dev --port 5174 --backend 8131 --root examples/some
   `server.v` (`dist + path` exists → serve with `application/javascript`
   for `.js`, ahead of Accept routing) is the serving path. `svelte.config.js`
   untouched (default OFF).
+- Request hardening proven live (item 10, default binary + env overrides):
+  `?slow&ms=12000` → 500 in ~10s + server alive (`/` → 200 after);
+  `SWELTE_RATE_LIMIT=3` → hits 1–3 are 200, hit 4 → 429 (`count > limit`
+  after increment — set the env BELOW the hit count); cross-origin POST
+  without `SWELTE_CORS_ORIGIN` match → 403 (CORS gate, `server.v:415` —
+  not the `SWELTE_CSRF_CHECK_ORIGIN` knob, which is a second gate);
+  OPTIONS with origin → 204 always; default trailing-slash `ignore` →
+  no redirect (`/router/` → 200); `X-Swelte-Version` absent unless
+  `SWELTE_VERSION` set (`=9.9.9` → header present); `POST
+  ?_method=DELETE` without `SWELTE_METHOD_OVERRIDE=1` → normal dispatch
+  (override OFF by default). Fixed 2026-11-02: the `swelte build` CLI
+  silently no-opped (`import { swelte }` vs default export — generate
+  never ran, exit 0); now falls back to the default export and fails
+  loudly. Also fixed: `@[reroute]` inject assigned immutable `path` —
+  template now declares `mut path`, and the `renderHarness` anchor
+  matches it (previously emitted the "anchor missing" fallback, so
+  `/old` 404'd instead of rewriting to `/router`).
+- SvelteKit remainder closed (item 15): 15a `use:enhance` —
+  `/router/enhance` leaf (`enhance_echo ?echo` POST arm returns the
+  payload as JSON; live curl proves the arm) + plain `<form
+  method=post use:enhance>` asserting `page.form` publish + reset;
+  no-reload is structural (`preventDefault` + fetch, never navigates)
+  and the SDK half is unit-pinned (`enhance` intercept / `applyAction` /
+  cancel in `sdk-errors.test.ts`); SSR guard fixed to scan `<script>`
+  blocks only (markup `use:enhance` no longer a build error). 15b
+  prerender — throwaway `prerender.entries: 'static'` build writes
+  additive `dist/router/live/index.html` (API-only routes like `/about`
+  correctly skipped: no page → no HTML), root `dist/index.html` stays
+  the shell. 15c ISR — `SWELTE_ISR="/router=60"` → `GET /router` HTML
+  200 carries `Cache-Control: public, max-age=0, s-maxage=60` +
+  `X-Swelte-Revalidate: 60`; JSON API untouched; fixed 2026-11-02 (the
+  stamp sat below the SSR/static/shell early returns so it never fired —
+  moved above them). 15e offline — `offline: { fallback: true }` writes
+  `dist/offline.html` (best-effort from first crawled page). All three
+  throwaway knobs reverted after assert (`svelte.config.js` clean).
+  15d targets + 15f export proved earlier (see above).
 - Lifecycle proven (item 9): `src/app.v` ships `@[startup] boot()` (no
   params, `void` — throw aborts boot) + `@[reroute] rewrite(host, path)`
   (`/old` → `/router`, `''` = no-op); generate inlines the bodies into

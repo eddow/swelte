@@ -94,7 +94,12 @@ export async function runBuild(ctx: Ctx): Promise<void> {
 			.join(',')
 	// 1. generate into .swelte/ (routes/*.v + server_gen.v + .swelte/server.v harness).
 	try {
-		const { swelte } = await import('../vite.js')
+		const mod = (await import('../vite.js')) as unknown as {
+			default?: (opts: Record<string, unknown>) => unknown
+			swelte?: (opts: Record<string, unknown>) => unknown
+		}
+		const swelte = mod.default ?? mod.swelte
+		if (typeof swelte !== 'function') throw new Error('vite.js has no swelte export')
 		const plug = swelte({}) as unknown as {
 			buildStart?: () => Promise<void> | void
 			configResolved?: (c: { root: string }) => void
@@ -133,7 +138,12 @@ export async function runBuild(ctx: Ctx): Promise<void> {
 	// .swelte/server.v compile against it. Core-only projects: generate() is
 	// idempotent, no bridge, no QJS. Then rebuild libqjs.a (mtime-guarded).
 	try {
-		const { swelte } = await import('../vite.js')
+		const mod = (await import('../vite.js')) as unknown as {
+			default?: (opts: Record<string, unknown>) => unknown
+			swelte?: (opts: Record<string, unknown>) => unknown
+		}
+		const swelte = mod.default ?? mod.swelte
+		if (typeof swelte !== 'function') throw new Error('vite.js has no swelte export')
 		const plug = swelte({}) as unknown as {
 			buildStart?: () => Promise<void> | void
 			configResolved?: (c: { root: string }) => void

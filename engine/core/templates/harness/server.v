@@ -251,7 +251,8 @@ fn serve_static(dist string, path string) (int, string, string) {
 }
 
 fn (mut app App) before_request(mut ctx Ctx) veb.Result {
-	path := if ctx.req.url.contains('?') { ctx.req.url.all_before('?') } else { ctx.req.url }
+	mut path := if ctx.req.url.contains('?') { ctx.req.url.all_before('?') } else { ctx.req.url }
+	// @[reroute] (src/app.v) may reassign path below — mutable by design.
 	// Roadmap §1.3 `trailingSlash` (+ §1.6 CSRF + §1.6 `_method`): env wins,
 	// like the §11 knobs. `ignore` = today's behavior (no redirect, exact match).
 	trailing_mode := os.getenv_opt('SWELTE_TRAILING_SLASH') or { '' }
@@ -416,6 +417,23 @@ fn (mut app App) before_request(mut ctx Ctx) veb.Result {
 		return ctx.send_response_to_client('application/json', '{"error":"forbidden"}')
 	}
 	dist := os.getenv_opt('SWELTE_DIST') or { '' }
+	// ISR lite (item 15c): stamp early — before the SSR/static/shell early
+	// returns below — so every GET HTML 200 serve path carries the headers,
+	// not just the API-envelope path at the bottom. `set_custom`
+	// accumulates; later `send_response_to_client` calls flush all headers
+	// set so far. Headers only — no background revalidation.
+	// (`wants_html`/`wants_json` are declared further down; the Accept test
+	// is inlined here so the stamp stays above the early returns.)
+	if ctx.req.method == .get && status == 200 {
+		isr_accept := headers['Accept'] or { headers['accept'] or { '' } }
+		if isr_accept.contains('text/html') && !isr_accept.contains('application/json') {
+			seconds := swelte_isr_seconds(path)
+			if seconds > 0 {
+				ctx.res.header.set_custom('Cache-Control', 'public, max-age=0, s-maxage=' + seconds.str()) or {}
+				ctx.res.header.set_custom('X-Swelte-Revalidate', seconds.str()) or {}
+			}
+		}
+	}
 	// Static-first for exact dist files (sw.js, hashed assets): serve the
 	// file regardless of Accept. The SPA-first proxy rule is about ROUTES
 	// (page navigations vs API dispatch) — real files always win so the SW
@@ -558,19 +576,6 @@ fn (mut app App) before_request(mut ctx Ctx) veb.Result {
 		s, ct, sb := serve_static(dist, path)
 		ctx.res.set_status(http.status_from_int(s))
 		return ctx.send_response_to_client(ct, sb)
-	}
-	// ISR lite (specs/sveltekit.md item 3): additive response headers only.
-	// `SWELTE_ISR` = comma list `prefix=seconds` (written by `swelte build`
-	// from the `isr` config; longest prefix wins per request). Stamps
-	// `Cache-Control: public, max-age=0, s-maxage=N` +
-	// `X-Swelte-Revalidate: N` on matching GET HTML 200s. Headers only —
-	// no background revalidation, runtime default unchanged.
-	if ctx.req.method == .get && status == 200 && wants_html && !wants_json {
-		seconds := swelte_isr_seconds(path)
-		if seconds > 0 {
-			ctx.res.header.set_custom('Cache-Control', 'public, max-age=0, s-maxage=' + seconds.str()) or {}
-			ctx.res.header.set_custom('X-Swelte-Revalidate', seconds.str()) or {}
-		}
 	}
 	// API response: Hand translates the SwelteResponse envelope 1:1 into
 	// veb calls (set_status, custom headers, cookies already set above).

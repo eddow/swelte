@@ -261,7 +261,7 @@ export function renderHarness(
 		else src += '\n// @[startup] anchor missing — harness template changed.\n'
 	}
 	if (hooks?.rerouteBody !== undefined) {
-		const anchor = '\tpath := if ctx.req.url.contains'
+		const anchor = 'path := if ctx.req.url.contains'
 		const idx = src.indexOf(anchor)
 		if (idx >= 0) {
 			const lineEnd = src.indexOf('\n', idx)

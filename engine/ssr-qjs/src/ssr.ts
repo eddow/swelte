@@ -487,7 +487,14 @@ export async function assertNoSdkTopLevelCalls(
 		}
 	}
 	if (sdkNames.size === 0) return
-	const { code, lineOf } = stripForScan(src)
+	// Scan script blocks only: markup `use:` directives (e.g. `use:enhance`)
+	// mention SDK names textually but never execute during SSR render (no
+	// DOM in QJS/`generate: 'server'`); only script-scope calls can fire.
+	// Item 15a — without this, every `use:enhance` form is a build error.
+	const scripts = [...src.matchAll(/<script[^>]*>([\s\S]*?)<\/script>/g)]
+		.map((m) => m[1])
+		.join('\n')
+	const { code, lineOf } = stripForScan(scripts === '' ? src : scripts)
 	const at = (idx: number) => `${relFile}:${lineOf(idx)}`
 	for (const m of code.matchAll(/\b([A-Za-z_$][A-Za-z0-9_$]*)\s*\(/g)) {
 		const nm = m[1] as string
