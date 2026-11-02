@@ -1039,6 +1039,10 @@ ${dynHelper}${list(fns, (fn) => {
 	const q = JSON.stringify(fn.qualifier ?? '')
 	const nm = JSON.stringify(fn.name)
 	const attr = JSON.stringify(fn.attr)
+	// SwelteResponse verbs (incl. the (int, string) sugar, same tsret)
+	// resolve the raw envelope { status, headers, cookies, body };
+	// value verbs keep the decoded body.
+	const env = fn.tsret === 'SwelteResponse' ? ', true' : ''
 	if (hasDyn && fn.attr === 'sse')
 		return `export ${kind} ${fn.name}(args = {}) {${stripCall(`yield* __swelteStream(__swelteUrl(args), ${nm}, __swelteArgs, ${q})`)}}
 `
@@ -1049,10 +1053,10 @@ ${dynHelper}${list(fns, (fn) => {
 
 `
 	if (hasDyn)
-		return `export ${kind} ${fn.name}(args = {}) {${stripCall(`return __swelteFetch(__swelteUrl(args), ${nm}, ${attr}, __swelteArgs, ${q})`)}}
+		return `export ${kind} ${fn.name}(args = {}) {${stripCall(`return __swelteFetch(__swelteUrl(args), ${nm}, ${attr}, __swelteArgs, ${q}${env})`)}}
 `
 	return `export ${kind} ${fn.name}(args = {}) {
-	return __swelteFetch(${JSON.stringify(route)}, ${nm}, ${attr}, args, ${q})
+	return __swelteFetch(${JSON.stringify(route)}, ${nm}, ${attr}, args, ${q}${env})
 }
 
 `

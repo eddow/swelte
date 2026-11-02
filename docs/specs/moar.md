@@ -4,6 +4,10 @@ This file tracks TODO only. Built server-lifecycle behavior
 (`@[startup]`, `@[reroute]`) lives in `docs/config.md` +
 `docs/coming-from-sveltekit.md`.
 
+## Use of swelte.contract.json
+
+Review how useful to commit a generated file
+
 ## `src/server.v` — remaining
 
 ```v

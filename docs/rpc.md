@@ -182,7 +182,11 @@ control (passthrough, incl. `Content-Disposition`, `Set-Cookie`).
 `@[rpc]` return kinds are typed values only (struct/string/number/bool/array/map/`?T`): HTTP shapes (`SwelteResponse`/`[]u8`/`(int,string)`) and HTTP params (`SwelteRequest`) are build errors. Binary responses send raw bytes
 with the handler's `Content-Type`; JSON/text send `body` with
 `Content-Type` (default `application/json`). TS stubs branch on
-`Content-Type`: JSON → `json()`, text → `text()`, else `Blob`.
+`Content-Type`: JSON → `json()`, text → `text()`, else `Blob` — except
+verbs returning `SwelteResponse` (or the `(int, string)` sugar, same
+projection), whose stubs resolve the raw envelope
+`{ status, headers, cookies, body }` instead (`body` text for JSON/text,
+`Blob` for binary; the caller parses/branches).
 
 ## Transport
 

@@ -78,7 +78,7 @@ struct out, always `await`).
 `[]T→T[]`, `[]u8→Blob`, `map[string]T→Record<string,unknown>`
 (value type stays opaque — `T` does not cross the TS boundary),
 `time.Time→number` (unix epoch, `json.encode` as-is — decided 2026-10-29),
-`?T→T|null`, `!T` strips to `T` + fallible flag, `SwelteResponse→{ status, headers, cookies, body }`,
+`?T→T|null`, `!T` strips to `T` + fallible flag, `SwelteResponse→{ status, headers, cookies, body }` (stub resolves the raw envelope — `body` is text for JSON/text, `Blob` for binary — so the caller parses/branches; value verbs keep the decoded body),
 `(int, string)→SwelteResponse` (status+text sugar),
 named `UpperCamel` structs pass through 1:1, else `unknown` + warning.
 

@@ -26,6 +26,7 @@ let lastError = $state('')
 let ticks: string[] = $state([])
 
 function showError(e: unknown) {
+	console.error(e)
 	if (e instanceof SwelteRpcError) {
 		lastError = e.message
 	} else {
@@ -61,7 +62,7 @@ async function doLogin() {
 	lastError = ''
 	try {
 		{ const res: SwelteResponse = await login({ payload: name })
-		session = JSON.parse(typeof res.body === 'string' ? res.body : await (res.body as Blob).text()) as Session }
+		session = JSON.parse(typeof res.body === 'string' ? res.body : await (res.body as Blob).text()) as Session } // SwelteResponse envelope: body is raw text for JSON (Blob only on binary CT)
 	} catch (e) {
 		showError(e)
 	}
@@ -88,7 +89,7 @@ async function loadCreated() {
 	lastError = ''
 	try {
 		const res = await make_created({})
-		createdInfo = `created ${res.status}: ${res.body}`
+		createdInfo = `created ${res.status}: ${typeof res.body === 'string' ? res.body : '(binary)'}`
 	} catch (e) {
 		showError(e)
 	}

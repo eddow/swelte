@@ -46,6 +46,48 @@ export class SwelteRpcError extends Error {
 	}
 }
 
+// Client-side mirror of the V `SwelteResponse` envelope (see `docs/types.md`).
+// Verbs returning `SwelteResponse` (or the `(int, string)` sugar, which
+// projects to the same `tsret`) resolve this envelope — NOT the decoded
+// body: `{ status, headers, cookies, body }`, where `body` is the raw text
+// for JSON/text responses and a `Blob` otherwise. Value verbs (plain
+// `string`/struct/`[]u8` returns) keep the old behavior: the decoded body
+// directly (`json()` / `text()` / `blob()` by content-type).
+export interface SwelteCookie {
+	name: string
+	value: string
+	path?: string
+	max_age?: number
+	expires?: string
+	domain?: string
+	secure?: boolean
+	http_only?: boolean
+	same_site?: string
+}
+export interface SwelteResponse {
+	status: number
+	headers: Record<string, string>
+	cookies: SwelteCookie[]
+	body: string | Blob
+	body_bytes?: Uint8Array
+	is_bytes: boolean
+}
+
+async function decodeEnvelope(res: Response): Promise<SwelteResponse> {
+	const ct = (res.headers.get('content-type') ?? '').toLowerCase()
+	const headers: Record<string, string> = {}
+	res.headers.forEach((v, k) => {
+		headers[k] = v
+	})
+	// Mirror decodeBody's content-type branches, but keep the envelope:
+	// text for JSON/text (never res.json() — the caller parses), Blob for
+	// binary. Set-Cookie is never visible to fetch — cookies stays [].
+	if (ct.startsWith('text/') || ct.includes('json') || ct === '') {
+		return { status: res.status, headers, cookies: [], body: await res.text(), is_bytes: false }
+	}
+	return { status: res.status, headers, cookies: [], body: await res.blob(), is_bytes: true }
+}
+
 async function throwForStatus(base: string, fn: string, res: Response): Promise<never> {
 	let raw = ''
 	let body: SwelteErrorShape | null = null
@@ -79,13 +121,19 @@ async function decodeBody<TResult>(base: string, fn: string, res: Response): Pro
 	return (await res.blob()) as unknown as TResult
 }
 
-async function postJson<TResult>(base: string, fn: string, args: object): Promise<TResult> {
+async function postJson<TResult>(
+	base: string,
+	fn: string,
+	args: object,
+	envelope = false
+): Promise<TResult> {
 	const res = await fetch(base, {
 		method: 'POST',
 		headers: { 'content-type': 'application/json', accept: 'application/json' },
 		body: JSON.stringify({ fn, args: args ?? {} }),
 	})
 	if (!res.ok) return throwForStatus(base, fn, res)
+	if (envelope) return (await decodeEnvelope(res)) as unknown as TResult
 	return decodeBody<TResult>(base, fn, res)
 }
 
@@ -94,7 +142,8 @@ async function getVerb<TResult>(
 	fn: string,
 	method: string,
 	qualifier: string,
-	args: object
+	args: object,
+	envelope = false
 ): Promise<TResult> {
 	const q = qualifier ? `?q=${encodeURIComponent(qualifier)}` : ''
 	const res = await fetch(`${base}${q}${encodeQuery(args ?? {}).replace(/^\?/, q ? '&' : '?')}`, {
@@ -102,6 +151,7 @@ async function getVerb<TResult>(
 		headers: { accept: 'application/json' },
 	})
 	if (!res.ok) return throwForStatus(base, fn, res)
+	if (envelope) return (await decodeEnvelope(res)) as unknown as TResult
 	return decodeBody<TResult>(base, fn, res)
 }
 
@@ -110,7 +160,8 @@ async function postForm<TResult>(
 	fn: string,
 	method: string,
 	qualifier: string,
-	args: object
+	args: object,
+	envelope = false
 ): Promise<TResult> {
 	const q = qualifier ? `?q=${encodeURIComponent(qualifier)}` : ''
 	// §13 uploads: File/Blob values go multipart (browser sets the boundary);
@@ -140,6 +191,7 @@ async function postForm<TResult>(
 			body: fd,
 		})
 		if (!res.ok) return throwForStatus(base, fn, res)
+		if (envelope) return (await decodeEnvelope(res)) as unknown as TResult
 		return res.json()
 	}
 	const params = new URLSearchParams()
@@ -153,6 +205,7 @@ async function postForm<TResult>(
 		body: params.toString(),
 	})
 	if (!res.ok) return throwForStatus(base, fn, res)
+	if (envelope) return (await decodeEnvelope(res)) as unknown as TResult
 	return decodeBody<TResult>(base, fn, res)
 }
 
@@ -168,13 +221,14 @@ export async function __swelteFetch<TResult>(
 	fn: string,
 	kind: 'rpc' | 'get' | 'post' | 'put' | 'delete' | 'patch',
 	args: object = {},
-	qualifier = ''
+	qualifier = '',
+	envelope = false
 ): Promise<TResult> {
-	if (kind === 'rpc') return postJson<TResult>(base, fn, args)
+	if (kind === 'rpc') return postJson<TResult>(base, fn, args, envelope)
 	if (kind === 'get' || kind === 'put' || kind === 'delete' || kind === 'patch') {
-		return getVerb<TResult>(base, fn, kind.toUpperCase(), qualifier, args)
+		return getVerb<TResult>(base, fn, kind.toUpperCase(), qualifier, args, envelope)
 	}
-	return postForm<TResult>(base, fn, 'POST', qualifier, args)
+	return postForm<TResult>(base, fn, 'POST', qualifier, args, envelope)
 }
 
 /**

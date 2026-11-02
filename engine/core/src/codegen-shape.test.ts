@@ -33,6 +33,19 @@ describeGoldens('item 4 — literal golden strings for jsFetchFor/jsWasmFor', ()
 		assertGolden.equal(got, want)
 	})
 
+	itGolden('jsFetchFor SwelteResponse verb passes envelope=true; value verb does not', () => {
+		const got = jsFetchForGolden('/api/greet', [
+			goldenFn({ name: 'login', attr: 'post', tsret: 'SwelteResponse', vret: 'SwelteResponse' }),
+			goldenFn({ name: 'get_greeting', attr: 'get', tsret: 'string', vret: 'string' }),
+		])
+		assertGolden.ok(got.includes('__swelteFetch("/api/greet", "login", "post", args, "", true)')
+			, got)
+		assertGolden.ok(got.includes('__swelteFetch("/api/greet", "get_greeting", "get", args, "")')
+			, got)
+		assertGolden.ok(!got.includes('get_greeting", "get", args, "", true)')
+		, got)
+	})
+
 	itGolden('jsFetchFor verb + rpc + sse + qualifier: transports stay distinct', () => {
 		const got = jsFetchForGolden('/api/greet', [
 			goldenFn({ name: 'login', attr: 'rpc' }),

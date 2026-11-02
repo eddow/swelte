@@ -73,6 +73,28 @@ describe('SDK error contract', () => {
 		void r1
 	})
 
+	it('SwelteResponse verbs resolve the envelope (JSON text + binary Blob)', async () => {
+		let calls = 0
+		globalThis.fetch = (async () => {
+			calls++
+			if (calls === 2)
+				return new Response(new Blob(['PDF'], { type: 'application/pdf' }), { status: 200, headers: { 'content-type': 'application/pdf' } })
+			if (calls === 3)
+				return new Response(JSON.stringify('hi'), { status: 200, headers: { 'content-type': 'application/json' } })
+			return new Response(JSON.stringify({ id: 'sess_x' }), { status: 201, headers: { 'content-type': 'application/json' } })
+		}) as typeof fetch
+		const login = await __swelteFetch<{ status: number; body: unknown }>('/api/greet', 'login', 'post', {}, '', true)
+		assert.equal(login.status, 201)
+		assert.equal(JSON.parse(login.body as string).id, 'sess_x')
+		const pdf = await __swelteFetch<{ status: number; body: unknown; is_bytes: boolean }>('/api/greet', 'serve_pdf', 'get', {}, 'pdf', true)
+		assert.equal(pdf.status, 200)
+		assert.equal(pdf.is_bytes, true)
+		assert.ok(pdf.body instanceof Blob)
+		// value verbs are unaffected: decoded body directly
+		const val = await __swelteFetch<string>('/api/greet', 'get_greeting', 'get', {}, '', false)
+		assert.equal(val, 'hi')
+	})
+
 	it('wasm fallback map hit without fetch', async () => {
 		__registerLibFallback('pure_add', (args) => (args['a'] as number) + 1)
 		const v = await __swelteWasmCall<number>('/nope.wasm', 'main.pure_add', { a: 1 }, [], 'int')
