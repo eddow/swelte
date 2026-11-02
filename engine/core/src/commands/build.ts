@@ -3,6 +3,11 @@
 // Roadmap §6: prod WASM bundle compiles in the plugin's generateBundle
 // hook (`v -b wasm -os browser` → dist/assets/app_lib-*.wasm, exactly
 // one *.wasm in dist/assets/ — the [swelte] log line proves it).
+// Cross-build: `swelte build --target-os <os>` (linux|macos|windows,
+// also SWELTE_TARGET_OS / swelte.targetOs) passes `-os <os>` to the
+// `v -o` link; smoke probe + prerender crawl skip (foreign binary can't
+// boot — assert artifacts only). WASM untouched (always `-os browser`);
+// QJS embed fails fast unless a per-OS libqjs-<os>.a exists.
 import { execFileSync } from 'node:child_process'
 import { existsSync, readdirSync, statSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
@@ -71,13 +76,28 @@ export async function runBuild(ctx: Ctx): Promise<void> {
 	const outBinary = String(ctx.opts.output ?? join(root, 'dist', 'server'))
 	const targetFlag = String(ctx.opts.target ?? '').toLowerCase()
 	let targetIsrHeaders: Record<string, string> = {}
-	const { resolveV, vVersion, toolchainEnv, resolveCC } = await import('../toolchain.js')
+	const { resolveV, vVersion, toolchainEnv, resolveCC, resolveTargetOs, hostTargetOs, vOsArgs } =
+		await import('../toolchain.js')
 	const { loadConfig } = await import('../gen/config.js')
 	const v = resolveV(import.meta.url)
 	ctx.log(`V toolchain: ${vVersion(v)} (${v})`)
 	ctx.log(`root ${root}`)
 	const cfg = await loadConfig(root)
 	const genAbs = join(root, cfg.outDir)
+	// Cross-build OS (build-only): CLI wins, SWELTE_TARGET_OS middle,
+	// `swelte.targetOs` config last. Host-native = '' (no -os flag).
+	// WASM untouched: plugin always uses `-os browser`. dev/preview/test
+	// stay host-native (this flag is build-only).
+	const crossOs = ctx.opts['target-os'] ?? ctx.opts.targetOs
+	const targetOs = resolveTargetOs({ cli: crossOs, config: cfg.targetOs })
+	const cross = targetOs !== ''
+	if (cross) {
+		ctx.log(`target OS: ${targetOs} (host ${hostTargetOs()} — smoke probe skipped, artifacts only)`)
+		// Forward to adapter generateBundle passes (QJS link): env wins in
+		// the precedence chain, so publish the resolved OS for any
+		// downstream reader that only sees env.
+		process.env.SWELTE_TARGET_OS = targetOs
+	}
 	// Item pass-through: build env for the smoke probe — config knobs
 	// become env when not already set (same env-wins rule as §11).
 	if (!process.env.SWELTE_TRAILING_SLASH && cfg.trailingSlash !== 'ignore')
@@ -166,14 +186,30 @@ export async function runBuild(ctx: Ctx): Promise<void> {
 	try {
 		const { existsSync } = await import('node:fs')
 		if (existsSync(join(genAbs, 'routes', 'swelte_qjs_bridge.v'))) {
+			// QJS embed is the hard part of cross-build: libqjs.a is
+			// prebuilt for the HOST. Needs per-OS prebuilt
+			// (libqjs-<os>.a) or from-source compile under the target
+			// cc. A host-prebuilt archive silently links the wrong ABI,
+			// so cross + bridge = fail fast. Core-only projects cross
+			// trivially today. The adapter publishes per-OS archives as
+			// `.swelte/qjs/libqjs-<os>.a` (bridge `#flag`s that name);
+			// until then this guard stays.
+			if (cross && !existsSync(join(genAbs, 'qjs', `libqjs-${targetOs}.a`))) {
+				throw new Error(
+					`cross-build --target-os ${targetOs} with QJS embed: no per-OS archive at .swelte/qjs/libqjs-${targetOs}.a ` +
+						`(only the host-prebuilt libqjs.a exists, which would link the wrong ABI). ` +
+						`Remove the SSR bridge for a core-only cross, or rebuild libqjs.a under the target cc.`
+				)
+			}
 			vExtra = ['-enable-globals', '-cc', resolveCC()]
 			ctx.log(`QJS embed: -enable-globals -cc ${vExtra[vExtra.length - 1]} (bridge present)`)
 		}
-	} catch {
-		/* core-only */
+	} catch (e) {
+		/* core-only — unless it's our cross guard above */
+		if ((e as Error).message?.includes('cross-build --target-os')) throw e
 	}
 	try {
-		execFileSync(v, ['-o', outBinary, ...vExtra, join(genAbs, 'server.v')], {
+		execFileSync(v, [...vOsArgs(targetOs), '-o', outBinary, ...vExtra, join(genAbs, 'server.v')], {
 			cwd: root,
 			stdio: ['ignore', 'pipe', 'pipe'],
 			env: toolchainEnv(),
@@ -191,69 +227,80 @@ export async function runBuild(ctx: Ctx): Promise<void> {
 	// GETs each crawl URL with browser Accept, writes 200 HTML to
 	// `dist/<route>/index.html` (root → `dist/index.html` stays the shell).
 	// Runtime/SPA-first defaults unchanged; probes/JSON untouched.
-	try {
-		const { runPrerender } = await import('./prerender.js')
-		await runPrerender(root, outBinary, cfg as unknown as Record<string, unknown>, {
-			log: ctx.log,
-			onIsrHeaders: (headers) => {
-				targetIsrHeaders = headers
-			},
-		})
-	} catch (e) {
-		throw new Error(`prerender failed: ${(e as Error).message}`)
+	// Cross-build: the foreign binary can't boot on this host — skip the
+	// crawl (assert artifacts only), like the smoke probe below.
+	if (cross) {
+		ctx.log('prerender: skipped (cross-build target != host — foreign binary cannot boot)')
+	} else {
+		try {
+			const { runPrerender } = await import('./prerender.js')
+			await runPrerender(root, outBinary, cfg as unknown as Record<string, unknown>, {
+				log: ctx.log,
+				onIsrHeaders: (headers) => {
+					targetIsrHeaders = headers
+				},
+			})
+		} catch (e) {
+			throw new Error(`prerender failed: ${(e as Error).message}`)
+		}
 	}
 	// 5. Smoke: boot the binary, probe page + API, stop. Engine-agnostic:
 	// static shell + JSON only. SSR HTML is the adapter's proof (its own
 	// check boots the sidecar + asserts markers) — core never imports or
 	// starts an engine. If SWELTE_SSR_URL happens to be set in the env,
 	// Hand will proxy (its contract), but core sets nothing.
-	const probePort = takePort(ctx.opts.port, 4173)
-	await killPort(probePort, ctx.log)
-	const hasGreetRoute =
-		existsSync(join(root, cfg.routesDir, 'api', 'greet.v')) ||
-		existsSync(join(root, cfg.routesDir, 'api', 'greet', '+page.v')) ||
-		existsSync(join(root, cfg.routesDir, 'api', 'greet', 'index.v'))
-	const child = (await import('node:child_process')).spawn(outBinary, [], {
-		cwd: root,
-		env: {
-			...process.env,
-			PORT: String(probePort),
-			SWELTE_DIST: 'dist',
-		},
-		stdio: ['ignore', 'pipe', 'pipe'],
-	})
-	let logged = ''
-	child.on('error', (e: Error) => {
-		logged += `\nspawn failed: ${(e as Error).message}`
-	})
-	child.stderr?.on('data', (d: Buffer) => {
-		logged += d.toString()
-	})
-	child.stdout?.on('data', (d: Buffer) => {
-		logged += d.toString()
-	})
-	try {
+	// Cross-build: foreign binary can't boot — assert artifacts only.
+	if (cross) {
+		ctx.log(`build done: ${outBinary} + dist/ (cross ${targetOs}, smoke skipped)`)
+	} else {
+		const probePort = takePort(ctx.opts.port, 4173)
+		await killPort(probePort, ctx.log)
+		const hasGreetRoute =
+			existsSync(join(root, cfg.routesDir, 'api', 'greet.v')) ||
+			existsSync(join(root, cfg.routesDir, 'api', 'greet', '+page.v')) ||
+			existsSync(join(root, cfg.routesDir, 'api', 'greet', 'index.v'))
+		const child = (await import('node:child_process')).spawn(outBinary, [], {
+			cwd: root,
+			env: {
+				...process.env,
+				PORT: String(probePort),
+				SWELTE_DIST: 'dist',
+			},
+			stdio: ['ignore', 'pipe', 'pipe'],
+		})
+		let logged = ''
+		child.on('error', (e: Error) => {
+			logged += `\nspawn failed: ${(e as Error).message}`
+		})
+		child.stderr?.on('data', (d: Buffer) => {
+			logged += d.toString()
+		})
+		child.stdout?.on('data', (d: Buffer) => {
+			logged += d.toString()
+		})
 		try {
-			await probeSmoke(probePort, hasGreetRoute, ctx.log)
-		} catch (e) {
-			throw new Error(`${(e as Error).message}\n${logged}`)
+			try {
+				await probeSmoke(probePort, hasGreetRoute, ctx.log)
+			} catch (e) {
+				throw new Error(`${(e as Error).message}\n${logged}`)
+			}
+		} finally {
+			try {
+				child.kill('SIGTERM')
+			} catch {
+				/* ignore */
+			}
+			await new Promise((r) => setTimeout(r, 800))
+			try {
+				child.kill('SIGKILL')
+			} catch {
+				/* ignore */
+			}
+			// Best-effort port cleanup (Linux-only tool — skip elsewhere).
+			await killPort(probePort, () => {})
 		}
-	} finally {
-		try {
-			child.kill('SIGTERM')
-		} catch {
-			/* ignore */
-		}
-		await new Promise((r) => setTimeout(r, 800))
-		try {
-			child.kill('SIGKILL')
-		} catch {
-			/* ignore */
-		}
-		// Best-effort port cleanup (Linux-only tool — skip elsewhere).
-		await killPort(probePort, () => {})
+		ctx.log(`build done: ${outBinary} + dist/`)
 	}
-	ctx.log(`build done: ${outBinary} + dist/`)
 	// 6. Target shim (packaging only): `--target` flag wins, else config.
 	writeTargetShim(
 		root,

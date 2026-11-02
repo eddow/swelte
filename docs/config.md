@@ -30,6 +30,7 @@ export default defineConfig({
     prerender: { entries: 'off', concurrency: 4 }, // 'off' | 'static' | 'all' → entries.json + dist/*.html
     isr: {},                  // { '/blog': 60 } → Cache-Control s-maxage + X-Swelte-Revalidate
     target: 'auto',           // 'auto' | 'static' | 'node' | 'edge' — packaging only
+    targetOs: '',             // '' (host) | 'linux' | 'macos' | 'windows' — `v -o -os` cross (build-only; CLI --target-os wins, $SWELTE_TARGET_OS middle)
     offline: { fallback: 'off' }, // 'off' | 'offline.html' | custom — SW precache + dist file
   },
 });

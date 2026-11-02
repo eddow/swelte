@@ -38,17 +38,21 @@ TODO:
 
 ## Cross-build (`swelte build --target-os`)
 
-TODO: `swelte build [--target-os <os>]` (`linux`|`macos`|`windows`)
+Built: `swelte build [--target-os <os>]` (`linux`|`macos`|`windows`)
 + `targetOs?` in the `swelte` config key (CLI flag wins, env
 `SWELTE_TARGET_OS` middle, config fallback):
 
-* `build.ts` passes `-os <os>` to the `v -o` link. Smoke probe skips
-  when target != host (foreign binary can't boot) — assert artifacts only.
+* `build.ts` passes `-os <os>` to the `v -o` link. Smoke probe +
+  prerender crawl skip when target != host (foreign binary can't boot)
+  — assert artifacts only.
 * QJS embed is the hard part: `libqjs.a` is prebuilt for the HOST.
-  Needs per-OS prebuilt (`libqjs-<os>.a`) or from-source QJS compile
-  under the target cc. Core-only projects cross trivially today.
+  Needs per-OS prebuilt (`libqjs-<os>.a` at `.swelte/qjs/`) or
+  from-source QJS compile under the target cc — until then cross +
+  bridge fails fast (host archive would link the wrong ABI).
+  Core-only projects cross trivially today.
 * WASM untouched: always `-os browser`.
-* `dev`/`preview`/`test` stay host-native — flag is `build`-only.
+* `dev`/`preview`/`test` stay host-native — flag is `build`-only
+  (rejected as unknown option elsewhere).
 
 ## Open decisions
 

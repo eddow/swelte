@@ -41,6 +41,49 @@ export function resolveCC(): string {
 	return 'gcc'
 }
 
+/** Cross-build OS (`swelte build --target-os`): V `-os` values. */
+export type SwelteTargetOs = 'linux' | 'macos' | 'windows'
+
+/** Host OS in V `-os` vocabulary (`process.platform` mapped). */
+export function hostTargetOs(): SwelteTargetOs {
+	if (process.platform === 'win32') return 'windows'
+	if (process.platform === 'darwin') return 'macos'
+	return 'linux'
+}
+
+/** Lenient normalize for the `swelte.targetOs` config key: known OS
+ * (case-insensitive) or `''` (= host-native). Unknown/empty → `''`
+ * (config never throws — CLI/env validation reports bad values). */
+export function normalizeTargetOs(raw: unknown): SwelteTargetOs | '' {
+	const v = String(raw ?? '').trim().toLowerCase()
+	if (v === 'linux' || v === 'macos' || v === 'windows') return v
+	return ''
+}
+
+/** Strict assert for CLI/env values: throws listing the valid set. */
+export function assertTargetOs(raw: unknown, where: string): SwelteTargetOs {
+	const v = String(raw ?? '').trim().toLowerCase()
+	if (v === 'linux' || v === 'macos' || v === 'windows') return v
+	throw new Error(`invalid ${where} '${String(raw)}' (want linux|macos|windows)`)
+}
+
+/** Precedence: CLI flag wins, `SWELTE_TARGET_OS` middle, config fallback.
+ * Returns `''` for host-native (nothing passed). CLI/env values are
+ * strict (unknown throws); config is lenient (unknown → host). */
+export function resolveTargetOs(opts: { cli?: unknown; env?: unknown; config?: unknown }): SwelteTargetOs | '' {
+	const cli = String(opts.cli ?? '').trim()
+	if (cli !== '') return assertTargetOs(cli, '--target-os')
+	const env = String(opts.env ?? process.env.SWELTE_TARGET_OS ?? '').trim()
+	if (env !== '') return assertTargetOs(env, 'SWELTE_TARGET_OS')
+	return normalizeTargetOs(opts.config)
+}
+
+/** `v -o` flag slice for the target OS: `['-os', os]` or `[]` (host). */
+export function vOsArgs(targetOs: SwelteTargetOs | '' | unknown): string[] {
+	const t = normalizeTargetOs(targetOs)
+	return t === '' ? [] : ['-os', t]
+}
+
 export function whichV(): string {
 	try {
 		const probe = process.platform === 'win32' ? 'where' : 'which'

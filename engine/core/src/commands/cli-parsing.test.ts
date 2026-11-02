@@ -65,4 +65,20 @@ describe('CLI parsing', () => {
 		const dev = findCommand('dev')!
 		assert.throws(() => parseArgs(dev, ['--nope']), /unknown option/)
 	})
+
+	it('build --target-os parses (cross-build is build-only)', () => {
+		const build = findCommand('build')!
+		const { opts } = parseArgs(build, ['--target-os', 'macos'])
+		assert.equal(opts['target-os'], 'macos')
+		const { opts: eq } = parseArgs(build, ['--target-os=windows'])
+		assert.equal(eq['target-os'], 'windows')
+		// no short flag: -t stays the deploy-target shim
+		const { opts: t } = parseArgs(build, ['-t', 'node'])
+		assert.equal(t.target, 'node')
+		assert.equal(t['target-os'], undefined)
+		// dev/preview/test reject it (build-only)
+		for (const n of ['dev', 'preview', 'test']) {
+			assert.throws(() => parseArgs(findCommand(n)!, ['--target-os', 'linux']), /unknown option/)
+		}
+	})
 })

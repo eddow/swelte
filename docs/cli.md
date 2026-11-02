@@ -3,9 +3,9 @@
 Built behavior. Every command resolves the V toolchain itself
 (system `v`, else `@swelte/vvm` — no manual install). Subcommand list
 is closed: `dev` / `build` / `preview` / `test` / `check` / `init` /
-`export` (+ `--help` / `--version`). No aliases — `build --target-os` /
-`--targetOs` are rejected as unknown options (cross-build is open work,
-see `specs/moar.md`); use the documented `--target` deploy shim.
+`export` (+ `--help` / `--version`). No aliases — the documented
+`--target` is the deploy-target shim; `--target-os` is the cross-build
+OS (build-only, see below).
 
 ## `swelte dev [--port N] [--backend N] [--root dir]`
 
@@ -18,7 +18,7 @@ passes the CSRF guard; config knobs forward to env (env wins when set).
 so idle `dev` stays quiet (no phantom HMR), and the watcher ignores
 `.swelte/` output — regenerating never re-triggers itself.
 
-## `swelte build [--root dir] [--output path] [--port N] [--target auto|static|node|edge]`
+## `swelte build [--root dir] [--output path] [--port N] [--target auto|static|node|edge] [--target-os linux|macos|windows]`
 
 1. `generate()` into `.swelte/` (`routes/*.v` + `server_gen.v` +
    `.swelte/server.v` harness). Emits dev `.swelte/dev/<mod>.wasm` per file
@@ -34,11 +34,16 @@ so idle `dev` stays quiet (no phantom HMR), and the watcher ignores
    Rebuild `libqjs.a` (mtime-guarded).
 4. `v -o dist/server .swelte/server.v` (single artifact; QJS projects
    add `-enable-globals -cc <system-gcc>`).
+   Cross-build: `--target-os <os>` (CLI wins, `SWELTE_TARGET_OS` env
+   middle, `swelte.targetOs` config last) prepends `-os <os>` to the
+   link. Unknown CLI/env value = build error (`linux|macos|windows`
+   only); unknown config value falls back to host-native.
 5. Prerender crawl (only when `prerender.entries` is `static`|`all`):
    boot the binary on an ephemeral port, GET each crawl URL, write
    additive `dist/<route>/index.html` (root `/` shell never
    overwritten). `isr` freezes to `SWELTE_ISR` for this env.
    Offline `fallback` file written best-effort from the first page.
+   Cross-build: skipped (foreign binary can't boot).
 6. Target shim (packaging only): `--target` wins, else `swelte.target`
    (`static` → `dist/.swelte-static`, `node` →
    `dist/Dockerfile.swelte`, `edge` → `dist/_headers`).
@@ -46,6 +51,14 @@ so idle `dev` stays quiet (no phantom HMR), and the watcher ignores
    exists), stop. Static shell + JSON only — SSR HTML is the adapter's
    proof, core never starts an engine. `SWELTE_SSR_URL` in the env is
    honored by `Hand` but core sets nothing.
+   Cross-build: skipped — the foreign binary can't boot on this host,
+   so the build asserts artifacts only (`dist/` + binary exist).
+   Core-only projects cross trivially today; with a QJS embed the build
+   fails fast unless a per-OS `.swelte/qjs/libqjs-<os>.a` exists (the
+   host-prebuilt `libqjs.a` would link the wrong ABI — needs a per-OS
+   prebuilt or a from-source QJS compile under the target cc).
+   WASM is untouched by `--target-os` (always `-os browser`), and
+   `dev`/`preview`/`test` stay host-native (the flag is build-only).
 
 ## `swelte test [--root dir] [--update-snapshot | -u]`
 

@@ -95,17 +95,30 @@ describe('config normalization (tmp roots)', () => {
 		assert.equal(off.prerender.concurrency, 4)
 		assert.deepEqual(off.isr, {})
 		assert.equal(off.target, 'auto')
+		assert.equal(off.targetOs, '')
 		assert.equal(off.offline.fallback, 'off')
 		writeFileSync(
 			join(root, 'svelte.config.js'),
-			`export default { swelte: { prerender: { entries: 'all', concurrency: 2 }, isr: { '/blog': 60, '/x': -1 }, target: 'node', offline: { fallback: true } } }`
+			`export default { swelte: { prerender: { entries: 'all', concurrency: 2 }, isr: { '/blog': 60, '/x': -1 }, target: 'node', targetOs: 'macos', offline: { fallback: true } } }`
 		)
 		const on = await loadConfig(root)
 		assert.equal(on.prerender.entries, 'all')
 		assert.equal(on.prerender.concurrency, 2)
 		assert.deepEqual(on.isr, { '/blog': 60 })
 		assert.equal(on.target, 'node')
+		assert.equal(on.targetOs, 'macos')
 		assert.equal(on.offline.fallback, 'offline.html')
+	})
+
+	it('cross-build targetOs normalizes (case-insensitive, bad -> host)', async () => {
+		const root = mkdtempSync(join(tmpdir(), 'swelte-cfg-'))
+		writeFileSync(join(root, 'svelte.config.js'), `export default { swelte: { targetOs: 'Windows' } }`)
+		const cfg = await loadConfig(root)
+		assert.equal(cfg.targetOs, 'windows')
+		const root2 = mkdtempSync(join(tmpdir(), 'swelte-cfg-'))
+		writeFileSync(join(root2, 'svelte.config.js'), `export default { swelte: { targetOs: 'plan9' } }`)
+		const bad = await loadConfig(root2)
+		assert.equal(bad.targetOs, '')
 	})
 
 	it('bad prerender/target/offline fall back to defaults', async () => {

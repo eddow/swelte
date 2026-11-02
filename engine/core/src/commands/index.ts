@@ -32,6 +32,11 @@ const buildCmd: Command = {
 		{ name: 'output', short: 'o', help: 'Server binary output path', value: 'string' },
 		{ name: 'port', short: 'p', help: 'Smoke-probe port', value: 'number' },
 		{ name: 'target', short: 't', help: 'Deploy target shim: auto | static | node | edge', value: 'string' },
+		{
+			name: 'target-os',
+			help: 'Cross-build OS: linux | macos | windows (also SWELTE_TARGET_OS, swelte.targetOs)',
+			value: 'string',
+		},
 	],
 	async run(ctx: Ctx) {
 		await runBuild(ctx)

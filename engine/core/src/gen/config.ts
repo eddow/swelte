@@ -48,6 +48,15 @@ export interface SwelteOptions {
 	/** Deploy-target shims (packaging only, no Node runtime). `static`
 	 *  asserts no `dist/server` consumer is needed... (see normalize). */
 	target?: 'auto' | 'static' | 'node' | 'edge'
+	/** Cross-build OS (`swelte build --target-os` fallback). `linux` |
+	 *  `macos` | `windows` — passed as `-os <os>` to the `v -o` server
+	 *  link. Unset = host-native. CLI flag wins, `SWELTE_TARGET_OS` env
+	 *  middle, this config last. `build`-only: `dev`/`preview`/`test`
+	 *  stay host-native. QJS projects cross trivially only when
+	 *  core-only: an embedded QuickJS bridge needs a per-OS
+	 *  `libqjs-<os>.a` (host-prebuilt `libqjs.a` mismatch = build error).
+	 *  WASM untouched: always `-os browser`. */
+	targetOs?: 'linux' | 'macos' | 'windows' | string
 	/** Offline fallback page (opt-in service worker remainder): precached
 	 *  `dist/offline.html` served by `sw.js` on navigation failure. */
 	offline?: SwelteOfflineOptions
@@ -73,10 +82,12 @@ export interface SwelteOfflineOptions {
 
 /** Resolved config: optionals filled, nested unions widened so `Required`
  *  stays sound (TS `Required` does not distribute into nested optionals). */
-export interface ResolvedSwelteOptions extends Omit<Required<SwelteOptions>, 'prerender' | 'offline' | 'target'> {
+export interface ResolvedSwelteOptions extends Omit<Required<SwelteOptions>, 'prerender' | 'offline' | 'target' | 'targetOs'> {
 	prerender: { entries: 'static' | 'all' | 'off'; concurrency: number }
 	offline: { fallback: string }
 	target: 'auto' | 'static' | 'node' | 'edge'
+	/** Cross-build OS: `linux` | `macos` | `windows` or `''` (= host-native). */
+	targetOs: 'linux' | 'macos' | 'windows' | ''
 }
 
 /** Build the project config: `preprocess` + friends stay enumerable for the
@@ -134,6 +145,7 @@ function normalize(raw: SwelteOptions | null | undefined): ResolvedSwelteOptions
 		prerender: normalizePrerender(r.prerender),
 		isr: normalizeIsr(r.isr),
 			target: normalizeTarget(r.target),
+		targetOs: normalizeTargetOs(r.targetOs),
 		offline: normalizeOffline(r.offline),
 	} as ResolvedSwelteOptions
 }
@@ -162,6 +174,14 @@ function normalizeIsr(raw: SwelteOptions['isr']): Record<string, number> {
 function normalizeTarget(raw: SwelteOptions['target']): ResolvedSwelteOptions['target'] {
 	if (raw === 'static' || raw === 'node' || raw === 'edge') return raw
 	return 'auto'
+}
+
+/** Lenient `swelte.targetOs` normalize: known OS (case-insensitive) or
+ * `''` (= host-native). Never throws — CLI/env validation reports. */
+function normalizeTargetOs(raw: SwelteOptions['targetOs']): ResolvedSwelteOptions['targetOs'] {
+	const v = String(raw ?? '').trim().toLowerCase()
+	if (v === 'linux' || v === 'macos' || v === 'windows') return v
+	return ''
 }
 
 function normalizeOffline(raw: SwelteOptions['offline']): { fallback: string } {

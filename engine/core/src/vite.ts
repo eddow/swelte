@@ -74,6 +74,11 @@ export interface SweltePluginOptions {
 	offline?: { fallback?: boolean | string }
 	/** Deploy target shim (packaging only): 'auto' (default) | 'static' | 'node' | 'edge'. */
 	target?: 'auto' | 'static' | 'node' | 'edge'
+	/** Cross-build OS passthrough (`swelte build --target-os` fallback).
+	 *  Accepted but unused by generate/vite: the `v -o -os` link is
+	 *  build.ts-owned (WASM always `-os browser`). Present so inline
+	 *  plugin options never leak an "unknown option" warning. */
+	targetOs?: string
 }
 
 /** Re-export the unified config type + helper so projects can
