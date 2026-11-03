@@ -2,7 +2,9 @@
  *
  *  Split from a single 4,838-line module into `vite/*` by concern;
  *  this barrel preserves the exact public surface (`./vite.js` output,
- *  `@swelte/core/vite` subpath, `dist/vite.d.ts`).
+ *  `@swelte/core/vite` subpath, `dist/vite.d.ts`), plus four
+ *  additive chunking helpers promoted from private scope:
+ *  `assertChunkHint`, `chunkKeyFor`, `readChunkHint`, `WrapperMw`.
  */
 
 export type { SwelteConfig, SwelteOptions } from './gen/config.js'
@@ -12,6 +14,8 @@ export { dynSegPattern, loadMatchers, transpileMatcherBody } from './vite/matche
 export { narrowArgParts, narrowCall, parseStructs, parseVFile, tsTypeFor } from './vite/parse.js'
 export { swelte, swelte as default } from './vite/plugin.js'
 export {
+	assertChunkHint,
+	chunkKeyFor,
 	collectPrerenderEntries,
 	collectSvelteManifest,
 	dynSegMatcher,
@@ -19,6 +23,7 @@ export {
 	dynSegPatternGlobal,
 	isStaticRoute,
 	modulePath,
+	readChunkHint,
 	relPosix,
 	routeFor,
 	routeParams,

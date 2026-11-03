@@ -70,6 +70,20 @@ describe('SDK error contract', () => {
 		)
 	})
 
+	it('HTML shell error hints at dist/index.html instead of bare parse failure', async () => {
+		const shell = '<!doctype html><html><head></head><body><div id="app"></div></body></html>'
+		globalThis.fetch = (async () => new Response(shell, { status: 200 })) as typeof fetch
+		// getVerb/postForm decode on 2xx; force the error path via a 404 shell
+		globalThis.fetch = (async () => new Response(shell, { status: 404 })) as typeof fetch
+		await assert.rejects(
+			() => __swelteFetch('/b', 'fn', 'get', {}),
+			(e: unknown) => {
+				const err = e as SwelteRpcError
+				return err instanceof SwelteRpcError && err.message.includes('dist/index.html')
+			}
+		)
+	})
+
 	it('loadPage maps SwelteRpcError -> { error } and non-RPC -> 500', async () => {
 		const r1 = await loadPage(() => __swelteFetch('/b', 'f', 'rpc', {}))
 		// fetch mock above persists per-test; set a failing fetch here:

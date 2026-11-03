@@ -297,9 +297,9 @@ pub fn add(a int, b int) int {
 	return root
 }
 
-async function generate(root: string): Promise<void> {
+async function generate(root: string, opts: Record<string, unknown> = {}): Promise<void> {
 	const { swelte } = await import('./vite.js')
-	const plug = swelte({}) as unknown as {
+	const plug = swelte(opts) as unknown as {
 		configResolved?: (c: { root: string }) => void
 		buildStart?: () => Promise<void>
 	}
@@ -485,15 +485,18 @@ describe('codegen shape snapshots (fetch/SSE/dispatcher)', () => {
 		// No remount fallback: wrapper routes hydrate through the chain.
 		assert.ok(!js.includes('nested hydrate falls back to mount'), js.slice(0, 500))
 		assert.ok(
-			js.includes('hydrate(r.wrappers[0], { target, props: { params, children: child } })'),
+			js.includes('hydrate(__rc0.wrappers[0], { target, props: { params, children: child } })'),
 			js.slice(0, 3000)
 		)
 		// Emitted matcher regex keeps its escapes (parse check, not string match).
 		assert.ok(js.includes('/^\\[([A-Za-z_]'), 'matcher regex escapes lost in emit')
 		// The emit must parse: catches unbalanced-escape regressions at generate time.
 		// Component imports are stubbed (shape check only — real modules need Vite).
+		// Lazy emits `const __swelteLoad_x = () => import(...)`; single emits
+		// static `import` lines — strip both before the module-parse check.
 		const stubbed = js
 			.replace(/^import .*$/gm, '// stripped')
+			.replace(/^const (__swelteLoad_\w+) = \(\) => import\(.*\)$/gm, 'const $1 = 0;')
 			.replace(
 				'const ROUTES = [',
 				'const R_admin__page_Page = 0;\nconst R_admin__route_Wrap = 1;\nconst SwelteErrorPage = 2;\nconst ROUTES = ['
@@ -690,8 +693,9 @@ describe('item 11 — codegen golden project (sample-overlay variant + routes.js
 			await generate(root)
 			const js = readFileSync(join(root, '.swelte', 'routes.js'), 'utf8')
 			// 1. ROUTES entries carry hasLoad: true only where @[load] exists.
+			// Lazy emits `chunkMods` between wrappers and hasLoad — tolerate it.
 			const entryRe =
-				/\{ path: "([^"]+)", page: \w+, wrappers: \[[^\]]*\], hasLoad: (true|false) \}/g
+				/\{ path: "([^"]+)", page: \w+, wrappers: \[[^\]]*\](?:, chunkMods: \[[^\]]*\])?, hasLoad: (true|false) \}/g
 			const got = new Map<string, string>()
 			for (const m of js.matchAll(entryRe)) got.set(m[1], m[2])
 			assert.equal(got.get('/static'), 'false', 'static page must be hasLoad:false (no fetch)')
@@ -718,8 +722,11 @@ describe('item 11 — codegen golden project (sample-overlay variant + routes.js
 			assert.ok(js.includes('download'), 'router must skip download links')
 			assert.ok(js.includes('data-swelte-reload'), 'router must honor the full-reload escape hatch')
 			// 6. The emit parses as a module (catches template-literal breakage).
+			// Strip static imports AND lazy loaders (both are real modules
+			// under Vite; the data: import only checks emit syntax).
 			const stubbed = js
 				.replace(/^import .*$/gm, '// stripped')
+				.replace(/^const (__swelteLoad_\w+) = \(\) => import\(.*\)$/gm, 'const $1 = 0;')
 				.replace(
 					'const ROUTES = [',
 					'const R_static__page_Page = 0;\nconst R_dyn__page_Page = 1;\nconst ROUTES = ['
@@ -755,5 +762,33 @@ describe('item 11 — codegen golden project (sample-overlay variant + routes.js
 		)
 		assert.equal(nojs?.ssr, false, 'manifest marks ssr=false')
 		assert.equal(nojs?.hasUniversalLoad, 'async', 'async load classified')
+	})
+
+	it('chunking modes: layout lazy by default, single static on opt-in', async () => {
+		const root = scaffold()
+		mkdirSync(join(root, 'src', 'routes', 'admin'), { recursive: true })
+		writeFileSync(join(root, 'src', 'routes', 'admin', '+page.svelte'), '<h1>a</h1>')
+		writeFileSync(
+			join(root, 'src', 'routes', 'admin', '+route.svelte'),
+			'<script>let { children } = $props()</script>{@render children?.()}'
+		)
+		await generate(root)
+		const lazy = readFileSync(join(root, '.swelte', 'routes.js'), 'utf8')
+		assert.ok(lazy.includes('__swelteLoad_'), 'layout default must emit lazy loaders')
+		assert.ok(lazy.includes('chunkMods'), 'layout default must emit chunk membership')
+		assert.ok(!lazy.includes("from '../src/routes/"), 'layout default must not statically import routes')
+		const mani = JSON.parse(readFileSync(join(root, '.swelte', 'ssr-manifest.json'), 'utf8'))
+		const admin = (mani.routes as { route: string; chunk: string }[]).find((r) => r.route === '/admin')
+		assert.equal(admin?.chunk, 'inherit', 'no hint = inherit')
+		await generate(root, { chunking: 'single' })
+		const single = readFileSync(join(root, '.swelte', 'routes.js'), 'utf8')
+		assert.ok(single.includes("from '../src/routes/"), 'single must statically import routes')
+		assert.ok(!single.includes('__swelteLoad_'), 'single must not emit lazy loaders')
+		// Async mount/hydrate is mode-independent: entry awaits either way.
+		// No top-level await (es2020 build target) — boot is a called fn.
+		const entry = readFileSync(join(root, '.swelte', 'entry-main.ts'), 'utf8')
+		assert.ok(entry.includes('await hydrateSwelteRoute'), 'entry must await hydrate')
+		assert.ok(entry.includes('await mountSwelteRoute'), 'entry must await mount')
+		assert.ok(entry.includes('function __swelteBoot()'), 'boot must be a called fn')
 	})
 })

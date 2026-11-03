@@ -32,6 +32,7 @@ export default defineConfig({
     target: 'auto',           // 'auto' | 'static' | 'node' | 'edge' — packaging only
     targetOs: '',             // '' (host) | 'linux' | 'macos' | 'windows' — `v -o -os` cross (build-only; CLI --target-os wins, $SWELTE_TARGET_OS middle)
     offline: { fallback: 'off' }, // 'off' | 'offline.html' | custom — SW precache + dist file
+    chunking: 'layout',       // 'layout' (default) | 'single' | 'route' — client code-splitting ($SWELTE_CHUNKING wins)
   },
 });
 ```
@@ -118,6 +119,62 @@ immutable assets stay cached, API/SSE network-only (unchanged).
 | `SWELTE_SW` | unset (off) | `1` = force the opt-in service worker emit (`dist/sw.js` + registration snippet) without touching `svelte.config.js`. See `config.md` §Service worker. |
 | `SWELTE_V_BACKEND_URL` | unset | Dev RPC proxy target for Vite (injected by `swelte dev`). Unset = no proxy. |
 | `SWELTE_CLIENT` | unset | `1` = `check` typechecks the client stubs too (default: server-only). |
+| `SWELTE_CHUNKING` | `layout` | Client code-splitting (`single` \| `layout` \| `route`). Wins over `swelte.chunking` in `svelte.config.js` and the `swelte()` plugin option (explicit plugin option wins over config; env wins over both). See §Chunking. |
+
+## Chunking (client code-splitting)
+
+The server bundle (`dist/server`) and SSR (`dist/ssr/render.js`) are
+unaffected — chunking only cuts the browser JS/CSS. CSS follows JS by
+construction (`() => import()` + `cssCodeSplit`, which stays on — never
+turn it off or chunk cuts diverge from CSS).
+
+| Mode | Cut | When |
+|---|---|---|
+| `'layout'` (default) | one lazy chunk per `+route.svelte` subtree | recommended: nav inside a layout is chunk-local, crossing a layout is one `import()` |
+| `'single'` | static imports, one JS + one CSS | smallest apps, `prerender`/`offline.html` shells |
+| `'route'` | one lazy chunk per leaf | measuring / fine control; pair with prefetch or nav regresses |
+
+Rules:
+
+* Chunk key reads **`+route.svelte` existence**: directory `D` with
+  `D/+route.svelte` opens a chunk owning `D/+route.svelte` + every page
+  directly in `D` + recursively every page in sub-directories with **no**
+  `+route.svelte` on the path. Folders without a wrapper bubble up into
+  the parent chunk. There is no per-folder mode: a folder is not a
+  runtime boundary (no new `children` snippet, no new `@[load]` level),
+  so cutting there only adds waterfall.
+* `about.svelte` ⇔ `about/+page.svelte` (same `/about`), but only the
+  nested spelling mounts `about/+route.svelte` — so they land in
+  different `layout` chunks. One URL = one spelling (`doubleClaimCheck`
+  build error otherwise).
+* `src/app.css` stays in the entry chunk; `+error` + the matcher table
+  stay eager (needed synchronously on 404/no-match); `#lib` and the
+  Svelte runtime stay in Vite's default shared chunks.
+* `mountSwelteRoute` / `hydrateSwelteRoute` are async (chunk resolve
+  before mount/hydrate); the generated entry awaits them. `navigateTo`
+  preloads the target chunk in parallel with the data fetch. Components
+  resolve through a per-mod cache, so layout + page share one network
+  round-trip.
+* `serviceWorkerPrecache` already covers `chunk` outputs, so lazy chunks
+  work offline; the prerender crawl covers them too.
+
+Per-route override (sibling `.ts`, same regex pass as `export const ssr`):
+
+```ts
+// admin/+page.ts (leaf) or admin/+route.ts (whole subtree)
+export const chunk = 'eager' | 'lazy' // default: 'inherit' (follow global mode)
+```
+
+* leaf `'eager'` = hoist into the parent/layout chunk (landing page);
+  `'lazy'` = force its own `import()` even under `single`.
+* wrapper `'eager'` = collapse the subtree into the parent chunk;
+  `'lazy'` = force a cut at its own dir even when the parent would bubble.
+* precedence: leaf > nearest explicit wrapper > global. Bad value =
+  build error with file+line (same contract as matchers).
+* `+route.ts` **can exist** (sibling of `+route.svelte`): it already
+  carries `ssr`/`load` today — chunking is the moment it gets documented.
+  The cut itself still reads the `.svelte`; the `.ts` only pins.
+  Headless API routes (`.v` only) have no chunk.
 
 ## Request behavior driven by config/env
 

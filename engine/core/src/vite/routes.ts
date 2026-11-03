@@ -1,7 +1,7 @@
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
 import { join, relative, resolve, sep } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { dynSegPattern, loadMatchers } from './matchers.js'
+import { dynSegPattern } from './matchers.js'
 import type { SvelteRouteEntry } from './types.js'
 
 export function listFilesWithExt(dir: string, ext: string, base?: string): string[] {
@@ -102,6 +102,28 @@ export function universalLoadKind(tsAbs: string): 'sync' | 'async' | false {
 	return 'sync'
 }
 
+/** Per-route chunk hint: `export const chunk = 'eager' | 'lazy'` in the
+ * sibling `.ts` (leaf like `admin.ts` or wrapper like `+route.ts`).
+ * Absent/no match = `'inherit'` (follow the global `chunking` mode).
+ * Quoted-but-unknown value passes through here — `assertChunkHint`
+ * turns it into a file+line build error at the call site. */
+export function readChunkHint(src: string): 'eager' | 'lazy' | 'inherit' | string {
+	const m = /export\s+const\s+chunk\s*=\s*['"]([^'"]+)['"]/.exec(src)
+	if (!m) return 'inherit'
+	return m[1]
+}
+
+/** Validate a chunk hint at the call site (file+line build error). */
+export function assertChunkHint(file: string, src: string): 'eager' | 'lazy' | 'inherit' {
+	const hint = readChunkHint(src)
+	if (hint !== 'eager' && hint !== 'lazy' && hint !== 'inherit') {
+		throw new Error(
+			`[swelte] ${file}: bad chunk hint '${hint}' (want 'eager' | 'lazy' | 'inherit')`
+		)
+	}
+	return hint
+}
+
 /** Collect `.svelte` siblings under routesAbs into a URL manifest.
  * Dynamic segments pass through verbatim ([id]/[...rest]). */
 export function collectSvelteManifest(
@@ -137,10 +159,20 @@ export function collectSvelteManifest(
 				hasData: false,
 				hasUniversalLoad: false,
 				ssr: true,
+				chunk: 'inherit',
 			})
 			continue
 		}
 		if (kind === 'wrapper') {
+			const chunkSibling = siblingLoadSource(f.replace(/\.svelte$/, '.ts'))
+			let chunkSrc = ''
+			if (chunkSibling) {
+				try {
+					chunkSrc = readFileSync(chunkSibling, 'utf8')
+				} catch {
+					chunkSrc = ''
+				}
+			}
 			entries.push({
 				route: svelteRouteFor(mod) ?? `/${mod}`,
 				svelte: rel,
@@ -156,6 +188,9 @@ export function collectSvelteManifest(
 						return true
 					}
 				})(),
+				chunk: chunkSibling
+					? assertChunkHint(`${routesDir}/${relPosixTop(routesAbs, chunkSibling)}`, chunkSrc)
+					: 'inherit',
 			})
 			continue
 		}
@@ -192,6 +227,17 @@ export function collectSvelteManifest(
 					return true
 				}
 			})(),
+			chunk: (() => {
+				const sib = siblingLoadSource(f.replace(/\.svelte$/, '.ts'))
+				if (!sib) return 'inherit' as const
+				let src = ''
+				try {
+					src = readFileSync(sib, 'utf8')
+				} catch {
+					return 'inherit' as const
+				}
+				return assertChunkHint(`${routesDir}/${relPosixTop(routesAbs, sib)}`, src)
+			})(),
 		})
 	}
 	return { entries, hasError }
@@ -219,7 +265,8 @@ export function isStaticRoute(route: string): boolean {
 export async function collectPrerenderEntries(
 	root: string,
 	routesDir: string,
-	mode: 'off' | 'static' | 'all'
+	mode: 'off' | 'static' | 'all',
+	knownMatchers?: Set<string>
 ): Promise<PrerenderCrawl> {
 	const routesAbs = join(resolve(root), routesDir)
 	let patterns: string[] = []
@@ -241,14 +288,9 @@ export async function collectPrerenderEntries(
 		// V-only routes (no .svelte): routeFor leaf/dir rules (abs path form).
 		// §7: pass the custom matcher set — bare `routeFor` without it treats
 		// every `[x=y]` as `unknown matcher` (only `integer` builtin known).
-		let crawlMatchers: Set<string> | undefined
-		try {
-			crawlMatchers = new Set(loadMatchers(root).keys())
-		} catch {
-			crawlMatchers = undefined
-		}
+		// Injected by the plugin (already loaded); absent = builtin only.
 		for (const f of listVFiles(routesAbs)) {
-			const r = routeFor(routesDir, routesAbs, f, crawlMatchers)
+			const r = routeFor(routesDir, routesAbs, f, knownMatchers)
 			if (r && !seen.has(r)) {
 				seen.add(r)
 				patterns.push(r)
@@ -364,6 +406,61 @@ export function expandDynamicPattern(pattern: string, row: unknown, file: string
 
 export function modulePath(root: string, file: string): string {
 	return relative(root, file).replace(/\.v$/, '').split(sep).join('/')
+}
+
+/** Client chunk key for a svelte entry under a `chunking` mode.
+ *  `single` → `'app'` (static imports, one chunk).
+ *  `route` → one chunk per leaf (`eager` leaf joins its layout chunk).
+ *  `layout` → nearest ancestor dir (self included) containing a
+ *  `+route.svelte` wrapper (folder without a wrapper bubbles up; `root`
+ *  when none). An explicit `'lazy'` wrapper/page forces a cut at its own
+ *  dir; `'eager'` collapses into the parent chunk.
+ *  `wrapperMods` = set of mods (`admin/+route`) owning a wrapper. */
+export function chunkKeyFor(
+	mode: 'single' | 'layout' | 'route',
+	entry: { svelte: string; kind: 'page' | 'plain' | 'error' | 'wrapper'; chunk?: string },
+	wrapperMods: Set<string>
+): string {
+	const hint = entry.chunk ?? 'inherit'
+	if (mode === 'single') {
+		if (hint === 'lazy') return chunkKeySelf(entry)
+		return 'app'
+	}
+	if (entry.kind === 'error') return 'app'
+	if (mode === 'route') {
+		if (hint === 'eager') return layoutChunkKey(entry, wrapperMods, false)
+		return chunkKeySelf(entry)
+	}
+	// layout
+	if (hint === 'lazy') return chunkKeySelf(entry)
+	return layoutChunkKey(entry, wrapperMods, hint === 'eager' && entry.kind === 'wrapper')
+}
+
+/** Own-dir chunk key: parent layout still wraps at runtime, but the file
+ *  ships in its own `import()` chunk. */
+function chunkKeySelf(entry: { svelte: string }): string {
+	const mod = entry.svelte.replace(/\.svelte$/, '')
+	const dir = mod.includes('/') ? mod.slice(0, mod.lastIndexOf('/')) : ''
+	return `page:${dir === '' ? '/' : dir}`
+}
+
+/** Nearest ancestor dir (self included) with a `+route.svelte`.
+ *  `skipSelf` (explicit `eager` on a wrapper) starts the walk at the
+ *  parent dir. */
+function layoutChunkKey(
+	entry: { svelte: string },
+	wrapperMods: Set<string>,
+	skipSelf: boolean
+): string {
+	const mod = entry.svelte.replace(/\.svelte$/, '')
+	let dir = mod.includes('/') ? mod.slice(0, mod.lastIndexOf('/')) : ''
+	if (skipSelf) dir = dir.includes('/') ? dir.slice(0, dir.lastIndexOf('/')) : ''
+	for (;;) {
+		const wmod = dir === '' ? '+route' : `${dir}/+route`
+		if (wrapperMods.has(wmod)) return `layout:${dir === '' ? '/' : dir}`
+		if (dir === '') return 'layout:/'
+		dir = dir.includes('/') ? dir.slice(0, dir.lastIndexOf('/')) : ''
+	}
 }
 
 /** V dispatch prefix for a route mod (`admin/+page` → `swelte_admin__page_`). */

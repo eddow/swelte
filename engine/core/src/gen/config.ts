@@ -48,6 +48,13 @@ export interface SwelteOptions {
 	/** Deploy-target shims (packaging only, no Node runtime). `static`
 	 *  asserts no `dist/server` consumer is needed... (see normalize). */
 	target?: 'auto' | 'static' | 'node' | 'edge'
+	/** Client code-splitting: `'layout'` (default) emits one lazy chunk per
+	 *  `+route.svelte` subtree (folder without a wrapper bubbles into the
+	 *  parent chunk); `'single'` emits static imports (one JS + one CSS);
+	 *  `'route'` emits one lazy chunk per leaf. CSS follows JS (`import()`
+	 *  + `cssCodeSplit`); `src/app.css` stays in the entry; `+error` +
+	 *  matcher table stay eager. Env `SWELTE_CHUNKING` wins. */
+	chunking?: 'single' | 'layout' | 'route'
 	/** Cross-build OS (`swelte build --target-os` fallback). `linux` |
 	 *  `macos` | `windows` — passed as `-os <os>` to the `v -o` server
 	 *  link. Unset = host-native. CLI flag wins, `SWELTE_TARGET_OS` env
@@ -148,7 +155,15 @@ function normalize(raw: SwelteOptions | null | undefined): ResolvedSwelteOptions
 		target: normalizeTarget(r.target),
 		targetOs: normalizeTargetOs(r.targetOs),
 		offline: normalizeOffline(r.offline),
+		chunking: normalizeChunking(r.chunking),
 	} as ResolvedSwelteOptions
+}
+
+function normalizeChunking(raw: SwelteOptions['chunking']): 'single' | 'layout' | 'route' {
+	const env = String(process.env.SWELTE_CHUNKING ?? '').trim()
+	if (env === 'single' || env === 'layout' || env === 'route') return env
+	if (raw === 'single' || raw === 'layout' || raw === 'route') return raw
+	return 'layout'
 }
 
 function normalizePrerender(raw: SwelteOptions['prerender']): {

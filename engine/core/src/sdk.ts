@@ -101,6 +101,17 @@ async function throwForStatus(base: string, fn: string, res: Response): Promise<
 	} catch {
 		/* not JSON */
 	}
+	// HTML shell instead of JSON (preview served dist/index.html for an RPC
+	// GET): surface a hint instead of a bare `Unexpected token <` downstream.
+	if (!body && /^\s*<!doctype html|^\s*<html/i.test(raw)) {
+		throw new SwelteRpcError(
+			base,
+			fn,
+			res.status,
+			{ error: 'got HTML shell instead of JSON (route served dist/index.html)' } as SwelteErrorShape,
+			raw.slice(0, 200)
+		)
+	}
 	throw new SwelteRpcError(base, fn, res.status, body, raw)
 }
 

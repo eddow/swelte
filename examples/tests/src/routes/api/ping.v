@@ -7,3 +7,4 @@ pub fn ping(req SwelteRequest) string {
 	return 'pong'
 }
 
+

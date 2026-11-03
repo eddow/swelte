@@ -140,6 +140,29 @@ describe('config normalization (tmp roots)', () => {
 		assert.equal(cfg.offline.fallback, 'off')
 	})
 
+	it('chunking defaults to layout; env wins over config', async () => {
+		const root = mkdtempSync(join(tmpdir(), 'swelte-cfg-'))
+		const off = await loadConfig(root)
+		assert.equal(off.chunking, 'layout')
+		// One root per case: loadConfig cache-busts by ms timestamp, so two
+		// writes in the same millisecond would read the first module.
+		const root2 = mkdtempSync(join(tmpdir(), 'swelte-cfg-'))
+		writeFileSync(join(root2, 'svelte.config.js'), `export default { swelte: { chunking: 'route' } }`)
+		const on = await loadConfig(root2)
+		assert.equal(on.chunking, 'route')
+		const root3 = mkdtempSync(join(tmpdir(), 'swelte-cfg-'))
+		writeFileSync(join(root3, 'svelte.config.js'), `export default { swelte: { chunking: 'sometimes' } }`)
+		const bad = await loadConfig(root3)
+		assert.equal(bad.chunking, 'layout')
+		process.env.SWELTE_CHUNKING = 'single'
+		try {
+			const env = await loadConfig(root2)
+			assert.equal(env.chunking, 'single')
+		} finally {
+			delete process.env.SWELTE_CHUNKING
+		}
+	})
+
 	it('renderClientEntry pulls src/app.ts + src/app.css via .js specifiers (no allowImportingTsExtensions)', async () => {
 		const { templatesDir } = await import('./config.js')
 		const fromUrl = import.meta.url

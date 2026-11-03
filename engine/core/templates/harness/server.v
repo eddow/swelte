@@ -412,9 +412,18 @@ fn (mut app App) before_request(mut ctx Ctx) veb.Result {
 	status := out.res.status
 	body := out.res.body
 	set_cookies := out.res.cookies
+	// Same-origin mutating requests always pass (browser sends Origin on
+	// same-origin POST/fetch). Only cross-origin writes need cors_ok —
+	// otherwise every default same-origin POST 403s when SWELTE_CORS_ORIGIN
+	// is unset. Mirrors the CSRF host check above.
 	if !cors_ok && origin != '' && ctx.req.method != .get && ctx.req.method != .head {
-		ctx.res.set_status(.forbidden)
-		return ctx.send_response_to_client('application/json', '{"error":"forbidden"}')
+		host := ctx.req.header.get_custom('Host') or { ctx.req.header.get(.host) or { '' } }
+		if host == '' || origin.contains(host) {
+			// same-origin (or no Host to compare) — allow
+		} else {
+			ctx.res.set_status(.forbidden)
+			return ctx.send_response_to_client('application/json', '{"error":"forbidden"}')
+		}
 	}
 	dist := os.getenv_opt('SWELTE_DIST') or { '' }
 	// ISR lite (item 15c): stamp early — before the SSR/static/shell early
@@ -558,7 +567,10 @@ fn (mut app App) before_request(mut ctx Ctx) veb.Result {
 	}
 	// Static/SPA fallback (after SSR attempt above): dist/index.html for
 	// / and unknown non-api paths, raw assets otherwise.
-	if dist != '' && ctx.req.method == .get && !path.starts_with('/api/') && (path == '/' || (status == 404 && body.contains('not found'))) {
+	// Fetch stubs (Accept: application/json) never get the shell — that
+	// breaks __swelteFetch JSON decoding (gets HTML instead). The
+	// `!wants_json` guard keeps RPC GETs (`/`, `/api/*`) on the dispatcher.
+	if dist != '' && ctx.req.method == .get && !wants_json && !path.starts_with('/api/') && (path == '/' || (status == 404 && body.contains('not found'))) {
 		// Probes (bare curl: Accept */* or missing) must see the dispatcher
 		// contract (JSON/statics), never the SPA shell — the shell is a
 		// document response for real navigations only.

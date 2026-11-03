@@ -1,8 +1,7 @@
-/** Shared option + shape types for the swelte vite plugin (no runtime deps). */
-
-export type { SwelteConfig, SwelteOptions } from '../gen/config.js'
-
-export { defineConfig } from '../gen/config.js'
+/** Shared option + shape types for the swelte vite plugin (no runtime deps).
+ *
+ *  `SwelteConfig`/`SwelteOptions` live in `../gen/config.js` — import
+ *  them from `@swelte/core/config` (or the `vite` barrel), never here. */
 
 export interface SweltePluginOptions {
 	routesDir?: string
@@ -35,6 +34,8 @@ export interface SweltePluginOptions {
 	offline?: { fallback?: boolean | string }
 	/** Deploy target shim (packaging only): 'auto' (default) | 'static' | 'node' | 'edge'. */
 	target?: 'auto' | 'static' | 'node' | 'edge'
+	/** Client code-splitting. Env `SWELTE_CHUNKING` wins. */
+	chunking?: 'single' | 'layout' | 'route'
 	/** Cross-build OS passthrough (`swelte build --target-os` fallback).
 	 *  Accepted but unused by generate/vite: the `v -o -os` link is
 	 *  build.ts-owned (WASM always `-os browser`). Present so inline
@@ -100,6 +101,11 @@ export interface SvelteRouteEntry {
 	 * sibling `.ts` (or wrapper `.ts`) opts the route out — Hand serves
 	 * the SPA shell (§4 ssr=false-lite). Absent = SSR on. */
 	ssr: boolean
+	/** Per-route chunk hint: `export const chunk = 'eager' | 'lazy'` in the
+	 * sibling `.ts` (leaf or `+route.ts` wrapper). `'eager'` pins the file
+	 * into the parent chunk; `'lazy'` forces its own `import()` chunk.
+	 * Default `'inherit'` = follow the global `chunking` mode. */
+	chunk: 'eager' | 'lazy' | 'inherit'
 }
 
 export interface PrerenderCrawl {

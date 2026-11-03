@@ -6,6 +6,7 @@ import type { Plugin } from 'vite'
 import { loadConfig, renderAppDts, renderClientEntry, renderHarness } from '../gen/config.js'
 import { isBackendMod } from '../gen/paths.js'
 import { resolveV } from '../toolchain.js'
+import { emitClientRouter } from './client-router.js'
 import { list, writeIfChanged } from './fs.js'
 import { loadServerHooks } from './hooks.js'
 import { loadMatchers } from './matchers.js'
@@ -103,6 +104,10 @@ export function swelte(options: SweltePluginOptions = {}): Plugin {
 		options.target === 'static' || options.target === 'node' || options.target === 'edge'
 			? options.target
 			: 'auto'
+	let appChunking: 'single' | 'layout' | 'route' =
+		options.chunking === 'single' || options.chunking === 'layout' || options.chunking === 'route'
+			? options.chunking
+			: 'layout'
 	// Resolved per-generate() against the Vite root (never at construction:
 	// outDir is relative and the cwd at plugin-construction time is not the
 	// project root when loaded via vite.config.ts).
@@ -114,6 +119,37 @@ export function swelte(options: SweltePluginOptions = {}): Plugin {
 	// buildStart runs another — concurrent runs interleave file writes
 	// (stale routes.js wins the race). Chain on the in-flight promise.
 	let genChain: Promise<void> = Promise.resolve()
+	// Chunk grouping for manualChunks: `.swelte/chunks.json` (mod -> chunk
+	// key), written by generate(). `config()` runs before generate() in a
+	// fresh process, so the group map is read lazily at bundle time from
+	// disk — never from closure state. Null when `single`.
+	function swelteChunkGroup(root: string): { routesAbs: string; map: Map<string, string> } | null {
+		if (appChunking === 'single') return null
+		try {
+			const raw = readFileSync(join(resolve(root, outDir), 'chunks.json'), 'utf8')
+			const parsed = JSON.parse(raw) as { mode?: string; chunks?: Record<string, string[]> }
+			if (!parsed || typeof parsed.chunks !== 'object') return null
+			const map = new Map<string, string>()
+			for (const [key, mods] of Object.entries(parsed.chunks))
+				for (const m of mods ?? []) map.set(m, key)
+			if (map.size === 0) return null
+			return { routesAbs: resolve(root, routesDir), map }
+		} catch {
+			return null
+		}
+	}
+	function swelteManualChunk(
+		group: { routesAbs: string; map: Map<string, string> } | null,
+		id: string
+	): string | null {
+		if (!group) return null
+		const q = id.indexOf('?')
+		const clean = (q >= 0 ? id.slice(0, q) : id).split(sep).join('/')
+		const root = group.routesAbs.split(sep).join('/')
+		if (!clean.startsWith(`${root}/`) || !clean.endsWith('.svelte')) return null
+		const hit = group.map.get(clean.slice(root.length + 1, -'.svelte'.length))
+		return hit ? `swelte-${hit.replace(/[^A-Za-z0-9_-]/g, '_')}` : null
+	}
 	// Roadmap §6 tree-shaking: every .v import resolved through the plugin
 	// is recorded here (abs path → same). generateBundle compiles only the
 	// recorded client-used #lib/ files — untouched helpers never enter
@@ -216,6 +252,14 @@ export function swelte(options: SweltePluginOptions = {}): Plugin {
 					if (options.offline === undefined && cfg.offline.fallback !== 'off')
 						appOffline = { fallback: cfg.offline.fallback }
 					if (options.target === undefined && cfg.target !== 'auto') appTarget = cfg.target
+					if (options.chunking === undefined && cfg.chunking !== 'layout')
+						appChunking = cfg.chunking
+					if (
+						process.env.SWELTE_CHUNKING === 'single' ||
+						process.env.SWELTE_CHUNKING === 'layout' ||
+						process.env.SWELTE_CHUNKING === 'route'
+					)
+						appChunking = process.env.SWELTE_CHUNKING
 				} catch {
 					/* defaults stand */
 				}
@@ -1214,349 +1258,32 @@ export declare const dev: boolean
 				}
 				for (const w of warnings) console.warn(`[swelte] ${w}`)
 				// Roadmap 7: client router — UI composition without manual imports.
-				// Emits `.swelte/routes.js`: real static imports of every page +
-				// wrapper, a ROUTES array (path pattern, page, wrappers root→leaf),
-				// and mountRoute() that matches location.pathname (static-first,
-				// fewest-params-first — same precedence as the V dispatcher) and
-				// nests the page inside its wrappers via `children` snippets.
-				// main.ts mounts through it; unknown path → +error.svelte 404.
+				// (extracted: `emitClientRouter` in `./client-router.js` builds the
+				// `routes.js` lines + chunk map; generate() owns the disk writes.)
 				try {
-					const svelteOnly: { route: string; mod: string; wrappers: string[] }[] = []
-					try {
-						const { entries: svelteEntries } = collectSvelteManifest(routesAbs, routesDir, vMods)
-						const dispMods = new Set(dispatched.map((d) => d.mod))
-						for (const e of svelteEntries) {
-							if (e.kind === 'wrapper' || e.kind === 'error') continue
-							const mod = e.svelte.replace(/\.svelte$/, '')
-							if (dispMods.has(mod)) continue // already covered by dispatched UI entry
-							const dir = mod.includes('/') ? mod.slice(0, mod.lastIndexOf('/')) : ''
-							const wrappers: string[] = []
-							let cur = dir
-							for (;;) {
-								const cand = `${cur === '' ? '+route' : `${cur}/+route`}.svelte`
-								if (existsSync(join(routesAbs, ...cand.split('/'))))
-									wrappers.unshift(cand.replace(/\.svelte$/, ''))
-								if (cur === '') break
-								cur = cur.includes('/') ? cur.slice(0, cur.lastIndexOf('/')) : ''
-							}
-							svelteOnly.push({ route: e.route, mod, wrappers })
-						}
-					} catch {
-						/* svelte-only entries best-effort */
-					}
-					// hasLoad per page mod: True when the leaf .v or any wrapper .v above it
-					// declares @[load]. The client router gates its JSON preload fetch on
-					// this — static pages mount with params only, no request at all.
-					const loadMods = new Set<string>()
-					for (const f of routeFiles) {
+					const router = emitClientRouter({
+						routesAbs,
+						routesDir,
+						dispatched,
+						routeFiles,
+						vMods,
+						matchers,
+						appChunking,
+					})
+					if (router.chunks) {
+						writeIfChanged(
+							join(genDir, 'chunks.json'),
+							JSON.stringify({ mode: router.chunks.mode, chunks: router.chunks.chunks }, null, 2) +
+								'\n'
+						)
+					} else {
 						try {
-							if (parseVFile(readFileSync(f, 'utf8')).some((x) => x.attr === 'load'))
-								loadMods.add(modulePath(routesAbs, f))
+							rmSync(join(genDir, 'chunks.json'), { force: true })
 						} catch {
 							/* ignore */
 						}
 					}
-					const entries: { route: string; mod: string; wrappers: string[] }[] = []
-					for (const d of dispatched) {
-						const pageFile = `${join(routesAbs, ...d.mod.split('/'))}.svelte`
-						if (!existsSync(pageFile)) continue // headless API route: no UI
-						const dir = d.mod.includes('/') ? d.mod.slice(0, d.mod.lastIndexOf('/')) : ''
-						const wrappers: string[] = []
-						let cur = dir
-						for (;;) {
-							const cand = `${cur === '' ? '+route' : `${cur}/+route`}.svelte`
-							if (existsSync(join(routesAbs, ...cand.split('/'))))
-								wrappers.unshift(cand.replace(/\.svelte$/, ''))
-							if (cur === '') break
-							cur = cur.includes('/') ? cur.slice(0, cur.lastIndexOf('/')) : ''
-						}
-						entries.push({ route: d.route, mod: d.mod, wrappers })
-					}
-					for (const s of svelteOnly) entries.push(s)
-					const rank = (p: string) => (p.includes('[') ? (p.includes('...') ? 2 : 1) : 0)
-					entries.sort((a, b) => rank(a.route) - rank(b.route) || a.route.localeCompare(b.route))
-					const o: string[] = ['// Auto-generated by swelte from src/routes. Do not edit.', '']
-					const sym = (mod: string, suffix: string) =>
-						`R_${mod.replace(/[^A-Za-z0-9_]/g, '_')}${suffix}`
-					const emittedSyms = new Set<string>()
-					for (const e of entries) {
-						o.push(`import ${sym(e.mod, '_Page')} from '../${routesDir}/${e.mod}.svelte'`)
-						for (const w of e.wrappers) {
-							const wSym = sym(w, '_Wrap')
-							if (!emittedSyms.has(wSym)) {
-								emittedSyms.add(wSym)
-								o.push(`import ${wSym} from '../${routesDir}/${w}.svelte'`)
-							}
-						}
-					}
-					try {
-						if (existsSync(join(routesAbs, '+error.svelte')))
-							o.push(`import SwelteErrorPage from '../${routesDir}/+error.svelte'`)
-					} catch {
-						/* no error page */
-					}
-					o.push(`
-import { mount, hydrate } from 'svelte'
-
-const __swelteMatcherFns = { ${[...matchers.values()].map((md) => `${md.name}: (s) => { ${md.jsBody} }`).join(', ')} }
-function __swelteSegName(seg) {
-	const m = /^\\[([A-Za-z_][A-Za-z0-9_]*)=([A-Za-z_][A-Za-z0-9_]*)\\]$/.exec(seg)
-	if (m) return { name: m[1], matcher: m[2] }
-	return { name: seg.slice(1, -1), matcher: null }
-}
-function matchSegs(pattern, pathname) {
-	const pat = pattern.split('/').filter((s) => s !== '')
-	const got = pathname.split('/').filter((s) => s !== '')
-	const params = {}
-	let gi = 0
-	for (let pi = 0; pi < pat.length; pi++) {
-		const seg = pat[pi]
-		if (seg.startsWith('[...') && seg.endsWith(']')) { params[seg.slice(4, -1)] = got.slice(gi).map(decodeURIComponent).join('/'); gi = got.length; break }
-		// Item 2 double-bracket optional: matches zero or one segment.
-		if (seg.startsWith('[[') && seg.endsWith(']]')) {
-			const name = seg.slice(2, -2)
-			if (pi === pat.length - 1 && gi >= got.length) { params[name] = ''; break }
-			if (gi >= got.length || !got[gi]) return null
-			params[name] = decodeURIComponent(got[gi++])
-			continue
-		}
-		if (seg.startsWith('[') && seg.endsWith(']')) { if (gi >= got.length || !got[gi]) return null; const { name: __nm, matcher: __mm } = __swelteSegName(seg); if (__mm) { const __ck = __swelteMatcherFns[__mm]; if (__ck && !__ck(got[gi])) return null } params[__nm] = decodeURIComponent(got[gi++]); continue }
-		if (got[gi++] !== seg) return null
-	}
-	return gi === got.length ? params : null
-}
-
-export const ROUTES = [
-`)
-					for (const e of entries) {
-						const wraps = e.wrappers.map((w) => sym(w, '_Wrap')).join(', ')
-						o.push(
-							`\t{ path: ${JSON.stringify(e.route)}, page: ${sym(e.mod, '_Page')}, wrappers: [${wraps}], hasLoad: ${loadMods.has(e.mod) || e.wrappers.some((w) => loadMods.has(w)) ? 'true' : 'false'} },`
-						)
-					}
-					o.push(`]
-
-let __mountedRoots = []
-function __teardownMounted() {
-	for (const inst of __mountedRoots) { try { unmount(inst) } catch {} }
-	__mountedRoots = []
-}
-// Swap without an empty frame: mount the new tree into an off-DOM host,
-// then move it in and drop the old tree in one step — no blank flash.
-function __swapIn(target, build) {
-	const host = document.createElement('div')
-	const inst = build(host)
-	const next = host.firstChild
-	if (!next) { target.innerHTML = ''; __teardownMounted(); if (inst) __mountedRoots = [inst]; return }
-	__teardownMounted()
-	target.insertBefore(next, target.firstChild)
-	while (target.childNodes.length > 1) target.removeChild(target.lastChild)
-	__mountedRoots = inst ? [inst] : []
-}
-export function mountSwelteRoute(target, pathname, errorProps = undefined) {
-	const path = pathname !== '/' && pathname.endsWith('/') ? pathname.slice(0, -1) : pathname
-	for (const r of ROUTES) {
-		const params = matchSegs(r.path, path)
-		if (!params) continue
-		// Leaf-first: page mounts into host[0]; each wrapper mounts with \`children\`
-		// as a Snippet appending the inner host — leaf renders inside wrapper
-		// nav/chrome with no manual import in +page.svelte.
-	// Client mounts merge preloaded JSON into leaf props (same shape as SSR props).
-	const leafData = (errorProps && typeof errorProps === 'object' && errorProps.data && typeof errorProps.data === 'object') ? errorProps.data : {}
-	const leafProps = { params, ...leafData }
-	const build = (swapHost) => {
-		const hosts = [document.createElement('div')]
-		const pageInst = mount(r.page, { target: hosts[0], props: leafProps })
-		const wrapInsts = []
-		for (let i = r.wrappers.length - 1; i >= 0; i--) {
-			const host = document.createElement('div')
-			const inner = hosts[hosts.length - 1]
-			const snip = (anchor) => { anchor.before(inner) }
-			wrapInsts.push(mount(r.wrappers[i], { target: host, props: { params, children: snip } }))
-			hosts.push(host)
-		}
-		swapHost.appendChild(hosts[hosts.length - 1])
-		return [pageInst, ...wrapInsts]
-	}
-	if (target.childNodes.length === 0) {
-		// Cold boot (empty #app): mount directly, no swap needed.
-		const host = document.createElement('div')
-		const insts = build(host)
-		const next = host.firstChild
-		if (next) target.appendChild(next)
-		__mountedRoots = Array.isArray(insts) ? insts.flat() : [insts]
-	} else {
-		// Client navigation: build off-DOM, then swap atomically.
-		const host = document.createElement('div')
-		const insts = build(host)
-		const next = host.firstChild
-		if (next) {
-			__teardownMounted()
-			target.insertBefore(next, target.firstChild)
-			while (target.childNodes.length > 1) target.removeChild(target.lastChild)
-		}
-		__mountedRoots = Array.isArray(insts) ? insts.flat() : [insts]
-	}
-	return { params, path: r.path }
-	}
-	if (typeof SwelteErrorPage !== 'undefined') {
-		let inst = null
-		__swapIn(target, (host) => { inst = mount(SwelteErrorPage, { target: host, props: errorProps ?? { status: 404, message: 'not found' } }); return inst })
-		return { params: {}, path: null }
-	}
-	throw new Error('swelte: no route for ' + pathname)
-}
-`)
-					o.push(`
-// SSR hydrate path: when Hand fills <!--ssr-body-->
-// the same component tree hydrates in place instead of mounting fresh.
-// Wrapper routes hydrate nested: one top-level hydrate() of the outermost
-// wrapper, with each level's children snippet invoking the inner component
-// directly on the snippet anchor. Svelte's hydration cursor is already
-// positioned at the SSR slot, so every level adopts its SSR DOM and the
-// leaf page takes over without remount. Falls back to mount on mismatch.
-export function hydrateSwelteRoute(target, pathname, errorProps = undefined) {
-	try {
-		const path = pathname !== '/' && pathname.endsWith('/') ? pathname.slice(0, -1) : pathname
-		for (const r of ROUTES) {
-			const params = matchSegs(r.path, path)
-			if (!params) continue
-			if (r.wrappers.length > 0) {
-				// Root-first closure chain: the outermost hydrate()'s
-				// children snippet invokes the next wrapper with *its*
-				// children snippet, down to the leaf page. Each level runs
-				// while Svelte's hydration cursor sits on its SSR slot, so
-				// the whole tree adopts SSR DOM instead of remounting.
-				const leafData = (errorProps && typeof errorProps === 'object' && errorProps.data && typeof errorProps.data === 'object') ? errorProps.data : {}
-				const leafExtra = (errorProps && typeof errorProps === 'object' && !errorProps.data) ? errorProps : {}
-				const leafProps = { params, ...leafData, ...leafExtra }
-				let child = (anchor) => { r.page(anchor, leafProps) }
-				for (let i = r.wrappers.length - 1; i >= 1; i--) {
-					const Wrap = r.wrappers[i]
-					const inner = child
-					child = (anchor) => { Wrap(anchor, { params, children: inner }) }
-				}
-				hydrate(r.wrappers[0], { target, props: { params, children: child } })
-				return { params, path: r.path, hydrated: true }
-			}
-			hydrate(r.page, { target, props: (() => { const d = (errorProps && typeof errorProps === 'object' && errorProps.data && typeof errorProps.data === 'object') ? errorProps.data : {}; const x = (errorProps && typeof errorProps === 'object' && !errorProps.data && !(errorProps.status || errorProps.message)) ? errorProps : {}; return { params, ...d, ...x }; })() })
-			return { params, path: r.path, hydrated: true }
-		}
-		if (typeof SwelteErrorPage !== 'undefined') {
-			hydrate(SwelteErrorPage, { target, props: errorProps ?? { status: 404, message: 'not found' } })
-			return { params: {}, path: null, hydrated: true }
-		}
-	} catch { /* fall through to mount */ }
-	return { ...mountSwelteRoute(target, pathname, errorProps), hydrated: false }
-}
-
-// §1.4 client router: history-driven navigation with data preloading,
-// cancellable guards, and reactive stores (wired lazily so routes.js
-// never hard-depends on the SDK bundle shape).
-let __routerTarget = null
-let __routerMounted = null
-function __routerSdk() { return (typeof globalThis !== 'undefined' && globalThis.__swelteRouterSdk) || null }
-function __setPage(s) { const sdk = __routerSdk(); if (sdk && sdk.page) sdk.page.set(s) }
-function __setNavigating(s) { const sdk = __routerSdk(); if (sdk && sdk.navigating) sdk.navigating.set(s) }
-async function __runGuards(kind, arg) {
-	const sdk = __routerSdk(); if (!sdk) return false
-	const fns = kind === 'before' ? (sdk.__beforeNav || []) : (sdk.__afterNav || [])
-	for (const fn of fns) {
-		let cancelled = false
-		const extra = kind === 'before' ? { cancel: () => { cancelled = true } } : {}
-		await fn({ ...arg, ...extra })
-		if (kind === 'before' && cancelled) return true
-	}
-	return false
-}
-function __matchRoute(pathname) {
-	const path = pathname !== '/' && pathname.endsWith('/') ? pathname.slice(0, -1) : pathname
-	for (const r of ROUTES) {
-		const params = matchSegs(r.path, path)
-		if (params) return { route: r, params }
-	}
-	return null
-}
-export async function goto(url, opts) {
-	opts = opts || {}
-	const to = typeof url === 'string' ? url : url.pathname
-	const from = __routerMounted ? __routerMounted.url : null
-	__setNavigating({ from, to })
-	const cancelled = await __runGuards('before', { from: __routerMounted, to })
-	if (cancelled) { __setNavigating(null); return }
-	if (!opts.replaceState) history.pushState({}, '', to)
-	else history.replaceState({}, '', to)
-	await __navigateTo(to, opts)
-}
-export async function preloadData(url) {
-	const to = typeof url === 'string' ? url : url.pathname
-	const hit = __matchRoute(to)
-	if (!hit) return null
-	// Static pages (no @[load] anywhere on the chain) carry no page data:
-	// skip the preload fetch entirely — no request, no 404 noise.
-	if (!hit.route.hasLoad) return { route: hit.route.path, params: hit.params, data: null, status: 200 }
-	try {
-		const res = await fetch(to, { headers: { accept: 'application/json' } })
-		const data = res.ok ? await res.json().catch(() => null) : null
-		return { route: hit.route.path, params: hit.params, data, status: res.status }
-	} catch (e) { return { route: hit.route.path, params: hit.params, data: null, status: 0 } }
-}
-export async function pushState(url, state) {
-	history.pushState(state ?? {}, '', typeof url === 'string' ? url : url.pathname)
-	if (state && state.page) __setPage(state.page)
-}
-async function __navigateTo(pathname, opts) {
-	opts = opts || {}
-	const target = __routerTarget || document.getElementById('app')
-	if (!target) return
-	const hit = __matchRoute(pathname)
-	const from = __routerMounted ? __routerMounted.url : null
-	if (!hit) {
-		if (typeof SwelteErrorPage !== 'undefined') {
-			mount(SwelteErrorPage, { target, props: { status: 404, message: 'not found' } })
-			__routerMounted = { url: pathname, params: {}, route: null }
-			__setPage(__routerMounted); __setNavigating(null)
-			await __runGuards('after', { from, to: __routerMounted })
-			return
-		}
-		throw new Error('swelte: no route for ' + pathname)
-	}
-	// Fetch BEFORE touching the DOM: the old page stays painted while the
-	// new page's data loads, and mountSwelteRoute swaps atomically —
-	// no innerHTML blank frame while awaiting the network.
-	let data = null
-	if (!opts.noPreload && hit.route.hasLoad) {
-		try {
-			const res = await fetch(pathname, { headers: { accept: 'application/json' } })
-			if (res.ok) data = await res.json().catch(() => null)
-		} catch { /* offline/static — mount with params only */ }
-	}
-	const out = mountSwelteRoute(target, pathname, data ? { params: hit.params, data } : undefined)
-	__routerMounted = { url: pathname, params: out.params ?? hit.params, route: out.path ?? hit.route.path, data }
-	__setPage(__routerMounted); __setNavigating(null)
-	await __runGuards('after', { from, to: __routerMounted })
-}
-export function initSwelteRouter(target) {
-	__routerTarget = target || document.getElementById('app')
-	if (typeof globalThis !== 'undefined') { globalThis.__swelteRoutes = { goto, preloadData, pushState, initSwelteRouter } }
-	if (typeof window === 'undefined' || !__routerTarget) return () => {}
-	const onClick = (e) => {
-		const a = e.target && e.target.closest ? e.target.closest('a[href]') : null
-		if (!a) return
-		const href = a.getAttribute('href')
-		if (!href || href.startsWith('#') || href.includes(':') || a.target === '_blank') return
-		if (a.hasAttribute('download') || a.getAttribute('rel') === 'external' || a.hasAttribute('data-swelte-reload')) return
-		if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return
-		e.preventDefault()
-		goto(href)
-	}
-	const onPop = () => { __navigateTo(location.pathname) }
-	window.addEventListener('click', onClick)
-	window.addEventListener('popstate', onPop)
-	return () => { window.removeEventListener('click', onClick); window.removeEventListener('popstate', onPop) }
-}
-`)
-					writeIfChanged(join(genDir, 'routes.js'), o.join('\n'))
+					writeIfChanged(join(genDir, 'routes.js'), router.lines.join('\n'))
 				} catch (e) {
 					console.warn(`[swelte] routes.js emit failed: ${(e as Error).message}`)
 				}
@@ -1605,6 +1332,7 @@ export function initSwelteRouter(target) {
 								hasData: e.hasData,
 								hasUniversalLoad: e.hasUniversalLoad,
 								ssr: e.ssr,
+								chunk: e.chunk ?? 'inherit',
 							}))
 							.sort((a, b) => a.route.localeCompare(b.route)),
 						error: svelteEntries.some((e) => e.kind === 'error')
@@ -1622,7 +1350,12 @@ export function initSwelteRouter(target) {
 					// executes sibling `entries.ts` exports for dynamics.
 					// No prerender implied - just the crawl source.
 					try {
-						const crawl = await collectPrerenderEntries(root, routesDir, appPrerender.entries)
+						const crawl = await collectPrerenderEntries(
+							root,
+							routesDir,
+							appPrerender.entries,
+							knownMatchers
+						)
 						writeIfChanged(join(genDir, 'entries.json'), JSON.stringify(crawl, null, 2))
 					} catch (e) {
 						throw e
@@ -1654,8 +1387,8 @@ export function initSwelteRouter(target) {
 						join(genDir, 'entry-main.d.ts'),
 						'// Auto-generated by swelte. Do not edit.\n' +
 							"declare module './routes.js' {\n" +
-							'\texport function mountSwelteRoute(target: Element, pathname: string, errorProps?: unknown): { params: Record<string, string>; path: string | null }\n' +
-							'\texport function hydrateSwelteRoute(target: Element, pathname: string, errorProps?: unknown): { params: Record<string, string>; path: string | null; hydrated: boolean }\n' +
+							'\texport function mountSwelteRoute(target: Element, pathname: string, errorProps?: unknown): Promise<{ params: Record<string, string>; path: string | null }>\n' +
+							'\texport function hydrateSwelteRoute(target: Element, pathname: string, errorProps?: unknown): Promise<{ params: Record<string, string>; path: string | null; hydrated: boolean }>\n' +
 							'\texport function initSwelteRouter(target: Element | null): () => void\n' +
 							'}\n'
 					)
@@ -1684,7 +1417,27 @@ export function initSwelteRouter(target) {
 			const root = (userConfig && (userConfig as { root?: string }).root) || process.cwd()
 			const routesAbs = resolve(root, routesDir)
 			const libAbs = resolve(root, libDir)
+			// Chunking build config: `single` leaves Vite defaults; `layout`/`route`
+			// group the generated dynamic imports by chunk key (`.swelte/` +
+			// `chunks.json`, written by generate() before the bundle runs) so
+			// one layout subtree (or one leaf) ships in one file. Bare
+			// `import()` already cuts the graph per file; without
+			// `manualChunks` Vite keeps every leaf in its own chunk
+			// (waterfall inside a layout). CSS follows JS via cssCodeSplit
+			// (Vite default true; never turn it off or chunk cuts diverge
+			// from CSS).
+			const chunkBuild = {
+				cssCodeSplit: true,
+				rollupOptions: {
+					output: {
+						manualChunks(id: string) {
+							return swelteManualChunk(swelteChunkGroup(root), id) ?? undefined
+						},
+					},
+				},
+			}
 			return {
+				...(chunkBuild ? { build: chunkBuild } : {}),
 				resolve: {
 					alias: [
 						{ find: '#routes', replacement: routesAbs },

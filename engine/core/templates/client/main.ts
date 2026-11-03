@@ -15,9 +15,15 @@
 import { hydrateSwelteRoute, mountSwelteRoute, initSwelteRouter } from './routes.js'
 
 const target = document.getElementById('app')!
-if (target.dataset.swelteSsr === '1' || target.childNodes.length > 0) {
-	hydrateSwelteRoute(target, location.pathname, undefined)
-} else {
-	mountSwelteRoute(target, location.pathname, undefined)
+async function __swelteBoot() {
+	if (target.dataset.swelteSsr === '1' || target.childNodes.length > 0) {
+		await hydrateSwelteRoute(target, location.pathname, undefined)
+	} else {
+		await mountSwelteRoute(target, location.pathname, undefined)
+	}
+	initSwelteRouter(target)
 }
-initSwelteRouter(target)
+__swelteBoot().catch((e) => {
+	console.error('[swelte] boot failed, mounting shell', e)
+	mountSwelteRoute(target, location.pathname, undefined).then(() => initSwelteRouter(target))
+})

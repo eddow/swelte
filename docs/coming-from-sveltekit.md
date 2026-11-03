@@ -12,6 +12,7 @@ that bites during migration. Only built behavior is documented here.
 | `+page.svelte` | `+page.svelte` **or** `about.svelte` (same URL) | Same component model, two spellings: `about.svelte` ⇔ `about/+page.svelte` (both → `/about`; `src/routes/+page.svelte` ⇔ `/`). See leaf duality below. |
 | `+page.ts` / `+page.server.ts` | `+page.v` (`@[load]`) + `+page.ts` (universal) — or flat `about.v` + `about.ts` | Same duality as the `.svelte`: `about.v` ⇔ `about/+page.v`, `about.ts` ⇔ `about/+page.ts` (one triple per URL — mixing `foo.*` + `foo/+page.*` is a build error). Server-only `load` = HTML-navigation initial paint (`parent T` param replaces `parent()`); universal sibling `load({ params, props, url })` = sync view-model transform inside `renderRoute` (typed TS — ssr-qjs transpiles via `transpileSiblingLoad`, the mirror of the `.svelte` `generate: 'server'` step; async only when `ssr=false`). |
 | `+layout.svelte` | `+route.svelte` | Wrapper per subtree (nav + chrome), Svelte 5 `children` Snippet + `{@render children?.()}` outlet (not slots). SPA mount nests automatically; SSR `renderRoute` composes the chain server-side; client `hydrateSwelteRoute` hydrates the whole chain in place (SSR DOM adopted, leaf interactive; mismatch falls back to mount). |
+| `+layout.ts` | `+route.ts` | Sibling of `+route.svelte`: carries `ssr` / universal `load` for the wrapper level and `export const chunk` (subtree pin — see `config.md` §Chunking). The cut itself reads the `.svelte`; the `.ts` only pins. |
 | `+layout.server.ts` | `+route.v` (`@[load]`) | Same cascade position. Level 0 takes `(req)`; deeper takes `(req, parent T)` — typed parent value instead of `await parent()`. Mismatch is a build error. |
 | `+server.ts` | `SwelteResponse` in the leaf `.v` | No standalone file. `@[get]`/`@[post]`/`@[put]`/`@[patch]`/`@[delete]` on the route file; one default per verb, `?q` qualifiers for many-per-file. Returns `string`/struct (JSON), `[]u8` (binary), `(int, string)` (status+text), or `SwelteResponse{ status, headers, cookies, body/body_bytes }` — full header/cookie/status/binary control, translated 1:1 into veb by `Hand`. |
 | `+error.svelte` (per-dir) | single global `+error.svelte` | By design — no per-directory inheritance. Props `{ status?, message? }`, renders server-side and client-side (via `loadPage`). |
@@ -46,6 +47,9 @@ src/routes/+page.svelte (+ .v / .ts)                        →  / (root)
   dynamic segments, per-route helpers) or must sit inside a `+route` guard's
   directory — wrapping covers `foo/+page.*` and `foo/**/*`, never the flat
   sibling `foo.*` (so a guarded page must be the folder leaf).
+* Chunking consequence (`config.md` §Chunking): only the nested spelling
+  mounts `about/+route.svelte`, so `about.svelte` lands in the parent
+  `layout` chunk while `about/+page.svelte` lands in `layout:about`.
 * Under `src/routes/api/**` there is no `.svelte` partner (headless JSON):
   `api/greet.v` → `/api/greet`. A routed `.v` outside `api/` with no
   `.svelte` partner is an orphan warning.
@@ -168,7 +172,9 @@ src/routes/+page.svelte (+ .v / .ts)                        →  / (root)
   `assets`, `csp`, `csrf`, `methodOverride`, `version`,
   `serviceWorker` (`{ enabled, register }` → additive `dist/sw.js`,
   `SWELTE_SW=1` forces on), `prerender` (`{ entries, concurrency }`),
-  `isr`, `target`, `offline` (`{ fallback }`). Env wins at
+  `isr`, `target`, `offline` (`{ fallback }`), `chunking`
+  (`'layout'` default | `'single'` | `'route'`,
+  `SWELTE_CHUNKING` wins — see `config.md` §Chunking). Env wins at
   runtime (`SWELTE_*`), defaults when unset/invalid.
 * `CSP` injected as meta, `CSRF` origin-check, `_method` override,
   `X-Swelte-Version` header.

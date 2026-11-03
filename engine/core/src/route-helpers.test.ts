@@ -214,7 +214,7 @@ describe('route helpers', () => {
 			join(root, 'src', 'routes', 'posts', '[slug=slug].v'),
 			'module p\n@[get]\npub fn post_detail() string { return "" }'
 		)
-		const crawl = await collectPrerenderEntries(root, 'src/routes', 'static')
+		const crawl = await collectPrerenderEntries(root, 'src/routes', 'static', new Set(ms.keys()))
 		assert.ok(
 			crawl.routes.includes('/posts/[slug=slug]') || crawl.dynamics.includes('/posts/[slug=slug]')
 		)

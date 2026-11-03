@@ -8,6 +8,7 @@ import {
 	svelteRouteFor,
 	siblingLoadSource,
 	universalLoadKind,
+	chunkKeyFor,
 } from './vite.js'
 import type { SvelteRouteEntry } from './vite.js'
 
@@ -106,5 +107,63 @@ describe('collectSvelteManifest (tmp routes)', () => {
 		assert.equal(by('live/+page.svelte')?.ssr, false)
 		assert.ok(siblingLoadSource(join(routesAbs, 'router', '+page.ts'))?.endsWith('+page.js'))
 		assert.equal(universalLoadKind(join(routesAbs, 'router', '+page.ts')), 'sync')
+	})
+
+	it('chunk hint defaults to inherit; wrapper +route.ts pins the subtree', () => {
+		const routesAbs = tmpRoutes({
+			'admin/+route.svelte': '<slot />',
+			'admin/+route.ts': `export const chunk = 'lazy'`,
+			'admin/+page.svelte': '<h1>a</h1>',
+			'admin/+page.ts': `export const chunk = 'eager'`,
+			'bare.svelte': '<h1>b</h1>',
+		})
+		const { entries } = collectSvelteManifest(routesAbs, 'src/routes', new Set())
+		const by = (svelte: string) => entries.find((e: SvelteRouteEntry) => e.svelte === svelte)
+		assert.equal(by('admin/+route.svelte')?.chunk, 'lazy')
+		assert.equal(by('admin/+page.svelte')?.chunk, 'eager')
+		assert.equal(by('bare.svelte')?.chunk, 'inherit')
+	})
+
+	it('bad chunk hint throws with file+line', () => {
+		const routesAbs = tmpRoutes({
+			'bad.svelte': '<h1>b</h1>',
+			'bad.ts': `export const chunk = 'sometimes'`,
+		})
+		assert.throws(() => collectSvelteManifest(routesAbs, 'src/routes', new Set()), /bad chunk hint/)
+	})
+
+	it('chunkKeyFor: layout bubbles wrapper-less folders, flat vs nested split', () => {
+		const wrappers = new Set(['+route', 'admin/+route'])
+		const e = (svelte: string, chunk?: 'eager' | 'lazy' | 'inherit') => ({
+			svelte,
+			kind: 'page' as const,
+			chunk: chunk ?? 'inherit',
+		})
+		// layout: admin pages share the admin chunk; wrapper-less subfolder
+		// bubbles up; root pages share the root chunk.
+		assert.equal(chunkKeyFor('layout', e('admin/+page.svelte'), wrappers), 'layout:admin')
+		assert.equal(chunkKeyFor('layout', e('admin/users.svelte'), wrappers), 'layout:admin')
+		assert.equal(chunkKeyFor('layout', e('admin/audit/+page.svelte'), wrappers), 'layout:admin')
+		assert.equal(chunkKeyFor('layout', e('+page.svelte'), wrappers), 'layout:/')
+		assert.equal(chunkKeyFor('layout', e('about.svelte'), wrappers), 'layout:/')
+		// flat foo.svelte skips foo/+route; nested foo/+page.svelte mounts it.
+		const withChild = new Set(['+route', 'shop/+route'])
+		assert.equal(chunkKeyFor('layout', e('shop.svelte'), withChild), 'layout:/')
+		assert.equal(chunkKeyFor('layout', e('shop/+page.svelte'), withChild), 'layout:shop')
+		// route: one chunk per leaf; eager hoists to the layout chunk.
+		assert.equal(chunkKeyFor('route', e('admin/+page.svelte'), wrappers), 'page:admin')
+		assert.equal(chunkKeyFor('route', e('admin/+page.svelte', 'eager'), wrappers), 'layout:admin')
+		// single: everything in app unless forced lazy.
+		assert.equal(chunkKeyFor('single', e('admin/+page.svelte'), wrappers), 'app')
+		assert.equal(chunkKeyFor('single', e('admin/+page.svelte', 'lazy'), wrappers), 'page:admin')
+		// eager wrapper collapses into its parent chunk; eager leaf is a no-op.
+		const ew = { svelte: 'admin/+route.svelte', kind: 'wrapper' as const, chunk: 'eager' as const }
+		assert.equal(chunkKeyFor('layout', ew, wrappers), 'layout:/')
+		assert.equal(chunkKeyFor('layout', e('admin/+page.svelte', 'eager'), wrappers), 'layout:admin')
+		// error page always stays in the entry chunk.
+		assert.equal(
+			chunkKeyFor('layout', { svelte: '+error.svelte', kind: 'error', chunk: 'inherit' }, wrappers),
+			'app'
+		)
 	})
 })
