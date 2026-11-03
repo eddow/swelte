@@ -25,8 +25,11 @@ npx swelte dev    # Vite :5174 + V backend :8131`
 		lang: 'bash',
 		code: `npx swelte init myapp && cd myapp
 npm install
-npm install @swelte/ssr-qjs @swelte/mcp @swelte/vvm
-npx swelte dev    # Vite :5174 + V backend :8131`
+npx swelte dev    # Vite :5174 + V backend :8131
+
+# SSR is optional - core runs SPA/static + JSON without it.
+# Only if you want server rendering, add the adapter:
+# npm install @swelte/ssr-qjs`
 	},
 	'install-dev': {
 		lang: 'bash',

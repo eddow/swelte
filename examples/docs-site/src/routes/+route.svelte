@@ -1,46 +1,80 @@
 <script lang="ts">
-	import type { Snippet } from 'svelte';
-	import { onMount } from 'svelte';
+	import type { Snippet } from 'svelte'
+	import { onMount } from 'svelte'
+	import { searchDocs } from '#lib/search.js'
+	import { goto } from '@swelte/core'
+	import { browser } from '#app/environment'
 
-	let { children }: { children?: Snippet } = $props();
+	let { children }: { children?: Snippet } = $props()
 
-	const THEME_KEY = 'swelte-docs-theme';
+	const THEME_KEY = 'swelte-docs-theme'
 
 	// System default first (no stored pref → OS decides via CSS),
 	// then explicit light/dark persisted in localStorage.
 	// Client-only: runs in onMount, never during SSR.
-	let dark = $state(false);
+	let dark = $state(false)
+
+	let query = $state('')
+	let open = $state(false)
+	let active = $state(0)
+	// SSR-safe: searchDocs is plain client data (static index, no RPC).
+	// Evaluate lazily only in the browser render — the server bundle
+	// renders the shell (query starts empty) and hydrates interactivity.
+	let results = $derived(typeof window === 'undefined' ? [] : searchDocs(query))
 
 	function applyTheme(next: boolean) {
-		dark = next;
+		dark = next
 		if (typeof document !== 'undefined') {
-			document.documentElement.dataset.theme = next ? 'dark' : 'light';
+			document.documentElement.dataset.theme = next ? 'dark' : 'light'
 			try {
-				localStorage.setItem(THEME_KEY, next ? 'dark' : 'light');
+				localStorage.setItem(THEME_KEY, next ? 'dark' : 'light')
 			} catch {
 				// private mode — theme just won't persist
 			}
 		}
 	}
 
-	onMount(() => {
-		const root = document.documentElement;
-		let stored: string | null = null;
-		try {
-			stored = localStorage.getItem(THEME_KEY);
-		} catch {
-			stored = null;
-		}
-		if (stored === 'dark' || stored === 'light') {
-			// Boot script already applied this; just sync the toggle.
-			dark = stored === 'dark';
-			root.dataset.theme = stored;
-		} else {
-			// No stored pref: follow the OS, then adopt it as explicit state
-			// (toggle shows the truth; next flip persists from here).
-			applyTheme(window.matchMedia?.('(prefers-color-scheme: dark)').matches ?? false);
-		}
-	});
+	// Guards register client-side only: they must never fire during the
+	// sync SSR render (no router/stores in QJS — build error by design).
+	// NOTE: plain onMount still fires inside Svelte's sync server render,
+	// so guard with a browser check (false on the server output, so the
+	// calls are tree-shaken before QJS ever sees them).
+	// `#app/*` imports are SSR-safe (server literals in the sync bundle);
+	// only `@swelte/core` store *values* ($page/$navigating/$updated) and
+	// router fns need the browser gate (throw-stubs in QJS).
+	if (browser) {
+		onMount(() => {
+			const root = document.documentElement
+			let stored: string | null = null
+			try {
+				stored = localStorage.getItem(THEME_KEY)
+			} catch {
+				stored = null
+			}
+			if (stored === 'dark' || stored === 'light') {
+				// Boot script already applied this; just sync the toggle.
+				dark = stored === 'dark'
+				root.dataset.theme = stored
+			} else {
+				// No stored pref: follow the OS, then adopt it as explicit state
+				// (toggle shows the truth; next flip persists from here).
+				applyTheme(window.matchMedia?.('(prefers-color-scheme: dark)').matches ?? false)
+			}
+			const onKey = (e: KeyboardEvent) => {
+				const t = e.target as HTMLElement | null
+				const typing = t != null && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA')
+				if (e.key === '/' && !typing) {
+					e.preventDefault()
+					const el = document.querySelector(
+						'input[aria-label="Search docs"]'
+					) as HTMLInputElement | null
+					el?.focus()
+				}
+			}
+			window.addEventListener('keydown', onKey)
+			return () => window.removeEventListener('keydown', onKey)
+		})
+	}
 
 	const groups: { title: string; links: { href: string; label: string }[] }[] = [
 		{
@@ -59,6 +93,7 @@
 				{ href: '/guide/forms', label: 'Forms' },
 				{ href: '/guide/errors', label: 'Errors' },
 				{ href: '/guide/config', label: 'Config' },
+				{ href: '/guide/offline', label: 'Offline' },
 				{ href: '/guide/ssr', label: 'SSR' },
 				{ href: '/guide/cli', label: 'CLI' },
 				{ href: '/guide/mcp', label: 'MCP' }
@@ -72,7 +107,7 @@
 				{ href: '/example', label: 'Example app' }
 			]
 		}
-	];
+	]
 </script>
 
 <div class="drawer lg:drawer-open min-h-screen">
@@ -101,12 +136,87 @@
 				<span class="badge badge-primary hidden sm:inline-flex">V + Svelte 5</span>
 			</div>
 			<div class="flex-none gap-2">
-				<label class="input input-bordered input-sm hidden md:flex items-center gap-2">
-					<input type="text" class="grow" placeholder="Search docs…" disabled />
-					<kbd class="kbd kbd-xs">/</kbd>
-				</label>
+				<div class="relative hidden md:block">
+					<label class="input input-bordered input-sm flex items-center gap-2">
+						<input
+							type="text"
+							class="grow"
+							placeholder="Search docs…"
+							bind:value={query}
+							onfocus={() => (open = true)}
+							onblur={() => setTimeout(() => (open = false), 120)}
+							onkeydown={(e) => {
+								if (e.key === 'ArrowDown') {
+									e.preventDefault()
+									active = Math.min(active + 1, results.length - 1)
+								} else if (e.key === 'ArrowUp') {
+									e.preventDefault()
+									active = Math.max(active - 1, 0)
+								} else if (e.key === 'Enter' && results[active]) {
+									const href = results[active].href
+									query = ''
+									open = false
+									active = 0
+									try {
+										goto(href)
+									} catch {
+										window.location.href = href
+									}
+								} else if (e.key === 'Escape') {
+									query = ''
+									open = false
+								}
+							}}
+							aria-label="Search docs"
+							role="combobox"
+							aria-expanded={open && results.length > 0}
+							aria-controls="docs-search-list"
+						/>
+						<kbd class="kbd kbd-xs">/</kbd>
+					</label>
+					{#if open && query.trim() && results.length > 0}
+						<ul
+							id="docs-search-list"
+							role="listbox"
+							class="absolute right-0 mt-1 w-72 menu bg-base-100 border border-base-200 rounded-box shadow-lg z-30 p-1"
+						>
+							{#each results as r, i}
+								<li>
+									<button
+										role="option"
+										aria-selected={i === active}
+										class={i === active ? 'active' : ''}
+										onmousedown={(e) => {
+											e.preventDefault()
+											const href = r.href
+											query = ''
+											open = false
+											active = 0
+											try {
+												goto(href)
+											} catch {
+												window.location.href = href
+											}
+										}}>{r.label} <span class="opacity-60 text-xs">· {r.group}</span></button
+									>
+								</li>
+							{/each}
+						</ul>
+					{:else if open && query.trim()}
+						<div
+							class="absolute right-0 mt-1 w-72 bg-base-100 border border-base-200 rounded-box shadow-lg z-30 p-3 text-sm opacity-70"
+						>
+							No matches — try “ssr”, “offline”, or “rpc”.
+						</div>
+					{/if}
+				</div>
 				<label class="swap swap-rotate btn btn-ghost btn-circle btn-sm">
-					<input type="checkbox" checked={dark} onchange={(e) => applyTheme(e.currentTarget.checked)} aria-label="Toggle dark mode" />
+					<input
+						type="checkbox"
+						checked={dark}
+						onchange={(e) => applyTheme(e.currentTarget.checked)}
+						aria-label="Toggle dark mode"
+					/>
 					<svg
 						class="swap-off h-5 w-5 fill-current"
 						xmlns="http://www.w3.org/2000/svg"
@@ -126,9 +236,8 @@
 						/>
 					</svg>
 				</label>
-				<a
-					href="https://github.com/eddow/swelte"
-					class="btn btn-ghost btn-sm hidden sm:inline-flex">GitHub</a
+				<a href="https://github.com/eddow/swelte" class="btn btn-ghost btn-sm hidden sm:inline-flex"
+					>GitHub</a
 				>
 			</div>
 		</div>

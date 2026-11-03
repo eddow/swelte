@@ -1,0 +1,46 @@
+# Manual Vercel container deploy for docs-site (Swelte: V binary + dist/).
+# Vercel builds this file in the cloud and runs the container on Fluid
+# compute. The binary serves dist/ + API on one port; Vercel routes all
+# traffic to it. $PORT is injected by the platform — the Dockerfile default
+# (8131) only applies to local `docker run` without -e PORT.
+#
+# Vercel project settings (dashboard → project → Settings):
+#   Root Directory: examples/docs-site
+#   Dockerfile Path: Dockerfile.vercel  (default when only one Dockerfile.* exists)
+#
+# Manual deploy (Vercel CLI, from repo root):
+#   cd examples/docs-site
+#   vercel deploy                    # preview URL
+#   vercel deploy --prod             # production
+#
+# Notes:
+# - Build stage needs gcc + git + node (V toolchain via @swelte/vvm,
+#   QuickJS archive via gcc, shiki highlight via node).
+# - Runtime stage is debian slim + the prebuilt dist/ only (no toolchain).
+# - SSR is embedded QuickJS: SWELTE_SSR=1 reads dist/ssr/render.js in-process.
+# - No EXPOSE needed for Vercel (platform injects $PORT); kept for `docker run`.
+
+# ---------- build ----------
+FROM node:22-bookworm AS build
+RUN apt-get update && apt-get install -y --no-install-recommends gcc git unzip ca-certificates \
+	&& rm -rf /var/lib/apt/lists/*
+WORKDIR /app
+# Install docs-site deps from the npm registry (self-contained: no monorepo needed).
+# Keep package.json + scripts/ + sources; npm resolves @swelte/* from the registry.
+COPY package.json ./
+COPY scripts/ ./scripts/
+COPY src/ ./src/
+COPY index.html svelte.config.js tsconfig.json vite.config.ts ./
+RUN npm install
+# V toolchain (postinstall downloads V 0.5.2 unless present) + full static build
+RUN npm run highlight && npx swelte build
+# Drop the dev-only toolchain weight before copying to runtime
+RUN rm -rf node_modules/.cache /root/.npm
+
+# ---------- runtime ----------
+FROM debian:stable-slim
+WORKDIR /app
+COPY --from=build /app/dist ./dist
+EXPOSE 8131
+ENV PORT=8131 SWELTE_DIST=dist SWELTE_SSR=1
+CMD ["./dist/server"]

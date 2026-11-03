@@ -18,11 +18,12 @@ Open work (`ssr-bun`, gate-as-CI with wrapper-route asserts) stays in
   `build`/`dev`/`preview` never start an engine. `SWELTE_SSR_URL` in the
   environment is the only bridge — `Hand` proxies when set, skips when
   not. Default is SPA/static + JSON, always.
-* `@swelte/ssr-qjs` (default engine) owns: the SSR compiler, the
+* `@swelte/ssr-qjs` (optional engine — `npm install @swelte/ssr-qjs`) owns: the SSR compiler, the
   vendored QuickJS prod embed, the dev sidecar (Node HTTP, dev-only),
   and its own lifecycle commands (`runSsrDev`, `runSsrCheck`).
 * `@swelte/ssr-bun` (opt-in) does not exist yet. Same HTTP protocol
   (`POST {route, props} → {html, head}`) when it does.
+* Without the package, core stays SPA/static + JSON: `swelte build` skips the QJS bridge pass, `swelte preview` serves the shell, and `SWELTE_SSR=1` fails the V compile loudly (missing bridge symbol) instead of silently falling back.
 
 ## How it works
 
@@ -46,10 +47,13 @@ Two copies of the same bundle:
 Guards (build errors with file+line): no `node:` imports, no
 `fetch(`, no top-level `await`, no top-level stub calls in
 SSR-compiled components (QuickJS is pure-sync; `load()` stays in V).
-Known SDK imports become render-time throw-stubs (`#routes`/`#lib`/`@swelte/core`,
+`.v` RPC stub imports become render-time throw-stubs (`#routes/*.v` /
+`#lib/*.v` / `@swelte/core`,
 `$app/stores|state|navigation`; `$app|#app/environment` + `$app|#app/paths`
 resolve to server literals) — they never ship to the
-browser (client bundle is a separate Vite build). Unknown IDs
+browser (client bundle is a separate Vite build). Plain `#lib/*.js|ts|svelte`
+source imports are NOT stubs: the SSR bundler resolves them from disk
+(like the client's `#lib` alias). Unknown IDs
 (`#app/secret`, `$app/forms`, `$env/*`) are not shimmed: build error.
 ## Request path
 

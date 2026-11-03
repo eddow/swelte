@@ -24,7 +24,7 @@ helpers). `.swelte/server.v` (generated harness: `Hand` + static handlers
   when the leaf exists it wins — static beats dynamic). Catch-all is a
   fallback: it matches only when no exact or narrower dynamic arm does.
   `.svelte` and `.v` match independently (HTML vs JSON dispatch never
-  conflict — see `internal/v-imports.md` §2).
+  conflict — see `internal/v-imports.md` §2). A `+page.svelte` with no `+page.v` still renders (static shell/SPA + SSR when enabled); the leaf `.v` is only required to claim the URL for the API dispatcher (verbs/`@[rpc]`/`@[load]`).
   Import from `#routes/...` (or relative `./x.v`).
 - `src/lib/**/*.v` — isomorphic lib. Never routed, never fetched.
   Same V compiles native + `v -b wasm`; TS import is always `async`.

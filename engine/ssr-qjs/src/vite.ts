@@ -62,6 +62,7 @@ export function swelte(options: SsrQjsOptions = {}): Plugin[] {
 			const outFile = await emitRenderJs(manifest, {
 				root,
 				routesDir: String(options.routesDir ?? 'src/routes'),
+				libDir: String(options.libDir ?? 'src/lib'),
 				prod: true,
 			})
 			// QJS prod link (adapter-owned): vendored QuickJS → libqjs.a +

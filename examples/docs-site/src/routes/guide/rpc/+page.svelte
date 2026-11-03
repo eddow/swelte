@@ -43,6 +43,7 @@
 
 <h2 class="text-2xl font-bold mt-8">Routing knobs</h2>
 <ul class="list-disc list-inside opacity-80 space-y-1 mt-2">
+	<li>A <code>+page.svelte</code> with no <code>+page.v</code> still renders (static shell/SPA + SSR); the leaf <code>.v</code> only claims the URL for API/RPC/load arms.</li>
 	<li>Route groups <code>(group)</code> — disk-only, stripped from URL.</li>
 	<li>Optional <code>[[slug]]</code> — last segment only, zero-or-one (<code>/docs</code> + <code>/docs/x</code> → 200).</li>
 	<li>Dynamics <code>[id]</code>, <code>[id=integer]</code> (digits-only, <code>Params</code> narrows to <code>number</code>), catch-all <code>[...rest]</code>.</li>

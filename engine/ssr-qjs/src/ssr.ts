@@ -30,6 +30,11 @@ export interface SsrComposeOptions {
 	outFile?: string
 	dev?: boolean
 	routesDir?: string
+	/** Plain-source `#lib/*` resolution (default `src/lib`). `.v` stub
+	 * imports never reach the resolver (rewritten to throw-stubs above);
+	 * plain `.js`/`.ts`/`.svelte`/extensionless `#lib/*` ids resolve here
+	 * from disk so Rollup bundles the real source. */
+	libDir?: string
 }
 
 export interface SsrManifest {
@@ -101,7 +106,7 @@ export function assertUniversalLoadSync(
 		}
 	}
 	const sdkRe =
-		/import\s*\{([^}]*)\}\s*from\s*['"](#routes\/[^'"]*|#lib\/[^'"]*|@swelte\/core)['"]/g
+		/import\s*\{([^}]*)\}\s*from\s*['"](#routes\/[^'"]*\.v|#lib\/[^'"]*\.v|@swelte\/core)['"]/g
 	let sm: RegExpExecArray | null
 	while ((sm = sdkRe.exec(src)) !== null) {
 		const names = [...sm[1].split(',')]
@@ -416,15 +421,18 @@ export function stubSdkImports(code: string, relFile: string): string {
 	}
 	const out: string[] = []
 	let last = 0
-	// Named SDK imports → render-time throw-stubs (must never fire in SSR).
+	// Named `.v` RPC stub imports → render-time throw-stubs (must never fire
+	// in SSR). Plain `#lib/*.js|ts|svelte` source imports are NOT stubs —
+	// the Rollup resolver serves them from disk — so the `.v` suffix is
+	// part of the match (mirrors assertNoSdkTopLevelCalls below).
 	// Single RegExp literal: `$app` needs one backslash escape here.
 	const re =
-		/import\s*\{([^}]*)\}\s*from\s*['"](#routes\/[^'"]*|#lib\/[^'"]*|@swelte\/core|\$app\/[^'"]*)['"]/g
+		/import\s*\{([^}]*)\}\s*from\s*['"](#routes\/[^'"]*\.v|#lib\/[^'"]*\.v|@swelte\/core|\$app\/[^'"]*)['"]/g
 	// Bare side-effect SDK imports (`import '$app/navigation'`: the Svelte
 	// compiler preserves them when no named binding is used) → drop: the
 	// client bundle resolves them for real; the sync bundle needs no trace.
 	const bare =
-		/import\s*['"](#routes\/[^'"]*|#lib\/[^'"]*|@swelte\/core|\$app\/[^'"]*)['"];?/g
+		/import\s*['"](#routes\/[^'"]*\.v|#lib\/[^'"]*\.v|@swelte\/core|\$app\/[^'"]*)['"];?/g
 	let m: RegExpExecArray | null
 	while ((m = re.exec(code)) !== null) {
 		if (isCommentedOut(m.index)) continue
@@ -475,7 +483,14 @@ export async function assertNoSdkTopLevelCalls(
 	src: string
 ): Promise<void> {
 	const sdkNames = new Set<string>()
-	const imre = /import\s*\{([^}]*)\}\s*from\s*['"](#routes\/[^'"]*|#lib\/[^'"]*|@swelte\/core|\$app\/[^'"]*)['"]/g
+	// Only `.v` RPC stub specifiers count as SDK imports here: `#lib/*.js`
+	// (and `.ts`/`.svelte`/extensionless source imports) are plain user
+	// code the SSR bundler resolves from disk. The client resolver
+	// aliases both `#routes` and `#lib` to source dirs, so this guard
+	// mirrors the same `.v` boundary — otherwise e.g. `searchDocs` from
+	// `#lib/search.js` is misread as a stub and any top-level call to it
+	// (incl. Svelte runes like `$derived(...)`) fails the build.
+	const imre = /import\s*\{([^}]*)\}\s*from\s*['"](#routes\/[^'"]*\.v|#lib\/[^'"]*\.v|@swelte\/core|\$app\/[^'"]*)['"]/g
 	let im: RegExpExecArray | null
 	while ((im = imre.exec(src)) !== null) {
 		for (const part of (im[1] as string).split(',')) {
@@ -527,8 +542,65 @@ function resolveSdkShim(id: string, _importer: string): string | null {
 	return null
 }
 
+/** Register a plain `#lib/*` source module from disk (`./__lib__/*` key).
+ * Recursive: lib files may themselves import `#lib/*` (plain source
+ * recurses; `.v` stubs stay throw-stubs and never reach here). */
+export async function registerLibModule(
+	modules: Map<string, string>,
+	root: string,
+	libDir: string,
+	id: string
+): Promise<string | null> {
+	const sub = id === '#lib' ? '' : id.slice('#lib/'.length)
+	const libBase = join(resolve(root), libDir, sub)
+	const { readFileSync: rd, statSync: st } = await import('node:fs')
+	// Requested sub may already carry an extension (`search.js`) while the
+	// file on disk is extensionless-adjacent (`search.ts`): also try the
+	// stem (strip one known suffix) so client-style ids resolve on disk.
+	const stems = [sub]
+	for (const e of ['.js', '.ts', '.svelte']) {
+		if (sub !== '' && sub.endsWith(e) && !stems.includes(sub.slice(0, -e.length))) stems.push(sub.slice(0, -e.length))
+	}
+	for (const stem of stems) {
+		const base = join(resolve(root), libDir, stem === '' ? '' : stem)
+		for (const cand of [base, `${base}.js`, `${base}.ts`, `${base}.svelte`, join(base, 'index.js'), join(base, 'index.ts')]) {
+			try {
+				if (!existsSync(cand) || cand.includes('\0') || st(cand).isDirectory()) continue
+			} catch {
+				continue
+			}
+			// Key follows the DISK stem (not the requested suffix): the
+			// client alias resolves `search.js` → `search.ts` on disk, so
+			// the SSR module is `./__lib__/search.ts`. The normalize pass
+			// matches exact keys first, then stem variants.
+			const ext = cand.endsWith('.svelte') ? '.svelte' : cand.endsWith('.ts') ? '.ts' : '.js'
+			const diskStem = stem === '' ? 'index' : stem.replace(/\.(js|ts|svelte)$/, '')
+			const rel = './__lib__/' + diskStem + ext
+			if (!modules.has(rel)) {
+				let src = rd(cand, 'utf8')
+				if (cand.endsWith('.svelte')) {
+					const { compile } = (await import('svelte/compiler')) as typeof import('svelte/compiler')
+					const out = compile(src, { generate: 'server', dev: false, filename: cand })
+					src = stubSdkImports(out.js.code, rel)
+				} else if (cand.endsWith('.ts')) {
+					src = await transpileSiblingLoad(rel, src)
+				}
+				// Recurse before set (handles cycles via the has() check on re-entry).
+				modules.set(rel, src)
+				for (const m of src.matchAll(/from\s*['"](#lib(?:\/[^'"]*)?)['"]/g)) {
+					if (`./__lib__/${m[1] === '#lib' ? 'index' : m[1].slice('#lib/'.length)}.js` !== rel) {
+						await registerLibModule(modules, root, libDir, m[1])
+					}
+				}
+			}
+			return rel
+		}
+	}
+	return null
+}
+
 /** Bundle compiled route modules + svelte runtime into one ESM module. */
-export async function bundleSsr(modules: Map<string, string>, entry: string, bundleRoot = '', bundleRoutesDir = 'src/routes'): Promise<string> {
+export async function bundleSsr(modules: Map<string, string>, entry: string, bundleRoot = '', bundleRoutesDir = 'src/routes', bundleLibDir = 'src/lib'): Promise<string> {
 	const { rollup } = (await import('rollup')) as typeof import('rollup')
 	// svelte resolves from the adapter's own install (peer dep), falling
 	// back to cwd — the fixture dir may not have node_modules.
@@ -573,6 +645,13 @@ export async function bundleSsr(modules: Map<string, string>, entry: string, bun
 				if (!modules.has(key2)) modules.set(key2, rd2(cand, 'utf8'))
 				return key2
 			}
+		}
+		// Plain-source `#lib/*` (NOT `.v` stubs — those are throw-stubs by
+		// now and never reach the resolver): resolve from disk so Rollup
+		// bundles the real source. Mirrors the client's `#lib → src/lib`
+		// alias (non-enumerable `swelte` key keeps it out of svelte()).
+		if (id === '#lib' || id.startsWith('#lib/')) {
+			return (await registerLibModule(modules, bundleRoot || process.cwd(), bundleLibDir, id)) ?? null
 		}
 			// QJS-safe substitutes (shims/): crypto + render-context carry
 			// lazy `node:` imports that never fire on the sync path but
@@ -679,6 +758,7 @@ export async function composeRenderJs(
 ): Promise<string> {
 	const root = resolve(opts.root)
 	const routesDir = opts.routesDir ?? 'src/routes'
+	const libDir = opts.libDir ?? 'src/lib'
 	const modules = new Map<string, string>()
 
 	const compileFile = async (rel: string, routeSsr = true): Promise<string> => {
@@ -718,9 +798,39 @@ export async function composeRenderJs(
 		}
 		if (!routeSsr) return key
 		let code = await compileSsrComponent(abs, `${routesDir}/${rel}`)
-		code = code.replace(/from\s*(['"])(\.[^'"]*)\1/g, (full, q: string, id: string) => {
+		// Pre-register plain `#lib/*` source deps so the normalize pass
+		// below finds their `./__lib__/*` keys (resolver also handles
+		// out-of-order, but normalize runs first so preload here).
+		// Both `from '#lib/x'` and bare `import '#lib/x'` forms.
+		for (const m of code.matchAll(/(?:from\s*|import\s*)['"](#lib(?:\/[^'"]*)?)['"]/g)) {
+			await registerLibModule(modules, root, libDir, m[1])
+		}
+		// Normalize imports to module keys: relative ids (`./x`, `../+error`)
+		// resolve against the importer key; plain `#lib/*` source imports
+		// resolve to their `./__lib__/*` registration keys (NOT stubs).
+		// Both `from '#lib/x'` and bare `import '#lib/x'` forms.
+		code = code.replace(/(?:from\s*|import\s*)(['"])([^'"]+)\1/g, (full, q: string, id: string) => {
+			if (id === '#lib' || id.startsWith('#lib/')) {
+				const sub = id === '#lib' ? 'index' : id.slice('#lib/'.length)
+				// Direct key first (exact id), then disk-stem variants (id
+				// carried `.js` but disk holds `.ts`: key is `./__lib__/search.ts`).
+				const stems = [sub]
+				for (const e of ['.js', '.ts', '.svelte']) {
+					const stem = sub !== '' && sub.endsWith(e) ? sub.slice(0, -e.length) : null
+					if (stem && !stems.includes(stem)) stems.push(stem)
+				}
+				for (const stem of stems) {
+					const base = stem === '' ? 'index' : stem.replace(/\.(js|ts|svelte)$/, '')
+					for (const ext of ['.js', '.ts', '.svelte']) {
+						const cand = `./__lib__/${base}${ext}`
+						if (modules.has(cand)) return full.replace(id, cand)
+					}
+				}
+				return full
+			}
+			if (!id.startsWith('.')) return full
 			const norm = withDot(posixNormalize(key, id))
-			if (modules.has(norm) || norm.endsWith('.svelte')) return `from ${q}${norm}${q}`
+			if (modules.has(norm) || norm.endsWith('.svelte')) return full.replace(id, norm)
 			return full
 		})
 		modules.set(key, code)
@@ -901,7 +1011,7 @@ export function renderRoute(route, props_json) {
 `
 	const entryAbs = join(root, '.swelte', 'ssr-entry.js')
 	modules.set(entryAbs, entrySrc)
-	return bundleSsr(modules, entryAbs, root, routesDir)
+	return bundleSsr(modules, entryAbs, root, routesDir, libDir)
 }
 
 /** Write `dist/ssr/render.js` (prod) or `<outDir>/dev/render.js` (dev).
@@ -931,11 +1041,14 @@ export async function emitRenderJs(
 	return outFile
 }
 
-/** Collect stub names imported from SDK dirs (#routes/#lib, @swelte/core, $app/*). */
+/** Collect stub names imported from SDK `.v` stubs (#routes/*.v, #lib/*.v,
+ * @swelte/core, $app/*). Plain `#lib/*.js|ts|svelte` source imports are
+ * plain user code (bundled from disk) — NOT stubs — so the `.v` suffix is
+ * part of the match (mirrors assertNoSdkTopLevelCalls). */
 function stubImportNames(src: string): Set<string> {
 	const names = new Set<string>()
 	const re =
-		/import\s*\{([^}]*)\}\s*from\s*['"](#routes\/[^'"]*|#lib\/[^'"]*|@swelte\/core|\$app\/[^'"]*)['"]/g
+		/import\s*\{([^}]*)\}\s*from\s*['"](#routes\/[^'"]*\.v|#lib\/[^'"]*\.v|@swelte\/core|\$app\/[^'"]*)['"]/g
 	for (const m of src.matchAll(re)) {
 		for (const part of m[1].split(',')) {
 			const nm = part

@@ -79,6 +79,16 @@ describe('item 17 — QJS-compat guards (file+line)', () => {
 		await assert.rejects(() => assertNoSdkTopLevelCalls('a', 'r', aliased), /top-level stub call \(g\)/)
 		// Non-SDK calls never flagged.
 		await assert.doesNotReject(() => assertNoSdkTopLevelCalls('a', 'r', `<script>function go() {} go();</script><h1>x</h1>`))
+		// Plain `#lib/*.js` source is NOT a stub: same top-level call shape
+		// passes (the SSR bundler resolves it from disk like the client).
+		await assert.doesNotReject(() =>
+			assertNoSdkTopLevelCalls('a', 'r', `<script>import { searchDocs } from '#lib/search.js'; let q = $state(''); let results = $derived(searchDocs(q));</script><h1>x</h1>`)
+		)
+		// `#lib/*.v` IS a stub: same call shape still fails.
+		await assert.rejects(
+			() => assertNoSdkTopLevelCalls('a', 'r', `<script>import { h } from '#lib/crypto/hash.v'; const r = h({});</script><h1>x</h1>`),
+			/top-level stub call \(h\)/
+		)
 	})
 })
 
@@ -107,6 +117,9 @@ describe('item 18 — stubSdkImports rewrite + compileSsrComponent', () => {
 		// `import type` is a different statement form: untouched here
 		// (the Svelte compiler erases it before this rewrite runs).
 		assert.ok(out.includes('import type'))
+		// Plain `#lib/*.js` source is NOT a stub: left for the resolver.
+		const plain = `import { searchDocs } from '#lib/search.js';\n`
+		assert.equal(stubSdkImports(plain, 'f.svelte'), plain)
 	})
 
 	it('compileSsrComponent: server output with SDK stubbed, guards applied', async () => {
@@ -371,5 +384,47 @@ describe('universal load — sync subset (§1.1)', () => {
 		}
 		const out = mod.renderRoute('/', JSON.stringify({ title: 'app-ok' }))
 		assert.ok(out.body.includes('app-ok'), `page must render, got: ${out.body.slice(0, 160)}`)
+	})
+
+	it('composeRenderJs bundles a page importing plain #lib/*.js source (no specifier leak)', async () => {
+		const dir = mkdtempSync(join(tmpdir(), 'swelte-ssr-lib-'))
+		const routesDir = join(dir, 'src', 'routes')
+		const libDir = join(dir, 'src', 'lib')
+		const { mkdirSync } = await import('node:fs')
+		mkdirSync(routesDir, { recursive: true })
+		mkdirSync(libDir, { recursive: true })
+		writeFileSync(join(libDir, 'search.js'), `export function searchDocs(q) { return 'found:' + q; }`)
+		writeFileSync(
+			join(routesDir, '+page.svelte'),
+			`<script>import { searchDocs } from '#lib/search.js'; let { title } = $props(); let out = searchDocs('x');</script><h1>{title} {out}</h1>`
+		)
+		const code = await composeRenderJs(
+			{
+				hasError: false,
+				routes: [
+					{
+						route: '/',
+						svelte: '+page.svelte',
+						kind: 'page',
+						hasData: false,
+						hasUniversalLoad: false,
+					},
+				],
+				error: null,
+				wrappers: [],
+				wrappersByRoute: {},
+			},
+			{ root: dir }
+		)
+		assert.ok(!code.includes('#lib/'), 'no #lib specifier may survive into render.js')
+		assert.ok(code.includes('found:'), 'lib source must be bundled, got: ' + code.slice(0, 200))
+		const { pathToFileURL } = await import('node:url')
+		const probeFile = join(dir, 'render.check.mjs')
+		writeFileSync(probeFile, code)
+		const mod = (await import(pathToFileURL(probeFile).href)) as unknown as {
+			renderRoute: (route: string, props: string) => { head: string; body: string }
+		}
+		const out = mod.renderRoute('/', JSON.stringify({ title: 'lib-ok' }))
+		assert.ok(out.body.includes('found:x'), `lib call must run in SSR, got: ${out.body.slice(0, 160)}`)
 	})
 })

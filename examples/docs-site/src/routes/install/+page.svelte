@@ -11,7 +11,7 @@
 </div>
 
 <h1 class="text-4xl font-bold mt-2">Installation</h1>
-<p class="py-4 opacity-80">Requires Node 20+. V resolves itself — system <code>v</code>, else the <code>@swelte/vvm</code> toolchain. No manual V install.</p>
+<p class="py-4 opacity-80">Requires Node 20+. V resolves itself — system <code>v</code>, else the <code>@swelte/vvm</code> toolchain. No manual V install. SSR is optional: core runs SPA/static + JSON out of the box; only install <code>@swelte/ssr-qjs</code> if you want server rendering (see <a class="link" href="/guide/ssr">SSR</a>).</p>
 
 <ul class="steps steps-vertical lg:steps-horizontal w-full my-4">
 	<li class="step step-primary">Scaffold</li>
@@ -39,7 +39,7 @@
 		<div class="card-body">
 			<h2 class="card-title">Try it live</h2>
 			<Code snippet={codeHtml['install-dev']} dense />
-			<p class="text-sm opacity-70 mt-2">Every page here has a <code>+page.v</code> probe arm — the dispatcher needs a leaf <code>.v</code> to claim the URL.</p>
+			<p class="text-sm opacity-70 mt-2">Every page here has a <code>+page.v</code> probe arm — the API dispatcher needs a leaf <code>.v</code> to claim the URL for JSON/RPC. A <code>+page.svelte</code> alone still renders (static shell/SPA + optional SSR); add the <code>+page.v</code> only when the route needs server data or callable arms.</p>
 		</div>
 	</div>
 </div>

@@ -82,7 +82,8 @@ pub fn swelte_admin__page_swelte_load(req SwelteRequest) !string {
 ## Boundaries
 
 * Components must not re-fetch load-time data: the SSR compile pass
-  rejects `#routes`/`loadPage` imports with file+line. Move it into
+  rejects `#routes/*.v`/`#lib/*.v` stub imports with file+line (plain
+  `#lib/*.js|ts|svelte` source is fine — bundled from disk). Move it into
   `$props()` and let `Hand` supply it.
 * On-click stubs (`@[get]`/`@[rpc]` in handlers) unchanged.
 * Three+ levels: each level's parent is the previous level's return —

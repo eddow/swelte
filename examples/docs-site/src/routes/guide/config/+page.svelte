@@ -28,7 +28,7 @@
 			<ul class="text-sm opacity-80 list-disc list-inside space-y-1">
 				<li><code>prerender.entries: off | static | all</code> + sibling <code>entries.ts</code> → additive <code>dist/*.html</code></li>
 				<li><code>isr: &#123; '/blog': 60 &#125;</code> → <code>Cache-Control s-maxage</code> + <code>X-Swelte-Revalidate</code></li>
-				<li><code>offline.fallback</code> — opt-in service worker + precache</li>
+				<li><code>offline.fallback</code> — opt-in service worker + precache (<a class="link" href="/guide/offline">offline guide</a>)</li>
 				<li>per-route <code>ssr = false</code> — SPA shell, async universal load client-side</li>
 			</ul>
 		</div>
