@@ -5,7 +5,7 @@
 //
 // Core stays engine-agnostic: this package owns ALL engine deps
 // (svelte/compiler for generate:'server', qjs at runtime). Core never
-// imports svelte/compiler, quickjs, or bun.
+// imports svelte/compiler, quickjs, or a JS runtime.
 export * from '@swelte/core'
 export { swelte } from './vite.js'
 export {

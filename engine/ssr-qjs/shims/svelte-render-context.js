@@ -4,7 +4,7 @@
 // streaming, no await) flow through get_render_context only in hydratable
 // paths that sync render touches at renderer.js:866. This stub provides
 // a module-local context so sync renders work without ALS.
-// Async entry points throw — the bun adapter covers streaming.
+// Async entry points throw — streaming SSR is a non-goal.
 // Re-verify against upstream on svelte upgrades.
 let context = null
 
@@ -18,7 +18,7 @@ export function get_render_context() {
 }
 
 export async function with_render_context(_fn) {
-	throw new Error('[swelte:ssr-qjs] async render context unavailable in QuickJS (use ssr-bun for streaming)')
+	throw new Error('[swelte:ssr-qjs] async render context unavailable in QuickJS')
 }
 
 export function init_render_context() {

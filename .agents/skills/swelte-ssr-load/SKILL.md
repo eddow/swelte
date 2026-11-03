@@ -7,7 +7,7 @@ description: Swelte SSR and page-data loading — @[load] cascade, +route wrappe
 
 ## Ownership (locked)
 
-- `core` is engine-agnostic: manifest (`.swelte/ssr-manifest.json`), `Hand` SSR hook, marker injection, client entry, `loadPage` twin. Core never imports `svelte/compiler`, QuickJS, or bun; `build`/`dev`/`preview` never start an engine. `SWELTE_SSR_URL` is the only bridge — `Hand` proxies when set, skips when not. Default is SPA/static + JSON, always.
+- `core` is engine-agnostic: manifest (`.swelte/ssr-manifest.json`), `Hand` SSR hook, marker injection, client entry, `loadPage` twin. Core never imports `svelte/compiler`, QuickJS, or a JS runtime; `build`/`dev`/`preview` never start an engine. `SWELTE_SSR_URL` is the only bridge — `Hand` proxies when set, skips when not. Default is SPA/static + JSON, always.
 - `@swelte/ssr-qjs` (default engine) owns the SSR compiler, vendored QuickJS prod embed, dev sidecar, `runSsrDev`/`runSsrCheck`.
 
 ## Request path
@@ -63,4 +63,4 @@ Stable — all built including per-route `ssr=false`-lite:
 - `docs/config.md` — per-route `ssr=false`-lite (`export const ssr = false` → manifest flag → `Hand` skips rendering, serves SPA shell; async universal `load` stays client-only)
 - `docs/coming-from-sveltekit.md` — `ssr=false`-lite rendering row
 
-- `docs/specs/ssr.md` — open work only (`ssr-bun`, dev auto-sidecar UX, gate-as-CI); not required to use this skill
+- `docs/ssr.md` — ownership, request path, cascade, contract, budgets, gate (also covers the open hardening work: dev auto-sidecar UX, gate-as-CI)

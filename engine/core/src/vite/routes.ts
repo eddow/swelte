@@ -63,8 +63,8 @@ export function svelteRouteFor(mod: string): string | null {
 }
 
 /** SSR manifest entry: route → svelte file + data pairing.
- * Engine-agnostic JSON — adapters (ssr-qjs/ssr-bun) consume it; core
- * never imports svelte/compiler, quickjs, or bun. */
+ * Engine-agnostic JSON — SSR adapters consume it; core
+ * never imports svelte/compiler, quickjs, or a JS runtime. */
 export function relPosixTop(abs: string, f: string): string {
 	return f
 		.slice(abs.length + 1)

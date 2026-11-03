@@ -81,8 +81,8 @@ export async function runSsrDev(opts: SsrDevRunOptions = {}): Promise<void> {
  *  - `ls dist/ssr/` shows exactly one artifact (post-QJS-link)
  *  - bare-machine prod: SWELTE_SSR=1, no SWELTE_SSR_URL, same HTML shape
  *  - 20× repeat-render against the prod binary: all 200, stable timing
- * `qjsc` needs no half (C ring-cache, unvendored); `ssr-bun` streaming
- * is excluded (tracked with the bun package). Dev HMR touch-and-swap
+ * `qjsc` needs no half (C ring-cache, unvendored); HTML streaming
+ * is a non-goal. Dev HMR touch-and-swap
  * is covered by hmr-proof.test.ts.
  * Core's `swelte build` smoke stays static/SPA + JSON — this is the
  * adapter's proof. Missing `+error.svelte` → SPA `index.html` 200 is

@@ -1,7 +1,6 @@
 // Dev SSR sidecar (adapter-owned, never core).
 // Serves the compiled `render.js` IIFE over HTTP so `Hand` (V, no JS
-// engine) can render without linking QuickJS. Same protocol the future
-// `ssr-bun` sidecar uses: POST / { route, props } -> { html, head }.
+// engine) can render without linking QuickJS: POST / { route, props } -> { html, head }.
 // The bundle is engine-agnostic IIFE — dev verifies HTML + hydration,
 // not the QJS engine (bytecode/embed/caps are prod-only).
 // HMR: watches the render.js file (mtime); re-imports on change, no

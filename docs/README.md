@@ -17,7 +17,7 @@ Documentation for users of Swelte (all describe built behavior):
 - `mcp.md` — `@swelte/mcp` stdio server: tools, client config, wasm maps (implemented)
 - `example.md` — the `something` example (implemented; browseable twin: `examples/docs-site/`)
 - `versus.md` — Swelte vs. other full-stack paradigms (positioning)
-- `coming-from-sveltekit.md` — SvelteKit → Swelte migration map (built behavior; open work in `specs/`)
+- `coming-from-sveltekit.md` — SvelteKit → Swelte migration map (built behavior)
 
 
 ## Internal
@@ -29,7 +29,7 @@ Internal docs to modify Swelte (design rationale, decisions, ephemeral notes):
 
 ## Specs
 
-Specifications of what has to be done (plans, open work only):
+Open tracking notes for the remaining polish:
 
-- `specs/app.md` — `src/app.v` lifecycle (`@[startup]`/`@[reroute]`/`@[cron]` contracts + dropped ideas)
-- `specs/ssr.md` — SSR open work (dev sidecar, `ssr-bun`, CI)
+- `specs/docs.md` — doc review note (`svg icon`)
+- `specs/more.md` — open questions (code splitting)

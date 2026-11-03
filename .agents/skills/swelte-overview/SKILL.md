@@ -45,7 +45,7 @@ Browser refresh never hits the API; `curl` does.
 
 Stable only — no spec dependency:
 
-- `docs/README.md` — doc index (root = built behavior, `internal/` = rationale, `specs/` = open work)
+- `docs/README.md` — doc index (root = built behavior, `internal/` = rationale, `specs/` = remaining polish notes)
 - `docs/example.md` — canonical `examples/something` demo
 - `docs/versus.md` — positioning vs SvelteKit, Rust, Go, LiveView
 - `README.md` — quickstart

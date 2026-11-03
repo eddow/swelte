@@ -13,7 +13,7 @@ import { swelte } from '@swelte/ssr-qjs' // instead of '@swelte/core/vite'
 
 Core stays engine-agnostic: this package owns ALL engine deps
 (`svelte/compiler` at build time, vendored QuickJS at runtime).
-Core never imports `svelte/compiler`, `quickjs`, or `bun`.
+Core never imports `svelte/compiler`, `quickjs`, or a JS runtime.
 
 ## Layout
 
@@ -29,13 +29,13 @@ shims/ QJS-safe substitutes (2 svelte internals + SDK shim)
 `render.js` is your client components compiled with `generate: 'server'`
 plus the sync universal load, run in embedded QuickJS (pure-sync, no
 I/O). Most guards below are the same universal-code hygiene SvelteKit
-enforces — not QuickJS deficits. The genuine QJS-vs-`bun` delta is
+enforces — not QuickJS deficits. The genuine QJS delta is
 only: no async render, no streaming.
 
 * **No HTML streaming** — one `renderRoute()` call per render (after `@[load]`),
   one HTML string, 50ms render budget then SPA fallback. (SSE event streaming is
   unaffected: it is V-native in `Hand`, intercepted before SSR, and
-  works with any engine.) *Bun later: chunked HTML via the sidecar.*
+  works with any engine.)
 * **Three shims, not the real internals** — `shims/svelte-crypto.js`
   (throws: CSP-hash branch) and `shims/svelte-render-context.js`
   (module-local context, no ALS; async entry points throw) substitute

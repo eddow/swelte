@@ -2,8 +2,6 @@
 
 Server-side rendering is proven. This page is the durable
 record: what SSR does, how it runs, and the measured budgets.
-Open work (`ssr-bun`, gate-as-CI with wrapper-route asserts) stays in
-`specs/ssr.md`.
 
 ## Ownership (locked)
 
@@ -14,16 +12,14 @@ Open work (`ssr-bun`, gate-as-CI with wrapper-route asserts) stays in
   `.swelte/server.v`), marker
   injection in `transformIndexHtml`, the generated client entry
   (`.swelte/entry-main.ts`), and the `loadPage` client twin in `sdk.ts`.
-  Core never imports `svelte/compiler`, QuickJS, or bun; core's
+  Core never imports `svelte/compiler`, QuickJS, or a JS runtime; core's
   `build`/`dev`/`preview` never start an engine. `SWELTE_SSR_URL` in the
   environment is the only bridge — `Hand` proxies when set, skips when
   not. Default is SPA/static + JSON, always.
 * `@swelte/ssr-qjs` (optional engine — `npm install @swelte/ssr-qjs`) owns: the SSR compiler, the
   vendored QuickJS prod embed, the dev sidecar (Node HTTP, dev-only),
   and its own lifecycle commands (`runSsrDev`, `runSsrCheck`).
-* `@swelte/ssr-bun` (opt-in) does not exist yet. Same HTTP protocol
-  (`POST {route, props} → {html, head}`) when it does.
-* Without the package, core stays SPA/static + JSON: `swelte build` skips the QJS bridge pass, `swelte preview` serves the shell, and `SWELTE_SSR=1` fails the V compile loudly (missing bridge symbol) instead of silently falling back.
+* Without the QJS package, core stays SPA/static + JSON: `swelte build` skips the bridge pass, `swelte preview` serves the shell, and `SWELTE_SSR=1` fails the V compile loudly (missing bridge symbol) instead of silently falling back.
 
 ## How it works
 
@@ -142,8 +138,8 @@ plus exactly one artifact in `dist/ssr/` and a 20× repeat-render
 * No per-directory `+error` inheritance (single global).
 * No React/Vue adapters in core — `core` lists `.svelte` because
 Swelte is Svelte.
-* No async in the qjs renderer (use `bun` if you need it).
-* No `core` dependency on `svelte/compiler`, `quickjs`, or `bun`.
+* No async in the qjs renderer — streaming SSR is a non-goal.
+* No `core` dependency on `svelte/compiler`, `quickjs`, or a JS runtime.
 * QJS bytecode cache (proven, no `qjsc` binary needed): the glue
 compiles `render.js` once per distinct bundle bytes (`JS_Eval` +
 `JS_WriteObject(BYTECODE)` on a throwaway runtime, FNV-1a key + length

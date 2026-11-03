@@ -1562,7 +1562,7 @@ export function initSwelteRouter(target) {
 				}
 				// SSR manifest: engine-agnostic JSON for adapters.
 				// [{ route, svelte, kind, hasData }] + hasError flag. Core emits it;
-				// ssr-qjs/ssr-bun compose render.js from it. Never import engine deps.
+				// ssr-qjs composes render.js from it. Never import engine deps.
 				try {
 					const { entries: svelteEntries, hasError } = collectSvelteManifest(
 						routesAbs,

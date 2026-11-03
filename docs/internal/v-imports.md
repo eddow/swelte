@@ -6,7 +6,6 @@ all 2026-10-29 decisions including the verb-vs-rpc handler split
 one args-struct).
 `../rpc.md`+`../types.md`+`../errors.md` describe the built behavior;
 this file is the design rationale and the undecided remainder.
-Forward work lives in `../specs/app.md` only.
 
 ## 1. Goal
 

@@ -12,7 +12,7 @@ The reigning incumbents of full-stack web development. While SvelteKit provides 
 
 | Feature | SvelteKit (Node.js / V8) | Swelte (V + Svelte 5) |
 | --- | --- | --- |
-| **Backend Runtime** | Interpreted/JIT JavaScript (Node.js / Bun) | Native machine code compiled via V |
+| **Backend Runtime** | Interpreted/JIT JavaScript (Node.js) | Native machine code compiled via V |
 | **Memory Footprint** | Heavy (50MB–150MB+ base per process for V8) | Ultra-lightweight, near-zero baseline |
 | **Garbage Collection** | Automatic GC pauses under high concurrency | Deterministic resource control / minimal overhead |
 | **Deployment Scale** | Requires containerization, `node_modules`, and process managers | **Single self-contained binary** with zero external dependencies |

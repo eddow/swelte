@@ -646,7 +646,7 @@ fn swelte_render_page(route string, props_json string) (string, bool) {
 		_ = props_json
 		return '', false
 	}
-	// Dev sidecar (node) / bun proxy: POST { route, props } -> { html, head }.
+	// Dev sidecar (node): POST { route, props } -> { html, head }.
 	// Any failure (down, timeout, 5xx) → not-ok → SPA/static fallback.
 	body := '{"route":' + swelte_json_str(route) + ',"props":' + props_json + '}'
 	mut resp := http.post_json(url, body) or { return '', false }
