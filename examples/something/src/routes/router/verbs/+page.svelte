@@ -4,7 +4,10 @@ import { verbs_probe, verbs_echo } from '#routes/router/verbs/+page.v'
 let note = $state('')
 
 async function headProbe() {
-	const res = await fetch('/router/verbs', { method: 'HEAD', headers: { accept: 'application/json' } })
+	const res = await fetch('/router/verbs', {
+		method: 'HEAD',
+		headers: { accept: 'application/json' },
+	})
 	note = `HEAD /router/verbs → ${res.status} (GET arm answers HEAD)`
 }
 
@@ -17,7 +20,10 @@ async function deleteProbe() {
 	try {
 		await verbs_probe({})
 		// verbs_probe is the GET stub — force a DELETE through fetch instead.
-		const res = await fetch('/router/verbs', { method: 'DELETE', headers: { accept: 'application/json' } })
+		const res = await fetch('/router/verbs', {
+			method: 'DELETE',
+			headers: { accept: 'application/json' },
+		})
 		note = `DELETE /router/verbs → ${res.status} (no @[delete] arm → 405)`
 	} catch (e) {
 		note = String(e)
@@ -37,5 +43,7 @@ async function echoProbe() {
 		<button onclick={deleteProbe}>DELETE probe (405)</button>
 		<button onclick={echoProbe}>POST ?echo</button>
 	</div>
-	{#if note}<p>{note}</p>{/if}
+	{#if note}
+		<p>{note}</p>
+	{/if}
 </main>

@@ -42,7 +42,11 @@ export function writeTargetShim(
 	if (target === 'edge') {
 		const lines = ['/*', '  X-Swelte-Target: edge', '']
 		for (const [prefix, seconds] of Object.entries(isrHeaders)) {
-			lines.push(`${prefix === '/' ? '/*' : `${prefix}/*`}`, `  Cache-Control: public, max-age=0, s-maxage=${seconds}`, '')
+			lines.push(
+				`${prefix === '/' ? '/*' : `${prefix}/*`}`,
+				`  Cache-Control: public, max-age=0, s-maxage=${seconds}`,
+				''
+			)
 		}
 		writeFileSync(join(root, distDir, '_headers'), lines.join('\n'))
 		log('target edge: dist/_headers')
@@ -104,7 +108,8 @@ export async function runBuild(ctx: Ctx): Promise<void> {
 		process.env.SWELTE_TRAILING_SLASH = cfg.trailingSlash
 	if (!process.env.SWELTE_CSRF_CHECK_ORIGIN && cfg.csrf === 'enforce')
 		process.env.SWELTE_CSRF_CHECK_ORIGIN = '1'
-	if (!process.env.SWELTE_METHOD_OVERRIDE && cfg.methodOverride) process.env.SWELTE_METHOD_OVERRIDE = '1'
+	if (!process.env.SWELTE_METHOD_OVERRIDE && cfg.methodOverride)
+		process.env.SWELTE_METHOD_OVERRIDE = '1'
 	if (!process.env.SWELTE_VERSION && cfg.version !== '') process.env.SWELTE_VERSION = cfg.version
 	// ISR lite: freeze the `isr` map into SWELTE_ISR for the prerender
 	// crawl + smoke probe env (the V binary reads it per request).
@@ -305,7 +310,9 @@ export async function runBuild(ctx: Ctx): Promise<void> {
 	writeTargetShim(
 		root,
 		cfg.distDir,
-		targetFlag === 'static' || targetFlag === 'node' || targetFlag === 'edge' ? targetFlag : cfg.target,
+		targetFlag === 'static' || targetFlag === 'node' || targetFlag === 'edge'
+			? targetFlag
+			: cfg.target,
 		targetIsrHeaders,
 		ctx.log
 	)

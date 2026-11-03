@@ -42,7 +42,9 @@ describe('parseVFile', () => {
 
 describe('parseStructs', () => {
 	it('fields under pub: (real Session shape)', () => {
-		const sts = parseStructs(`pub struct Session {\npub:\n\tid string\n\tuser string\n\tremember bool\n}`)
+		const sts = parseStructs(
+			`pub struct Session {\npub:\n\tid string\n\tuser string\n\tremember bool\n}`
+		)
 		assert.equal(sts.length, 1)
 		assert.deepEqual(
 			sts[0]?.fields.map((f) => [f.name, f.tstype]),

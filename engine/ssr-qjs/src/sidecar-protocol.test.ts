@@ -18,7 +18,11 @@ async function freePort(): Promise<number> {
 	})
 }
 
-async function post(port: number, body: unknown, headers: Record<string, string> = {}): Promise<{ status: number; json: unknown; text: string }> {
+async function post(
+	port: number,
+	body: unknown,
+	headers: Record<string, string> = {}
+): Promise<{ status: number; json: unknown; text: string }> {
 	const raw = typeof body === 'string' ? body : JSON.stringify(body)
 	const res = await fetch(`http://127.0.0.1:${port}/`, {
 		method: 'POST',
@@ -66,11 +70,7 @@ describe('item 21 — sidecar protocol (real loopback)', () => {
 	it('bad JSON → 400; body > 1MB → 413', async () => {
 		const bad = await post(port, '{not json')
 		assert.equal(bad.status, 400)
-		const big = await post(
-			port,
-			'x'.repeat(1024 * 1024 + 8),
-			{ 'content-type': 'text/plain' }
-		)
+		const big = await post(port, 'x'.repeat(1024 * 1024 + 8), { 'content-type': 'text/plain' })
 		assert.equal(big.status, 413)
 	})
 
@@ -97,12 +97,14 @@ describe('item 21 — sidecar protocol (real loopback)', () => {
 
 	it('render timeout → 500; throw in render → 500 JSON, server survives', async () => {
 		const slowFile = join(root, 'slow.js')
-		writeFileSync(
-			slowFile,
-			`export function renderRoute() { return new Promise(() => {}); }\n`
-		)
+		writeFileSync(slowFile, `export function renderRoute() { return new Promise(() => {}); }\n`)
 		const p2 = await freePort()
-		const s2 = await startSsrDevServer({ root, renderFile: slowFile, port: p2, renderTimeoutMs: 50 })
+		const s2 = await startSsrDevServer({
+			root,
+			renderFile: slowFile,
+			port: p2,
+			renderTimeoutMs: 50,
+		})
 		try {
 			const { status } = await post(p2, { route: '/', props: {} })
 			assert.equal(status, 500)

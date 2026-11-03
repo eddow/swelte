@@ -6,9 +6,9 @@
 // stay build errors in generate() only (diagnostics warns types/orphans/clashes).
 import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { join, resolve, sep } from 'node:path'
+import { parseStructs, parseVFile } from '../vite/parse.js'
 import { loadConfig } from './config.js'
 import { isBackendMod } from './paths.js'
-import { parseStructs, parseVFile } from '../vite.js'
 
 function listFilesWithExt(dir: string, ext: string): string[] {
 	const out: string[] = []
@@ -84,7 +84,7 @@ export async function collectDiagnostics(root: string): Promise<Diagnostic[]> {
 			const svelteIndex = join(routesAbs, mod, 'index.svelte')
 			const svelteMatch = join(
 				routesAbs,
-				mod.replace(/\[\.\.\.[^\]]+\]/g, 'x').replace(/\[[^\]]+\]/g, 'x') + '.svelte'
+				`${mod.replace(/\[\.\.\.[^\]]+\]/g, 'x').replace(/\[[^\]]+\]/g, 'x')}.svelte`
 			)
 			let ok = false
 			try {
@@ -94,7 +94,7 @@ export async function collectDiagnostics(root: string): Promise<Diagnostic[]> {
 			}
 			if (!ok)
 				warn(
-					routesDir + '/' + rel,
+					`${routesDir}/${rel}`,
 					'orphan',
 					routesDir +
 						'/' +
@@ -111,9 +111,9 @@ export async function collectDiagnostics(root: string): Promise<Diagnostic[]> {
 			])
 			for (const mod of seen) {
 				for (const leafName of ['index', '+page']) {
-					if (mod !== leafName && seen.has(mod + '/' + leafName)) {
+					if (mod !== leafName && seen.has(`${mod}/${leafName}`)) {
 						warn(
-							routesDir + '/' + mod + '.v',
+							`${routesDir}/${mod}.v`,
 							'clash',
 							routesDir +
 								'/' +
@@ -141,7 +141,7 @@ export async function collectDiagnostics(root: string): Promise<Diagnostic[]> {
 			const dir = slash < 0 ? '' : mod.slice(0, slash)
 			if (base === '+error' && dir !== '') {
 				warn(
-					routesDir + '/' + rel,
+					`${routesDir}/${rel}`,
 					'ssr-error',
 					routesDir +
 						'/' +
@@ -161,12 +161,12 @@ export async function collectDiagnostics(root: string): Promise<Diagnostic[]> {
 					.slice(srcAbs.length + 1)
 					.split(sep)
 					.join('/')
-				if (rel === rBase || rel.startsWith(rBase + '/')) continue
-				if (rel === lBase || rel.startsWith(lBase + '/')) continue
+				if (rel === rBase || rel.startsWith(`${rBase}/`)) continue
+				if (rel === lBase || rel.startsWith(`${lBase}/`)) continue
 				warn(
-					'src/' + rel,
+					`src/${rel}`,
 					'stray',
-					'src/' + rel + ': .v outside routes/ + lib/ -- ignored (never routed, never typed)'
+					`src/${rel}: .v outside routes/ + lib/ -- ignored (never routed, never typed)`
 				)
 			}
 		}
@@ -188,7 +188,7 @@ export async function collectDiagnostics(root: string): Promise<Diagnostic[]> {
 							.split(sep)
 							.join('/')
 							.slice(libAbs.split(sep).join('/').length + 1)
-						if (rel.split('/').includes('backend')) bad.push(libDir + '/' + rel)
+						if (rel.split('/').includes('backend')) bad.push(`${libDir}/${rel}`)
 					}
 				}
 			}
@@ -201,7 +201,7 @@ export async function collectDiagnostics(root: string): Promise<Diagnostic[]> {
 				warn(
 					b,
 					'backend-ts',
-					b + ': backend/ runs purely on V -- no TS/JS/Svelte here (move it out of backend/)'
+					`${b}: backend/ runs purely on V -- no TS/JS/Svelte here (move it out of backend/)`
 				)
 		}
 		for (const f of listVFiles(libAbs)) {
@@ -217,7 +217,7 @@ export async function collectDiagnostics(root: string): Promise<Diagnostic[]> {
 			const allFns = parseVFile(src)
 			for (const vf of allFns.filter((x) => x.attr !== 'rpc')) {
 				warn(
-					libDir + '/' + rel,
+					`${libDir}/${rel}`,
 					'attr',
 					libDir +
 						'/' +
@@ -233,7 +233,7 @@ export async function collectDiagnostics(root: string): Promise<Diagnostic[]> {
 				for (const fld of st.fields) {
 					if (fld.tstype === 'unknown')
 						warn(
-							libDir + '/' + rel,
+							`${libDir}/${rel}`,
 							'type',
 							'lib/' +
 								mod +
@@ -251,7 +251,7 @@ export async function collectDiagnostics(root: string): Promise<Diagnostic[]> {
 				for (const p of fn.params) {
 					if (p.tstype === 'unknown')
 						warn(
-							libDir + '/' + rel,
+							`${libDir}/${rel}`,
 							'type',
 							'lib/' +
 								mod +
@@ -266,9 +266,9 @@ export async function collectDiagnostics(root: string): Promise<Diagnostic[]> {
 				}
 				if (fn.tsret === 'unknown' && fn.vret !== 'unknown')
 					warn(
-						libDir + '/' + rel,
+						`${libDir}/${rel}`,
 						'type',
-						'lib/' + mod + '.' + fn.name + ": return: unknown V type '" + fn.vret + "' -> unknown"
+						`lib/${mod}.${fn.name}: return: unknown V type '${fn.vret}' -> unknown`
 					)
 			}
 		}
@@ -286,7 +286,7 @@ export async function collectDiagnostics(root: string): Promise<Diagnostic[]> {
 					for (const fld of st.fields) {
 						if (fld.tstype === 'unknown')
 							warn(
-								routesDir + '/' + rel,
+								`${routesDir}/${rel}`,
 								'type',
 								'routes/' +
 									mod +
@@ -304,7 +304,7 @@ export async function collectDiagnostics(root: string): Promise<Diagnostic[]> {
 					for (const p of fn.params) {
 						if (p.tstype === 'unknown')
 							warn(
-								routesDir + '/' + rel,
+								`${routesDir}/${rel}`,
 								'type',
 								'routes/' +
 									mod +
@@ -319,7 +319,7 @@ export async function collectDiagnostics(root: string): Promise<Diagnostic[]> {
 					}
 					if (fn.tsret === 'unknown' && fn.vret !== 'unknown')
 						warn(
-							routesDir + '/' + rel,
+							`${routesDir}/${rel}`,
 							'type',
 							'routes/' +
 								mod +

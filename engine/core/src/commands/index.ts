@@ -31,7 +31,12 @@ const buildCmd: Command = {
 		{ name: 'root', help: 'Project root', value: 'string' },
 		{ name: 'output', short: 'o', help: 'Server binary output path', value: 'string' },
 		{ name: 'port', short: 'p', help: 'Smoke-probe port', value: 'number' },
-		{ name: 'target', short: 't', help: 'Deploy target shim: auto | static | node | edge', value: 'string' },
+		{
+			name: 'target',
+			short: 't',
+			help: 'Deploy target shim: auto | static | node | edge',
+			value: 'string',
+		},
 		{
 			name: 'target-os',
 			help: 'Cross-build OS: linux | macos | windows (also SWELTE_TARGET_OS, swelte.targetOs)',
@@ -125,7 +130,15 @@ const exportCmd: Command = {
 	},
 }
 
-export const COMMANDS: Command[] = [devCmd, buildCmd, previewCmd, initCmd, checkCmd, testCmd, exportCmd]
+export const COMMANDS: Command[] = [
+	devCmd,
+	buildCmd,
+	previewCmd,
+	initCmd,
+	checkCmd,
+	testCmd,
+	exportCmd,
+]
 
 export function findCommand(name: string): Command | undefined {
 	return COMMANDS.find((c) => c.name === name)

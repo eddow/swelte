@@ -27,11 +27,17 @@ describe('SDK error contract', () => {
 	})
 
 	it('message includes fn/base/status/available/hint', () => {
-		const err = new SwelteRpcError('/api', 'login', 404, {
-			error: 'unknown fn',
-			available: ['a', 'b'],
-			hint: 'try q',
-		}, 'raw')
+		const err = new SwelteRpcError(
+			'/api',
+			'login',
+			404,
+			{
+				error: 'unknown fn',
+				available: ['a', 'b'],
+				hint: 'try q',
+			},
+			'raw'
+		)
 		assert.ok(err.message.includes('"login"'))
 		assert.ok(err.message.includes('/api'))
 		assert.ok(err.message.includes('404'))
@@ -44,18 +50,24 @@ describe('SDK error contract', () => {
 			new Response(JSON.stringify({ error: 'unknown fn', available: ['x'] }), {
 				status: 404,
 			})) as typeof fetch
-		await assert.rejects(() => __swelteFetch('/b', 'fn', 'rpc', {}), (e: unknown) => {
-			const err = e as SwelteRpcError
-			return err instanceof SwelteRpcError && err.body?.available?.[0] === 'x'
-		})
+		await assert.rejects(
+			() => __swelteFetch('/b', 'fn', 'rpc', {}),
+			(e: unknown) => {
+				const err = e as SwelteRpcError
+				return err instanceof SwelteRpcError && err.body?.available?.[0] === 'x'
+			}
+		)
 	})
 
 	it('raw text fallback when body is not JSON', async () => {
 		globalThis.fetch = (async () => new Response('boom', { status: 500 })) as typeof fetch
-		await assert.rejects(() => __swelteFetch('/b', 'fn', 'rpc', {}), (e: unknown) => {
-			const err = e as SwelteRpcError
-			return err instanceof SwelteRpcError && err.message.includes('boom') && err.body === null
-		})
+		await assert.rejects(
+			() => __swelteFetch('/b', 'fn', 'rpc', {}),
+			(e: unknown) => {
+				const err = e as SwelteRpcError
+				return err instanceof SwelteRpcError && err.message.includes('boom') && err.body === null
+			}
+		)
 	})
 
 	it('loadPage maps SwelteRpcError -> { error } and non-RPC -> 500', async () => {
@@ -83,15 +95,38 @@ describe('SDK error contract', () => {
 		globalThis.fetch = (async () => {
 			calls++
 			if (calls === 2)
-				return new Response(new Blob(['PDF'], { type: 'application/pdf' }), { status: 200, headers: { 'content-type': 'application/pdf' } })
+				return new Response(new Blob(['PDF'], { type: 'application/pdf' }), {
+					status: 200,
+					headers: { 'content-type': 'application/pdf' },
+				})
 			if (calls === 3)
-				return new Response(JSON.stringify('hi'), { status: 200, headers: { 'content-type': 'application/json' } })
-			return new Response(JSON.stringify({ id: 'sess_x' }), { status: 201, headers: { 'content-type': 'application/json' } })
+				return new Response(JSON.stringify('hi'), {
+					status: 200,
+					headers: { 'content-type': 'application/json' },
+				})
+			return new Response(JSON.stringify({ id: 'sess_x' }), {
+				status: 201,
+				headers: { 'content-type': 'application/json' },
+			})
 		}) as typeof fetch
-		const login = await __swelteFetch<{ status: number; body: unknown }>('/api/greet', 'login', 'post', {}, '', true)
+		const login = await __swelteFetch<{ status: number; body: unknown }>(
+			'/api/greet',
+			'login',
+			'post',
+			{},
+			'',
+			true
+		)
 		assert.equal(login.status, 201)
 		assert.equal(JSON.parse(login.body as string).id, 'sess_x')
-		const pdf = await __swelteFetch<{ status: number; body: unknown; is_bytes: boolean }>('/api/greet', 'serve_pdf', 'get', {}, 'pdf', true)
+		const pdf = await __swelteFetch<{ status: number; body: unknown; is_bytes: boolean }>(
+			'/api/greet',
+			'serve_pdf',
+			'get',
+			{},
+			'pdf',
+			true
+		)
 		assert.equal(pdf.status, 200)
 		assert.equal(pdf.is_bytes, true)
 		assert.ok(pdf.body instanceof Blob)
@@ -115,38 +150,54 @@ describe('SDK error contract', () => {
 				// `available` list — same envelope as the unknown-fn path,
 				// so callers can always read `body.available`.
 				return (
-					err instanceof SwelteRpcError &&
-					err.status === 0 &&
-					Array.isArray(err.body?.available)
+					err instanceof SwelteRpcError && err.status === 0 && Array.isArray(err.body?.available)
 				)
 			}
 		)
 	})
 
 	it('§2.11 isFail narrows fail-lite bodies, optional status', () => {
-		const fail = new SwelteRpcError('/b', 'save', 422, { error: 'bad', ok: false, fieldErrors: { name: 'required' } }, '')
+		const fail = new SwelteRpcError(
+			'/b',
+			'save',
+			422,
+			{ error: 'bad', ok: false, fieldErrors: { name: 'required' } },
+			''
+		)
 		assert.ok(isFail(fail))
 		assert.ok(isFail(fail, 422))
 		assert.ok(!isFail(fail, 400))
 		const plain = new SwelteRpcError('/b', 'save', 422, { error: 'bad' }, '')
 		assert.ok(!isFail(plain))
 		assert.ok(!isFail(new Error('x')))
-		const wrongStatus = new SwelteRpcError('/b', 'save', 200, { error: 'x', ok: false, fieldErrors: {} }, '')
+		const wrongStatus = new SwelteRpcError(
+			'/b',
+			'save',
+			200,
+			{ error: 'x', ok: false, fieldErrors: {} },
+			''
+		)
 		assert.ok(!isFail(wrongStatus))
 	})
 
 	it('§2.12 deserialize parses action envelopes', async () => {
 		const r1 = await deserialize(
-			new Response(JSON.stringify({ type: 'success', status: 200, data: { id: 1 } }), { status: 200 })
+			new Response(JSON.stringify({ type: 'success', status: 200, data: { id: 1 } }), {
+				status: 200,
+			})
 		)
 		assert.equal(r1.type, 'success')
 		const r2 = await deserialize(
-			new Response(JSON.stringify({ type: 'failure', status: 422, data: { ok: false } }), { status: 200 })
+			new Response(JSON.stringify({ type: 'failure', status: 422, data: { ok: false } }), {
+				status: 200,
+			})
 		)
 		assert.equal(r2.type, 'failure')
 		if (r2.type === 'failure') assert.equal(r2.status, 422)
 		const r3 = await deserialize(
-			new Response(JSON.stringify({ type: 'redirect', status: 303, location: '/done' }), { status: 200 })
+			new Response(JSON.stringify({ type: 'redirect', status: 303, location: '/done' }), {
+				status: 200,
+			})
 		)
 		assert.equal(r3.type, 'redirect')
 		await assert.rejects(() => deserialize(new Response('not json', { status: 200 })), /not JSON/)
@@ -158,16 +209,23 @@ describe('SDK error contract', () => {
 
 	it('§1 enhance maps raw verb JSON (envelope-first, raw fallback)', async () => {
 		const env = await __swelteActionResult(
-			new Response(JSON.stringify({ type: 'success', status: 200, data: { id: 1 } }), { status: 200 }),
+			new Response(JSON.stringify({ type: 'success', status: 200, data: { id: 1 } }), {
+				status: 200,
+			})
 		)
 		assert.equal(env.type, 'success')
-		const rawOk = await __swelteActionResult(new Response(JSON.stringify({ ok: true }), { status: 200 }))
+		const rawOk = await __swelteActionResult(
+			new Response(JSON.stringify({ ok: true }), { status: 200 })
+		)
 		assert.equal(rawOk.type, 'success')
 		const rawFail = await __swelteActionResult(
-			new Response(JSON.stringify({ error: 'bad', ok: false, fieldErrors: { name: 'required' } }), { status: 422 }),
+			new Response(JSON.stringify({ error: 'bad', ok: false, fieldErrors: { name: 'required' } }), {
+				status: 422,
+			})
 		)
 		assert.equal(rawFail.type, 'failure')
-		if (rawFail.type === 'failure') assert.ok(isFail(new SwelteRpcError('/b', 'save', 422, rawFail.data as never, '')))
+		if (rawFail.type === 'failure')
+			assert.ok(isFail(new SwelteRpcError('/b', 'save', 422, rawFail.data as never, '')))
 	})
 
 	it('§1 applyAction folds success/failure/redirect into stores', async () => {
@@ -175,12 +233,20 @@ describe('SDK error contract', () => {
 		await applyAction({ type: 'success', status: 200, data: { id: 7 } })
 		assert.deepEqual(page.get().form, { id: 7 })
 		assert.equal(navigating.get(), null)
-		await applyAction({ type: 'failure', status: 422, data: { ok: false, fieldErrors: { n: 'req' } } })
+		await applyAction({
+			type: 'failure',
+			status: 422,
+			data: { ok: false, fieldErrors: { n: 'req' } },
+		})
 		assert.deepEqual((page.get().form as { ok: boolean }).ok, false)
 		const g = globalThis as Record<string, unknown>
 		const prev = g.__swelteRoutes
 		let went = ''
-		g.__swelteRoutes = { goto: async (u: string) => { went = String(u) } }
+		g.__swelteRoutes = {
+			goto: async (u: string) => {
+				went = String(u)
+			},
+		}
 		await applyAction({ type: 'redirect', status: 303, location: '/done' })
 		assert.equal(went, '/done')
 		if (prev === undefined) delete g.__swelteRoutes
@@ -199,9 +265,15 @@ describe('SDK error contract', () => {
 		const listeners = new Map<string, (e: Event) => void>()
 		const form = {
 			getAttribute: (k: string) => (k === 'action' ? '/save' : k === 'method' ? 'post' : null),
-			addEventListener: (t: string, fn: (e: Event) => void) => { listeners.set(t, fn) },
-			removeEventListener: (t: string) => { listeners.delete(t) },
-			reset: () => { reset++ },
+			addEventListener: (t: string, fn: (e: Event) => void) => {
+				listeners.set(t, fn)
+			},
+			removeEventListener: (t: string) => {
+				listeners.delete(t)
+			},
+			reset: () => {
+				reset++
+			},
 		} as unknown as HTMLFormElement
 		const origFD = globalThis.FormData
 		class FakeFD {
@@ -211,7 +283,11 @@ describe('SDK error contract', () => {
 		try {
 			const ctl = enhance(form)
 			let prevented = false
-			listeners.get('submit')?.({ preventDefault: () => { prevented = true } } as unknown as Event)
+			listeners.get('submit')?.({
+				preventDefault: () => {
+					prevented = true
+				},
+			} as unknown as Event)
 			await new Promise((r) => setTimeout(r, 20))
 			assert.equal(fetched, 'http://localhost/save')
 			assert.equal(accepted, 'application/json')
@@ -234,8 +310,12 @@ describe('SDK error contract', () => {
 		const listeners = new Map<string, (e: Event) => void>()
 		const form = {
 			getAttribute: () => null,
-			addEventListener: (t: string, fn: (e: Event) => void) => { listeners.set(t, fn) },
-			removeEventListener: (t: string) => { listeners.delete(t) },
+			addEventListener: (t: string, fn: (e: Event) => void) => {
+				listeners.set(t, fn)
+			},
+			removeEventListener: (t: string) => {
+				listeners.delete(t)
+			},
 			reset: () => {},
 		} as unknown as HTMLFormElement
 		const origFD = globalThis.FormData
@@ -244,7 +324,9 @@ describe('SDK error contract', () => {
 		}
 		;(globalThis as Record<string, unknown>).FormData = FakeFD as unknown as typeof FormData
 		try {
-			const ctl = enhance(form, ({ cancel }) => { cancel() })
+			const ctl = enhance(form, ({ cancel }) => {
+				cancel()
+			})
 			listeners.get('submit')?.({ preventDefault: () => {} } as unknown as Event)
 			await new Promise((r) => setTimeout(r, 20))
 			assert.equal(calls, 0)
@@ -253,5 +335,4 @@ describe('SDK error contract', () => {
 			;(globalThis as Record<string, unknown>).FormData = origFD
 		}
 	})
-
 })

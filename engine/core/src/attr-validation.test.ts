@@ -24,13 +24,18 @@ describe('attr fan-out + validation errors (parse level)', () => {
 	})
 
 	it('bare @[sets_cookie] is rejected (removed — use SwelteResponse)', () => {
-		assert.throws(() => parseVFile(`@[sets_cookie]\n@[rpc] pub fn login() string { return '' }`), /sets_cookie.*removed/)
+		assert.throws(
+			() => parseVFile(`@[sets_cookie]\n@[rpc] pub fn login() string { return '' }`),
+			/sets_cookie.*removed/
+		)
 	})
 
 	it('verbs = HTTP, rpc = protocol-ignorant (parse keeps shapes; generate validates)', () => {
 		const rpc = parseVFile(`@[rpc] pub fn f(args LoginArgs) !Session { return Session{} }`)
 		assert.equal(rpc[0]?.attr, 'rpc')
-		const verb = parseVFile(`@[get] pub fn g(req SwelteRequest) SwelteResponse { return SwelteResponse{} }`)
+		const verb = parseVFile(
+			`@[get] pub fn g(req SwelteRequest) SwelteResponse { return SwelteResponse{} }`
+		)
 		assert.equal(verb[0]?.attr, 'get')
 	})
 

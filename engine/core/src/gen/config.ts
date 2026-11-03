@@ -82,7 +82,8 @@ export interface SwelteOfflineOptions {
 
 /** Resolved config: optionals filled, nested unions widened so `Required`
  *  stays sound (TS `Required` does not distribute into nested optionals). */
-export interface ResolvedSwelteOptions extends Omit<Required<SwelteOptions>, 'prerender' | 'offline' | 'target' | 'targetOs'> {
+export interface ResolvedSwelteOptions
+	extends Omit<Required<SwelteOptions>, 'prerender' | 'offline' | 'target' | 'targetOs'> {
 	prerender: { entries: 'static' | 'all' | 'off'; concurrency: number }
 	offline: { fallback: string }
 	target: 'auto' | 'static' | 'node' | 'edge'
@@ -136,7 +137,7 @@ function normalize(raw: SwelteOptions | null | undefined): ResolvedSwelteOptions
 				? r.trailingSlash
 				: 'ignore',
 		base: String(r.base ?? ''),
-		assets: String(r.assets ?? (r.base ?? '')),
+		assets: String(r.assets ?? r.base ?? ''),
 		csp: String(r.csp ?? ''),
 		csrf: r.csrf === 'enforce' ? 'enforce' : 'ignore',
 		methodOverride: r.methodOverride === true,
@@ -144,15 +145,21 @@ function normalize(raw: SwelteOptions | null | undefined): ResolvedSwelteOptions
 		serviceWorker: normalizeServiceWorker(r.serviceWorker),
 		prerender: normalizePrerender(r.prerender),
 		isr: normalizeIsr(r.isr),
-			target: normalizeTarget(r.target),
+		target: normalizeTarget(r.target),
 		targetOs: normalizeTargetOs(r.targetOs),
 		offline: normalizeOffline(r.offline),
 	} as ResolvedSwelteOptions
 }
 
-function normalizePrerender(raw: SwelteOptions['prerender']): { entries: 'static' | 'all' | 'off'; concurrency: number } {
+function normalizePrerender(raw: SwelteOptions['prerender']): {
+	entries: 'static' | 'all' | 'off'
+	concurrency: number
+} {
 	const r = (raw ?? {}) as { entries?: unknown; concurrency?: unknown }
-	const c = typeof r.concurrency === 'number' && Number.isFinite(r.concurrency) && r.concurrency > 0 ? Math.floor(r.concurrency) : 4
+	const c =
+		typeof r.concurrency === 'number' && Number.isFinite(r.concurrency) && r.concurrency > 0
+			? Math.floor(r.concurrency)
+			: 4
 	return {
 		entries: r.entries === 'all' ? 'all' : r.entries === 'static' ? 'static' : 'off',
 		concurrency: c,
@@ -179,7 +186,9 @@ function normalizeTarget(raw: SwelteOptions['target']): ResolvedSwelteOptions['t
 /** Lenient `swelte.targetOs` normalize: known OS (case-insensitive) or
  * `''` (= host-native). Never throws — CLI/env validation reports. */
 function normalizeTargetOs(raw: SwelteOptions['targetOs']): ResolvedSwelteOptions['targetOs'] {
-	const v = String(raw ?? '').trim().toLowerCase()
+	const v = String(raw ?? '')
+		.trim()
+		.toLowerCase()
 	if (v === 'linux' || v === 'macos' || v === 'windows') return v
 	return ''
 }
@@ -194,7 +203,7 @@ function normalizeOffline(raw: SwelteOptions['offline']): { fallback: string } {
 }
 
 function normalizeServiceWorker(
-	raw: SwelteOptions['serviceWorker'],
+	raw: SwelteOptions['serviceWorker']
 ): Required<Required<SwelteOptions>['serviceWorker']> {
 	const r = (raw ?? {}) as { enabled?: unknown; register?: unknown }
 	return {
@@ -261,7 +270,11 @@ export function templatesDir(fromUrl: string): string {
 export function renderHarness(
 	_config: Required<SwelteOptions>,
 	fromUrl: string,
-	hooks?: { startupBody?: string; rerouteBody?: string; crons?: { seconds: number; body: string; fallible: boolean }[] }
+	hooks?: {
+		startupBody?: string
+		rerouteBody?: string
+		crons?: { seconds: number; body: string; fallible: boolean }[]
+	}
 ): string {
 	const file = join(templatesDir(fromUrl), 'harness', 'server.v')
 	let src = readFileSync(file, 'utf8')
@@ -320,13 +333,13 @@ export function renderHarness(
 			const inject =
 				src.slice(0, lineEnd + 1) +
 				'\t// @[reroute] (src/app.v) — host/path rewrite before dispatch.\n' +
-				'\t// Returns rewritten path or \'\' for no-op. Must be pure + fast.\n' +
+				"\t// Returns rewritten path or '' for no-op. Must be pure + fast.\n" +
 				'\t{\n' +
-				'\t\thost_reroute := ctx.req.header.get_custom(\'Host\') or { ctx.req.header.get(.host) or { \'\' } }\n' +
+				"\t\thost_reroute := ctx.req.header.get_custom('Host') or { ctx.req.header.get(.host) or { '' } }\n" +
 				'\t\trerouted := (fn (host string, path string) string {\n' +
 				indent(indent(hooks.rerouteBody)) +
 				'\n\t\t})(host_reroute, path)\n' +
-				'\t\tif rerouted != \'\' { path = rerouted }\n' +
+				"\t\tif rerouted != '' { path = rerouted }\n" +
 				'\t}'
 			src = inject + src.slice(lineEnd + 1)
 		} else {
@@ -353,7 +366,8 @@ export function renderClientEntry(root: string, fromUrl: string): string {
 	const src = readFileSync(file, 'utf8')
 	const lines: string[] = []
 	if (existsSync(join(resolve(root), 'src', 'app.ts'))) lines.push(`import '../src/app.js'`)
-	else if (existsSync(join(resolve(root), 'src', 'client.ts'))) lines.push(`import '../src/client.js'`)
+	else if (existsSync(join(resolve(root), 'src', 'client.ts')))
+		lines.push(`import '../src/client.js'`)
 	else lines.push(`// Optional user hook: create src/app.ts for app-level setup.`)
 	if (existsSync(join(resolve(root), 'src', 'app.css'))) lines.push(`import '../src/app.css'`)
 	return lines.join('\n') + '\n' + src

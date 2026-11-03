@@ -10,8 +10,8 @@
  * Keep keys stable (`page-block`); `code` is the exact source text.
  */
 export interface SnippetSource {
-	code: string;
-	lang: 'v' | 'ts' | 'js' | 'svelte' | 'bash' | 'json' | 'html';
+	code: string
+	lang: 'v' | 'ts' | 'js' | 'svelte' | 'bash' | 'json' | 'html'
 }
 
 export const snippets: Record<string, SnippetSource> = {
@@ -19,7 +19,7 @@ export const snippets: Record<string, SnippetSource> = {
 		lang: 'bash',
 		code: `npx swelte init myapp && cd myapp
 npm install
-npx swelte dev    # Vite :5174 + V backend :8131`
+npx swelte dev    # Vite :5174 + V backend :8131`,
 	},
 	'install-steps': {
 		lang: 'bash',
@@ -29,12 +29,12 @@ npx swelte dev    # Vite :5174 + V backend :8131
 
 # SSR is optional - core runs SPA/static + JSON without it.
 # Only if you want server rendering, add the adapter:
-# npm install @swelte/ssr-qjs`
+# npm install @swelte/ssr-qjs`,
 	},
 	'install-dev': {
 		lang: 'bash',
 		code: `npx swelte dev    # this site: examples/docs-site
-# open http://localhost:5174`
+# open http://localhost:5174`,
 	},
 	'quickstart-server': {
 		lang: 'v',
@@ -49,7 +49,7 @@ pub fn get_greeting(req SwelteRequest) string {
 @[post]
 pub fn save_name(req SwelteRequest) string {
 	return 'saved:' + (req.form['payload'] or { '' })
-}`
+}`,
 	},
 	'quickstart-client': {
 		lang: 'svelte',
@@ -63,52 +63,52 @@ pub fn save_name(req SwelteRequest) string {
 </script>
 
 <input bind:value={name} class="input input-bordered" />
-<button onclick={greet} class="btn btn-primary">Greet</button>`
+<button onclick={greet} class="btn btn-primary">Greet</button>`,
 	},
 	'quickstart-shape': {
 		lang: 'bash',
 		code: `src/routes/   # server RPC (.v = handler, #routes/... import → fetch)
 src/lib/      # isomorphic (.v = local compute, #lib/... import → WASM)
 .swelte/      # generated types + stubs + harness (gitignored)
-dist/server   # single binary + dist/ static (prod)`
+dist/server   # single binary + dist/ static (prod)`,
 	},
 	'rpc-v': {
 		lang: 'v',
 		code: `pub struct LoginArgs { pub: payload string }
 pub struct Session { pub: id string ... }
-@[rpc] pub fn login(args LoginArgs) !Session { ... }`
+@[rpc] pub fn login(args LoginArgs) !Session { ... }`,
 	},
 	'rpc-ts': {
 		lang: 'ts',
 		code: `export interface Session { id: string; ... }
 export type LoginResult = Session;
-export function login(args: { payload: string }): Promise<LoginResult>;`
+export function login(args: { payload: string }): Promise<LoginResult>;`,
 	},
 	'forms-html': {
 		lang: 'html',
-		code: `<form action="?delete" method="post">`
+		code: `<form action="?delete" method="post">`,
 	},
 	'forms-v': {
 		lang: 'v',
 		code: `@[post('delete')]
-pub fn delete_account(req SwelteRequest) !string { ... }`
+pub fn delete_account(req SwelteRequest) !string { ... }`,
 	},
 	'forms-fail': {
 		lang: 'ts',
-		code: `save_name({ name }).catch((e) => { if (isFail(e)) showInline(e) })`
+		code: `save_name({ name }).catch((e) => { if (isFail(e)) showInline(e) })`,
 	},
 	'forms-enhance': {
 		lang: 'svelte',
 		code: `<script>import { enhance } from '@swelte/core';</script>
-<form method="post" use:enhance>…</form>`
+<form method="post" use:enhance>…</form>`,
 	},
 	'errors-curl': {
 		lang: 'bash',
-		code: `curl -X POST /api/greet -H 'Accept: application/json' -d '{"fn":"nope"}'`
+		code: `curl -X POST /api/greet -H 'Accept: application/json' -d '{"fn":"nope"}'`,
 	},
 	'errors-json': {
 		lang: 'json',
-		code: `{ "error": "unknown fn", "fn": "nope", "path": "/api/greet", "available": ["login"] }`
+		code: `{ "error": "unknown fn", "fn": "nope", "path": "/api/greet", "available": ["login"] }`,
 	},
 	'config-js': {
 		lang: 'js',
@@ -119,23 +119,23 @@ export default defineConfig({
 		outDir: '.swelte', distDir: 'dist', port: 8131, corsOrigin: '',
 		trailingSlash: 'ignore', base: '', assets: '', csp: '', csrf: 'ignore',
 		methodOverride: false, version: '', target: 'auto' }
-});`
+});`,
 	},
 	'ssr-load': {
 		lang: 'v',
 		code: `@[load] load_page(req SwelteRequest) !PageData { ... }        // level 0
-@[load] load_leaf(req SwelteRequest, parent PageData) !Leaf { ... }`
+@[load] load_leaf(req SwelteRequest, parent PageData) !Leaf { ... }`,
 	},
 	'mcp-json': {
 		lang: 'json',
 		code: `{ "mcpServers": { "swelte": { "command": "node",
-	"args": ["./node_modules/@swelte/mcp/dist/index.js"] } } }`
+	"args": ["./node_modules/@swelte/mcp/dist/index.js"] } } }`,
 	},
 	'example-imports': {
 		lang: 'ts',
 		code: `import { get_greeting } from '#routes/+page.v'   // → GET / (JSON)
 import { hash_string } from '#lib/crypto/hash.v'   // → local WASM
 greeting = get_greeting({ payload: name })  // Promise
-hashed = hash_string({ input: name })  // Promise`
-	}
-};
+hashed = hash_string({ input: name })  // Promise`,
+	},
+}

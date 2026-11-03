@@ -46,7 +46,13 @@ describe('CLI parsing', () => {
 		assert.ok(check)
 		await assert.rejects(
 			async () =>
-				check.run({ argv: [], opts: { format: 'bogus' }, rest: [], log: () => {}, error: () => {} }),
+				check.run({
+					argv: [],
+					opts: { format: 'bogus' },
+					rest: [],
+					log: () => {},
+					error: () => {},
+				}),
 			/--format must be text or json/
 		)
 	})

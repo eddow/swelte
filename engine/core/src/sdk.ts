@@ -435,7 +435,12 @@ export async function __swelteWasmCall<TResult>(
 			wasmUrl,
 			bare2,
 			0,
-			{ error: e instanceof Error ? e.message : String(e), fn: bare2, path: wasmUrl, available: [] },
+			{
+				error: e instanceof Error ? e.message : String(e),
+				fn: bare2,
+				path: wasmUrl,
+				available: [],
+			},
 			''
 		)
 	}
@@ -546,7 +551,8 @@ export const page: SwelteStore<SweltePageState> = swelteStore<SweltePageState>({
 	route: null,
 })
 
-export const navigating: SwelteStore<SwelteNavigatingState | null> = swelteStore<SwelteNavigatingState | null>(null)
+export const navigating: SwelteStore<SwelteNavigatingState | null> =
+	swelteStore<SwelteNavigatingState | null>(null)
 
 export const updated: SwelteStore<boolean> = swelteStore<boolean>(false)
 
@@ -580,24 +586,48 @@ export function onNavigate(fn: SwelteAfterNavigate): () => void {
 function __routerFn(name: string): ((...a: unknown[]) => Promise<unknown>) | null {
 	try {
 		const g = globalThis as unknown as Record<string, Record<string, unknown>>
-		const mod = (g.__swelteRoutes ?? g.__swelteRouter) as unknown as Record<string, unknown> | undefined
+		const mod = (g.__swelteRoutes ?? g.__swelteRouter) as unknown as
+			| Record<string, unknown>
+			| undefined
 		const fn = mod?.[name]
 		return typeof fn === 'function' ? (fn as (...a: unknown[]) => Promise<unknown>) : null
-	} catch { return null }
+	} catch {
+		return null
+	}
 }
-export async function goto(url: string | URL, opts: { replaceState?: boolean; noPreload?: boolean } = {}): Promise<void> {
+export async function goto(
+	url: string | URL,
+	opts: { replaceState?: boolean; noPreload?: boolean } = {}
+): Promise<void> {
 	const fn = __routerFn('goto')
 	if (!fn) throw new Error('swelte: goto() needs the client router (browser + entry-main boot)')
 	await fn(url, opts)
 }
-export async function preloadData(url: string | URL): Promise<{ route: string; params: Record<string, string>; data: unknown; status: number } | null> {
+export async function preloadData(
+	url: string | URL
+): Promise<{
+	route: string
+	params: Record<string, string>
+	data: unknown
+	status: number
+} | null> {
 	const fn = __routerFn('preloadData')
-	if (!fn) throw new Error('swelte: preloadData() needs the client router (browser + entry-main boot)')
-	return (await fn(url)) as { route: string; params: Record<string, string>; data: unknown; status: number } | null
+	if (!fn)
+		throw new Error('swelte: preloadData() needs the client router (browser + entry-main boot)')
+	return (await fn(url)) as {
+		route: string
+		params: Record<string, string>
+		data: unknown
+		status: number
+	} | null
 }
-export async function pushState(url: string | URL, state: Record<string, unknown> = {}): Promise<void> {
+export async function pushState(
+	url: string | URL,
+	state: Record<string, unknown> = {}
+): Promise<void> {
 	const fn = __routerFn('pushState')
-	if (!fn) throw new Error('swelte: pushState() needs the client router (browser + entry-main boot)')
+	if (!fn)
+		throw new Error('swelte: pushState() needs the client router (browser + entry-main boot)')
 	await fn(url, state)
 }
 
@@ -672,7 +702,10 @@ export interface SwelteFailBody {
 
 /** True when `e` is a `SwelteRpcError` carrying a fail-lite body. When
  * `status` is given it must also match (default: any 4xx). */
-export function isFail(e: unknown, status?: number): e is SwelteRpcError & { body: SwelteFailBody } {
+export function isFail(
+	e: unknown,
+	status?: number
+): e is SwelteRpcError & { body: SwelteFailBody } {
 	if (!(e instanceof SwelteRpcError)) return false
 	const b = e.body as unknown as Record<string, unknown> | null
 	if (b === null || typeof b !== 'object') return false
@@ -701,19 +734,34 @@ export async function deserialize(res: Response): Promise<SwelteActionResult> {
 	try {
 		json = JSON.parse(text) as Record<string, unknown>
 	} catch {
-		throw new Error(`swelte: deserialize failed — not JSON (HTTP ${res.status}): ${text.slice(0, 120)}`)
+		throw new Error(
+			`swelte: deserialize failed — not JSON (HTTP ${res.status}): ${text.slice(0, 120)}`
+		)
 	}
 	const type = json['type']
 	if (type === 'success' || type === 'failure') {
-		return { type, status: typeof json['status'] === 'number' ? json['status'] : res.status, data: json['data'] }
+		return {
+			type,
+			status: typeof json['status'] === 'number' ? json['status'] : res.status,
+			data: json['data'],
+		}
 	}
 	if (type === 'error') {
-		return { type, status: typeof json['status'] === 'number' ? json['status'] : res.status, error: json['error'] }
+		return {
+			type,
+			status: typeof json['status'] === 'number' ? json['status'] : res.status,
+			error: json['error'],
+		}
 	}
 	if (type === 'redirect') {
 		const location = json['location']
-		if (typeof location !== 'string') throw new Error('swelte: deserialize failed — redirect without location')
-		return { type, status: typeof json['status'] === 'number' ? json['status'] : res.status, location }
+		if (typeof location !== 'string')
+			throw new Error('swelte: deserialize failed — redirect without location')
+		return {
+			type,
+			status: typeof json['status'] === 'number' ? json['status'] : res.status,
+			location,
+		}
 	}
 	throw new Error(`swelte: deserialize failed — unknown type ${JSON.stringify(type)}`)
 }
@@ -744,7 +792,12 @@ async function swelteSafeJson(res: Response): Promise<unknown> {
  *  `failure` with the decoded body as `data`, so `isFail` narrows it
  *  inline). Not user API - `enhance` calls this. */
 export async function __swelteActionResult(res: Response): Promise<SwelteActionResult> {
-	if (typeof res.redirected === 'boolean' && res.redirected && typeof res.url === 'string' && res.url !== '') {
+	if (
+		typeof res.redirected === 'boolean' &&
+		res.redirected &&
+		typeof res.url === 'string' &&
+		res.url !== ''
+	) {
 		return { type: 'redirect', status: res.status, location: res.url }
 	}
 	let probe: SwelteActionResult | null = null
@@ -775,11 +828,11 @@ export interface SwelteEnhanceUpdateOptions {
 
 export type SwelteEnhanceResultHandler = (
 	result: SwelteActionResult,
-	update: (opts?: SwelteEnhanceUpdateOptions) => Promise<void>,
+	update: (opts?: SwelteEnhanceUpdateOptions) => Promise<void>
 ) => void | Promise<void>
 
 export type SwelteEnhanceCallback = (
-	input: SwelteEnhanceSubmit,
+	input: SwelteEnhanceSubmit
 ) => void | SwelteEnhanceResultHandler | Promise<void | SwelteEnhanceResultHandler>
 
 async function swelteGotoOrReload(location: string): Promise<void> {
@@ -797,7 +850,10 @@ async function swelteGotoOrReload(location: string): Promise<void> {
  *  failures stay inline per the `loadPage` contract - never `page.error`),
  *  `redirect` navigates via the client router (`goto`, `location.href`
  *  fallback outside the browser router). */
-export async function applyAction(result: SwelteActionResult, opts: { invalidate?: boolean } = {}): Promise<void> {
+export async function applyAction(
+	result: SwelteActionResult,
+	opts: { invalidate?: boolean } = {}
+): Promise<void> {
 	const doInvalidate = opts.invalidate ?? true
 	if (result.type === 'redirect') {
 		navigating.set(null)
@@ -821,7 +877,7 @@ export async function applyAction(result: SwelteActionResult, opts: { invalidate
  *  import, so `sdk.ts` stays dependency-free. */
 export function enhance(
 	node: HTMLFormElement,
-	cb?: SwelteEnhanceCallback,
+	cb?: SwelteEnhanceCallback
 ): { update?: (next?: SwelteEnhanceCallback) => void; destroy: () => void } {
 	let current = cb
 	const onSubmit = (e: Event) => {
@@ -829,7 +885,8 @@ export function enhance(
 			const submit = e as SubmitEvent & { submitter?: HTMLElement | null }
 			const formData = new FormData(node, submit.submitter ?? undefined)
 			const rawAction = node.getAttribute('action') ?? ''
-			const base = typeof globalThis.location !== 'undefined' ? globalThis.location.href : 'http://localhost/'
+			const base =
+				typeof globalThis.location !== 'undefined' ? globalThis.location.href : 'http://localhost/'
 			const action = new URL(rawAction === '' ? base : rawAction, base)
 			const method = (node.getAttribute('method') ?? 'post').toUpperCase()
 			const input: SwelteEnhanceSubmit = {
@@ -891,7 +948,6 @@ export function enhance(
 		},
 	}
 }
-
 
 /** True when a `#lib` rel path is backend-only: a `backend` path segment
  * at any depth, or a V-native `_backend.v` suffix. Kept name

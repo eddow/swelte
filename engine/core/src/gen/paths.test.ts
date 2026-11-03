@@ -14,4 +14,3 @@ describe('isBackendMod', () => {
 		assert.equal(isBackendMod('backendish/x'), false)
 	})
 })
-

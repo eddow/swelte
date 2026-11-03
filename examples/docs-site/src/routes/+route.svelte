@@ -1,111 +1,111 @@
 <script lang="ts">
-	import type { Snippet } from 'svelte'
-	import { onMount } from 'svelte'
-	import { searchDocs } from '#lib/search.js'
-	import { goto } from '@swelte/core'
+import type { Snippet } from 'svelte'
+import { onMount } from 'svelte'
+import { searchDocs } from '#lib/search.js'
+import { goto } from '@swelte/core'
 
-	let { children }: { children?: Snippet } = $props()
+let { children }: { children?: Snippet } = $props()
 
-	const THEME_KEY = 'swelte-docs-theme'
+const THEME_KEY = 'swelte-docs-theme'
 
-	// System default first (no stored pref → OS decides via CSS),
-	// then explicit light/dark persisted in localStorage.
-	// Client-only: runs in onMount, never during SSR.
-	let dark = $state(false)
+// System default first (no stored pref → OS decides via CSS),
+// then explicit light/dark persisted in localStorage.
+// Client-only: runs in onMount, never during SSR.
+let dark = $state(false)
 
-	let query = $state('')
-	let open = $state(false)
-	let active = $state(0)
-	// SSR-safe: searchDocs is plain client data (static index, no RPC).
-	// Evaluate lazily only in the browser render — the server bundle
-	// renders the shell (query starts empty) and hydrates interactivity.
-	let results = $derived(typeof window === 'undefined' ? [] : searchDocs(query))
+let query = $state('')
+let open = $state(false)
+let active = $state(0)
+// SSR-safe: searchDocs is plain client data (static index, no RPC).
+// Evaluate lazily only in the browser render — the server bundle
+// renders the shell (query starts empty) and hydrates interactivity.
+let results = $derived(typeof window === 'undefined' ? [] : searchDocs(query))
 
-	function applyTheme(next: boolean) {
-		dark = next
-		if (typeof document !== 'undefined') {
-			document.documentElement.dataset.theme = next ? 'dark' : 'light'
-			try {
-				localStorage.setItem(THEME_KEY, next ? 'dark' : 'light')
-			} catch {
-				// private mode — theme just won't persist
-			}
+function applyTheme(next: boolean) {
+	dark = next
+	if (typeof document !== 'undefined') {
+		document.documentElement.dataset.theme = next ? 'dark' : 'light'
+		try {
+			localStorage.setItem(THEME_KEY, next ? 'dark' : 'light')
+		} catch {
+			// private mode — theme just won't persist
 		}
 	}
+}
 
-	// Theme + keyboard shortcut register client-side only (onMount is a
-	// server noop during sync SSR render, so the callback never fires in
-	// QJS — `document`/`window`/`localStorage` below only run in the
-	// browser after hydration). `goto` stays inside the click handler,
-	// where it never executes during SSR.
-	onMount(() => {
-		const root = document.documentElement
-		let stored: string | null = null
-		try {
-			stored = localStorage.getItem(THEME_KEY)
-		} catch {
-			stored = null
+// Theme + keyboard shortcut register client-side only (onMount is a
+// server noop during sync SSR render, so the callback never fires in
+// QJS — `document`/`window`/`localStorage` below only run in the
+// browser after hydration). `goto` stays inside the click handler,
+// where it never executes during SSR.
+onMount(() => {
+	const root = document.documentElement
+	let stored: string | null = null
+	try {
+		stored = localStorage.getItem(THEME_KEY)
+	} catch {
+		stored = null
+	}
+	if (stored === 'dark' || stored === 'light') {
+		// Boot script already applied this; just sync the toggle.
+		dark = stored === 'dark'
+		root.dataset.theme = stored
+	} else {
+		// No stored pref: follow the OS, then adopt it as explicit state
+		// (toggle shows the truth; next flip persists from here).
+		applyTheme(window.matchMedia?.('(prefers-color-scheme: dark)').matches ?? false)
+	}
+	const onKey = (e: KeyboardEvent) => {
+		const t = e.target as HTMLElement | null
+		const typing = t != null && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA')
+		if (e.key === '/' && !typing) {
+			e.preventDefault()
+			const el = document.querySelector(
+				'input[aria-label="Search docs"]'
+			) as HTMLInputElement | null
+			el?.focus()
 		}
-		if (stored === 'dark' || stored === 'light') {
-			// Boot script already applied this; just sync the toggle.
-			dark = stored === 'dark'
-			root.dataset.theme = stored
-		} else {
-			// No stored pref: follow the OS, then adopt it as explicit state
-			// (toggle shows the truth; next flip persists from here).
-			applyTheme(window.matchMedia?.('(prefers-color-scheme: dark)').matches ?? false)
-		}
-		const onKey = (e: KeyboardEvent) => {
-			const t = e.target as HTMLElement | null
-			const typing = t != null && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA')
-			if (e.key === '/' && !typing) {
-				e.preventDefault()
-				const el = document.querySelector(
-					'input[aria-label="Search docs"]'
-				) as HTMLInputElement | null
-				el?.focus()
-			}
-		}
-		window.addEventListener('keydown', onKey)
-		return () => window.removeEventListener('keydown', onKey)
-	})
+	}
+	window.addEventListener('keydown', onKey)
+	return () => window.removeEventListener('keydown', onKey)
+})
 
-	const groups: { title: string; links: { href: string; label: string }[] }[] = [
-		{
-			title: 'Start',
-			links: [
-				{ href: '/', label: 'Overview' },
-				{ href: '/install', label: 'Installation' },
-				{ href: '/quickstart', label: 'Quickstart' }
-			]
-		},
-		{
-			title: 'Guide',
-			links: [
-				{ href: '/guide/rpc', label: 'RPC & routes' },
-				{ href: '/guide/types', label: 'Types' },
-				{ href: '/guide/forms', label: 'Forms' },
-				{ href: '/guide/errors', label: 'Errors' },
-				{ href: '/guide/config', label: 'Config' },
-				{ href: '/guide/offline', label: 'Offline' },
-				{ href: '/guide/ssr', label: 'SSR' },
-				{ href: '/guide/cli', label: 'CLI' },
-				{ href: '/guide/mcp', label: 'MCP' }
-			]
-		},
-		{
-			title: 'Migrate',
-			links: [
-				{ href: '/from-sveltekit', label: 'From SvelteKit' },
-				{ href: '/versus', label: 'Versus' },
-				{ href: '/example', label: 'Example app' }
-			]
-		}
-	]
+const groups: { title: string; links: { href: string; label: string }[] }[] = [
+	{
+		title: 'Start',
+		links: [
+			{ href: '/', label: 'Overview' },
+			{ href: '/install', label: 'Installation' },
+			{ href: '/quickstart', label: 'Quickstart' },
+		],
+	},
+	{
+		title: 'Guide',
+		links: [
+			{ href: '/guide/rpc', label: 'RPC & routes' },
+			{ href: '/guide/types', label: 'Types' },
+			{ href: '/guide/forms', label: 'Forms' },
+			{ href: '/guide/errors', label: 'Errors' },
+			{ href: '/guide/config', label: 'Config' },
+			{ href: '/guide/offline', label: 'Offline' },
+			{ href: '/guide/ssr', label: 'SSR' },
+			{ href: '/guide/cli', label: 'CLI' },
+			{ href: '/guide/mcp', label: 'MCP' },
+		],
+	},
+	{
+		title: 'Migrate',
+		links: [
+			{ href: '/from-sveltekit', label: 'From SvelteKit' },
+			{ href: '/versus', label: 'Versus' },
+			{ href: '/example', label: 'Example app' },
+		],
+	},
+]
 </script>
 
 <div class="drawer lg:drawer-open min-h-screen">
-	<input id="docs-drawer" type="checkbox" class="drawer-toggle" />
+	<input id="docs-drawer" type="checkbox" class="drawer-toggle">
 	<div class="drawer-content flex flex-col">
 		<div class="navbar bg-base-100 border-b border-base-200 sticky top-0 z-10">
 			<div class="flex-none lg:hidden">
@@ -165,7 +165,7 @@
 							role="combobox"
 							aria-expanded={open && results.length > 0}
 							aria-controls="docs-search-list"
-						/>
+						>
 						<kbd class="kbd kbd-xs">/</kbd>
 					</label>
 					{#if open && query.trim() && results.length > 0}
@@ -191,8 +191,10 @@
 											} catch {
 												window.location.href = href
 											}
-										}}>{r.label} <span class="opacity-60 text-xs">· {r.group}</span></button
+										}}
 									>
+										{r.label} <span class="opacity-60 text-xs">· {r.group}</span>
+									</button>
 								</li>
 							{/each}
 						</ul>
@@ -210,7 +212,7 @@
 						checked={dark}
 						onchange={(e) => applyTheme(e.currentTarget.checked)}
 						aria-label="Toggle dark mode"
-					/>
+					>
 					<svg
 						class="swap-off h-5 w-5 fill-current"
 						xmlns="http://www.w3.org/2000/svg"

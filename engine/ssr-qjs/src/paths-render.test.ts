@@ -9,7 +9,10 @@ import { bridgeSrc } from './qjs.js'
 
 describe('item 19 — path keys (posixNormalize/withDot)', () => {
 	it('../+error.svelte from ./admin/+page.svelte → ./+error.svelte', () => {
-		assert.equal(withDot(posixNormalize('./admin/+page.svelte', '../+error.svelte')), './+error.svelte')
+		assert.equal(
+			withDot(posixNormalize('./admin/+page.svelte', '../+error.svelte')),
+			'./+error.svelte'
+		)
 	})
 
 	it('already-./ untouched; route table maps verbatim', () => {

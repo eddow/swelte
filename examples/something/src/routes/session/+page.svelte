@@ -6,7 +6,7 @@ let { user = 'guest', via = 'locals' }: { user?: string; via?: string } = $props
 	<h1>session (locals + cookies + redirect)</h1>
 	<p>user {user} via {via}</p>
 	<form method="post" action="/session">
-		<input name="payload" value="alice" />
+		<input name="payload" value="alice">
 		<button type="submit">Login (sets sess cookie)</button>
 	</form>
 	<form method="post" action="/session?logout">

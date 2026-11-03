@@ -127,11 +127,7 @@ async function probeSsr(
  *    (fixture absent — unit stubs have no throw route).
  *  The caller supplies a `base` and a `label` for error messages.
  *  Marker-only (no `<main>`): any project page passes, example or real. */
-async function assertSsrHtml(
-	base: string,
-	label: string,
-	throwRoute?: string
-): Promise<void> {
+async function assertSsrHtml(base: string, label: string, throwRoute?: string): Promise<void> {
 	const html: RequestInit = { headers: { accept: 'text/html,application/xhtml+xml' } }
 	await probeSsr(
 		base,

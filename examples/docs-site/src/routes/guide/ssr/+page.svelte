@@ -1,6 +1,6 @@
 <script lang="ts">
-	import Code from '#lib/Code.svelte'
-	import { codeHtml } from '#lib/snippets.gen.js'
+import Code from '#lib/Code.svelte'
+import { codeHtml } from '#lib/snippets.gen.js'
 </script>
 
 <div class="breadcrumbs text-sm">
@@ -79,5 +79,6 @@
 	<span class="badge badge-error">no top-level stub calls</span>
 </div>
 <p class="text-sm opacity-70 mt-2">
-	QuickJS is pure-sync; <code>load()</code> stays in V. Known SDK imports become render-time throw-stubs.
+	QuickJS is pure-sync; <code>load()</code> stays in V. Known SDK imports become render-time
+	throw-stubs.
 </p>

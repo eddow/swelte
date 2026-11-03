@@ -14,7 +14,7 @@
  */
 export interface CodeSnippet {
 	/** highlighted HTML fragment (inner content of the <pre>) */
-	html: string;
+	html: string
 	/** shiki language id used (for a11y / debugging) */
-	lang: string;
+	lang: string
 }

@@ -1,6 +1,16 @@
 <script lang="ts">
 import { onMount } from 'svelte'
-import { goto, preloadData, pushState, beforeNavigate, afterNavigate, onNavigate, page, navigating, updated } from '@swelte/core'
+import {
+	goto,
+	preloadData,
+	pushState,
+	beforeNavigate,
+	afterNavigate,
+	onNavigate,
+	page,
+	navigating,
+	updated,
+} from '@swelte/core'
 import { page as appPage, updated as appUpdated } from '$app/stores'
 import { page as statePage } from '$app/state'
 import { goto as navGoto, onNavigate as navOnNavigate } from '$app/navigation'
@@ -11,8 +21,22 @@ import { browser, dev, version } from '#app/environment'
 // (RouterProps: greeting/ts, incl.iblingRows from swelte_fetch) merged with
 // the universal sibling load (viewModel/paramsEcho/urlEcho, pure-sync).
 // All async (fetch/db/…) lives in the .v server load — never here.
-let { greeting = 'none', ts = '', siblingRows = '', viewModel = 'none', paramsEcho = '{}', urlEcho = '', params = {} }: {
-	greeting?: string; ts?: string; siblingRows?: string; viewModel?: string; paramsEcho?: string; urlEcho?: string; params?: Record<string, string>
+let {
+	greeting = 'none',
+	ts = '',
+	siblingRows = '',
+	viewModel = 'none',
+	paramsEcho = '{}',
+	urlEcho = '',
+	params = {},
+}: {
+	greeting?: string
+	ts?: string
+	siblingRows?: string
+	viewModel?: string
+	paramsEcho?: string
+	urlEcho?: string
+	params?: Record<string, string>
 } = $props()
 
 let probe = $state('')
@@ -26,11 +50,15 @@ async function doGoto() {
 
 async function doPreload() {
 	const hit = await preloadData('/router?who=preload')
-	probe = hit ? `preloaded ${hit.route} status=${hit.status} data=${JSON.stringify(hit.data).slice(0, 80)}` : 'no route'
+	probe = hit
+		? `preloaded ${hit.route} status=${hit.status} data=${JSON.stringify(hit.data).slice(0, 80)}`
+		: 'no route'
 }
 
 async function doPush() {
-	await pushState('/router?who=pushed', { page: { url: '/router?who=pushed', params: {}, route: '/router' } })
+	await pushState('/router?who=pushed', {
+		page: { url: '/router?who=pushed', params: {}, route: '/router' },
+	})
 	probe = 'pushed state (URL changed, no DOM write)'
 }
 
@@ -54,7 +82,10 @@ if (browser) {
 		const offAfter = afterNavigate((nav) => {
 			navigations = [...navigations, `${nav.from} → ${nav.to.url}`].slice(-5)
 		})
-		return () => { offBefore(); offAfter() }
+		return () => {
+			offBefore()
+			offAfter()
+		}
 	})
 }
 </script>
@@ -66,7 +97,11 @@ if (browser) {
 	<!-- Server @[load] paint (+ in-process sibling rows) + universal sibling transform -->
 	<p>server: {greeting} @ {ts}</p>
 	<p>sibling (swelte_fetch, server-only): {siblingRows}</p>
-	<p>universal: {viewModel} (params={paramsEcho}, url={urlEcho}, route-params={JSON.stringify(params)})</p>
+	<p>
+		universal: {viewModel} (params={paramsEcho}, url={urlEcho}, route-params={JSON.stringify(
+			params
+		)})
+	</p>
 
 	<!-- §1.4 router fns: goto / preloadData / pushState -->
 	<div style="display:flex; gap:0.5rem; margin-top:0.5rem; flex-wrap:wrap;">
@@ -89,12 +124,21 @@ if (browser) {
 			<p>navigating {$navigating.from} → {$navigating.to}…</p>
 		{/if}
 		<p>page store: {$page.url} (route={$page.route})</p>
-		<p>$app/stores alias resolves: {typeof appPage} · $app/state: {typeof statePage} · $app/navigation: {typeof navGoto}/{typeof navOnNavigate}/{typeof onNavigate}</p>
+		<p>
+			$app/stores alias resolves: {typeof appPage} · $app/state: {typeof statePage} ·
+			$app/navigation: {typeof navGoto}/{typeof navOnNavigate}/{typeof onNavigate}
+		</p>
 		<!-- items 2+11: $updated is a stub flag (no version feed yet — always
 		     false); #app/paths + #app/environment render build-time constants. -->
-		<p>updated stub: {$updated} ({typeof appUpdated}) — never flips until the snapshot feed lands</p>
+		<p>
+			updated stub: {$updated} ({typeof appUpdated}) — never flips until the snapshot feed lands
+		</p>
 	{/if}
-	<p>paths: {base}/router · assets {assets === '' ? '(=base)' : assets} · v{version}{dev ? ' (dev)' : ''}</p>
+	<p>
+		paths: {base}/router · assets {assets === '' ? '(=base)' : assets} · v{version}{dev
+			? ' (dev)'
+			: ''}
+	</p>
 
 	{#if navigations.length}
 		<ul>

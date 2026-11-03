@@ -20,10 +20,7 @@ describe('config normalization (tmp roots)', () => {
 		const cfg0 = defineConfig({ swelte: { port: 9999 } })
 		assert.ok(!Object.keys(cfg0).includes('swelte'))
 		assert.equal((cfg0 as unknown as { swelte?: { port?: number } }).swelte?.port, 9999)
-		writeFileSync(
-			join(root, 'svelte.config.js'),
-			`export default { swelte: { port: 4321 } }`
-		)
+		writeFileSync(join(root, 'svelte.config.js'), `export default { swelte: { port: 4321 } }`)
 		const cfg = await loadConfig(root)
 		assert.equal(cfg.port, 4321)
 	})
@@ -84,7 +81,10 @@ describe('config normalization (tmp roots)', () => {
 
 	it('bad trailingSlash falls back to ignore', async () => {
 		const root = mkdtempSync(join(tmpdir(), 'swelte-cfg-'))
-		writeFileSync(join(root, 'svelte.config.js'), `export default { swelte: { trailingSlash: 'sometimes' } }`)
+		writeFileSync(
+			join(root, 'svelte.config.js'),
+			`export default { swelte: { trailingSlash: 'sometimes' } }`
+		)
 		const cfg = await loadConfig(root)
 		assert.equal(cfg.trailingSlash, 'ignore')
 	})
@@ -112,11 +112,17 @@ describe('config normalization (tmp roots)', () => {
 
 	it('cross-build targetOs normalizes (case-insensitive, bad -> host)', async () => {
 		const root = mkdtempSync(join(tmpdir(), 'swelte-cfg-'))
-		writeFileSync(join(root, 'svelte.config.js'), `export default { swelte: { targetOs: 'Windows' } }`)
+		writeFileSync(
+			join(root, 'svelte.config.js'),
+			`export default { swelte: { targetOs: 'Windows' } }`
+		)
 		const cfg = await loadConfig(root)
 		assert.equal(cfg.targetOs, 'windows')
 		const root2 = mkdtempSync(join(tmpdir(), 'swelte-cfg-'))
-		writeFileSync(join(root2, 'svelte.config.js'), `export default { swelte: { targetOs: 'plan9' } }`)
+		writeFileSync(
+			join(root2, 'svelte.config.js'),
+			`export default { swelte: { targetOs: 'plan9' } }`
+		)
 		const bad = await loadConfig(root2)
 		assert.equal(bad.targetOs, '')
 	})
@@ -133,7 +139,6 @@ describe('config normalization (tmp roots)', () => {
 		assert.equal(cfg.target, 'auto')
 		assert.equal(cfg.offline.fallback, 'off')
 	})
-
 
 	it('renderClientEntry pulls src/app.ts + src/app.css via .js specifiers (no allowImportingTsExtensions)', async () => {
 		const { templatesDir } = await import('./config.js')

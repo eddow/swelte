@@ -39,7 +39,8 @@ describe('generate() validation errors (tmp scaffold, no V binary)', () => {
 
 	it('@[rpc] with SwelteResponse return throws', async () => {
 		const root = scaffold({
-			'+page.v': 'module p\n@[rpc] pub fn f(args LoginArgs) !SwelteResponse { return SwelteResponse{} }',
+			'+page.v':
+				'module p\n@[rpc] pub fn f(args LoginArgs) !SwelteResponse { return SwelteResponse{} }',
 		})
 		await assert.rejects(() => buildStart(root), /typed values/)
 	})
@@ -123,14 +124,23 @@ describe('generate() validation errors (tmp scaffold, no V binary)', () => {
 		const { readFileSync, writeFileSync, mkdirSync } = await import('node:fs')
 		// Two @[startup] → build error.
 		let root = scaffold({ '+page.v': 'module p\n@[get] pub fn g() string { return "" }' })
-		writeFileSync(join(root, 'src', 'app.v'), 'module s\n@[startup]\npub fn a() { }\n@[startup]\npub fn b() { }')
+		writeFileSync(
+			join(root, 'src', 'app.v'),
+			'module s\n@[startup]\npub fn a() { }\n@[startup]\npub fn b() { }'
+		)
 		await assert.rejects(() => buildStart(root), /two @\[startup\] fns/)
 		// @[reroute] wrong shape → build error.
 		root = scaffold({ '+page.v': 'module p\n@[get] pub fn g() string { return "" }' })
-		writeFileSync(join(root, 'src', 'app.v'), 'module s\n@[reroute]\npub fn r(host string) string { return host }')
+		writeFileSync(
+			join(root, 'src', 'app.v'),
+			'module s\n@[reroute]\npub fn r(host string) string { return host }'
+		)
 		await assert.rejects(() => buildStart(root), /must take \(host string, path string\)/)
 		root = scaffold({ '+page.v': 'module p\n@[get] pub fn g() string { return "" }' })
-		writeFileSync(join(root, 'src', 'app.v'), 'module s\n@[reroute]\npub fn r(host string, path string) bool { return true }')
+		writeFileSync(
+			join(root, 'src', 'app.v'),
+			'module s\n@[reroute]\npub fn r(host string, path string) bool { return true }'
+		)
 		await assert.rejects(() => buildStart(root), /must return string/)
 		// Happy path: startup + reroute inline into the harness.
 		root = scaffold({ '+page.v': 'module p\n@[get] pub fn g() string { return "" }' })
@@ -140,7 +150,7 @@ describe('generate() validation errors (tmp scaffold, no V binary)', () => {
 		)
 		await buildStart(root)
 		const sv = readFileSync(join(root, '.swelte', 'server.v'), 'utf8')
-		assert.ok(sv.includes("@[startup] (src/app.v)"), sv.slice(0, 500))
+		assert.ok(sv.includes('@[startup] (src/app.v)'), sv.slice(0, 500))
 		assert.ok(sv.includes("println('boot')"), sv.slice(0, 2000))
 		assert.ok(sv.includes('@[reroute] (src/app.v)'), sv.slice(0, 5000))
 		assert.ok(sv.includes("starts_with('bills.')"), sv.slice(0, 8000))
@@ -163,11 +173,15 @@ describe('generate() validation errors (tmp scaffold, no V binary)', () => {
 		await assert.rejects(() => buildStart(root), /takes no params/)
 		// Non-void return -> build error.
 		root = scaffold({ '+page.v': 'module p\n@[get] pub fn g() string { return "" }' })
-		writeFileSync(join(root, 'src', 'app.v'), "module s\n@[cron('60s')]\npub fn tick() string { return '' }")
+		writeFileSync(
+			join(root, 'src', 'app.v'),
+			"module s\n@[cron('60s')]\npub fn tick() string { return '' }"
+		)
 		await assert.rejects(() => buildStart(root), /must return void/)
 		// Misplaced @[cron] in routes -> build error.
 		root = scaffold({
-			'+page.v': 'module p\n@[cron(\'60s\')]\npub fn tick() { }\n@[get] pub fn g() string { return "" }',
+			'+page.v':
+				'module p\n@[cron(\'60s\')]\npub fn tick() { }\n@[get] pub fn g() string { return "" }',
 		})
 		writeFileSync(join(root, 'src', 'app.v'), 'module s')
 		await assert.rejects(() => buildStart(root), /only allowed in its own file/)
@@ -189,7 +203,7 @@ describe('generate() validation errors (tmp scaffold, no V binary)', () => {
 		assert.ok(sv.includes('fn swelte_cron_1() {'))
 		assert.ok(sv.includes('fn swelte_cron_2() !void {'))
 		assert.ok(sv.includes("eprintln('[swelte:cron] ' + err.msg())"))
-	
+
 		// No hooks → harness byte-identical to the template skeleton.
 		root = scaffold({ '+page.v': 'module p\n@[get] pub fn g() string { return "" }' })
 		await buildStart(root)

@@ -1,6 +1,6 @@
 <script lang="ts">
-	import Code from '#lib/Code.svelte';
-	import { codeHtml } from '#lib/snippets.gen.js';
+import Code from '#lib/Code.svelte'
+import { codeHtml } from '#lib/snippets.gen.js'
 </script>
 
 <div class="hero bg-base-200 rounded-box">
@@ -9,8 +9,8 @@
 			<div class="badge badge-primary mb-4">V + Svelte 5</div>
 			<h1 class="text-5xl font-bold">Swelte</h1>
 			<p class="py-6 text-lg opacity-80">
-				V is the compute engine (native server binary, WASM client modules). Svelte 5 is the
-				UI. One RPC protocol bridges them. Agents in, binaries out.
+				V is the compute engine (native server binary, WASM client modules). Svelte 5 is the UI. One
+				RPC protocol bridges them. Agents in, binaries out.
 			</p>
 			<div class="flex gap-2 justify-center flex-wrap">
 				<a href="/install" class="btn btn-primary">Get started</a>
@@ -26,8 +26,8 @@
 		<div class="card-body">
 			<h2 class="card-title">Server RPC</h2>
 			<p class="opacity-70 text-sm">
-				<code>.v</code> route handlers import straight into <code>.svelte</code> — verbs,
-				SSE, typed structs.
+				<code>.v</code>
+				route handlers import straight into <code>.svelte</code> — verbs, SSE, typed structs.
 			</p>
 			<div class="card-actions justify-end">
 				<a href="/guide/rpc" class="btn btn-sm">RPC & routes</a>
@@ -38,7 +38,8 @@
 		<div class="card-body">
 			<h2 class="card-title">Isomorphic lib</h2>
 			<p class="opacity-70 text-sm">
-				<code>src/lib</code> compiles native + WASM. Same V, local call, no fetch.
+				<code>src/lib</code>
+				compiles native + WASM. Same V, local call, no fetch.
 			</p>
 			<div class="card-actions justify-end">
 				<a href="/guide/types" class="btn btn-sm">Types</a>
@@ -49,8 +50,8 @@
 		<div class="card-body">
 			<h2 class="card-title">Single binary</h2>
 			<p class="opacity-70 text-sm">
-				<code>swelte build</code> emits <code>dist/server</code> + <code>dist/</code>. No
-				Node at runtime.
+				<code>swelte build</code>
+				emits <code>dist/server</code> + <code>dist/</code>. No Node at runtime.
 			</p>
 			<div class="card-actions justify-end">
 				<a href="/guide/cli" class="btn btn-sm">CLI</a>

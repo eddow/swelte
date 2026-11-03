@@ -68,7 +68,10 @@ async function generateAndTest(root: string, updateSnapshot: boolean): Promise<s
 		const diffs: string[] = []
 		for (const k of new Set([...Object.keys(prev), ...Object.keys(snap)])) {
 			if (prev[k] !== snap[k])
-				diffs.push(k + (prev[k] === undefined ? ' (new)' : snap[k] === undefined ? ' (removed)' : ' (changed)'))
+				diffs.push(
+					k +
+						(prev[k] === undefined ? ' (new)' : snap[k] === undefined ? ' (removed)' : ' (changed)')
+				)
 		}
 		if (diffs.length)
 			throw new Error(`contract drift — V types changed since last snapshot:\n${diffs.join('\n')}`)
@@ -154,7 +157,13 @@ describe('item 12 — contract snapshot through real runTest (toolchain-gated)',
 		writeFileSync(
 			join(root, 'tsconfig.json'),
 			JSON.stringify({
-				compilerOptions: { strict: true, noEmit: true, skipLibCheck: true, allowJs: true, checkJs: false },
+				compilerOptions: {
+					strict: true,
+					noEmit: true,
+					skipLibCheck: true,
+					allowJs: true,
+					checkJs: false,
+				},
 				include: ['src/**/*.ts', '.swelte/types/**/*', '.swelte/v-shim.d.ts'],
 			})
 		)

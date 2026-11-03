@@ -27,25 +27,16 @@ describe('route helpers', () => {
 	})
 
 	it('routeFor: api/ keeps path (dispatch strips leaf)', () => {
-		assert.equal(
-			routeFor('src/routes', '/tmp/rr/src/routes', R('api/greet.v')),
-			'/api/greet'
-		)
+		assert.equal(routeFor('src/routes', '/tmp/rr/src/routes', R('api/greet.v')), '/api/greet')
 	})
 
 	it('routeFor: +page -> /, admin/+page -> /admin', () => {
 		assert.equal(routeFor('src/routes', '/tmp/rr/src/routes', R('+page.v')), '/')
-		assert.equal(
-			routeFor('src/routes', '/tmp/rr/src/routes', R('admin/+page.v')),
-			'/admin'
-		)
+		assert.equal(routeFor('src/routes', '/tmp/rr/src/routes', R('admin/+page.v')), '/admin')
 	})
 
 	it('routeFor: dynamic [id] passes through; [...rest] leaf is a valid catch-all', () => {
-		assert.equal(
-			routeFor('src/routes', '/tmp/rr/src/routes', R('users/[id].v')),
-			'/users/[id]'
-		)
+		assert.equal(routeFor('src/routes', '/tmp/rr/src/routes', R('users/[id].v')), '/users/[id]')
 		// Bare catch-all leaf is allowed: /files/[...rest] with empty rest
 		// on GET /files (fallback when no folder-root leaf claims /files).
 		assert.equal(
@@ -56,10 +47,7 @@ describe('route helpers', () => {
 
 	it('routeFor: +route wrapper -> null; dynamic wrapper throws', () => {
 		assert.equal(routeFor('src/routes', '/tmp/rr/src/routes', R('+route.v')), null)
-		assert.equal(
-			routeFor('src/routes', '/tmp/rr/src/routes', R('admin/+route.v')),
-			null
-		)
+		assert.equal(routeFor('src/routes', '/tmp/rr/src/routes', R('admin/+route.v')), null)
 		assert.throws(
 			() => routeFor('src/routes', '/tmp/rr/src/routes', R('[id]/+route.v')),
 			/dynamic wrapper/
@@ -100,14 +88,8 @@ describe('route helpers', () => {
 		assert.equal(stripRouteGroups('(mkt)/(a)/users'), 'users')
 		assert.equal(stripRouteGroups('admin/(mkt)/users'), 'admin/users')
 		assert.equal(stripRouteGroups('users/[id]'), 'users/[id]')
-		assert.equal(
-			routeFor('src/routes', '/tmp/rr/src/routes', R('(mkt)/users/+page.v')),
-			'/users'
-		)
-		assert.equal(
-			routeFor('src/routes', '/tmp/rr/src/routes', R('(mkt)/+page.v')),
-			'/'
-		)
+		assert.equal(routeFor('src/routes', '/tmp/rr/src/routes', R('(mkt)/users/+page.v')), '/users')
+		assert.equal(routeFor('src/routes', '/tmp/rr/src/routes', R('(mkt)/+page.v')), '/')
 		assert.equal(svelteRouteFor('(mkt)/users/+page'), '/users')
 		assert.equal(svelteRouteFor('(mkt)/+page'), '/')
 	})
@@ -162,26 +144,50 @@ describe('route helpers', () => {
 		assert.ok(js.includes('for (const c_c of s)'), js.slice(0, 300))
 		assert.ok(js.includes('charCodeAt(0)'), js)
 		// Unsupported statement → build error naming the construct.
-		assert.throws(() => transpileMatcherBody('bad', '\ts := s + \"x\"\n\treturn true\n'), /unsupported statement/)
-		assert.throws(() => transpileMatcherBody('bad', '\treturn s.contains(\"x\")\n'), /unsupported statement/)
+		assert.throws(
+			() => transpileMatcherBody('bad', '\ts := s + \"x\"\n\treturn true\n'),
+			/unsupported statement/
+		)
+		assert.throws(
+			() => transpileMatcherBody('bad', '\treturn s.contains(\"x\")\n'),
+			/unsupported statement/
+		)
 		// loadMatchers: shape errors.
-		writeFileSync(join(root, 'src', 'matchers.v'), 'module m\n@[matcher]\npub fn bad(s string, t string) bool { return true }')
+		writeFileSync(
+			join(root, 'src', 'matchers.v'),
+			'module m\n@[matcher]\npub fn bad(s string, t string) bool { return true }'
+		)
 		assert.throws(() => loadMatchers(root), /exactly one string param/)
-		writeFileSync(join(root, 'src', 'matchers.v'), 'module m\n@[matcher]\npub fn bad(s string) !bool { return true }')
+		writeFileSync(
+			join(root, 'src', 'matchers.v'),
+			'module m\n@[matcher]\npub fn bad(s string) !bool { return true }'
+		)
 		assert.throws(() => loadMatchers(root), /must return bool \(total/)
-		writeFileSync(join(root, 'src', 'matchers.v'), 'module m\n@[matcher]\npub fn bad(s string) string { return s }')
+		writeFileSync(
+			join(root, 'src', 'matchers.v'),
+			'module m\n@[matcher]\npub fn bad(s string) string { return s }'
+		)
 		assert.throws(() => loadMatchers(root), /must return bool/)
-		writeFileSync(join(root, 'src', 'matchers.v'), 'import time\nmodule m\n@[matcher]\npub fn bad(s string) bool { return true }')
+		writeFileSync(
+			join(root, 'src', 'matchers.v'),
+			'import time\nmodule m\n@[matcher]\npub fn bad(s string) bool { return true }'
+		)
 		assert.throws(() => loadMatchers(root), /poisons WASM/)
 		writeFileSync(
 			join(root, 'src', 'matchers.v'),
 			'module m\n@[matcher]\npub fn a(s string) bool { return true }\n@[matcher]\npub fn a(s string) bool { return true }'
 		)
 		assert.throws(() => loadMatchers(root), /duplicate @\[matcher\] a/)
-		writeFileSync(join(root, 'src', 'matchers.v'), 'module m\n@[matcher]\npub fn integer(s string) bool { return true }')
+		writeFileSync(
+			join(root, 'src', 'matchers.v'),
+			'module m\n@[matcher]\npub fn integer(s string) bool { return true }'
+		)
 		assert.throws(() => loadMatchers(root), /'integer' is builtin/)
 		// Happy path: known set extends validation.
-		writeFileSync(join(root, 'src', 'matchers.v'), 'module m\n@[matcher]\npub fn slug(s string) bool {\n\tif s == \'\' {\n\t\treturn false\n\t}\n\treturn true\n}')
+		writeFileSync(
+			join(root, 'src', 'matchers.v'),
+			"module m\n@[matcher]\npub fn slug(s string) bool {\n\tif s == '' {\n\t\treturn false\n\t}\n\treturn true\n}"
+		)
 		const ms = loadMatchers(root)
 		assert.ok(ms.has('slug') && ms.has('integer'))
 		assert.equal(
@@ -194,7 +200,8 @@ describe('route helpers', () => {
 		assert.ok(stub.includes('slug: (s)'), stub.slice(0, 800))
 		// Unknown still rejected even with a file present.
 		assert.throws(
-			() => routeFor('src/routes', '/tmp/rr/src/routes', R('users/[id=nope].v'), new Set(ms.keys())),
+			() =>
+				routeFor('src/routes', '/tmp/rr/src/routes', R('users/[id=nope].v'), new Set(ms.keys())),
 			/unknown matcher 'nope'/
 		)
 		// Item 7 regression: the prerender crawl (`collectPrerenderEntries`)
@@ -203,9 +210,14 @@ describe('route helpers', () => {
 		// crawl called routeFor without the set, so every custom matcher
 		// failed as `unknown matcher 'slug' (known: integer)` at build).
 		mkdirSync(join(root, 'src', 'routes', 'posts'), { recursive: true })
-		writeFileSync(join(root, 'src', 'routes', 'posts', '[slug=slug].v'), 'module p\n@[get]\npub fn post_detail() string { return "" }')
+		writeFileSync(
+			join(root, 'src', 'routes', 'posts', '[slug=slug].v'),
+			'module p\n@[get]\npub fn post_detail() string { return "" }'
+		)
 		const crawl = await collectPrerenderEntries(root, 'src/routes', 'static')
-		assert.ok(crawl.routes.includes('/posts/[slug=slug]') || crawl.dynamics.includes('/posts/[slug=slug]'))
+		assert.ok(
+			crawl.routes.includes('/posts/[slug=slug]') || crawl.dynamics.includes('/posts/[slug=slug]')
+		)
 	})
 
 	it('roadmap §1.4 RouteId + Params types', async () => {
@@ -264,8 +276,14 @@ describe('route helpers', () => {
 		mkdirSync(join(root, 'src', 'lib'), { recursive: true })
 		writeFileSync(join(root, 'package.json'), '{"name":"t"}')
 		writeFileSync(join(root, 'svelte.config.js'), 'export default {}')
-		writeFileSync(join(root, 'src', 'routes', 'files', '[...a].v'), 'module a\n@[get] pub fn g() string { return "" }')
-		writeFileSync(join(root, 'src', 'routes', 'files', '[...b].v'), 'module b\n@[get] pub fn g() string { return "" }')
+		writeFileSync(
+			join(root, 'src', 'routes', 'files', '[...a].v'),
+			'module a\n@[get] pub fn g() string { return "" }'
+		)
+		writeFileSync(
+			join(root, 'src', 'routes', 'files', '[...b].v'),
+			'module b\n@[get] pub fn g() string { return "" }'
+		)
 		const { swelte } = await import('./vite.js')
 		const plug = swelte({}) as unknown as {
 			configResolved?: (c: { root: string }) => void
@@ -313,7 +331,10 @@ describe('route helpers', () => {
 		mkdirSync(join(root, 'src', 'lib'), { recursive: true })
 		writeFileSync(join(root, 'package.json'), '{"name":"t"}')
 		writeFileSync(join(root, 'svelte.config.js'), 'export default {}')
-		writeFileSync(join(root, 'src', 'routes', 'foo.v'), 'module f\n@[get] pub fn g() string { return "" }')
+		writeFileSync(
+			join(root, 'src', 'routes', 'foo.v'),
+			'module f\n@[get] pub fn g() string { return "" }'
+		)
 		writeFileSync(join(root, 'src', 'routes', 'foo', '+page.svelte'), '<h1>x</h1>')
 		const { swelte } = await import('./vite.js')
 		const plug = swelte({}) as unknown as {

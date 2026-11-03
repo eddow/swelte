@@ -11,14 +11,7 @@ import {
 	renderServiceWorker,
 	serviceWorkerPrecache,
 } from './vite.js'
-import {
-	SwelteRpcError,
-	isFail,
-	deserialize,
-	loadPage,
-	isPageError,
-	isPageData,
-} from './sdk.js'
+import { SwelteRpcError, isFail, deserialize, loadPage, isPageError, isPageData } from './sdk.js'
 import { stubSdkImports } from '../../ssr-qjs/dist/ssr.js'
 
 /** Diverse tests in bunch. */
@@ -32,13 +25,10 @@ describe('Bunch1', () => {
 		const fns = parseVFile('// @[sse]\n@[get]\npub fn g() string { return "x" }')
 		assert.deepEqual(
 			fns.map((f) => f.attr),
-			['get'],
+			['get']
 		)
 		const stacked = parseVFile('@[sse]\n@[get]\npub fn g() string { return "x" }')
-		assert.deepEqual(
-			stacked.map((f) => f.attr).sort(),
-			['get', 'sse'],
-		)
+		assert.deepEqual(stacked.map((f) => f.attr).sort(), ['get', 'sse'])
 	})
 
 	it('load-only .v dispatches a 405-only arm — svelte-only needs a @[get] probe for HTML 200', () => {
@@ -46,7 +36,7 @@ describe('Bunch1', () => {
 		const fns = parseVFile('@[load]\npub fn l(req SwelteRequest) string { return "{}" }')
 		assert.deepEqual(
 			fns.filter((x) => x.attr !== 'load').map((f) => f.attr),
-			[],
+			[]
 		)
 		// ...so emitRouteFile (loads stripped) emits verbs=[] and the
 		// dispatch arm is 405-only (`swelte_method_not_allowed`, see
@@ -78,7 +68,8 @@ describe('Bunch1', () => {
 	it('item 4: isFail matches ok:false+fieldErrors; deserialize needs the envelope', async () => {
 		// Proven live against dist/sdk.js 2026-11-02: the review's item 4
 		// must NOT call deserialize on raw verb JSON.
-		const mk = (status: number, body: never) => new SwelteRpcError('/b', 'save', status, body, 'raw')
+		const mk = (status: number, body: never) =>
+			new SwelteRpcError('/b', 'save', status, body, 'raw')
 		const failBody = { ok: false, fieldErrors: { name: 'required' } } as never
 		assert.equal(isFail(mk(422, failBody), 422), true)
 		assert.equal(isFail(mk(400, failBody)), true) // bare status: any 4xx
@@ -86,10 +77,12 @@ describe('Bunch1', () => {
 		assert.equal(isFail(mk(422, { ok: false } as never), 422), false)
 		await assert.rejects(
 			() => deserialize(new Response(JSON.stringify(failBody), { status: 422 })),
-			/unknown type/,
+			/unknown type/
 		)
 		const env = await deserialize(
-			new Response(JSON.stringify({ type: 'failure', status: 422, data: failBody }), { status: 422 }),
+			new Response(JSON.stringify({ type: 'failure', status: 422, data: failBody }), {
+				status: 422,
+			})
 		)
 		assert.equal(env.type, 'failure')
 		if (env.type === 'failure') assert.deepEqual(env.data, failBody)
@@ -113,7 +106,10 @@ describe('Bunch1', () => {
 		mkdirSync(join(root, 'src', 'lib'), { recursive: true })
 		writeFileSync(join(root, 'package.json'), '{"name":"t"}')
 		writeFileSync(join(root, 'svelte.config.js'), 'export default {}')
-		writeFileSync(join(root, 'src', 'routes', '+page.v'), 'module p\n@[get] pub fn g() string { return "" }')
+		writeFileSync(
+			join(root, 'src', 'routes', '+page.v'),
+			'module p\n@[get] pub fn g() string { return "" }'
+		)
 		const { swelte } = await import('./vite.js')
 		const plug = swelte({}) as unknown as {
 			configResolved?: (c: { root: string }) => void
@@ -129,7 +125,10 @@ describe('Bunch1', () => {
 
 	it('route groups strip; group-only +page claims / (one-file-per-URL)', () => {
 		assert.equal(stripRouteGroups('(mkt)/users'), 'users')
-		assert.equal(routeFor('src/routes', '/tmp/rr/src/routes', '/tmp/rr/src/routes/(mkt)/+page.v'), '/')
+		assert.equal(
+			routeFor('src/routes', '/tmp/rr/src/routes', '/tmp/rr/src/routes/(mkt)/+page.v'),
+			'/'
+		)
 		assert.equal(svelteRouteFor('(mkt)/+page'), '/')
 	})
 
@@ -141,11 +140,17 @@ describe('Bunch1', () => {
 	it('matcher portable subset: loop + early returns; calls rejected', () => {
 		const js = transpileMatcherBody(
 			'slug',
-			"\n\tif s == '' {\n\t\treturn false\n\t}\n\tfor c in s.bytes() {\n\t\tif c < 48 || c > 57 {\n\t\t\tif c < 97 || c > 122 {\n\t\t\t\treturn false\n\t\t\t}\n\t\t}\n\t}\n\treturn true\n",
+			"\n\tif s == '' {\n\t\treturn false\n\t}\n\tfor c in s.bytes() {\n\t\tif c < 48 || c > 57 {\n\t\t\tif c < 97 || c > 122 {\n\t\t\t\treturn false\n\t\t\t}\n\t\t}\n\t}\n\treturn true\n"
 		)
 		assert.ok(js.includes('for (const c_c of s)'))
-		assert.throws(() => transpileMatcherBody('bad', '\treturn s.contains("x")\n'), /unsupported statement/)
-		assert.throws(() => transpileMatcherBody('bad', '\ts := s + "x"\n\treturn true\n'), /unsupported statement/)
+		assert.throws(
+			() => transpileMatcherBody('bad', '\treturn s.contains("x")\n'),
+			/unsupported statement/
+		)
+		assert.throws(
+			() => transpileMatcherBody('bad', '\ts := s + "x"\n\treturn true\n'),
+			/unsupported statement/
+		)
 	})
 
 	it('app.v hooks: (host,path)->string reroute; startup void no-param', () => {
@@ -154,10 +159,17 @@ describe('Bunch1', () => {
 	})
 
 	it('SW render: SW_PRECACHE shell+hashes; precache lists / + assets', () => {
-		const sw = renderServiceWorker({ version: 'v', precache: ['/', '/assets/a.js', '/assets/b.wasm'], base: '' })
+		const sw = renderServiceWorker({
+			version: 'v',
+			precache: ['/', '/assets/a.js', '/assets/b.wasm'],
+			base: '',
+		})
 		assert.ok(sw.includes('const SW_PRECACHE = ['))
 		assert.ok(sw.includes('caches.open(SW_CACHE)'))
-		assert.deepEqual(serviceWorkerPrecache({ 'a.js': { type: 'chunk', fileName: 'assets/a.js' } }), ['/', '/assets/a.js'])
+		assert.deepEqual(
+			serviceWorkerPrecache({ 'a.js': { type: 'chunk', fileName: 'assets/a.js' } }),
+			['/', '/assets/a.js']
+		)
 	})
 
 	it('commented-out SDK imports survive stubSdkImports (comment fix)', () => {

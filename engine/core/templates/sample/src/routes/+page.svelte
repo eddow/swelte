@@ -61,8 +61,12 @@ async function hashName() {
 async function doLogin() {
 	lastError = ''
 	try {
-		{ const res: SwelteResponse = await login({ payload: name })
-		session = JSON.parse(typeof res.body === 'string' ? res.body : await (res.body as Blob).text()) as Session } // SwelteResponse envelope: body is raw text for JSON (Blob only on binary CT)
+		{
+			const res: SwelteResponse = await login({ payload: name })
+			session = JSON.parse(
+				typeof res.body === 'string' ? res.body : await (res.body as Blob).text()
+			) as Session
+		} // SwelteResponse envelope: body is raw text for JSON (Blob only on binary CT)
 	} catch (e) {
 		showError(e)
 	}

@@ -7,16 +7,16 @@ let result: SwelteLoadResult<string> | null = $state(null)
 
 async function load() {
 	result = await loadPage(() => admin_whoami({}))
-	}
+}
 
-	// Item 3: force-fail trigger — throws client-side before any fetch,
-	// so loadPage maps the plain throw to { error: 500 } and the branch
-	// below renders <ErrorPage> without a full-page SSR +error render.
-	async function forceFail() {
-		result = await loadPage(async () => {
-			throw new Error('forced failure (item 3)')
-		})
-	}
+// Item 3: force-fail trigger — throws client-side before any fetch,
+// so loadPage maps the plain throw to { error: 500 } and the branch
+// below renders <ErrorPage> without a full-page SSR +error render.
+async function forceFail() {
+	result = await loadPage(async () => {
+		throw new Error('forced failure (item 3)')
+	})
+}
 </script>
 
 <main>

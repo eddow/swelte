@@ -7,7 +7,15 @@
 // NOTE: typed TS — ssr-qjs transpiles the sibling (`transpileSiblingLoad`,
 // the mirror of the `.svelte` generate:'server' preprocessing step) so
 // annotations never reach the QJS bundle.
-export function load({ params, props, url }: { params: Record<string, string>; props: Record<string, unknown>; url: string }) {
+export function load({
+	params,
+	props,
+	url,
+}: {
+	params: Record<string, string>
+	props: Record<string, unknown>
+	url: string
+}) {
 	return {
 		viewModel: 'universal:' + String((props as { greeting?: string }).greeting ?? 'none'),
 		paramsEcho: JSON.stringify(params),

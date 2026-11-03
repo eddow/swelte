@@ -2,7 +2,15 @@
 // Copies the prerender/entries crawl list + rendered dist/*.html +
 // the contract snapshot into `<root>/snapshot/`. Reuses the crawl
 // (no new enumeration) - packaging only.
-import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
+import {
+	copyFileSync,
+	existsSync,
+	mkdirSync,
+	readdirSync,
+	readFileSync,
+	statSync,
+	writeFileSync,
+} from 'node:fs'
 import { join, resolve } from 'node:path'
 import type { Ctx } from './types.js'
 

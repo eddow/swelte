@@ -66,7 +66,11 @@ export async function runTest(ctx: Ctx): Promise<void> {
 	let vTested = 0
 	for (const dir of [...dirs].sort()) {
 		try {
-			execFileSync(v, ['test', dir], { cwd: root, stdio: ['ignore', 'pipe', 'pipe'], env: toolchainEnv() })
+			execFileSync(v, ['test', dir], {
+				cwd: root,
+				stdio: ['ignore', 'pipe', 'pipe'],
+				env: toolchainEnv(),
+			})
 			vTested++
 		} catch (e) {
 			const err = e as { stderr?: Buffer; stdout?: Buffer; message?: string }

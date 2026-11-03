@@ -1,6 +1,6 @@
 <script lang="ts">
-	import Code from '#lib/Code.svelte';
-	import { codeHtml } from '#lib/snippets.gen.js';
+import Code from '#lib/Code.svelte'
+import { codeHtml } from '#lib/snippets.gen.js'
 </script>
 
 <div class="breadcrumbs text-sm">
@@ -11,7 +11,9 @@
 </div>
 
 <h1 class="text-4xl font-bold mt-2">Quickstart</h1>
-<p class="py-4 opacity-80">One route file, one component. Server in V, UI in Svelte 5, typed bridge in between.</p>
+<p class="py-4 opacity-80">
+	One route file, one component. Server in V, UI in Svelte 5, typed bridge in between.
+</p>
 
 <div class="grid lg:grid-cols-2 gap-4">
 	<div>

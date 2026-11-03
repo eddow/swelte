@@ -41,7 +41,7 @@ describeSw('service worker (opt-in, additive)', () => {
 		assertSw.ok(src.includes('application/json'))
 		assertSw.ok(src.includes('text/event-stream'))
 		assertSw.ok(src.includes('/api/'))
-		assertSw.ok(src.includes('mode === \'navigate\''))
+		assertSw.ok(src.includes("mode === 'navigate'"))
 	})
 
 	itSw('renderServiceWorkerRegister: same-origin /sw.js, load-deferred', () => {
@@ -55,9 +55,9 @@ describeSw('service worker (opt-in, additive)', () => {
 	itSw('serviceWorkerPrecache: shell + hashed js/assets only', () => {
 		const got = swPrecache({
 			'index.html': { type: 'asset', fileName: 'index.html' },
-			'js': { type: 'chunk', fileName: 'assets/index-ABC.js' },
-			'wasm': { type: 'asset', fileName: 'assets/app_lib-XYZ.wasm' },
-			'sw': { type: 'asset', fileName: 'sw.js' },
+			js: { type: 'chunk', fileName: 'assets/index-ABC.js' },
+			wasm: { type: 'asset', fileName: 'assets/app_lib-XYZ.wasm' },
+			sw: { type: 'asset', fileName: 'sw.js' },
 		})
 		assertSw.ok(got.includes('/'))
 		assertSw.ok(got.includes('/assets/index-ABC.js'))
@@ -106,12 +106,15 @@ describeGoldens('item 4 — literal golden strings for jsFetchFor/jsWasmFor', ()
 			goldenFn({ name: 'login', attr: 'post', tsret: 'SwelteResponse', vret: 'SwelteResponse' }),
 			goldenFn({ name: 'get_greeting', attr: 'get', tsret: 'string', vret: 'string' }),
 		])
-		assertGolden.ok(got.includes('__swelteFetch("/api/greet", "login", "post", args, "", true)')
-			, got)
-		assertGolden.ok(got.includes('__swelteFetch("/api/greet", "get_greeting", "get", args, "")')
-			, got)
-		assertGolden.ok(!got.includes('get_greeting", "get", args, "", true)')
-		, got)
+		assertGolden.ok(
+			got.includes('__swelteFetch("/api/greet", "login", "post", args, "", true)'),
+			got
+		)
+		assertGolden.ok(
+			got.includes('__swelteFetch("/api/greet", "get_greeting", "get", args, "")'),
+			got
+		)
+		assertGolden.ok(!got.includes('get_greeting", "get", args, "", true)'), got)
 	})
 
 	itGolden('jsFetchFor verb + rpc + sse + qualifier: transports stay distinct', () => {
@@ -141,31 +144,44 @@ describeGoldens('item 4 — literal golden strings for jsFetchFor/jsWasmFor', ()
 		assertGolden.equal(got, want)
 	})
 
-	itGolden('jsFetchFor dyn route keeps generator byte-shape: url helper + strip + qualifier', () => {
-		const got = jsFetchForGolden('/users/[id]', [
-			goldenFn({ name: 'g', qualifier: 'q' }),
-			goldenFn({ name: 'tick', attr: 'sse' }),
-		])
-		assertGolden.ok(got.includes('const __swelteBase = "/users/[id]"'))
-		assertGolden.ok(got.includes('function __swelteUrl(args = {})'))
-		assertGolden.ok(got.includes('missing route param'))
-		assertGolden.ok(got.includes('return __swelteFetch(__swelteUrl(args), "g", "get", __swelteArgs, "q")'))
-		assertGolden.ok(got.includes('yield* __swelteStream(__swelteUrl(args), "tick", __swelteArgs, "")'))
-		assertGolden.ok(got.includes('async function * tick'))
-		// literal pin on the two export tails (dyn head is covered by includes above)
-		assertGolden.ok(
-			got.endsWith(
-				[
-					'void __swelteRest',
-					'  return __swelteFetch(__swelteUrl(args), "g", "get", __swelteArgs, "q")',
-					'}',
-					'export async function * tick(args = {}) {',
-				].join('\n')
-			) === false
-		)
-		// full byte comparison via JSON round-trip: regenerating yields identical bytes
-		assertGolden.equal(jsFetchForGolden('/users/[id]', [goldenFn({ name: 'g', qualifier: 'q' }), goldenFn({ name: 'tick', attr: 'sse' })]), got)
-	})
+	itGolden(
+		'jsFetchFor dyn route keeps generator byte-shape: url helper + strip + qualifier',
+		() => {
+			const got = jsFetchForGolden('/users/[id]', [
+				goldenFn({ name: 'g', qualifier: 'q' }),
+				goldenFn({ name: 'tick', attr: 'sse' }),
+			])
+			assertGolden.ok(got.includes('const __swelteBase = "/users/[id]"'))
+			assertGolden.ok(got.includes('function __swelteUrl(args = {})'))
+			assertGolden.ok(got.includes('missing route param'))
+			assertGolden.ok(
+				got.includes('return __swelteFetch(__swelteUrl(args), "g", "get", __swelteArgs, "q")')
+			)
+			assertGolden.ok(
+				got.includes('yield* __swelteStream(__swelteUrl(args), "tick", __swelteArgs, "")')
+			)
+			assertGolden.ok(got.includes('async function * tick'))
+			// literal pin on the two export tails (dyn head is covered by includes above)
+			assertGolden.ok(
+				got.endsWith(
+					[
+						'void __swelteRest',
+						'  return __swelteFetch(__swelteUrl(args), "g", "get", __swelteArgs, "q")',
+						'}',
+						'export async function * tick(args = {}) {',
+					].join('\n')
+				) === false
+			)
+			// full byte comparison via JSON round-trip: regenerating yields identical bytes
+			assertGolden.equal(
+				jsFetchForGolden('/users/[id]', [
+					goldenFn({ name: 'g', qualifier: 'q' }),
+					goldenFn({ name: 'tick', attr: 'sse' }),
+				]),
+				got
+			)
+		}
+	)
 
 	itGolden('jsWasmFor dev: per-module url + param/return kinds', () => {
 		const got = jsWasmForGolden(false, 'crypto/hash', [
@@ -183,7 +199,7 @@ describeGoldens('item 4 — literal golden strings for jsFetchFor/jsWasmFor', ()
 			'',
 			'const hash_string_params = [{"name":"s","kind":"string","vtype":"string"}]',
 			'export function hash_string(args) {',
-			"\treturn __swelteWasmCall(wasmUrl, 'main.hash_string', args, hash_string_params, \"string\")",
+			'\treturn __swelteWasmCall(wasmUrl, \'main.hash_string\', args, hash_string_params, "string")',
 			'}',
 			'',
 			'',
@@ -216,12 +232,12 @@ describeGoldens('item 4 — literal golden strings for jsFetchFor/jsWasmFor', ()
 			'',
 			'const add_params = [{"name":"a","kind":"int","vtype":"int"},{"name":"flag","kind":"bool","vtype":"bool"}]',
 			'export function add(args) {',
-			"\treturn __swelteWasmCall(wasmUrl, 'main.add', args, add_params, \"int\")",
+			'\treturn __swelteWasmCall(wasmUrl, \'main.add\', args, add_params, "int")',
 			'}',
 			'',
 			'const weird_params = [{"name":"t","kind":"unsupported","vtype":"time.Time"}]',
 			'export function weird(args) {',
-			"\treturn __swelteWasmCall(wasmUrl, 'main.weird', args, weird_params, \"unsupported\")",
+			'\treturn __swelteWasmCall(wasmUrl, \'main.weird\', args, weird_params, "unsupported")',
 			'}',
 			'',
 			'',
@@ -230,10 +246,17 @@ describeGoldens('item 4 — literal golden strings for jsFetchFor/jsWasmFor', ()
 	})
 })
 
-
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync, statSync, cpSync } from 'node:fs'
+import {
+	mkdtempSync,
+	mkdirSync,
+	writeFileSync,
+	readFileSync,
+	readdirSync,
+	statSync,
+	cpSync,
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -315,7 +338,10 @@ describe('codegen shape snapshots (fetch/SSE/dispatcher)', () => {
 		assert.ok(disp.includes('fn swelte_fetch('), 'swelte_fetch emitted')
 		assert.ok(disp.includes('swelte_route('), 'fetch dispatches in-process (no loopback)')
 		// Never projected to TS: browser stubs only carry user fns.
-		const stub = readFileSync(join(root, '.swelte', 'generated', 'routes', 'api', 'greet.js'), 'utf8')
+		const stub = readFileSync(
+			join(root, '.swelte', 'generated', 'routes', 'api', 'greet.js'),
+			'utf8'
+		)
 		assert.ok(!stub.includes('swelte_fetch'), 'swelte_fetch never leaks to #routes fetch stubs')
 		const dts = readFileSync(join(root, '.swelte', 'types', 'routes', 'api', 'greet.d.ts'), 'utf8')
 		assert.ok(!dts.includes('SwelteFetchOut'), 'SwelteFetchOut never leaks to .d.ts')
@@ -329,7 +355,10 @@ describe('codegen shape snapshots (fetch/SSE/dispatcher)', () => {
 			`module u\n@[get('q')] pub fn g() string { return '' }\n@[sse] pub fn tick(emit fn (string) bool) {}`
 		)
 		await generate(root)
-		const stub = readFileSync(join(root, '.swelte', 'generated', 'routes', 'users', '[id].js'), 'utf8')
+		const stub = readFileSync(
+			join(root, '.swelte', 'generated', 'routes', 'users', '[id].js'),
+			'utf8'
+		)
 		assert.ok(stub.includes('__swelteUrl'))
 		assert.ok(stub.includes('async function *'))
 		assert.ok(stub.includes('__swelteStream'))
@@ -367,13 +396,19 @@ describe('codegen shape snapshots (fetch/SSE/dispatcher)', () => {
 	it('rerun touches no mtimes except version.js (HMR hygiene)', async () => {
 		const root = scaffold()
 		await generate(root)
-		const watch = ['routes.js', 'entry-main.ts', 'routes/server_gen.v', 'generated/routes/api/greet.js']
+		const watch = [
+			'routes.js',
+			'entry-main.ts',
+			'routes/server_gen.v',
+			'generated/routes/api/greet.js',
+		]
 		const mtime = (f: string) => statSync(join(root, '.swelte', f)).mtimeMs
 		const before = new Map(watch.map((f) => [f, mtime(f)]))
 		// Sleep past filesystem mtime granularity so a rewrite would show.
 		await new Promise((r) => setTimeout(r, 1100))
 		await generate(root)
-		for (const f of watch) assert.equal(mtime(f), before.get(f), `${f} rewritten with identical content`)
+		for (const f of watch)
+			assert.equal(mtime(f), before.get(f), `${f} rewritten with identical content`)
 	})
 
 	it('ssr-manifest lists svelte pages; headless api stays out of entries', async () => {
@@ -429,7 +464,10 @@ describe('codegen shape snapshots (fetch/SSE/dispatcher)', () => {
 		const disp = readFileSync(join(root, '.swelte', 'routes', 'server_gen.v'), 'utf8')
 		for (const r of mf.routes as { route: string; hasData: boolean }[]) {
 			if (r.route === '/+error') continue
-			assert.ok(disp.includes(JSON.stringify(r.route)), `dispatch missing manifest route ${r.route}`)
+			assert.ok(
+				disp.includes(JSON.stringify(r.route)),
+				`dispatch missing manifest route ${r.route}`
+			)
 			if (r.hasData) assert.ok(disp.includes('swelte_load_for'), `load arm missing for ${r.route}`)
 		}
 	})
@@ -446,14 +484,20 @@ describe('codegen shape snapshots (fetch/SSE/dispatcher)', () => {
 		const js = readFileSync(join(root, '.swelte', 'routes.js'), 'utf8')
 		// No remount fallback: wrapper routes hydrate through the chain.
 		assert.ok(!js.includes('nested hydrate falls back to mount'), js.slice(0, 500))
-		assert.ok(js.includes('hydrate(r.wrappers[0], { target, props: { params, children: child } })'), js.slice(0, 3000))
+		assert.ok(
+			js.includes('hydrate(r.wrappers[0], { target, props: { params, children: child } })'),
+			js.slice(0, 3000)
+		)
 		// Emitted matcher regex keeps its escapes (parse check, not string match).
 		assert.ok(js.includes('/^\\[([A-Za-z_]'), 'matcher regex escapes lost in emit')
 		// The emit must parse: catches unbalanced-escape regressions at generate time.
 		// Component imports are stubbed (shape check only — real modules need Vite).
 		const stubbed = js
 			.replace(/^import .*$/gm, '// stripped')
-			.replace('const ROUTES = [', 'const R_admin__page_Page = 0;\nconst R_admin__route_Wrap = 1;\nconst SwelteErrorPage = 2;\nconst ROUTES = [')
+			.replace(
+				'const ROUTES = [',
+				'const R_admin__page_Page = 0;\nconst R_admin__route_Wrap = 1;\nconst SwelteErrorPage = 2;\nconst ROUTES = ['
+			)
 		await import(`data:text/javascript;base64,${Buffer.from(stubbed, 'utf8').toString('base64')}`)
 	})
 })
@@ -468,7 +512,13 @@ describe('item 11 — codegen golden project (sample-overlay variant + routes.js
 			join(here, '..', '..', 'src', '..', 'templates', 'sample', 'src'),
 			'/home/fmdm/dev/swelte/engine/core/templates/sample/src',
 		]
-		const tpl = cands.find((c) => { try { return statSync(c).isDirectory() } catch { return false } })
+		const tpl = cands.find((c) => {
+			try {
+				return statSync(c).isDirectory()
+			} catch {
+				return false
+			}
+		})
 		if (!tpl) throw new Error('sample templates/ not found (reinstall @swelte/core)')
 		mkdirSync(join(root, 'src'), { recursive: true })
 		cpSync(tpl, join(root, 'src'), { recursive: true })
@@ -484,7 +534,7 @@ describe('item 11 — codegen golden project (sample-overlay variant + routes.js
 		await generate(root)
 		const js = readFileSync(join(root, '.swelte', 'routes.js'), 'utf8')
 		// admin page nests inside the admin wrapper
-		assert.ok(js.includes("path: \"/admin\""), js.slice(0, 2000))
+		assert.ok(js.includes('path: "/admin"'), js.slice(0, 2000))
 		const adminLine = js.split('\n').find((l) => l.includes('"/admin"')) ?? ''
 		assert.ok(adminLine.includes('wrappers: ['), adminLine)
 		assert.ok(!adminLine.includes('wrappers: []'), adminLine)
@@ -503,7 +553,9 @@ describe('item 11 — codegen golden project (sample-overlay variant + routes.js
 		sampleFiles(root)
 		await generate(root)
 		const mf = JSON.parse(readFileSync(join(root, '.swelte', 'ssr-manifest.json'), 'utf8'))
-		const byRoute = new Map((mf.routes as { route: string; hasData: boolean }[]).map((r) => [r.route, r]))
+		const byRoute = new Map(
+			(mf.routes as { route: string; hasData: boolean }[]).map((r) => [r.route, r])
+		)
 		assert.ok(byRoute.has('/'), 'root page missing')
 		assert.ok(byRoute.has('/admin'), 'admin page missing')
 		assert.ok(byRoute.get('/')?.hasData, 'root +page.v should pair hasData')
@@ -528,7 +580,10 @@ describe('item 11 — codegen golden project (sample-overlay variant + routes.js
 		assert.ok(entry.includes('mountSwelteRoute'), 'entry must mount SPA shell')
 		assert.ok(entry.includes('initSwelteRouter'), 'entry must boot the client router')
 		// lib stub points at the dev per-module wasm url (prod bundle swaps in generateBundle)
-		const stub = readFileSync(join(root, '.swelte', 'generated', 'lib', 'crypto', 'hash.js'), 'utf8')
+		const stub = readFileSync(
+			join(root, '.swelte', 'generated', 'lib', 'crypto', 'hash.js'),
+			'utf8'
+		)
 		assert.ok(stub.includes('/@swelte-dev/crypto/hash.wasm'), stub.slice(0, 400))
 	})
 
@@ -538,110 +593,140 @@ describe('item 11 — codegen golden project (sample-overlay variant + routes.js
 		await generate(root)
 		const snap = (f: string) => readFileSync(join(root, f), 'utf8')
 		// Item 9: version.js embeds buildTime — compare shape, not bytes.
-		const before = ['.swelte/routes.js', '.swelte/ssr-manifest.json', '.swelte/entry-main.ts', '.swelte/routes/server_gen.v'].map(snap).join('\n====\n')
+		const before = [
+			'.swelte/routes.js',
+			'.swelte/ssr-manifest.json',
+			'.swelte/entry-main.ts',
+			'.swelte/routes/server_gen.v',
+		]
+			.map(snap)
+			.join('\n====\n')
 		const beforeV = snap('.swelte/version.js').replace(/buildTime = "[^"]*"/, 'buildTime = "T"')
 		await generate(root)
-		const after = ['.swelte/routes.js', '.swelte/ssr-manifest.json', '.swelte/entry-main.ts', '.swelte/routes/server_gen.v'].map(snap).join('\n====\n')
+		const after = [
+			'.swelte/routes.js',
+			'.swelte/ssr-manifest.json',
+			'.swelte/entry-main.ts',
+			'.swelte/routes/server_gen.v',
+		]
+			.map(snap)
+			.join('\n====\n')
 		const afterV = snap('.swelte/version.js').replace(/buildTime = "[^"]*"/, 'buildTime = "T"')
 		assert.equal(after, before)
 		assert.equal(afterV, beforeV)
 	})
 
-describe('§1.2 router stores + invalidation (§1.2/§1.4)', () => {
-	it('page/navigating/updated subscribe with current value', async () => {
-		const { page, navigating, updated } = await import('./sdk.js')
-		const seen: unknown[] = []
-		const unsub = page.subscribe((v) => seen.push(v))
-		unsub()
-		assert.ok(seen.length >= 1)
-		assert.equal(navigating.get(), null)
-		assert.equal(updated.get(), false)
-	})
+	describe('§1.2 router stores + invalidation (§1.2/§1.4)', () => {
+		it('page/navigating/updated subscribe with current value', async () => {
+			const { page, navigating, updated } = await import('./sdk.js')
+			const seen: unknown[] = []
+			const unsub = page.subscribe((v) => seen.push(v))
+			unsub()
+			assert.ok(seen.length >= 1)
+			assert.equal(navigating.get(), null)
+			assert.equal(updated.get(), false)
+		})
 
-	it('depends/invalidate track tags per load key', async () => {
-		const { depends, invalidate, invalidateAll, __swelteTrackLoad } = await import('./sdk.js')
-		__swelteTrackLoad('/a', () => {
-			depends('app:data')
+		it('depends/invalidate track tags per load key', async () => {
+			const { depends, invalidate, invalidateAll, __swelteTrackLoad } = await import('./sdk.js')
+			__swelteTrackLoad('/a', () => {
+				depends('app:data')
+			})
+			__swelteTrackLoad('/b', () => {
+				depends('other')
+			})
+			assert.deepEqual(invalidate('app:data'), ['/a'])
+			assert.deepEqual(invalidate('app:data'), [])
+			__swelteTrackLoad('/c', () => {
+				depends('x')
+			})
+			invalidateAll()
+			assert.deepEqual(invalidate('x'), [])
 		})
-		__swelteTrackLoad('/b', () => {
-			depends('other')
-		})
-		assert.deepEqual(invalidate('app:data'), ['/a'])
-		assert.deepEqual(invalidate('app:data'), [])
-		__swelteTrackLoad('/c', () => {
-			depends('x')
-		})
-		invalidateAll()
-		assert.deepEqual(invalidate('x'), [])
-	})
 
-	it('beforeNavigate/afterNavigate register + unregister', async () => {
-		const { beforeNavigate, afterNavigate } = await import('./sdk.js')
-		let calls = 0
-		const off = beforeNavigate(() => {
-			calls++
+		it('beforeNavigate/afterNavigate register + unregister', async () => {
+			const { beforeNavigate, afterNavigate } = await import('./sdk.js')
+			let calls = 0
+			const off = beforeNavigate(() => {
+				calls++
+			})
+			off()
+			const off2 = afterNavigate(() => {
+				calls++
+			})
+			off2()
+			assert.equal(calls, 0)
 		})
-		off()
-		const off2 = afterNavigate(() => {
-			calls++
-		})
-		off2()
-		assert.equal(calls, 0)
-	})
 
-	it('routes.js emits goto/preloadData/pushState/initSwelteRouter', async () => {
-		const root = scaffold()
-		await generate(root)
-		const js = readFileSync(join(root, '.swelte', 'routes.js'), 'utf8')
-		for (const fn of [
-			'export async function goto(',
-			'export async function preloadData(',
-			'export async function pushState(',
-			'export function initSwelteRouter(',
-		]) {
-			assert.ok(js.includes(fn), `routes.js must export ${fn}`)
-	}
-})
-	it('client router: hasLoad gating + no-clear navigation + unmount tracking', async () => {
-		const root = scaffold()
-		mkdirSync(join(root, 'src', 'routes', 'static'), { recursive: true })
-		writeFileSync(join(root, 'src', 'routes', 'static', '+page.svelte'), '<h1>s</h1>')
-		// Static page: GET probe only, no @[load] - must not trigger a fetch.
-		writeFileSync(join(root, 'src', 'routes', 'static', '+page.v'), 'module s\n@[get] pub fn ping() string { return "ok" }')
-		// Load page: @[load] present - fetch allowed.
-		mkdirSync(join(root, 'src', 'routes', 'dyn'), { recursive: true })
-		writeFileSync(join(root, 'src', 'routes', 'dyn', '+page.svelte'), '<h1>d</h1>')
-		writeFileSync(
-			join(root, 'src', 'routes', 'dyn', '+page.v'),
-			'module d\npub struct D {\npub:\n\tx string\n}\n@[load] pub fn ld(req SwelteRequest) !D { _ = req\n return D{ x: "y" } }'
-		)
-		await generate(root)
-		const js = readFileSync(join(root, '.swelte', 'routes.js'), 'utf8')
-		// 1. ROUTES entries carry hasLoad: true only where @[load] exists.
-		const entryRe = /\{ path: "([^"]+)", page: \w+, wrappers: \[[^\]]*\], hasLoad: (true|false) \}/g
-		const got = new Map<string, string>()
-		for (const m of js.matchAll(entryRe)) got.set(m[1], m[2])
-		assert.equal(got.get('/static'), 'false', 'static page must be hasLoad:false (no fetch)')
-		assert.equal(got.get('/dyn'), 'true', 'load page must be hasLoad:true')
-		// 2. Both fetch sites gate on hasLoad - static pages never fetch.
-		assert.ok(js.includes('if (!hit.route.hasLoad) return'), 'preloadData must early-return for static routes')
-		assert.ok(js.includes('if (!opts.noPreload && hit.route.hasLoad)'), 'navigate must gate fetch on hasLoad')
-		// 3. No blank frame: navigate never clears before the fetch resolves.
-		const navBody = js.slice(js.indexOf('async function __navigateTo'))
-		assert.ok(!navBody.slice(0, 1200).includes("target.innerHTML = ''"), 'navigate must not clear before mount (no flash)')
-		// 4. Old tree is unmounted on swap (no leak across navigations).
-		assert.ok(js.includes('unmount('), 'mount swap must unmount the previous tree')
-		assert.ok(js.includes('__mountedRoots'), 'router must track mounted roots for teardown')
-		// 5. Click interception skips non-SPA triggers.
-		assert.ok(js.includes('download'), 'router must skip download links')
-		assert.ok(js.includes('data-swelte-reload'), 'router must honor the full-reload escape hatch')
-		// 6. The emit parses as a module (catches template-literal breakage).
-		const stubbed = js
-			.replace(/^import .*$/gm, '// stripped')
-			.replace('const ROUTES = [', 'const R_static__page_Page = 0;\nconst R_dyn__page_Page = 1;\nconst ROUTES = [')
-		await import(`data:text/javascript;base64,${Buffer.from(stubbed, 'utf8').toString('base64')}`)
+		it('routes.js emits goto/preloadData/pushState/initSwelteRouter', async () => {
+			const root = scaffold()
+			await generate(root)
+			const js = readFileSync(join(root, '.swelte', 'routes.js'), 'utf8')
+			for (const fn of [
+				'export async function goto(',
+				'export async function preloadData(',
+				'export async function pushState(',
+				'export function initSwelteRouter(',
+			]) {
+				assert.ok(js.includes(fn), `routes.js must export ${fn}`)
+			}
+		})
+		it('client router: hasLoad gating + no-clear navigation + unmount tracking', async () => {
+			const root = scaffold()
+			mkdirSync(join(root, 'src', 'routes', 'static'), { recursive: true })
+			writeFileSync(join(root, 'src', 'routes', 'static', '+page.svelte'), '<h1>s</h1>')
+			// Static page: GET probe only, no @[load] - must not trigger a fetch.
+			writeFileSync(
+				join(root, 'src', 'routes', 'static', '+page.v'),
+				'module s\n@[get] pub fn ping() string { return "ok" }'
+			)
+			// Load page: @[load] present - fetch allowed.
+			mkdirSync(join(root, 'src', 'routes', 'dyn'), { recursive: true })
+			writeFileSync(join(root, 'src', 'routes', 'dyn', '+page.svelte'), '<h1>d</h1>')
+			writeFileSync(
+				join(root, 'src', 'routes', 'dyn', '+page.v'),
+				'module d\npub struct D {\npub:\n\tx string\n}\n@[load] pub fn ld(req SwelteRequest) !D { _ = req\n return D{ x: "y" } }'
+			)
+			await generate(root)
+			const js = readFileSync(join(root, '.swelte', 'routes.js'), 'utf8')
+			// 1. ROUTES entries carry hasLoad: true only where @[load] exists.
+			const entryRe =
+				/\{ path: "([^"]+)", page: \w+, wrappers: \[[^\]]*\], hasLoad: (true|false) \}/g
+			const got = new Map<string, string>()
+			for (const m of js.matchAll(entryRe)) got.set(m[1], m[2])
+			assert.equal(got.get('/static'), 'false', 'static page must be hasLoad:false (no fetch)')
+			assert.equal(got.get('/dyn'), 'true', 'load page must be hasLoad:true')
+			// 2. Both fetch sites gate on hasLoad - static pages never fetch.
+			assert.ok(
+				js.includes('if (!hit.route.hasLoad) return'),
+				'preloadData must early-return for static routes'
+			)
+			assert.ok(
+				js.includes('if (!opts.noPreload && hit.route.hasLoad)'),
+				'navigate must gate fetch on hasLoad'
+			)
+			// 3. No blank frame: navigate never clears before the fetch resolves.
+			const navBody = js.slice(js.indexOf('async function __navigateTo'))
+			assert.ok(
+				!navBody.slice(0, 1200).includes("target.innerHTML = ''"),
+				'navigate must not clear before mount (no flash)'
+			)
+			// 4. Old tree is unmounted on swap (no leak across navigations).
+			assert.ok(js.includes('unmount('), 'mount swap must unmount the previous tree')
+			assert.ok(js.includes('__mountedRoots'), 'router must track mounted roots for teardown')
+			// 5. Click interception skips non-SPA triggers.
+			assert.ok(js.includes('download'), 'router must skip download links')
+			assert.ok(js.includes('data-swelte-reload'), 'router must honor the full-reload escape hatch')
+			// 6. The emit parses as a module (catches template-literal breakage).
+			const stubbed = js
+				.replace(/^import .*$/gm, '// stripped')
+				.replace(
+					'const ROUTES = [',
+					'const R_static__page_Page = 0;\nconst R_dyn__page_Page = 1;\nconst ROUTES = ['
+				)
+			await import(`data:text/javascript;base64,${Buffer.from(stubbed, 'utf8').toString('base64')}`)
+		})
 	})
-})
 
 	it('§4/§1 Hand predicate + client props merge', async () => {
 		const root = scaffold()
@@ -665,9 +750,10 @@ describe('§1.2 router stores + invalidation (§1.2/§1.4)', () => {
 		const disp = readFileSync(join(root, '.swelte', 'routes', 'server_gen.v'), 'utf8')
 		assert.ok(disp.includes('/nojs'), 'no-ssr route registered in predicate')
 		const mani = JSON.parse(readFileSync(join(root, '.swelte', 'ssr-manifest.json'), 'utf8'))
-		const nojs = (mani.routes as { route: string; ssr: boolean; hasUniversalLoad: unknown }[]).find((r) => r.route === '/nojs')
+		const nojs = (mani.routes as { route: string; ssr: boolean; hasUniversalLoad: unknown }[]).find(
+			(r) => r.route === '/nojs'
+		)
 		assert.equal(nojs?.ssr, false, 'manifest marks ssr=false')
 		assert.equal(nojs?.hasUniversalLoad, 'async', 'async load classified')
 	})
-
 })

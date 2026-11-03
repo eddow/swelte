@@ -21,7 +21,9 @@ function rootWith(files: Record<string, string>): string {
 
 describe('diagnostics parity (tmp fixtures)', () => {
 	it('orphan route', async () => {
-		const root = rootWith({ 'src/routes/lonely.v': 'module l\n@[get] pub fn g() string { return "" }' })
+		const root = rootWith({
+			'src/routes/lonely.v': 'module l\n@[get] pub fn g() string { return "" }',
+		})
 		const diags = await collectDiagnostics(root)
 		assert.ok(diags.some((d) => d.kind === 'orphan'))
 	})

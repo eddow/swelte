@@ -22,9 +22,11 @@ describe('dev port helpers (no real binds except port 0)', () => {
 
 	it('onSpawnError logs readable hint', () => {
 		const msgs: string[] = []
-		const fake = { on: (ev: string, fn: (e: Error) => void) => {
-			if (ev === 'error') fn(new Error('spawn ENOENT'))
-		} }
+		const fake = {
+			on: (ev: string, fn: (e: Error) => void) => {
+				if (ev === 'error') fn(new Error('spawn ENOENT'))
+			},
+		}
 		onSpawnError(fake as never, 'Vite', (m: string) => msgs.push(m))
 		assert.ok(msgs.join(' ').includes('Vite'))
 	})

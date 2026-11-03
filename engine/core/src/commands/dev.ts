@@ -81,7 +81,7 @@ export async function freePortUnix(port: number): Promise<void> {
  * only recurses on macOS/Windows. Walk subdirs and watch each one. */
 export function watchVRecursive(
 	dir: string,
-	onVFile: (file: string) => void,
+	onVFile: (file: string) => void
 ): { close: () => void } {
 	type W = ReturnType<typeof watch>
 	const watchers: W[] = []
@@ -191,10 +191,13 @@ export async function waitPort(port: number, ms: number): Promise<boolean> {
 export async function probeSmoke(
 	port: number,
 	hasGreetRoute: boolean,
-	log: (m: string) => void = () => {},
+	log: (m: string) => void = () => {}
 ): Promise<void> {
 	// Portable probe helper (no curl): fetch with a hard timeout.
-	const probeGet = async (path: string, accept: string): Promise<{ status: number; body: string }> => {
+	const probeGet = async (
+		path: string,
+		accept: string
+	): Promise<{ status: number; body: string }> => {
 		const ctrl = new AbortController()
 		const t = setTimeout(() => ctrl.abort(), 5000)
 		try {
@@ -207,7 +210,8 @@ export async function probeSmoke(
 			clearTimeout(t)
 		}
 	}
-	if (!(await waitPort(port, 15000))) throw new Error(`built binary did not listen on :${port} within 15s`)
+	if (!(await waitPort(port, 15000)))
+		throw new Error(`built binary did not listen on :${port} within 15s`)
 	const page = await probeGet('/', 'text/html')
 	if (page.status !== 200) throw new Error(`smoke page: HTTP ${page.status} (want 200)`)
 	// Empty scaffold has no api/greet.v — only probe the API when the
@@ -316,8 +320,12 @@ export async function runDev(ctx: Ctx): Promise<void> {
 				...(!process.env.SWELTE_CSRF_CHECK_ORIGIN && cfg.csrf === 'enforce'
 					? { SWELTE_CSRF_CHECK_ORIGIN: '1' }
 					: {}),
-				...(!process.env.SWELTE_METHOD_OVERRIDE && cfg.methodOverride ? { SWELTE_METHOD_OVERRIDE: '1' } : {}),
-				...(!process.env.SWELTE_VERSION && cfg.version !== '' ? { SWELTE_VERSION: cfg.version } : {}),
+				...(!process.env.SWELTE_METHOD_OVERRIDE && cfg.methodOverride
+					? { SWELTE_METHOD_OVERRIDE: '1' }
+					: {}),
+				...(!process.env.SWELTE_VERSION && cfg.version !== ''
+					? { SWELTE_VERSION: cfg.version }
+					: {}),
 			}),
 			stdio: ['ignore', 'pipe', 'pipe'],
 		})

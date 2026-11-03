@@ -8,7 +8,15 @@ import type {
 	GreetNarrowResult,
 	SwelteRequest,
 } from '#routes/+page.v'
-import { login, greet_pure, serve_pdf, make_created, tick_stream, rename_greeting, touch_greeting } from '#routes/api/greet.v'
+import {
+	login,
+	greet_pure,
+	serve_pdf,
+	make_created,
+	tick_stream,
+	rename_greeting,
+	touch_greeting,
+} from '#routes/api/greet.v'
 import { tick_items } from '#routes/api/ticks.v'
 import { blob_bytes, hook_raw } from '#routes/api/blob.v'
 import { type_row, calc_probe } from '#routes/api/types.v'
@@ -76,7 +84,9 @@ async function saveFailLite() {
 	} catch (e) {
 		if (isFail(e, 422)) {
 			const fe = (e.body as { fieldErrors?: Record<string, string> }).fieldErrors ?? {}
-			saveFailNote = `inline fail-lite (item 4): ${Object.entries(fe).map(([k, v]) => `${k}=${v}`).join(', ')}`
+			saveFailNote = `inline fail-lite (item 4): ${Object.entries(fe)
+				.map(([k, v]) => `${k}=${v}`)
+				.join(', ')}`
 		} else {
 			showError(e)
 		}
@@ -106,8 +116,12 @@ async function hashName() {
 async function doLogin() {
 	lastError = ''
 	try {
-		{ const res: SwelteResponse = await login({ payload: name })
-		session = JSON.parse(typeof res.body === 'string' ? res.body : await (res.body as Blob).text()) as Session } // SwelteResponse envelope: body is raw text for JSON (Blob only on binary CT)
+		{
+			const res: SwelteResponse = await login({ payload: name })
+			session = JSON.parse(
+				typeof res.body === 'string' ? res.body : await (res.body as Blob).text()
+			) as Session
+		} // SwelteResponse envelope: body is raw text for JSON (Blob only on binary CT)
 	} catch (e) {
 		showError(e)
 	}

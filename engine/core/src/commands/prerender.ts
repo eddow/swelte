@@ -62,7 +62,6 @@ function isrSecondsFor(url: string, isr: Record<string, number>): number | null 
 	return best
 }
 
-
 export async function runPrerender(
 	root: string,
 	binary: string,
@@ -71,7 +70,8 @@ export async function runPrerender(
 ): Promise<{ pages: string[]; isrHeaders: Record<string, string> }> {
 	const empty = { pages: [], isrHeaders: {} as Record<string, string> }
 	const prerender = cfg['prerender'] as { entries?: unknown; concurrency?: unknown } | undefined
-	const mode = prerender?.entries === 'all' || prerender?.entries === 'static' ? prerender.entries : 'off'
+	const mode =
+		prerender?.entries === 'all' || prerender?.entries === 'static' ? prerender.entries : 'off'
 	if (mode === 'off') return empty
 	const genEntries = join(resolve(root), String(cfg['outDir'] ?? '.swelte'), 'entries.json')
 	let crawl: CrawlFile
@@ -83,7 +83,8 @@ export async function runPrerender(
 	const urls = crawlUrls(crawl)
 	if (urls.length === 0) return empty
 	const rawConc = prerender?.concurrency
-	const conc = typeof rawConc === 'number' && Number.isFinite(rawConc) && rawConc > 0 ? Math.floor(rawConc) : 4
+	const conc =
+		typeof rawConc === 'number' && Number.isFinite(rawConc) && rawConc > 0 ? Math.floor(rawConc) : 4
 	const distDir = String(cfg['distDir'] ?? 'dist')
 	const isr = (cfg['isr'] ?? {}) as Record<string, number>
 	const probePort = takePort(0, 4191)
@@ -94,7 +95,8 @@ export async function runPrerender(
 		stdio: ['ignore', 'pipe', 'pipe'],
 	})
 	try {
-		if (!(await waitPort(probePort, 15000))) throw new Error(`prerender binary did not listen on :${probePort} within 15s`)
+		if (!(await waitPort(probePort, 15000)))
+			throw new Error(`prerender binary did not listen on :${probePort} within 15s`)
 		const pages: string[] = []
 		const isrHeaders: Record<string, string> = {}
 		const queue = [...urls]

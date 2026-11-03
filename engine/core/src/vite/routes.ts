@@ -1,0 +1,521 @@
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
+import { join, relative, resolve, sep } from 'node:path'
+import { pathToFileURL } from 'node:url'
+import { dynSegPattern, loadMatchers } from './matchers.js'
+import type { SvelteRouteEntry } from './types.js'
+
+export function listFilesWithExt(dir: string, ext: string, base?: string): string[] {
+	if (!existsSync(dir)) return []
+	const root = base ?? dir
+	const out: string[] = []
+	// Sorted (byte order): readdir order is filesystem-dependent and made
+	// routeGen flip between runs (§7). Deterministic order, always.
+	for (const e of readdirSync(dir).sort()) {
+		const p = join(dir, e)
+		const st = statSync(p)
+		// Never scan our own output (`.swelte/`) — never the input tree
+		// (`src/routes/` lives under `src/`).
+		if (st.isDirectory()) {
+			if (e === '.swelte') continue
+			out.push(...listFilesWithExt(p, ext, root))
+		} else if (e.endsWith(ext)) out.push(p)
+	}
+	return out
+}
+
+export function listVFiles(dir: string, base?: string): string[] {
+	return listFilesWithExt(dir, '.v', base)
+}
+
+export function svelteModKind(mod: string): 'page' | 'wrapper' | 'error' | 'plain' | null {
+	const base = mod.includes('/') ? mod.slice(mod.lastIndexOf('/') + 1) : mod
+	if (base === '+page' || base === 'index') return 'page'
+	if (base === '+route') return 'wrapper'
+	if (base === '+error') return 'error'
+	if (base.startsWith('+')) return null
+	return 'plain'
+}
+
+/** Route groups `(name)` — disk-only folders that contribute no URL segment.
+ * `(admin)/users` -> `/users`. Syntactic only: a whole segment wrapped in
+ * parens. Dynamics, `+page`, `+route` pass through untouched. */
+export function stripRouteGroups(mod: string): string {
+	return mod
+		.split('/')
+		.filter((seg) => seg !== '' && !/^\([^/]+\)$/.test(seg))
+		.join('/')
+}
+
+/** URL pattern for a `.svelte` mod (mirrors routeFor leaf/dir rules).
+ * Returns null for wrappers (+route) and unknown +-files. */
+export function svelteRouteFor(mod: string): string | null {
+	const kind = svelteModKind(mod)
+	if (kind === null || kind === 'wrapper' || kind === 'error') return null
+	if (kind === 'page') {
+		const dir = mod.includes('/') ? mod.slice(0, mod.lastIndexOf('/')) : ''
+		const stripped = stripRouteGroups(dir)
+		// A page that lives ONLY inside groups (`(mkt)/+page`) is `/` — same
+		// folder-root rule as `+page` (folder-root claims the parent URL).
+		if (stripped === '' && dir !== '') return '/'
+		return stripped === '' || stripped === 'api' ? '/' : `/${stripped}`
+	}
+	return `/${stripRouteGroups(mod)}`
+}
+
+/** SSR manifest entry: route → svelte file + data pairing.
+ * Engine-agnostic JSON — adapters (ssr-qjs/ssr-bun) consume it; core
+ * never imports svelte/compiler, quickjs, or bun. */
+export function relPosixTop(abs: string, f: string): string {
+	return f
+		.slice(abs.length + 1)
+		.split(sep)
+		.join('/')
+}
+
+/** Classify a sibling universal-load (`.ts` preferred, `.js` accepted):
+ * `false` (absent or no `load` export), `'sync'` (SSR-applied), `'async'`
+ * (`export const ssr = false`, client-only). Core reads the sibling source
+ * plus the `export const ssr` marker by regex — engine-agnostic;
+ * ssr-qjs owns the sync-subset build errors. */
+/** Resolve the sibling universal-load source: `<basename>.ts` preferred,
+ * `<basename>.js` accepted (plain-JS sibling: raw-bundled into sync
+ * render.js with no TS transform, and skipped by user `tsc --strict`). */
+export function siblingLoadSource(tsAbs: string): string | null {
+	if (existsSync(tsAbs)) return tsAbs
+	const jsAbs = tsAbs.replace(/\.ts$/, '.js')
+	if (jsAbs !== tsAbs && existsSync(jsAbs)) return jsAbs
+	return null
+}
+
+export function universalLoadKind(tsAbs: string): 'sync' | 'async' | false {
+	const found = siblingLoadSource(tsAbs)
+	if (!found) return false
+	let src = ''
+	try {
+		src = readFileSync(found, 'utf8')
+	} catch {
+		return false
+	}
+	if (!/\bexport\s+(async\s+)?function\s+load\b|\bexport\s+const\s+load\b/.test(src)) return false
+	const m = /export\s+const\s+ssr\s*=\s*(true|false)/.exec(src)
+	if (m && m[1] === 'false') return 'async'
+	return 'sync'
+}
+
+/** Collect `.svelte` siblings under routesAbs into a URL manifest.
+ * Dynamic segments pass through verbatim ([id]/[...rest]). */
+export function collectSvelteManifest(
+	routesAbs: string,
+	routesDir: string,
+	vMods: Set<string>
+): { entries: SvelteRouteEntry[]; hasError: boolean } {
+	const entries: SvelteRouteEntry[] = []
+	let hasError = false
+	let files: string[] = []
+	try {
+		files = listFilesWithExt(routesAbs, '.svelte')
+	} catch {
+		return { entries, hasError }
+	}
+	for (const f of files.sort()) {
+		const rel = relPosixTop(routesAbs, f)
+		const mod = rel.replace(/\.svelte$/, '')
+		const kind = svelteModKind(mod)
+		if (kind === null) continue
+		if (kind === 'error') {
+			const dir = mod.includes('/') ? mod.slice(0, mod.lastIndexOf('/')) : ''
+			if (dir !== '') {
+				throw new Error(
+					`[swelte] ${routesDir}/${rel} is not allowed — only src/routes/+error.svelte exists (single global error boundary, no per-directory inheritance).`
+				)
+			}
+			hasError = true
+			entries.push({
+				route: '/+error',
+				svelte: rel,
+				kind: 'error',
+				hasData: false,
+				hasUniversalLoad: false,
+				ssr: true,
+			})
+			continue
+		}
+		if (kind === 'wrapper') {
+			entries.push({
+				route: svelteRouteFor(mod) ?? `/${mod}`,
+				svelte: rel,
+				kind: 'wrapper',
+				hasData: vMods.has(mod),
+				hasUniversalLoad: universalLoadKind(f.replace(/\.svelte$/, '.ts')),
+				ssr: (() => {
+					const found = siblingLoadSource(f.replace(/\.svelte$/, '.ts'))
+					if (!found) return true
+					try {
+						return !/export\s+const\s+ssr\s*=\s*false/.test(readFileSync(found, 'utf8'))
+					} catch {
+						return true
+					}
+				})(),
+			})
+			continue
+		}
+		const route = svelteRouteFor(mod)
+		if (route === null) continue
+		// Static .svelte sibling (no .v) must carry no @[...] attrs:
+		// it ships zero JS either way (pure static HTML/JS, no data channel).
+		if (!vMods.has(mod)) {
+			let src = ''
+			try {
+				src = readFileSync(f, 'utf8')
+			} catch {
+				src = ''
+			}
+			const badAttr = /@\[(get|post|put|delete|patch|rpc|sse|before|after)\b/.exec(src)
+			if (badAttr) {
+				throw new Error(
+					`[swelte] ${routesDir}/${rel}: @[${badAttr[1]}] on a .svelte file with no .v partner does nothing — add ${routesDir}/${mod}.v or remove the attribute.`
+				)
+			}
+		}
+		entries.push({
+			route,
+			svelte: rel,
+			kind: kind as 'page' | 'plain',
+			hasData: vMods.has(mod),
+			hasUniversalLoad: universalLoadKind(f.replace(/\.svelte$/, '.ts')),
+			ssr: (() => {
+				const found = siblingLoadSource(f.replace(/\.svelte$/, '.ts'))
+				if (!found) return true
+				try {
+					return !/export\s+const\s+ssr\s*=\s*false/.test(readFileSync(found, 'utf8'))
+				} catch {
+					return true
+				}
+			})(),
+		})
+	}
+	return { entries, hasError }
+}
+
+export interface PrerenderCrawl {
+	mode: 'off' | 'static' | 'all'
+	routes: string[]
+	/** Dynamics that need sibling `entries` expansion (`entries: 'all'`). */
+	dynamics: string[]
+	/** Resolved dynamic URLs (only when `mode: 'all'`). */
+	expanded: string[]
+}
+
+/** Static-route test: no `[param]`, `[...rest]`, or `[[optional]]`. */
+export function isStaticRoute(route: string): boolean {
+	return !route.includes('[')
+}
+
+/** Enumerate the prerender crawl list (docs (built) item 2).
+ *  Static routes are always listed. `mode: 'all'` also executes sibling
+ *  `entries.ts` exports (`export function entries()` returning string[]
+ *  or `{ slug }[]`-ish) for dynamic segments; bad shape = build error
+ *  with file+line. No prerender implied - just the route list for crawl. */
+export async function collectPrerenderEntries(
+	root: string,
+	routesDir: string,
+	mode: 'off' | 'static' | 'all'
+): Promise<PrerenderCrawl> {
+	const routesAbs = join(resolve(root), routesDir)
+	let patterns: string[] = []
+	try {
+		const mods = new Set<string>()
+		for (const f of listVFiles(routesAbs)) {
+			const rel = relPosixTop(routesAbs, f).replace(/\.v$/, '')
+			mods.add(rel)
+		}
+		const { entries } = collectSvelteManifest(routesAbs, routesDir, mods)
+		const seen = new Set<string>()
+		for (const e of entries) {
+			if (e.kind === 'wrapper' || e.kind === 'error') continue
+			if (!seen.has(e.route)) {
+				seen.add(e.route)
+				patterns.push(e.route)
+			}
+		}
+		// V-only routes (no .svelte): routeFor leaf/dir rules (abs path form).
+		// §7: pass the custom matcher set — bare `routeFor` without it treats
+		// every `[x=y]` as `unknown matcher` (only `integer` builtin known).
+		let crawlMatchers: Set<string> | undefined
+		try {
+			crawlMatchers = new Set(loadMatchers(root).keys())
+		} catch {
+			crawlMatchers = undefined
+		}
+		for (const f of listVFiles(routesAbs)) {
+			const r = routeFor(routesDir, routesAbs, f, crawlMatchers)
+			if (r && !seen.has(r)) {
+				seen.add(r)
+				patterns.push(r)
+			}
+		}
+	} catch (e) {
+		throw e
+	}
+	patterns.sort()
+	const routes = patterns.filter(isStaticRoute)
+	const dynamics = patterns.filter((p) => !isStaticRoute(p))
+	const out: PrerenderCrawl = { mode, routes, dynamics, expanded: [] }
+	if (mode !== 'all') return out
+	// Dynamic expansion: sibling `entries.ts` next to the dynamic leaf.
+	// Accepted shapes: `string[]`, `{ slug: string }[]`-ish rows, or
+	// `{ params: Record<string,string> }[]`. Anything else = build error.
+	for (const pattern of dynamics) {
+		const sibling = dynamicEntriesSibling(routesAbs, pattern)
+		if (!sibling) continue
+		let mod: Record<string, unknown>
+		try {
+			mod = (await import(`${pathToFileURL(sibling).href}?t=${Date.now()}`)) as Record<
+				string,
+				unknown
+			>
+		} catch (e) {
+			throw new Error(
+				`[swelte] ${relative(resolve(root), sibling)}: entries() import failed - ${(e as Error).message}`
+			)
+		}
+		const fn = mod['entries']
+		if (typeof fn !== 'function') {
+			throw new Error(
+				`[swelte] ${relative(resolve(root), sibling)}: no \`export function entries()\` - dynamics need it when prerender.entries is 'all'.`
+			)
+		}
+		let rows: unknown
+		try {
+			rows = await (fn as () => unknown)()
+		} catch (e) {
+			throw new Error(
+				`[swelte] ${relative(resolve(root), sibling)}: entries() threw - ${(e as Error).message}`
+			)
+		}
+		if (!Array.isArray(rows)) {
+			throw new Error(
+				`[swelte] ${relative(resolve(root), sibling)}: entries() must return an array (got ${typeof rows}).`
+			)
+		}
+		for (const row of rows) {
+			out.expanded.push(expandDynamicPattern(pattern, row, relative(resolve(root), sibling)))
+		}
+	}
+	out.expanded.sort()
+	return out
+}
+
+/** Locate the sibling `entries.ts` for a dynamic pattern: strip groups,
+ *  map segments back to disk names (`[id]` literal dir). */
+export function dynamicEntriesSibling(routesAbs: string, pattern: string): string | null {
+	const segs = pattern.split('/').filter(Boolean)
+	const disk = segs.map((s) => s)
+	const candTs = join(routesAbs, ...disk, 'entries.ts')
+	if (existsSync(candTs)) return candTs
+	const candJs = join(routesAbs, ...disk, 'entries.js')
+	if (existsSync(candJs)) return candJs
+	return null
+}
+
+export function expandDynamicPattern(pattern: string, row: unknown, file: string): string {
+	const fail = (why: string): never => {
+		throw new Error(`[swelte] ${file}: entries() row ${JSON.stringify(row)} ${why}.`)
+	}
+	let params: Record<string, string>
+	if (typeof row === 'string') {
+		const names = [
+			...pattern.matchAll(/\[\.\.\.(\w+)\]|`\[\[(\w+)\]\]`|\[(\w+)(?:=[^\]]+)?\]/g),
+		].map((m) => m[1] ?? m[2] ?? m[3])
+		if (names.length === 1) params = { [names[0]]: row }
+		else fail(`must be an object when the pattern has ${names.length} params`)
+		params = params!
+	} else if (row && typeof row === 'object' && !Array.isArray(row)) {
+		const r = row as Record<string, unknown>
+		const inner = r['params']
+		const src =
+			inner && typeof inner === 'object' && !Array.isArray(inner)
+				? (inner as Record<string, unknown>)
+				: r
+		params = {}
+		for (const [k, v] of Object.entries(src)) {
+			if (typeof v !== 'string' && typeof v !== 'number') fail(`param '${k}' must be string/number`)
+			params[k] = String(v)
+		}
+	} else {
+		fail('must be a string or params object')
+		params = {}
+	}
+	let url = pattern
+	url = url.replace(/\[\.\.\.(\w+)\]/g, (_, n: string) => {
+		const v = params[n]
+		if (v === undefined) fail(`missing param '${n}'`)
+		return v
+	})
+	url = url.replace(/\[\[(\w+)\]\]/g, (_, n: string) => params[n] ?? '')
+	url = url.replace(/\[(\w+)(?:=[^\]]+)?\]/g, (_, n: string) => {
+		const v = params[n]
+		if (v === undefined) fail(`missing param '${n}'`)
+		return v
+	})
+	if (url.includes('[')) fail(`unresolved pattern '${url}'`)
+	return url === '' ? '/' : url.startsWith('/') ? url : `/${url}`
+}
+
+export function modulePath(root: string, file: string): string {
+	return relative(root, file).replace(/\.v$/, '').split(sep).join('/')
+}
+
+/** V dispatch prefix for a route mod (`admin/+page` → `swelte_admin__page_`). */
+export function vPrefix(mod: string): string {
+	return `swelte_${mod.replace(/[^A-Za-z0-9_]/g, '_')}_`
+}
+
+/** Filesystem-safe generated name for a route mod (`+page` → `_page`). */
+export function vFileSafe(mod: string): string {
+	return mod.replace(/[^A-Za-z0-9_]/g, '_')
+}
+
+/** Map a routes file to its URL path (spec v-imports.md §2).
+ * Dynamic segments pass through verbatim (`users/[id]` →
+ * `/users/[id]`); the V dispatcher matches them segment-wise
+ * (roadmap §8); `[...rest]` at the END is a catch-all that may match
+ * empty (`files/[...rest].v` → `/files/[...rest]`, `GET /files` gives
+ * `rest=''`) and coexists with a folder-root leaf (`files/+page.v` →
+ * `/files` wins on exact match — static beats dynamic). `+route` →
+ * null (wrapper-only; handled above by callers).
+ * Pure + exported: single source for `generate()`'s load path and tests. */
+export function routeFor(
+	routesDir: string,
+	routesAbs: string,
+	file: string,
+	knownMatchers?: Set<string>
+): string | null {
+	const mod = modulePath(routesAbs, file)
+	if (mod === '+route' || mod.endsWith('/+route')) {
+		if (mod.includes('['))
+			throw new Error(
+				`[swelte] ${routesDir}/${relPosix(routesAbs, file)}: dynamic wrapper dirs are not supported (no brackets in +route.v paths)`
+			)
+		return null
+	}
+	const leaf =
+		mod === 'index' || mod.endsWith('/index') || mod === '+page' || mod.endsWith('/+page')
+	if (leaf) {
+		// Folder-root leaf: strip the leaf segment (`+page` or legacy
+		// `index`) to get the directory, whose path is the URL.
+		// `+page` → `/`, `admin/+page` → `/admin`.
+		// NOTE: `+page.v` sorting — `+` (0x2B) sorts before letters,
+		// so `+page.v` may scan before `admin/`. Sort order of
+		// listVFiles is deterministic; route identity never depends
+		// on it (pure function of mod).
+		const dir = mod.includes('/') ? mod.slice(0, mod.lastIndexOf('/')) : ''
+		const strippedDir = stripRouteGroups(dir)
+		if (dir !== '')
+			validateDynamicSegs(
+				`${routesDir}/${relPosix(routesAbs, file)}`,
+				strippedDir.split('/'),
+				knownMatchers
+			)
+		if (strippedDir === '' && dir !== '') return '/'
+		return strippedDir === '' || strippedDir === 'api' ? '/' : `/${strippedDir}`
+	}
+	const segs = stripRouteGroups(mod).split('/')
+	validateDynamicSegs(`${routesDir}/${relPosix(routesAbs, file)}`, segs, knownMatchers)
+	return `/${segs.join('/')}`
+}
+
+export function validateDynamicSegs(file: string, segs: string[], known?: Set<string>): void {
+	const seen = new Set<string>()
+	// Built-in param matchers: `[id=integer]` constrains the segment.
+	// Custom matchers from `src/matchers.v` extend the set; unknown name =
+	// build error (file+line at the call site).
+	const KNOWN_MATCHERS = known ?? new Set(['integer'])
+	for (let i = 0; i < segs.length; i++) {
+		const s = segs[i]
+		if (!s.includes('[') && !s.includes(']')) continue
+		const single = /^\[([A-Za-z_][A-Za-z0-9_]*)\]$/.exec(s)
+		const optional = /^\[\[([A-Za-z_][A-Za-z0-9_]*)\]\]$/.exec(s)
+		const rest = /^\[\.\.\.([A-Za-z_][A-Za-z0-9_]*)\]$/.exec(s)
+		const matched = /^\[([A-Za-z_][A-Za-z0-9_]*)=([A-Za-z_][A-Za-z0-9_]*)\]$/.exec(s)
+		if (single) {
+			if (seen.has(single[1]))
+				throw new Error(`[swelte] ${file}: duplicate route param [${single[1]}]`)
+			seen.add(single[1])
+			continue
+		}
+		if (optional) {
+			// `[[slug]]` matches zero-or-one segment; last-segment only
+			// (same positional rule as the catch-all — unambiguous).
+			if (i !== segs.length - 1)
+				throw new Error(
+					`[swelte] ${file}: [[${optional[1]}]] optional param must be the last segment`
+				)
+			if (seen.has(optional[1]))
+				throw new Error(`[swelte] ${file}: duplicate route param [[${optional[1]}]]`)
+			seen.add(optional[1])
+			continue
+		}
+		if (rest) {
+			if (i !== segs.length - 1)
+				throw new Error(`[swelte] ${file}: [...${rest[1]}] catch-all must be the last segment`)
+			if (seen.has(rest[1]))
+				throw new Error(`[swelte] ${file}: duplicate route param [...${rest[1]}]`)
+			seen.add(rest[1])
+			continue
+		}
+		if (matched) {
+			const [, name, matcher] = matched
+			if (!KNOWN_MATCHERS.has(matcher))
+				throw new Error(
+					`[swelte] ${file}: unknown matcher '${matcher}' in [${name}=${matcher}] (known: ${[...KNOWN_MATCHERS].sort().join(', ')})`
+				)
+			if (seen.has(name)) throw new Error(`[swelte] ${file}: duplicate route param [${name}]`)
+			seen.add(name)
+			continue
+		}
+		throw new Error(
+			`[swelte] ${file}: bad dynamic segment '${s}' (want [id], [id=integer], [[slug]], or [...rest])`
+		)
+	}
+}
+
+export function relPosix(abs: string, f: string): string {
+	return relative(abs, f).split(sep).join('/')
+}
+
+/** Dynamic path params of a route pattern (`users/[id]` -> ['id']). */
+export function routeParams(route: string): string[] {
+	const out: string[] = []
+	for (const m of route.matchAll(dynSegPatternGlobal())) out.push(m[1] ?? m[2] ?? m[3] ?? m[5])
+	return out
+}
+
+/** Global-flag copy of dynSegPattern (matchAll needs /g; keeps one source). */
+export function dynSegPatternGlobal(): RegExp {
+	return new RegExp(dynSegPattern.source, 'g')
+}
+
+export function dynSegName(seg: string): string | null {
+	const m =
+		/^\[\[([A-Za-z_][A-Za-z0-9_]*)\]\]$/.exec(seg) ??
+		/^\[\.\.\.([A-Za-z_][A-Za-z0-9_]*)\]$/.exec(seg) ??
+		/^\[([A-Za-z_][A-Za-z0-9_]*)=([A-Za-z_][A-Za-z0-9_]*)\]$/.exec(seg) ??
+		/^\[([A-Za-z_][A-Za-z0-9_]*)\]$/.exec(seg)
+	if (!m) return null
+	return m[1]
+}
+
+/** TS type of one route param (`integer` -> `number`, else `string`). */
+export function routeParamTs(route: string, name: string): string {
+	for (const seg of route.split('/')) {
+		if (dynSegName(seg) === name) return dynSegMatcher(seg) === 'integer' ? 'number' : 'string'
+	}
+	return 'string'
+}
+
+/** Matcher of one dynamic segment text (`[id=integer]` -> `integer`, else null). */
+export function dynSegMatcher(seg: string): string | null {
+	const m = /^\[([A-Za-z_][A-Za-z0-9_]*)=([A-Za-z_][A-Za-z0-9_]*)\]$/.exec(seg)
+	return m ? m[2] : null
+}

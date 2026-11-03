@@ -8,7 +8,7 @@ import { probeSmoke, portFree } from './dev.js'
 async function withStub(
 	stubSrc: string,
 	hasGreetRoute: boolean,
-	check: (port: number) => Promise<void>,
+	check: (port: number) => Promise<void>
 ): Promise<string[]> {
 	const logs: string[] = []
 	const { createServer } = await import('node:net')

@@ -18,7 +18,10 @@ import { join } from 'node:path'
 
 describe('item 17 — QJS-compat guards (file+line)', () => {
 	it('top-level fetch( rejected with file:line; handler fetch allowed', () => {
-		assert.throws(() => assertQjsCompatible('a.svelte', '<script>fetch("/x")</script>'), /a\.svelte:1/)
+		assert.throws(
+			() => assertQjsCompatible('a.svelte', '<script>fetch("/x")</script>'),
+			/a\.svelte:1/
+		)
 		assert.doesNotThrow(() =>
 			assertQjsCompatible('b.svelte', '<script>function go(){ fetch("/x") }</script>')
 		)
@@ -28,7 +31,10 @@ describe('item 17 — QJS-compat guards (file+line)', () => {
 	})
 
 	it('top-level await rejected in .svelte; await inside async fn allowed', () => {
-		assert.throws(() => assertQjsCompatible('a.svelte', '<script>await foo()</script>'), /a\.svelte:1/)
+		assert.throws(
+			() => assertQjsCompatible('a.svelte', '<script>await foo()</script>'),
+			/a\.svelte:1/
+		)
 		assert.doesNotThrow(() =>
 			assertQjsCompatible('b.svelte', '<script>async function f(){ await foo() }</script>')
 		)
@@ -48,23 +54,34 @@ describe('item 17 — QJS-compat guards (file+line)', () => {
 		assert.doesNotThrow(() => assertQjsCompatible('f.js', `const a = 1`))
 		assert.doesNotThrow(() => assertNoNodeExternals('f.js', `const a = 1`))
 		// Commented-out import stays allowed (strip runs first).
-		assert.doesNotThrow(() => assertNoNodeExternals('f.js', `// import x from 'node:fs'\nconst a = 1`))
+		assert.doesNotThrow(() =>
+			assertNoNodeExternals('f.js', `// import x from 'node:fs'\nconst a = 1`)
+		)
 	})
 
 	it('top-level SDK stub call rejected, onclick call passes, alias tracked', async () => {
 		const bad = `<script>import { greet } from '#routes/greet.v'; const r = greet({});</script><h1>x</h1>`
-		await assert.rejects(() => assertNoTopLevelStubCalls('a', 'r', bad), /top-level stub call \(greet\)/)
+		await assert.rejects(
+			() => assertNoTopLevelStubCalls('a', 'r', bad),
+			/top-level stub call \(greet\)/
+		)
 		const ok = `<script>import { greet } from '#routes/greet.v';</script><button onclick={() => greet({})}>x</button>`
 		await assert.doesNotReject(() => assertNoTopLevelStubCalls('a', 'r', ok))
 		const aliased = `<script>import { greet as g } from '#routes/greet.v'; const r = g({});</script><h1>x</h1>`
-		await assert.rejects(() => assertNoTopLevelStubCalls('a', 'r', aliased), /top-level stub call \(g\)/)
+		await assert.rejects(
+			() => assertNoTopLevelStubCalls('a', 'r', aliased),
+			/top-level stub call \(g\)/
+		)
 		// No SDK imports at all → no-op.
 		await assert.doesNotReject(() => assertNoTopLevelStubCalls('a', 'r', '<h1>plain</h1>'))
 	})
 
 	it('$app/* calls: top-level goto/page rejected, onMount/handler calls pass', async () => {
 		const bad = `<script>import { goto } from '$app/navigation'; goto('/x');</script><h1>x</h1>`
-		await assert.rejects(() => assertNoSdkTopLevelCalls('a', 'r', bad), /top-level stub call \(goto\)/)
+		await assert.rejects(
+			() => assertNoSdkTopLevelCalls('a', 'r', bad),
+			/top-level stub call \(goto\)/
+		)
 		const badStore = `<script>import { page } from '$app/stores'; const u = $page.url;</script><h1>x</h1>`
 		// `$page` auto-subscription is a store read, not a stub call — allowed
 		// at top level (the store import itself is dropped in the sync bundle,
@@ -76,17 +93,31 @@ describe('item 17 — QJS-compat guards (file+line)', () => {
 		await assert.doesNotReject(() => assertNoSdkTopLevelCalls('a', 'r', okHandler))
 		// Aliased import tracked by local name.
 		const aliased = `<script>import { goto as g } from '$app/navigation'; g('/x');</script><h1>x</h1>`
-		await assert.rejects(() => assertNoSdkTopLevelCalls('a', 'r', aliased), /top-level stub call \(g\)/)
+		await assert.rejects(
+			() => assertNoSdkTopLevelCalls('a', 'r', aliased),
+			/top-level stub call \(g\)/
+		)
 		// Non-SDK calls never flagged.
-		await assert.doesNotReject(() => assertNoSdkTopLevelCalls('a', 'r', `<script>function go() {} go();</script><h1>x</h1>`))
+		await assert.doesNotReject(() =>
+			assertNoSdkTopLevelCalls('a', 'r', `<script>function go() {} go();</script><h1>x</h1>`)
+		)
 		// Plain `#lib/*.js` source is NOT a stub: same top-level call shape
 		// passes (the SSR bundler resolves it from disk like the client).
 		await assert.doesNotReject(() =>
-			assertNoSdkTopLevelCalls('a', 'r', `<script>import { searchDocs } from '#lib/search.js'; let q = $state(''); let results = $derived(searchDocs(q));</script><h1>x</h1>`)
+			assertNoSdkTopLevelCalls(
+				'a',
+				'r',
+				`<script>import { searchDocs } from '#lib/search.js'; let q = $state(''); let results = $derived(searchDocs(q));</script><h1>x</h1>`
+			)
 		)
 		// `#lib/*.v` IS a stub: same call shape still fails.
 		await assert.rejects(
-			() => assertNoSdkTopLevelCalls('a', 'r', `<script>import { h } from '#lib/crypto/hash.v'; const r = h({});</script><h1>x</h1>`),
+			() =>
+				assertNoSdkTopLevelCalls(
+					'a',
+					'r',
+					`<script>import { h } from '#lib/crypto/hash.v'; const r = h({});</script><h1>x</h1>`
+				),
 			/top-level stub call \(h\)/
 		)
 	})
@@ -125,7 +156,10 @@ describe('item 18 — stubSdkImports rewrite + compileSsrComponent', () => {
 	it('compileSsrComponent: server output with SDK stubbed, guards applied', async () => {
 		const dir = mkdtempSync(join(tmpdir(), 'swelte-ssr-compile-'))
 		const abs = join(dir, '+page.svelte')
-		writeFileSync(abs, `<script>import { greet } from '#routes/greet.v'; let p = 1;</script><h1>{p}</h1>`)
+		writeFileSync(
+			abs,
+			`<script>import { greet } from '#routes/greet.v'; let p = 1;</script><h1>{p}</h1>`
+		)
 		const js = await compileSsrComponent(abs, 'src/routes/+page.svelte')
 		assert.ok(!js.includes('#routes/greet.v'))
 		assert.ok(js.includes('called during SSR render'))
@@ -186,15 +220,19 @@ describe('universal load — sync subset (§1.1)', () => {
 	})
 
 	it('non-load .ts is a no-op', () => {
-		assert.doesNotThrow(() =>
-			assertUniversalLoadSync('src/routes/util.ts', `export const x = 1`)
-		)
+		assert.doesNotThrow(() => assertUniversalLoadSync('src/routes/util.ts', `export const x = 1`))
 	})
 
 	it('export const ssr flag (ssr-qjs owned): absent/true = sync, false = async-ok', () => {
 		assert.equal(readUniversalSsrFlag(`export function load() { return {} }`), true)
-		assert.equal(readUniversalSsrFlag(`export const ssr = true\nexport function load() { return {} }`), true)
-		assert.equal(readUniversalSsrFlag(`export const ssr = false\nexport async function load() { return {} }`), false)
+		assert.equal(
+			readUniversalSsrFlag(`export const ssr = true\nexport function load() { return {} }`),
+			true
+		)
+		assert.equal(
+			readUniversalSsrFlag(`export const ssr = false\nexport async function load() { return {} }`),
+			false
+		)
 		assert.doesNotThrow(() =>
 			assertUniversalLoadSync(
 				'src/routes/admin.ts',
@@ -240,7 +278,7 @@ describe('universal load — sync subset (§1.1)', () => {
 				],
 				error: null,
 				wrappers: [],
-			wrappersByRoute: {},
+				wrappersByRoute: {},
 			},
 			{ root: dir }
 		)
@@ -256,7 +294,10 @@ describe('universal load — sync subset (§1.1)', () => {
 		const routesDir = join(dir, 'src', 'routes')
 		const { mkdirSync } = await import('node:fs')
 		mkdirSync(routesDir, { recursive: true })
-		writeFileSync(join(routesDir, '+page.svelte'), `<script>let { title } = $props();</script><h1>{title}</h1>`)
+		writeFileSync(
+			join(routesDir, '+page.svelte'),
+			`<script>let { title } = $props();</script><h1>{title}</h1>`
+		)
 		writeFileSync(
 			join(routesDir, '+page.ts'),
 			`export function load({ props }) { return { title: 'from-load:' + String(props?.greet ?? '') } }`
@@ -275,7 +316,7 @@ describe('universal load — sync subset (§1.1)', () => {
 				],
 				error: null,
 				wrappers: [],
-			wrappersByRoute: {},
+				wrappersByRoute: {},
 			},
 			{ root: dir }
 		)
@@ -290,7 +331,10 @@ describe('universal load — sync subset (§1.1)', () => {
 			renderRoute: (route: string, props: string) => { head: string; body: string }
 		}
 		const out = mod.renderRoute('/', JSON.stringify({ greet: 'hi' }))
-		assert.ok(out.body.includes('from-load:hi'), `sync load must merge V props, got: ${out.body.slice(0, 160)}`)
+		assert.ok(
+			out.body.includes('from-load:hi'),
+			`sync load must merge V props, got: ${out.body.slice(0, 160)}`
+		)
 	})
 
 	it('transpileSiblingLoad strips TS types (.ts sibling with annotations bundles as JS)', async () => {
@@ -310,7 +354,10 @@ describe('universal load — sync subset (§1.1)', () => {
 		const routesDir = join(dir, 'src', 'routes')
 		const { mkdirSync } = await import('node:fs')
 		mkdirSync(routesDir, { recursive: true })
-		writeFileSync(join(routesDir, '+page.svelte'), `<script>let { title } = $props();</script><h1>{title}</h1>`)
+		writeFileSync(
+			join(routesDir, '+page.svelte'),
+			`<script>let { title } = $props();</script><h1>{title}</h1>`
+		)
 		writeFileSync(
 			join(routesDir, '+page.ts'),
 			`export function load({ props }: { props: Record<string, unknown> }): { title: string } { return { title: 'typed:' + String((props as { greet?: string }).greet ?? '') } }`
@@ -329,7 +376,7 @@ describe('universal load — sync subset (§1.1)', () => {
 				],
 				error: null,
 				wrappers: [],
-			wrappersByRoute: {},
+				wrappersByRoute: {},
 			},
 			{ root: dir }
 		)
@@ -368,7 +415,7 @@ describe('universal load — sync subset (§1.1)', () => {
 				],
 				error: null,
 				wrappers: [],
-			wrappersByRoute: {},
+				wrappersByRoute: {},
 			},
 			{ root: dir }
 		)
@@ -393,7 +440,10 @@ describe('universal load — sync subset (§1.1)', () => {
 		const { mkdirSync } = await import('node:fs')
 		mkdirSync(routesDir, { recursive: true })
 		mkdirSync(libDir, { recursive: true })
-		writeFileSync(join(libDir, 'search.js'), `export function searchDocs(q) { return 'found:' + q; }`)
+		writeFileSync(
+			join(libDir, 'search.js'),
+			`export function searchDocs(q) { return 'found:' + q; }`
+		)
 		writeFileSync(
 			join(routesDir, '+page.svelte'),
 			`<script>import { searchDocs } from '#lib/search.js'; let { title } = $props(); let out = searchDocs('x');</script><h1>{title} {out}</h1>`
@@ -425,7 +475,10 @@ describe('universal load — sync subset (§1.1)', () => {
 			renderRoute: (route: string, props: string) => { head: string; body: string }
 		}
 		const out = mod.renderRoute('/', JSON.stringify({ title: 'lib-ok' }))
-		assert.ok(out.body.includes('found:x'), `lib call must run in SSR, got: ${out.body.slice(0, 160)}`)
+		assert.ok(
+			out.body.includes('found:x'),
+			`lib call must run in SSR, got: ${out.body.slice(0, 160)}`
+		)
 	})
 
 	it('composeRenderJs: ungated onMount renders the shell (server noop, SvelteKit parity)', async () => {
@@ -463,7 +516,10 @@ describe('universal load — sync subset (§1.1)', () => {
 		// the `export *` re-export carries every other binding, the three
 		// explicit named exports shadow it with server noops (tree-shaken
 		// when unused, harmless when kept).
-		assert.ok(!code.includes('lifecycle_outside_component'), 'client lifecycle throw must not survive into render.js')
+		assert.ok(
+			!code.includes('lifecycle_outside_component'),
+			'client lifecycle throw must not survive into render.js'
+		)
 		const { pathToFileURL } = await import('node:url')
 		const probeFile = join(dir, 'render.check.mjs')
 		writeFileSync(probeFile, code)
@@ -471,7 +527,10 @@ describe('universal load — sync subset (§1.1)', () => {
 			renderRoute: (route: string, props: string) => { head: string; body: string }
 		}
 		const out = mod.renderRoute('/', JSON.stringify({ title: 'mount-ok' }))
-		assert.ok(out.body.includes('mount-ok'), `ungated onMount page must render the shell, got: ${out.body.slice(0, 200)}`)
+		assert.ok(
+			out.body.includes('mount-ok'),
+			`ungated onMount page must render the shell, got: ${out.body.slice(0, 200)}`
+		)
 	})
 
 	it('composeRenderJs: svelte/store|motion|transition|animate|reactivity subpaths resolve server-side', async () => {
@@ -513,6 +572,9 @@ describe('universal load — sync subset (§1.1)', () => {
 			renderRoute: (route: string, props: string) => { head: string; body: string }
 		}
 		const out = mod.renderRoute('/', JSON.stringify({ title: 'sub-ok' }))
-		assert.ok(out.body.includes('sub-ok'), `subpath page must render, got: ${out.body.slice(0, 200)}`)
+		assert.ok(
+			out.body.includes('sub-ok'),
+			`subpath page must render, got: ${out.body.slice(0, 200)}`
+		)
 	})
 })

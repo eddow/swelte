@@ -39,7 +39,14 @@ export interface SsrComposeOptions {
 
 export interface SsrManifest {
 	hasError: boolean
-	routes: { route: string; svelte: string; kind: string; hasData: boolean; hasUniversalLoad?: boolean | 'sync' | 'async'; ssr?: boolean }[]
+	routes: {
+		route: string
+		svelte: string
+		kind: string
+		hasData: boolean
+		hasUniversalLoad?: boolean | 'sync' | 'async'
+		ssr?: boolean
+	}[]
 	error: string | null
 	wrappers: string[]
 	/** Wrapper chain per page (`./`-relative svelte path → root→leaf wrappers). */
@@ -110,7 +117,13 @@ export function assertUniversalLoadSync(
 	let sm: RegExpExecArray | null
 	while ((sm = sdkRe.exec(src)) !== null) {
 		const names = [...sm[1].split(',')]
-			.map((p) => p.trim().split(/\s+as\s+/).pop()?.trim())
+			.map((p) =>
+				p
+					.trim()
+					.split(/\s+as\s+/)
+					.pop()
+					?.trim()
+			)
 			.filter((n) => n && n !== 'type' && /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(n))
 		if (names.length) {
 			throw new Error(
@@ -346,7 +359,8 @@ export function assertWrapperChildren(absFile: string, relFile: string): void {
 export async function compileSsrComponent(absFile: string, relFile: string): Promise<string> {
 	const raw = readFileSync(absFile, 'utf8')
 	assertQjsCompatible(relFile, raw)
-	if (absFile.replace(/\\/g, '/').endsWith('/+route.svelte')) assertWrapperChildren(absFile, relFile)
+	if (absFile.replace(/\\/g, '/').endsWith('/+route.svelte'))
+		assertWrapperChildren(absFile, relFile)
 	await assertNoTopLevelStubCalls(absFile, relFile, raw)
 	await assertNoSdkTopLevelCalls(absFile, relFile, raw)
 	const { compile } = (await import('svelte/compiler')) as typeof import('svelte/compiler')
@@ -410,13 +424,15 @@ export function stubSdkImports(code: string, relFile: string): string {
 	// resolve `browser` (and friends) to server literals before stubbing.
 	// `$app/stores`/`$app/navigation`/`@swelte/core` stay throw-stubs —
 	// they must never fire during the sync render.
-	if (!isCommentedOut(code.search(/import\s*\{\s*browser\s*\}\s*from\s*['"]\$app\/environment['"]/))) {
+	if (
+		!isCommentedOut(code.search(/import\s*\{\s*browser\s*\}\s*from\s*['"]\$app\/environment['"]/))
+	) {
 		code = code.replace(
 			/import\s*\{\s*browser\s*\}\s*from\s*['"]\$app\/environment['"]/g,
 			(match, ...rest: unknown[]) => {
 				const offset = rest[rest.length - 2] as number
 				return isCommentedOut(offset) ? match : 'const browser = false;'
-			},
+			}
 		)
 	}
 	const out: string[] = []
@@ -458,15 +474,12 @@ export function stubSdkImports(code: string, relFile: string): string {
 	out.push(code.slice(last))
 	let stubbed = out.join('')
 	// Drop bare SDK side-effect imports (no named bindings to stub).
-	stubbed = stubbed.replace(
-		bare,
-		(match, ...rest: unknown[]) => {
-			const offset = rest[rest.length - 2] as number
-			return isCommentedOut(offset)
-				? match
-				: '/* swelte:ssr-qjs: dropped bare SDK side-effect import (SSR has no router/stores) */'
-		},
-	)
+	stubbed = stubbed.replace(bare, (match, ...rest: unknown[]) => {
+		const offset = rest[rest.length - 2] as number
+		return isCommentedOut(offset)
+			? match
+			: '/* swelte:ssr-qjs: dropped bare SDK side-effect import (SSR has no router/stores) */'
+	})
 	return stubbed
 }
 
@@ -490,7 +503,8 @@ export async function assertNoSdkTopLevelCalls(
 	// mirrors the same `.v` boundary — otherwise e.g. `searchDocs` from
 	// `#lib/search.js` is misread as a stub and any top-level call to it
 	// (incl. Svelte runes like `$derived(...)`) fails the build.
-	const imre = /import\s*\{([^}]*)\}\s*from\s*['"](#routes\/[^'"]*\.v|#lib\/[^'"]*\.v|@swelte\/core|\$app\/[^'"]*)['"]/g
+	const imre =
+		/import\s*\{([^}]*)\}\s*from\s*['"](#routes\/[^'"]*\.v|#lib\/[^'"]*\.v|@swelte\/core|\$app\/[^'"]*)['"]/g
 	let im: RegExpExecArray | null
 	while ((im = imre.exec(src)) !== null) {
 		for (const part of (im[1] as string).split(',')) {
@@ -559,11 +573,19 @@ export async function registerLibModule(
 	// stem (strip one known suffix) so client-style ids resolve on disk.
 	const stems = [sub]
 	for (const e of ['.js', '.ts', '.svelte']) {
-		if (sub !== '' && sub.endsWith(e) && !stems.includes(sub.slice(0, -e.length))) stems.push(sub.slice(0, -e.length))
+		if (sub !== '' && sub.endsWith(e) && !stems.includes(sub.slice(0, -e.length)))
+			stems.push(sub.slice(0, -e.length))
 	}
 	for (const stem of stems) {
 		const base = join(resolve(root), libDir, stem === '' ? '' : stem)
-		for (const cand of [base, `${base}.js`, `${base}.ts`, `${base}.svelte`, join(base, 'index.js'), join(base, 'index.ts')]) {
+		for (const cand of [
+			base,
+			`${base}.js`,
+			`${base}.ts`,
+			`${base}.svelte`,
+			join(base, 'index.js'),
+			join(base, 'index.ts'),
+		]) {
 			try {
 				if (!existsSync(cand) || cand.includes('\0') || st(cand).isDirectory()) continue
 			} catch {
@@ -600,7 +622,13 @@ export async function registerLibModule(
 }
 
 /** Bundle compiled route modules + svelte runtime into one ESM module. */
-export async function bundleSsr(modules: Map<string, string>, entry: string, bundleRoot = '', bundleRoutesDir = 'src/routes', bundleLibDir = 'src/lib'): Promise<string> {
+export async function bundleSsr(
+	modules: Map<string, string>,
+	entry: string,
+	bundleRoot = '',
+	bundleRoutesDir = 'src/routes',
+	bundleLibDir = 'src/lib'
+): Promise<string> {
 	const { rollup } = (await import('rollup')) as typeof import('rollup')
 	// svelte resolves from the adapter's own install (peer dep), falling
 	// back to cwd — the fixture dir may not have node_modules.
@@ -636,23 +664,29 @@ export async function bundleSsr(modules: Map<string, string>, entry: string, bun
 				}
 				return null
 			}
-		// Universal-load sibling imports: resolve relative ids from the route dir on disk.
-		if (importer && importer.endsWith('.ts') && id.startsWith('.')) {
-			const { existsSync: ex2, readFileSync: rd2 } = await import('node:fs')
-			const cand = join(bundleRoot || process.cwd(), bundleRoutesDir, posixNormalize(importer, id))
-			if (ex2(cand) && !cand.includes('\0')) {
-				const key2 = './' + posixNormalize(importer, id)
-				if (!modules.has(key2)) modules.set(key2, rd2(cand, 'utf8'))
-				return key2
+			// Universal-load sibling imports: resolve relative ids from the route dir on disk.
+			if (importer && importer.endsWith('.ts') && id.startsWith('.')) {
+				const { existsSync: ex2, readFileSync: rd2 } = await import('node:fs')
+				const cand = join(
+					bundleRoot || process.cwd(),
+					bundleRoutesDir,
+					posixNormalize(importer, id)
+				)
+				if (ex2(cand) && !cand.includes('\0')) {
+					const key2 = './' + posixNormalize(importer, id)
+					if (!modules.has(key2)) modules.set(key2, rd2(cand, 'utf8'))
+					return key2
+				}
 			}
-		}
-		// Plain-source `#lib/*` (NOT `.v` stubs — those are throw-stubs by
-		// now and never reach the resolver): resolve from disk so Rollup
-		// bundles the real source. Mirrors the client's `#lib → src/lib`
-		// alias (non-enumerable `swelte` key keeps it out of svelte()).
-		if (id === '#lib' || id.startsWith('#lib/')) {
-			return (await registerLibModule(modules, bundleRoot || process.cwd(), bundleLibDir, id)) ?? null
-		}
+			// Plain-source `#lib/*` (NOT `.v` stubs — those are throw-stubs by
+			// now and never reach the resolver): resolve from disk so Rollup
+			// bundles the real source. Mirrors the client's `#lib → src/lib`
+			// alias (non-enumerable `swelte` key keeps it out of svelte()).
+			if (id === '#lib' || id.startsWith('#lib/')) {
+				return (
+					(await registerLibModule(modules, bundleRoot || process.cwd(), bundleLibDir, id)) ?? null
+				)
+			}
 			// QJS-safe substitutes (shims/): crypto + render-context carry
 			// lazy `node:` imports that never fire on the sync path but
 			// break qjsc as strings. Substituted at bundle time; upstream
@@ -814,7 +848,9 @@ export async function composeRenderJs(
 		// the .svelte never renders server-side, so emitting a stub keeps
 		// dist/ssr/render.js renderable (unknown route → +error path)
 		// instead of failing the whole build.
-		const resolveSibling = async (baseRel: string): Promise<{ rel: string; abs: string } | null> => {
+		const resolveSibling = async (
+			baseRel: string
+		): Promise<{ rel: string; abs: string } | null> => {
 			for (const ext of ['.ts', '.js']) {
 				const candRel = baseRel.replace(/\.svelte$/, ext)
 				const candAbs = join(root, routesDir, candRel)
@@ -927,7 +963,12 @@ export async function composeRenderJs(
 		// .js accepted) — must match the registration loop above.
 		const jsRel = svelteRel.replace(/\.svelte$/, '.js')
 		if (existsSync(join(root, routesDir, jsRel))) return withDot(jsRel.split('/').join('/'))
-		return withDot(svelteRel.replace(/\.svelte$/, '.ts').split('/').join('/'))
+		return withDot(
+			svelteRel
+				.replace(/\.svelte$/, '.ts')
+				.split('/')
+				.join('/')
+		)
 	}
 	const loadTable = manifest.routes
 		.filter((r) => r.hasUniversalLoad === true || r.hasUniversalLoad === 'sync')
@@ -937,10 +978,10 @@ export async function composeRenderJs(
 		})
 		.join('\n')
 	const __compKeys = [...modules.keys()].filter((k) => !k.endsWith('.ts') && !k.endsWith('.js'))
-const entrySrc = `import { render } from 'svelte/internal/server';
+	const entrySrc = `import { render } from 'svelte/internal/server';
 ${__compKeys.map((key, i) => `import C${i} from ${JSON.stringify(key)};`).join('\n')}
 ${(() => {
-	let __li = 0;
+	let __li = 0
 	return manifest.routes
 		.filter((r) => r.hasUniversalLoad === true || r.hasUniversalLoad === 'sync')
 		.map((r) => {
@@ -950,7 +991,7 @@ ${(() => {
 		})
 		.filter(Boolean)
 		.join('\n')
-	})()}
+})()}
 const PAGES = {
 ${__compKeys.map((key, i) => `  ${JSON.stringify(key)}: C${i},`).join('\n')}
 };
@@ -965,7 +1006,7 @@ ${loadTable}
 };
 const LOADEDMODS = {
 ${(() => {
-	let __lj = 0;
+	let __lj = 0
 	return manifest.routes
 		.filter((r) => r.hasUniversalLoad === true || r.hasUniversalLoad === 'sync')
 		.map((r) => {
@@ -975,7 +1016,7 @@ ${(() => {
 		})
 		.filter(Boolean)
 		.join('\n')
-	})()}
+})()}
 };
 const ERROR = ${manifest.error ? JSON.stringify(withDot(manifest.error.split('/').join('/'))) : 'null'};
 function applyUniversalLoad(route, props) {

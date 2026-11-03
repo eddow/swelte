@@ -3,7 +3,12 @@ import assert from 'node:assert/strict'
 import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { collectSvelteManifest, svelteRouteFor, siblingLoadSource, universalLoadKind } from './vite.js'
+import {
+	collectSvelteManifest,
+	svelteRouteFor,
+	siblingLoadSource,
+	universalLoadKind,
+} from './vite.js'
 import type { SvelteRouteEntry } from './vite.js'
 
 function tmpRoutes(files: Record<string, string>): string {
