@@ -554,7 +554,7 @@ fn (mut app App) before_request(mut ctx Ctx) veb.Result {
 			msg = msg.all_before('"')
 		}
 		ctx.res.set_status(http.status_from_int(status))
-		return ctx.send_response_to_client('text/html; charset=utf-8', '<!doctype html><html><body><p>' + swelte_html_escape(msg) + '</p><p><a href="' + path + '">back</a></p></body></html>')
+		return ctx.send_response_to_client('text/html; charset=utf-8', '<!doctype html><html><body><main><p>' + swelte_html_escape(msg) + '</p><p><a href="' + path + '">back</a></p></main></body></html>')
 	}
 	// Static/SPA fallback (after SSR attempt above): dist/index.html for
 	// / and unknown non-api paths, raw assets otherwise.

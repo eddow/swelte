@@ -510,7 +510,11 @@ export async function assertNoSdkTopLevelCalls(
 // (`typeof window !== 'undefined'`). The sync QJS bundle needs the
 // server value (`false`) — resolve it to a literal at bundle time.
 function resolveSdkShim(id: string, _importer: string): string | null {
-	// `$app/*` + `#app/*` compat stubs live in `.swelte/app/` + `.swelte/`.
+	// Only these exact IDs are shimmed (nothing else: no `#app/secret`,
+	// `$app/forms`/`$app/server`, `$env/*` — unknown IDs return null and
+	// fail the build; no TS server exists, secrets live in V `backend/*.v`).
+	// The `$app`/`#app` stubs for the browser bundle live in
+	// `.swelte/app/` + `.swelte/`.
 	if (id === '$app/environment' || id === '#app/environment') {
 		return `export const browser = false;\nexport const dev = true;\nexport const building = false;\nexport const version = '';\n`
 	}
@@ -547,9 +551,10 @@ export async function bundleSsr(modules: Map<string, string>, entry: string, bun
 		name: 'swelte-ssr-resolve',
 		async resolveId(id: string, importer: string | undefined) {
 			if (modules.has(id)) return id
-			// `$app/*` / `#app/*` compat stubs: inline the server-shaped
-			// source (no disk read — the browser bundle resolves the real
-			// files via Vite aliases independently).
+			// Exact-ID `$app`/`#app` stubs only (see resolveSdkShim): inline
+			// the server-shaped source (no disk read — the browser bundle
+			// resolves the real files via Vite aliases independently).
+			// Unknown IDs (`#app/secret`, `$env/*`) return null → build error.
 			if (id.startsWith('$app/') || id.startsWith('#app/')) {
 				const src = resolveSdkShim(id, importer ?? '')
 				if (src !== null) {

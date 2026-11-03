@@ -10,6 +10,8 @@ import type {
 } from '#routes/+page.v'
 import { login, greet_pure, serve_pdf, make_created, tick_stream, rename_greeting, touch_greeting } from '#routes/api/greet.v'
 import { tick_items } from '#routes/api/ticks.v'
+import { blob_bytes, hook_raw } from '#routes/api/blob.v'
+import { type_row, calc_probe } from '#routes/api/types.v'
 import type { Session, SwelteResponse } from '#routes/api/greet.v'
 import { hash_string } from '#lib/crypto/hash.v'
 import type { HashStringResult } from '#lib/crypto/hash.v'
@@ -31,6 +33,10 @@ let ticks: string[] = $state([])
 let listed: string[] = $state([])
 let renamed = $state('')
 let touched = $state('')
+let blobInfo = $state('')
+let hookInfo = $state('')
+let rowInfo = $state('')
+let calcInfo = $state('')
 
 function showError(e: unknown) {
 	console.error(e)
@@ -185,6 +191,40 @@ async function patchTouch() {
 		showError(e)
 	}
 }
+async function loadBlob() {
+	lastError = ''
+	try {
+		const blob = await blob_bytes({})
+		blobInfo = `blob ${(blob as Blob).size}B ${(blob as Blob).type}`
+	} catch (e) {
+		showError(e)
+	}
+}
+async function loadHook() {
+	lastError = ''
+	try {
+		hookInfo = await hook_raw({})
+	} catch (e) {
+		showError(e)
+	}
+}
+async function loadRow() {
+	lastError = ''
+	try {
+		const row = await type_row({})
+		rowInfo = `row ${row.name} count=${row.count} active=${row.active} tags=${row.tags.join(',')} stamp=${typeof row.stamp}`
+	} catch (e) {
+		showError(e)
+	}
+}
+async function loadCalc() {
+	lastError = ''
+	try {
+		calcInfo = await calc_probe({ count: '3', ratio: '1.5', active: 'true' })
+	} catch (e) {
+		showError(e)
+	}
+}
 </script>
 
 <main>
@@ -203,6 +243,10 @@ async function patchTouch() {
 		<button onclick={putRename}>Rename (@[put])</button>
 		<button onclick={patchTouch}>Touch (@[patch])</button>
 		<button onclick={loadNarrow}>Narrow (#routes GET narrow-args)</button>
+		<button onclick={loadBlob}>Blob ([]u8)</button>
+		<button onclick={loadHook}>Raw (?hook)</button>
+		<button onclick={loadRow}>Typerow (?row)</button>
+		<button onclick={loadCalc}>Calc (?calc)</button>
 		<button onclick={saveFailLite}>Save fail-lite (item 4)</button>
 		<button onclick={deserEnvelope}>Deserialize (item 4)</button>
 	</div>
@@ -247,6 +291,18 @@ async function patchTouch() {
 	{/if}
 	{#if narrow}
 		<p>{narrow}</p>
+	{/if}
+	{#if blobInfo}
+		<p>{blobInfo}</p>
+	{/if}
+	{#if hookInfo}
+		<p>{hookInfo}</p>
+	{/if}
+	{#if rowInfo}
+		<p>{rowInfo}</p>
+	{/if}
+	{#if calcInfo}
+		<p>{calcInfo}</p>
 	{/if}
 	{#if lastError}
 		<pre style="color:crimson; white-space:pre-wrap;">{lastError}</pre>

@@ -46,8 +46,11 @@ Two copies of the same bundle:
 Guards (build errors with file+line): no `node:` imports, no
 `fetch(`, no top-level `await`, no top-level stub calls in
 SSR-compiled components (QuickJS is pure-sync; `load()` stays in V).
-SDK imports become render-time throw-stubs — they never ship to the
-browser (client bundle is a separate Vite build).
+Known SDK imports become render-time throw-stubs (`#routes`/`#lib`/`@swelte/core`,
+`$app/stores|state|navigation`; `$app|#app/environment` + `$app|#app/paths`
+resolve to server literals) — they never ship to the
+browser (client bundle is a separate Vite build). Unknown IDs
+(`#app/secret`, `$app/forms`, `$env/*`) are not shimmed: build error.
 ## Request path
 
 Browser `GET /` (`Accept: text/html`) → `Hand.before_request` →

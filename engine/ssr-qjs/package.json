@@ -5,6 +5,9 @@
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
+  "bin": {
+    "swelte-ssr": "./bin/swelte-ssr.js"
+  },
   "exports": {
     ".": "./dist/index.js",
     "./vite": "./dist/vite.js",
@@ -15,6 +18,7 @@
   "files": [
     "README.md",
     "dist",
+    "bin",
     "c",
     "shims",
     "LICENSE-MIT"

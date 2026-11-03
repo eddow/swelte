@@ -1,7 +1,9 @@
 <script lang="ts">
 import { onMount } from 'svelte'
-import { goto, preloadData, pushState, beforeNavigate, afterNavigate, page, navigating, updated } from '@swelte/core'
+import { goto, preloadData, pushState, beforeNavigate, afterNavigate, onNavigate, page, navigating, updated } from '@swelte/core'
 import { page as appPage, updated as appUpdated } from '$app/stores'
+import { page as statePage } from '$app/state'
+import { goto as navGoto, onNavigate as navOnNavigate } from '$app/navigation'
 import { base, assets } from '#app/paths'
 import { browser, dev, version } from '#app/environment'
 
@@ -87,7 +89,7 @@ if (browser) {
 			<p>navigating {$navigating.from} → {$navigating.to}…</p>
 		{/if}
 		<p>page store: {$page.url} (route={$page.route})</p>
-		<p>$app/stores alias resolves: {typeof appPage}</p>
+		<p>$app/stores alias resolves: {typeof appPage} · $app/state: {typeof statePage} · $app/navigation: {typeof navGoto}/{typeof navOnNavigate}/{typeof onNavigate}</p>
 		<!-- items 2+11: $updated is a stub flag (no version feed yet — always
 		     false); #app/paths + #app/environment render build-time constants. -->
 		<p>updated stub: {$updated} ({typeof appUpdated}) — never flips until the snapshot feed lands</p>

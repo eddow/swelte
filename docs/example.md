@@ -8,19 +8,23 @@ artifact: `dist/server` + `dist/`).
 ## Layout
 
 ```
-src/routes/+page.svelte + +page.v   / (get_greeting GET, save_name POST)
-src/routes/api/greet.v              /api/greet (get_greeting GET, greet_pure @[rpc] → Session, login POST → Session+cookie, pdf/created probes)
+src/routes/+page.svelte + +page.v   / (get_greeting GET, save_name POST, save_fail ?save 422 fail-lite, greet_narrow GET narrow-args bool/int/float/?string, Rename @[put], Touch @[patch])
+src/routes/api/greet.v              /api/greet (get_greeting GET, greet_pure @[rpc] → Session, login POST → Session+cookie, slow ?slow timeout probe, upload ?upload, pdf/created probes)
+src/routes/api/blob.v               /api/blob (blob_bytes GET → []u8 octet-stream, hook_raw POST ?hook echoes raw_body length)
+src/routes/api/types.v              /api/types (type_row GET ?row → TypeRow struct: int/f64/bool/[]string/map/?string/time.Time; calc_probe GET ?calc narrow-args int/float/bool/?string)
+src/routes/session/+route.v + +page.v + +page.svelte   /session (locals bag: +route @[before] stamps locals['uid'] from sess cookie; @[load] reads it; login POST sets cookie via swelte_cookie_set, logout ?logout deletes it, ?go swelte_redirect 303 → /router)
 src/routes/boom/+page.svelte + +page.v   /boom (throw fixture: @[load] + @[get] both `return error('boom')` — SSR `!T` gate)
 src/routes/users/[id].v             /users/[id] ([id] → req.params['id'])
 src/routes/(mkt)/about.v            /about (item 8: route group — (mkt) is disk-only, stripped from URL; Params {} empty)
 src/routes/docs/[[slug]].v          /docs/[[slug]] (item 8: optional segment — /docs + /docs/x → 200, /docs/x/y → 404; Params { slug: string })
-src/routes/members/[id=integer].v   /members/[id=integer] (item 7: [id=integer] narrows Params.id to number; non-digits 404 on V dispatch)
-src/routes/posts/[slug=slug].v      /posts/[slug=slug] (item 7: custom matcher — lowercase-alpha only, 200 vs 404 on V dispatch + client matchSegs)
+src/routes/members/[id=integer].v + [id=integer]/entries.ts   /members/[id=integer] ([id=integer] narrows Params.id to number; non-digits 404 on V dispatch; entries.ts ['42','7'] expands prerender 'all')
+src/routes/posts/[slug=slug].v + [slug=slug]/entries.ts      /posts/[slug=slug] (custom matcher — lowercase-alpha only, 200 vs 404 on V dispatch + client matchSegs; entries.ts [{slug:'hello'},{slug:'world'}])
 src/matchers.v                      custom param matchers (@[matcher] (s string) bool, portable subset — for c in s.bytes(), byte compares, early returns, no time/os/net imports; `integer` builtin)
 src/routes/files/[...rest].v        /files/[...rest] (catch-all → req.params['rest'])
 src/routes/admin/+route.svelte + +route.v   /admin wrapper (nav + @[before] sess guard / @[after] passthrough)
 src/routes/admin/+page.svelte + +page.v     /admin leaf (admin_whoami GET, reads injected x-user)
-src/routes/router/+page.v + +page.ts + +page.svelte   /router (§1: server @[load] + swelte_fetch sibling rows + sync universal load + client router + $app/* + #app/* + $updated stub)
+src/routes/router/+page.v + +page.ts + +page.svelte   /router (§1: server @[load] + swelte_fetch sibling rows + sync universal load + client router + $app/stores + $app/state + $app/navigation + #app/* + $updated stub + onNavigate)
+src/routes/router/verbs/+page.v + +page.svelte   /router/verbs (HEAD answered by GET arm, OPTIONS 204 preflight-only, DELETE with no arm → 405, POST ?echo probe)
 src/routes/router/live/+page.ts + +page.svelte        /router/live (§1: ssr=false twin — async universal load + <await> streaming, SPA shell)
 src/routes/router/tags/+page.svelte + +page.v          /router/tags (item 1: depends/invalidate/invalidateAll tag registry — pure client, +page.v is a probe arm)
 src/routes/router/enhance/+page.svelte + +page.v        /router/enhance (item 15a: plain <form method=post use:enhance> → page.form publish + reset, no reload)
@@ -45,7 +49,7 @@ node engine/core/dist/cli.js dev --port 5174 --backend 8131 --root examples/some
 
 - `/` GET/POST (`get_greeting`/`save_name`), `/api/greet` GET + `greet_pure @[rpc] → Session{id,user,remember,expires_at}` + `login POST → Session+cookie` (verb, HTTP) + `?pdf` (binary) + `?created` (201),
   empty payload → 400, unknown fn → 404 + available, `vite build` green.
-- Page buttons: Greet / Save / Hash (`#lib` real WASM) / Login / Stream (`@[sse]` `tick_stream` emit mode) / List (`@[sse]` `tick_items` list mode) / Rename (`@[put]`) / Touch (`@[patch]`).
+- Page buttons: Greet / Save / Hash (`#lib` real WASM) / Login / Stream (`@[sse]` `tick_stream` emit mode) / List (`@[sse]` `tick_items` list mode) / Rename (`@[put]`) / Touch (`@[patch]`) / Blob (`[]u8` octet-stream) / Raw (`?hook` raw_body) / Typerow (`?row` TypeRow struct) / Calc (`?calc` narrow-args).
 - SSE proven (true streaming via veb, both shapes): emit mode on `/api/greet` (`data: tick 1` ~0.5s pacing, `?wait_ms=500` proves zero buffering; plain JSON GETs keep hitting `@[get]` on the same URL) + list mode on `/api/ticks` (`[]string` `['a','b','c']` → `data: a/b/c` frames, identical `for await` consumption). Mixed emit+list in one file is unservable (per-file `swelte_sse_is_emit`), hence separate files — item 5 closed.
 - `hash_string` compiles to real WASM (`v -b wasm -os browser`):
   dev `.swelte/dev/crypto/hash.wasm` + prod `dist/assets/app_lib-*.wasm`.
@@ -54,6 +58,11 @@ node engine/core/dist/cli.js dev --port 5174 --backend 8131 --root examples/some
   `SwelteRequest` + `swelte_route`), full verb set (`get/post/put/patch/delete` — item 6 closed:
   `PUT /api/greet` → `"renamed:alice"`, `PATCH` → `"touched:bob"`, 405 arm quiet) +
   unique-qualifier enforced at generate time.
+- Type table proven (`/api/types`): `TypeRow` struct carries `int`/`f64`/`bool`/`[]string`/`map[string]string`/`?string`/`time.Time` (projected `number`/`boolean`/`string[]`/`Record<string,unknown>`/`string | null`/`number` in `.d.ts`); narrow-args verb `?calc` (`count int, ratio f64, active bool, nick ?string`) coerces from query/form strings server-side; `[]u8` return (`/api/blob` default GET) sends `application/octet-stream` via `swelte_bytes`; `req.raw_body` (`?hook`) + `req.files_bytes` carry the raw bytes uploads discard from `files` (filenames only).
+- `/session` proven (locals + cookies + redirect): `session/+route.v` `@[before]` stamps `locals['uid']` from the `sess` cookie (guest fallback); `@[load]` + `@[get]` read `req.locals['uid']`; `login POST` sets the cookie (`swelte_cookie_set`), `?logout` deletes it (`swelte_cookie_delete`), `?go` returns `swelte_redirect('/router', 0)` (303).
+- `/router/verbs` proven (HEAD/OPTIONS/405): `GET` arm answers `HEAD` (same handler), `OPTIONS` is CORS-preflight-only (204, no user fn), `DELETE` with no `@[delete]` arm goes 405 via `swelte_method_not_allowed` (`POST` on an rpc-less shape goes 403 via `swelte_method_gate`).
+- `$app/*` aliases proven (`/router` footer): `$app/stores` (page/updated), `$app/state` (page), `$app/navigation` (goto/onNavigate) re-export `@swelte/core` (`onNavigate` = `afterNavigate` alias).
+- `entries: 'all'` expansion proven without a live crawl: `members/[id=integer]/entries.ts` (`['42','7']`) + `posts/[slug=slug]/entries.ts` (`[{slug:'hello'},{slug:'world'}]`) — `collectPrerenderEntries(root, routesDir, 'all')` expands to `/members/42`, `/members/7`, `/posts/hello`, `/posts/world`. Live `prerender.entries: 'all'` build assert stays open (illustrations item 2: no `v` binary in this env).
 - Dynamic segments proven: `/users/42` → `"user:42"`, `/users/` + `/users` →
   404, `/files/a/b/c` → `"files:a/b/c"` (`req.params`; static beats
   dynamic, `[...rest]` last).

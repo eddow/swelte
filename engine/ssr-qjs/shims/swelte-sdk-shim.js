@@ -1,7 +1,8 @@
-// `$app/*` / `#app/*` / `#lib/*` server-shaped sources, inlined at bundle
-// time (see resolveSdkShim). Kept next to the Rollup shims so bundle
-// inputs stay auditable in one dir; header documents the contract.
-export const SWELTE_SSR_SDK_SHIM = `// swelte:ssr-qjs $app/* server-shaped shim (sync renderRoute has no router/stores).
+// Exact-ID server-shaped sources for the SSR bundle (`$app|#app/environment`,
+// `$app|#app/paths`, `$app/stores|state|navigation` — see resolveSdkShim).
+// Kept next to the Rollup shims so bundle inputs stay auditable in one
+// dir; header documents the contract.
+export const SWELTE_SSR_SDK_SHIM = `// swelte:ssr-qjs $app/stores|state|navigation server-shaped shim (sync renderRoute has no router/stores).
 export const page = undefined;
 export const navigating = undefined;
 export const updated = undefined;
