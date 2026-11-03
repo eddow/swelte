@@ -2,7 +2,27 @@
 @plugin "daisyui" {
 	themes:
 		light --default,
-		dark --prefersdark,
-		cupcake,
-		forest;
+		dark;
 }
+
+/* Shiki dual-theme code blocks (build-time highlighted, defaultColor: false).
+ * Tokens carry --shiki-light / --shiki-dark vars; the active set keys on
+ * [data-theme='dark'] (set explicitly by the toggle / boot script below).
+ * The :root:has(...) line is a no-JS fallback for the daisyUI
+ * theme-controller pattern. */
+.swelte-code .shiki,
+.swelte-code .shiki span {
+	color: var(--shiki-light);
+	background-color: transparent;
+}
+:root:has(input.theme-controller[value='dark']:checked) .swelte-code .shiki,
+:root:has(input.theme-controller[value='dark']:checked) .swelte-code .shiki span,
+[data-theme='dark'] .swelte-code .shiki,
+[data-theme='dark'] .swelte-code .shiki span {
+	color: var(--shiki-dark);
+}
+/* Block background follows the site theme (not the shiki palette). */
+.swelte-code .shiki {
+	background-color: transparent;
+}
+

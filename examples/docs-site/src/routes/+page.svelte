@@ -1,3 +1,8 @@
+<script lang="ts">
+	import Code from '#lib/Code.svelte';
+	import { codeHtml } from '#lib/snippets.gen.js';
+</script>
+
 <div class="hero bg-base-200 rounded-box">
 	<div class="hero-content text-center py-16">
 		<div class="max-w-2xl">
@@ -54,10 +59,8 @@
 	</div>
 </div>
 
-<div class="mockup-code mt-8">
-	<pre data-prefix="1"><code>npx swelte init myapp &amp;&amp; cd myapp</code></pre>
-	<pre data-prefix="2"><code>npm install</code></pre>
-	<pre data-prefix="3"><code>npx swelte dev    # Vite :5174 + V backend :8131</code></pre>
+<div class="mt-8">
+	<Code snippet={codeHtml['home-install']} dense />
 </div>
 
 <div class="alert alert-info mt-8">

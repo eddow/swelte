@@ -10,7 +10,7 @@
 <p class="py-4 opacity-80">Every <code>.v</code> file is an ES module. Every <code>pub fn</code> with an attribute is a named export. Directory decides runtime: <code>#routes/</code> = server fetch, <code>#lib/</code> = local WASM call.</p>
 
 <div class="alert alert-warning">
-	<span>No <code>self</code>, no <code>$ssapi</code> — named imports only: <code>import &#123; login &#125; from '#routes/api/greet.v'</code>.</span>
+	<span>Named imports only: <code>import &#123; login &#125; from '#routes/api/greet.v'</code>.</span>
 </div>
 
 <h2 class="text-2xl font-bold mt-8">Directories</h2>

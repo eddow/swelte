@@ -1,5 +1,7 @@
 # build outputs — never commit
 .svelte/
+# shiki build-time highlight output (rebuilt by `npm run highlight`)
+src/lib/snippets.gen.ts
 # legacy generated V dispatcher dir (pre-.swelte layout) — must stay empty
 /routes/
 dist/

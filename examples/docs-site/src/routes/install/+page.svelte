@@ -1,3 +1,8 @@
+<script lang="ts">
+	import Code from '#lib/Code.svelte';
+	import { codeHtml } from '#lib/snippets.gen.js';
+</script>
+
 <div class="breadcrumbs text-sm">
 	<ul>
 		<li><a href="/">Home</a></li>
@@ -15,11 +20,8 @@
 	<li class="step">Build</li>
 </ul>
 
-<div class="mockup-code">
-	<pre data-prefix="1"><code>npx swelte init myapp &amp;&amp; cd myapp</code></pre>
-	<pre data-prefix="2"><code>npm install</code></pre>
-	<pre data-prefix="3"><code>npm install @swelte/ssr-qjs @swelte/mcp @swelte/vvm</code></pre>
-	<pre data-prefix="4"><code>npx swelte dev    # Vite :5174 + V backend :8131</code></pre>
+<div class="mt-4">
+	<Code snippet={codeHtml['install-steps']} />
 </div>
 
 <div class="grid md:grid-cols-2 gap-4 mt-6">
@@ -36,10 +38,7 @@
 	<div class="card bg-base-100 border border-base-200">
 		<div class="card-body">
 			<h2 class="card-title">Try it live</h2>
-			<div class="mockup-code text-xs">
-				<pre data-prefix="1"><code>npx swelte dev    # this site: examples/docs-site</code></pre>
-				<pre data-prefix="2"><code># open http://localhost:5174</code></pre>
-			</div>
+			<Code snippet={codeHtml['install-dev']} dense />
 			<p class="text-sm opacity-70 mt-2">Every page here has a <code>+page.v</code> probe arm — the dispatcher needs a leaf <code>.v</code> to claim the URL.</p>
 		</div>
 	</div>

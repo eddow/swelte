@@ -1,3 +1,8 @@
+<script lang="ts">
+	import Code from '#lib/Code.svelte';
+	import { codeHtml } from '#lib/snippets.gen.js';
+</script>
+
 <div class="breadcrumbs text-sm">
 	<ul>
 		<li><a href="/">Home</a></li>
@@ -20,9 +25,8 @@
 <p class="opacity-80 text-sm mt-2">Browser <code>GET /</code> → <code>Hand.before_request</code> → <code>swelte_page_props()</code> (load cascade) → embedded QuickJS <code>renderRoute(path, props)</code> → HTML at <code>&lt;!--ssr-body--&gt;</code> + <code>data-swelte-ssr="1"</code>. Failures fall back to the SPA shell — never blank JSON for navigations.</p>
 
 <h2 class="text-2xl font-bold mt-8"><code class="text-lg">@&#91;load]</code> cascade</h2>
-<div class="mockup-code text-xs mt-2">
-	<pre data-prefix="1"><code>@&#91;load] load_page(req SwelteRequest) !PageData &#123; ... &#125;        // level 0</code></pre>
-	<pre data-prefix="2"><code>@&#91;load] load_leaf(req SwelteRequest, parent PageData) !Leaf &#123; ... &#125;</code></pre>
+<div class="mt-2">
+	<Code snippet={codeHtml['ssr-load']} dense />
 </div>
 <p class="text-sm opacity-70 mt-2">Root-first threading, one JSON encode at the edge. Throw → <code>+error</code> props (single global <code>+error.svelte</code>, <code>&#123; status?, message? &#125;</code>).</p>
 

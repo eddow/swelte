@@ -1,3 +1,8 @@
+<script lang="ts">
+	import Code from '#lib/Code.svelte';
+	import { codeHtml } from '#lib/snippets.gen.js';
+</script>
+
 <div class="breadcrumbs text-sm">
 	<ul>
 		<li><a href="/">Home</a></li>
@@ -28,11 +33,8 @@
 <h2 class="text-2xl font-bold mt-8">Live RPC demo</h2>
 <p class="text-sm opacity-70 mt-2">This page is static prose, but the same stubs power the interactive demo below (server fetch on <code>#routes/</code>, WASM on <code>#lib/</code>):</p>
 
-<div class="mockup-code text-xs mt-2">
-	<pre data-prefix="1"><code>import &#123; get_greeting &#125; from '#routes/+page.v'   // → GET / (JSON)</code></pre>
-	<pre data-prefix="2"><code>import &#123; hash_string &#125; from '#lib/crypto/hash.v'   // → local WASM</code></pre>
-	<pre data-prefix="3"><code>greeting = get_greeting(&#123; payload: name &#125;)  // Promise</code></pre>
-	<pre data-prefix="4"><code>hashed = hash_string(&#123; input: name &#125;)  // Promise</code></pre>
+<div class="mt-2">
+	<Code snippet={codeHtml['example-imports']} dense />
 </div>
 
 <div class="alert alert-info mt-6">

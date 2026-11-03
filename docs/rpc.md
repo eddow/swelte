@@ -1,7 +1,6 @@
 # RPC: `.v` imports, attributes, transport
 
-Source of truth for how Svelte calls V. No `self`, no `$ssapi`, no
-`$csapi` — every `.v` file is an ES module, every `pub fn` with an
+Source of truth for how Svelte calls V. Every `.v` file is an ES module, every `pub fn` with an
 attribute is a named export.
 
 Generated V dispatcher (`routes/`, `module routes`): `generate()` emits

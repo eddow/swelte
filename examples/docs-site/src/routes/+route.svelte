@@ -1,7 +1,46 @@
 <script lang="ts">
 	import type { Snippet } from 'svelte';
+	import { onMount } from 'svelte';
 
 	let { children }: { children?: Snippet } = $props();
+
+	const THEME_KEY = 'swelte-docs-theme';
+
+	// System default first (no stored pref → OS decides via CSS),
+	// then explicit light/dark persisted in localStorage.
+	// Client-only: runs in onMount, never during SSR.
+	let dark = $state(false);
+
+	function applyTheme(next: boolean) {
+		dark = next;
+		if (typeof document !== 'undefined') {
+			document.documentElement.dataset.theme = next ? 'dark' : 'light';
+			try {
+				localStorage.setItem(THEME_KEY, next ? 'dark' : 'light');
+			} catch {
+				// private mode — theme just won't persist
+			}
+		}
+	}
+
+	onMount(() => {
+		const root = document.documentElement;
+		let stored: string | null = null;
+		try {
+			stored = localStorage.getItem(THEME_KEY);
+		} catch {
+			stored = null;
+		}
+		if (stored === 'dark' || stored === 'light') {
+			// Boot script already applied this; just sync the toggle.
+			dark = stored === 'dark';
+			root.dataset.theme = stored;
+		} else {
+			// No stored pref: follow the OS, then adopt it as explicit state
+			// (toggle shows the truth; next flip persists from here).
+			applyTheme(window.matchMedia?.('(prefers-color-scheme: dark)').matches ?? false);
+		}
+	});
 
 	const groups: { title: string; links: { href: string; label: string }[] }[] = [
 		{
@@ -67,7 +106,7 @@
 					<kbd class="kbd kbd-xs">/</kbd>
 				</label>
 				<label class="swap swap-rotate btn btn-ghost btn-circle btn-sm">
-					<input type="checkbox" class="theme-controller" value="forest" />
+					<input type="checkbox" checked={dark} onchange={(e) => applyTheme(e.currentTarget.checked)} aria-label="Toggle dark mode" />
 					<svg
 						class="swap-off h-5 w-5 fill-current"
 						xmlns="http://www.w3.org/2000/svg"

@@ -1,3 +1,8 @@
+<script lang="ts">
+	import Code from '#lib/Code.svelte';
+	import { codeHtml } from '#lib/snippets.gen.js';
+</script>
+
 <div class="breadcrumbs text-sm">
 	<ul>
 		<li><a href="/">Home</a></li>
@@ -9,9 +14,8 @@
 <h1 class="text-4xl font-bold mt-2">MCP: <code class="text-2xl">@swelte/mcp</code> server</h1>
 <p class="py-4 opacity-80">Gives IDE agents programmatic insight (route tree, type contracts, diagnostics) instead of guessing from raw files. Transport is <strong>stdio only</strong>.</p>
 
-<div class="mockup-code text-xs">
-	<pre data-prefix="1"><code>&#123; "mcpServers": &#123; "swelte": &#123; "command": "node",</code></pre>
-	<pre data-prefix="2"><code>  "args": ["./node_modules/@swelte/mcp/dist/index.js"] &#125; &#125; &#125;</code></pre>
+<div class="mt-2">
+	<Code snippet={codeHtml['mcp-json']} dense title="config" />
 </div>
 <p class="text-sm opacity-70 mt-2">Or via the bin: <code>swelte-mcp</code> (stdio, no args).</p>
 

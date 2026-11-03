@@ -33,9 +33,8 @@ a named export. **Directory decides runtime; extension stays `.v`:**
   No route, no fetch. Same V source compiles to native (server) +
   WASM (browser); TS import is always `async` to unify both.
 
-Deleted: `self` bare specifier, `$ssapi/*`, `$csapi/*`,
-`sdk.post/get/worker.call` as user API, `@[expose]`, `src/pages/`,
-`src/ssapi/`, `src/csapi/`, `src/api/`, `./$types` shims.
+Deleted: `sdk.post/get/worker.call` as user API, `@[expose]`, `src/pages/`,
+`src/api/`, `./$types` shims.
 `@swelte/rust` is dropped — WASM stays V (`v -b wasm`), no Rust
 package, no `*.rs` imports. Aliases follow SvelteKit: `#routes`, `#lib`.
 
@@ -97,10 +96,10 @@ Rules (`routeFor`, once in `vite.ts`, reused by V dispatcher gen):
   Build errors: malformed brackets, non-final catch-all, duplicate
   params, same normalized shape across files.
 
-`src/routes/` is the rename of old `src/pages/`. `src/api/`
-(previous revision) and `src/ssapi/` (implemented) both move here:
-`src/ssapi/greet.v` -> `src/routes/api/greet.v`, route
-`/ssapi/greet` -> `/api/greet`.
+`src/routes/` is the rename of old `src/pages/` + `src/api/`
+(previous revision):
+`src/api/greet.v` -> `src/routes/api/greet.v`, route
+`/api/greet`.
 
 ### `#lib/` — isomorphic WASM
 
@@ -121,8 +120,7 @@ Rules (`routeFor`, once in `vite.ts`, reused by V dispatcher gen):
   attributes are bundled into each importer (static link), not split.
 * Runs on the importing thread (plain `async` call). Decided 2026-10-29:
   main thread, no Worker opt-in flag for now — revisit only with measured
-  jank. Never a shared cross-module bus (the old `csapi` worker design
-  is dead).
+  jank. Never a shared cross-module bus.
 
 Sexy property this buys: the *same* `hash_string` V fn is unit-tested
 natively (`v test`), served nowhere, and executed in the browser as

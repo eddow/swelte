@@ -1,3 +1,8 @@
+<script lang="ts">
+	import Code from '#lib/Code.svelte';
+	import { codeHtml } from '#lib/snippets.gen.js';
+</script>
+
 <div class="breadcrumbs text-sm">
 	<ul>
 		<li><a href="/">Home</a></li>
@@ -9,9 +14,9 @@
 <h1 class="text-4xl font-bold mt-2">Errors</h1>
 <p class="py-4 opacity-80">Every 4xx from the V backend is JSON. <code>SwelteRpcError(status, body, base, fn)</code> replaces thrown <code>error()</code>/<code>json()</code> helpers.</p>
 
-<div class="mockup-code text-xs">
-	<pre data-prefix="$"><code>curl -X POST /api/greet -H 'Accept: application/json' -d '&#123;"fn":"nope"&#125;'</code></pre>
-	<pre data-prefix="&gt;"><code>&#123; "error": "unknown fn", "fn": "nope", "path": "/api/greet", "available": ["login"] &#125;</code></pre>
+<div class="mt-2 grid gap-2">
+	<Code snippet={codeHtml['errors-curl']} dense title="terminal" />
+	<Code snippet={codeHtml['errors-json']} dense title="response" />
 </div>
 
 <div class="overflow-x-auto mt-6">

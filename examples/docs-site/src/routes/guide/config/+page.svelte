@@ -1,3 +1,8 @@
+<script lang="ts">
+	import Code from '#lib/Code.svelte';
+	import { codeHtml } from '#lib/snippets.gen.js';
+</script>
+
 <div class="breadcrumbs text-sm">
 	<ul>
 		<li><a href="/">Home</a></li>
@@ -10,15 +15,8 @@
 <p class="py-4 opacity-80">Single rule everywhere: <strong>env wins when set; config is the fallback; unset/invalid/zero/negative means built-in default.</strong></p>
 
 <h2 class="text-2xl font-bold"><code class="text-lg">svelte.config.js</code> (<code class="text-lg">swelte</code> key)</h2>
-<div class="mockup-code text-xs mt-2">
-	<pre data-prefix="1"><code>import &#123; defineConfig &#125; from '@swelte/core/config';</code></pre>
-	<pre data-prefix="2"><code>export default defineConfig(&#123;</code></pre>
-	<pre data-prefix="3"><code>  preprocess: vitePreprocess(),</code></pre>
-	<pre data-prefix="4"><code>  swelte: &#123; name: 'myapp', routesDir: 'src/routes', libDir: 'src/lib',</code></pre>
-	<pre data-prefix="5"><code>    outDir: '.swelte', distDir: 'dist', port: 8131, corsOrigin: '',</code></pre>
-	<pre data-prefix="6"><code>    trailingSlash: 'ignore', base: '', assets: '', csp: '', csrf: 'ignore',</code></pre>
-	<pre data-prefix="7"><code>    methodOverride: false, version: '', target: 'auto' &#125;</code></pre>
-	<pre data-prefix="8"><code>&#125;);</code></pre>
+<div class="mt-2">
+	<Code snippet={codeHtml['config-js']} dense title="svelte.config.js" />
 </div>
 <p class="text-sm opacity-70 mt-2"><code>defineConfig</code> keeps <code>swelte</code> non-enumerable: invisible to <code>svelte()</code>, readable by <code>loadConfig</code>.</p>
 
