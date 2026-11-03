@@ -1,0 +1,10 @@
+# build outputs — never commit
+.svelte/
+# legacy generated V dispatcher dir (pre-.swelte layout) — must stay empty
+/routes/
+dist/
+# compiled dev binary (`v -o server` / `v run` output)
+server
+docs-site
+.DS_Store
+node_modules/

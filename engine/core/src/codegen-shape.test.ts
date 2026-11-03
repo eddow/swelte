@@ -602,6 +602,45 @@ describe('§1.2 router stores + invalidation (§1.2/§1.4)', () => {
 			assert.ok(js.includes(fn), `routes.js must export ${fn}`)
 	}
 })
+	it('client router: hasLoad gating + no-clear navigation + unmount tracking', async () => {
+		const root = scaffold()
+		mkdirSync(join(root, 'src', 'routes', 'static'), { recursive: true })
+		writeFileSync(join(root, 'src', 'routes', 'static', '+page.svelte'), '<h1>s</h1>')
+		// Static page: GET probe only, no @[load] - must not trigger a fetch.
+		writeFileSync(join(root, 'src', 'routes', 'static', '+page.v'), 'module s\n@[get] pub fn ping() string { return "ok" }')
+		// Load page: @[load] present - fetch allowed.
+		mkdirSync(join(root, 'src', 'routes', 'dyn'), { recursive: true })
+		writeFileSync(join(root, 'src', 'routes', 'dyn', '+page.svelte'), '<h1>d</h1>')
+		writeFileSync(
+			join(root, 'src', 'routes', 'dyn', '+page.v'),
+			'module d\npub struct D {\npub:\n\tx string\n}\n@[load] pub fn ld(req SwelteRequest) !D { _ = req\n return D{ x: "y" } }'
+		)
+		await generate(root)
+		const js = readFileSync(join(root, '.swelte', 'routes.js'), 'utf8')
+		// 1. ROUTES entries carry hasLoad: true only where @[load] exists.
+		const entryRe = /\{ path: "([^"]+)", page: \w+, wrappers: \[[^\]]*\], hasLoad: (true|false) \}/g
+		const got = new Map<string, string>()
+		for (const m of js.matchAll(entryRe)) got.set(m[1], m[2])
+		assert.equal(got.get('/static'), 'false', 'static page must be hasLoad:false (no fetch)')
+		assert.equal(got.get('/dyn'), 'true', 'load page must be hasLoad:true')
+		// 2. Both fetch sites gate on hasLoad - static pages never fetch.
+		assert.ok(js.includes('if (!hit.route.hasLoad) return'), 'preloadData must early-return for static routes')
+		assert.ok(js.includes('if (!opts.noPreload && hit.route.hasLoad)'), 'navigate must gate fetch on hasLoad')
+		// 3. No blank frame: navigate never clears before the fetch resolves.
+		const navBody = js.slice(js.indexOf('async function __navigateTo'))
+		assert.ok(!navBody.slice(0, 1200).includes("target.innerHTML = ''"), 'navigate must not clear before mount (no flash)')
+		// 4. Old tree is unmounted on swap (no leak across navigations).
+		assert.ok(js.includes('unmount('), 'mount swap must unmount the previous tree')
+		assert.ok(js.includes('__mountedRoots'), 'router must track mounted roots for teardown')
+		// 5. Click interception skips non-SPA triggers.
+		assert.ok(js.includes('download'), 'router must skip download links')
+		assert.ok(js.includes('data-swelte-reload'), 'router must honor the full-reload escape hatch')
+		// 6. The emit parses as a module (catches template-literal breakage).
+		const stubbed = js
+			.replace(/^import .*$/gm, '// stripped')
+			.replace('const ROUTES = [', 'const R_static__page_Page = 0;\nconst R_dyn__page_Page = 1;\nconst ROUTES = [')
+		await import(`data:text/javascript;base64,${Buffer.from(stubbed, 'utf8').toString('base64')}`)
+	})
 })
 
 	it('§4/§1 Hand predicate + client props merge', async () => {
