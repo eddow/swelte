@@ -3,6 +3,7 @@
 	themes:
 		light --default,
 		dark;
+	exclude: join;
 }
 
 /* Shiki dual-theme code blocks (build-time highlighted, defaultColor: false).

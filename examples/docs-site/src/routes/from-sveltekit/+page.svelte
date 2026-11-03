@@ -12,8 +12,8 @@
 	<table class="table table-zebra table-sm">
 		<thead><tr><th>SvelteKit</th><th>Swelte</th><th>Notes</th></tr></thead>
 		<tbody>
-			<tr><td><code>+page.svelte</code></td><td><code>+page.svelte</code></td><td>Same. Component per URL leaf.</td></tr>
-			<tr><td><code>+page.ts / +page.server.ts</code></td><td><code>+page.v</code> + <code>+page.ts</code></td><td>Server <code>@&#91;load]</code> = initial paint; universal sibling = sync view-model transform (async only when <code>ssr=false</code>).</td></tr>
+			<tr><td><code>+page.svelte</code></td><td><code>+page.svelte</code> or <code>about.svelte</code></td><td>Same component, two spellings: <code>about.svelte</code> ⇔ <code>about/+page.svelte</code> (both → <code>/about</code>). One triple per URL — mixing <code>foo.*</code> + <code>foo/+page.*</code> is a build error.</td></tr>
+			<tr><td><code>+page.ts / +page.server.ts</code></td><td><code>+page.v</code> + <code>+page.ts</code> (or flat <code>about.v</code> + <code>about.ts</code>)</td><td>Server <code>@&#91;load]</code> = initial paint; universal sibling = sync view-model transform (async only when <code>ssr=false</code>). <code>.svelte</code>/<code>.v</code> pair by mod path — no cross-pairing.</td></tr>
 			<tr><td><code>+layout.svelte</code></td><td><code>+route.svelte</code></td><td>Wrapper per subtree, <code>children</code> snippet + <code>&#123;@render&#125;</code> outlet. SSR composes the chain server-side; client hydrates it in place.</td></tr>
 			<tr><td><code>+layout.server.ts</code></td><td><code>+route.v (@&#91;load])</code></td><td>Same cascade slot. <code>(req)</code> at level 0, <code>(req, parent T)</code> deeper — typed value instead of parent() directly.</td></tr>
 			<tr><td><code>+server.ts</code></td><td><code>SwelteResponse</code> in the leaf <code>.v</code></td><td>No standalone file. Verbs on the route file; full header/cookie/status/binary control.</td></tr>

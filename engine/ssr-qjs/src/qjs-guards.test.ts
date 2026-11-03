@@ -427,4 +427,92 @@ describe('universal load — sync subset (§1.1)', () => {
 		const out = mod.renderRoute('/', JSON.stringify({ title: 'lib-ok' }))
 		assert.ok(out.body.includes('found:x'), `lib call must run in SSR, got: ${out.body.slice(0, 160)}`)
 	})
+
+	it('composeRenderJs: ungated onMount renders the shell (server noop, SvelteKit parity)', async () => {
+		const dir = mkdtempSync(join(tmpdir(), 'swelte-ssr-onmount-'))
+		const routesDir = join(dir, 'src', 'routes')
+		const { mkdirSync } = await import('node:fs')
+		mkdirSync(routesDir, { recursive: true })
+		// NOTE: `beforeUpdate`/`afterUpdate` are legacy-only in runes mode
+		// (Svelte rejects the import at compile time), so only `onMount`
+		// is exercised here — the shim still covers all three for
+		// legacy-mode components.
+		writeFileSync(
+			join(routesDir, '+page.svelte'),
+			`<script>import { onMount } from 'svelte'; onMount(() => { console.log(1) }); let { title } = $props();</script><h1>{title}</h1>`
+		)
+		const code = await composeRenderJs(
+			{
+				hasError: false,
+				routes: [
+					{
+						route: '/',
+						svelte: '+page.svelte',
+						kind: 'page',
+						hasData: false,
+						hasUniversalLoad: false,
+					},
+				],
+				error: null,
+				wrappers: [],
+				wrappersByRoute: {},
+			},
+			{ root: dir }
+		)
+		// No throwing client lifecycle may survive into the sync bundle:
+		// the `export *` re-export carries every other binding, the three
+		// explicit named exports shadow it with server noops (tree-shaken
+		// when unused, harmless when kept).
+		assert.ok(!code.includes('lifecycle_outside_component'), 'client lifecycle throw must not survive into render.js')
+		const { pathToFileURL } = await import('node:url')
+		const probeFile = join(dir, 'render.check.mjs')
+		writeFileSync(probeFile, code)
+		const mod = (await import(pathToFileURL(probeFile).href)) as unknown as {
+			renderRoute: (route: string, props: string) => { head: string; body: string }
+		}
+		const out = mod.renderRoute('/', JSON.stringify({ title: 'mount-ok' }))
+		assert.ok(out.body.includes('mount-ok'), `ungated onMount page must render the shell, got: ${out.body.slice(0, 200)}`)
+	})
+
+	it('composeRenderJs: svelte/store|motion|transition|animate|reactivity subpaths resolve server-side', async () => {
+		// Guarded matrix (spec acceptance): every subpath the resolver
+		// serves must compose + render — or fail loudly at build time.
+		// `svelte/store|reactivity` have client/server splits: sync SSR
+		// takes the server variant (package `default` condition).
+		const dir = mkdtempSync(join(tmpdir(), 'swelte-ssr-subpaths-'))
+		const routesDir = join(dir, 'src', 'routes')
+		const { mkdirSync } = await import('node:fs')
+		mkdirSync(routesDir, { recursive: true })
+		writeFileSync(
+			join(routesDir, '+page.svelte'),
+			`<script>import { writable } from 'svelte/store'; import { spring } from 'svelte/motion'; import { fade } from 'svelte/transition'; import { flip } from 'svelte/animate'; import { MediaQuery } from 'svelte/reactivity'; const w = writable(1); const s = spring(0); const f = fade; const fl = flip; const M = MediaQuery; let { title } = $props();</script><h1>{title}</h1>`
+		)
+		const code = await composeRenderJs(
+			{
+				hasError: false,
+				routes: [
+					{
+						route: '/',
+						svelte: '+page.svelte',
+						kind: 'page',
+						hasData: false,
+						hasUniversalLoad: false,
+					},
+				],
+				error: null,
+				wrappers: [],
+				wrappersByRoute: {},
+			},
+			{ root: dir }
+		)
+		assert.ok(!code.includes('node:'), 'no node: externals may leak into render.js')
+		const { pathToFileURL } = await import('node:url')
+		const probeFile = join(dir, 'render.check.mjs')
+		writeFileSync(probeFile, code)
+		const mod = (await import(pathToFileURL(probeFile).href)) as unknown as {
+			renderRoute: (route: string, props: string) => { head: string; body: string }
+		}
+		const out = mod.renderRoute('/', JSON.stringify({ title: 'sub-ok' }))
+		assert.ok(out.body.includes('sub-ok'), `subpath page must render, got: ${out.body.slice(0, 200)}`)
+	})
 })

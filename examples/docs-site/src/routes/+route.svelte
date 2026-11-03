@@ -3,7 +3,6 @@
 	import { onMount } from 'svelte'
 	import { searchDocs } from '#lib/search.js'
 	import { goto } from '@swelte/core'
-	import { browser } from '#app/environment'
 
 	let { children }: { children?: Snippet } = $props()
 
@@ -34,47 +33,42 @@
 		}
 	}
 
-	// Guards register client-side only: they must never fire during the
-	// sync SSR render (no router/stores in QJS — build error by design).
-	// NOTE: plain onMount still fires inside Svelte's sync server render,
-	// so guard with a browser check (false on the server output, so the
-	// calls are tree-shaken before QJS ever sees them).
-	// `#app/*` imports are SSR-safe (server literals in the sync bundle);
-	// only `@swelte/core` store *values* ($page/$navigating/$updated) and
-	// router fns need the browser gate (throw-stubs in QJS).
-	if (browser) {
-		onMount(() => {
-			const root = document.documentElement
-			let stored: string | null = null
-			try {
-				stored = localStorage.getItem(THEME_KEY)
-			} catch {
-				stored = null
+	// Theme + keyboard shortcut register client-side only (onMount is a
+	// server noop during sync SSR render, so the callback never fires in
+	// QJS — `document`/`window`/`localStorage` below only run in the
+	// browser after hydration). `goto` stays inside the click handler,
+	// where it never executes during SSR.
+	onMount(() => {
+		const root = document.documentElement
+		let stored: string | null = null
+		try {
+			stored = localStorage.getItem(THEME_KEY)
+		} catch {
+			stored = null
+		}
+		if (stored === 'dark' || stored === 'light') {
+			// Boot script already applied this; just sync the toggle.
+			dark = stored === 'dark'
+			root.dataset.theme = stored
+		} else {
+			// No stored pref: follow the OS, then adopt it as explicit state
+			// (toggle shows the truth; next flip persists from here).
+			applyTheme(window.matchMedia?.('(prefers-color-scheme: dark)').matches ?? false)
+		}
+		const onKey = (e: KeyboardEvent) => {
+			const t = e.target as HTMLElement | null
+			const typing = t != null && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA')
+			if (e.key === '/' && !typing) {
+				e.preventDefault()
+				const el = document.querySelector(
+					'input[aria-label="Search docs"]'
+				) as HTMLInputElement | null
+				el?.focus()
 			}
-			if (stored === 'dark' || stored === 'light') {
-				// Boot script already applied this; just sync the toggle.
-				dark = stored === 'dark'
-				root.dataset.theme = stored
-			} else {
-				// No stored pref: follow the OS, then adopt it as explicit state
-				// (toggle shows the truth; next flip persists from here).
-				applyTheme(window.matchMedia?.('(prefers-color-scheme: dark)').matches ?? false)
-			}
-			const onKey = (e: KeyboardEvent) => {
-				const t = e.target as HTMLElement | null
-				const typing = t != null && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA')
-				if (e.key === '/' && !typing) {
-					e.preventDefault()
-					const el = document.querySelector(
-						'input[aria-label="Search docs"]'
-					) as HTMLInputElement | null
-					el?.focus()
-				}
-			}
-			window.addEventListener('keydown', onKey)
-			return () => window.removeEventListener('keydown', onKey)
-		})
-	}
+		}
+		window.addEventListener('keydown', onKey)
+		return () => window.removeEventListener('keydown', onKey)
+	})
 
 	const groups: { title: string; links: { href: string; label: string }[] }[] = [
 		{

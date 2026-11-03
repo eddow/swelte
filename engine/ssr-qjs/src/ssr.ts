@@ -676,9 +676,30 @@ export async function bundleSsr(modules: Map<string, string>, entry: string, bun
 				id === 'svelte/internal/server/render-context.js'
 			)
 				return join(shimDir, 'svelte-render-context.js')
-			if (id.startsWith('svelte')) {
+			if (id === 'svelte') {
+				// A2 lifecycle shim (SvelteKit parity): bare `svelte` re-exports
+				// the client runtime, but `onMount`/`beforeUpdate`/`afterUpdate`
+				// are server `noop`s — the client impls throw
+				// `lifecycle_outside_component` during sync `render()` (no
+				// client `component_context` server-side), while svelte's own
+				// package map (`default` → `src/index-server.js`) documents
+				// them as noops. Explicit named exports shadow the star
+				// re-export per ESM semantics. Upstream files for review on
+				// svelte upgrades: `src/index-client.js` (throwing impls),
+				// `src/index-server.js` (noop impls).
+				const clientAbs = join(svelteRoot, 'src/index-client.js')
+				const key = '\0swelte-svelte-lifecycle'
+				if (!modules.has(key)) {
+					modules.set(
+						key,
+						`export * from ${JSON.stringify(clientAbs)};\nexport function onMount() {}\nexport function beforeUpdate() {}\nexport function afterUpdate() {}\n`
+					)
+				}
+				return key
+			}
+			if (id.startsWith('svelte/')) {
 				const sub = id.replace(/^svelte\/?/, '')
-				const base = join(svelteRoot, sub === '' ? 'src/index-client.js' : `src/${sub}`)
+				const base = join(svelteRoot, `src/${sub}`)
 				const isFile = (p: string) => {
 					try {
 						return statSync(p).isFile()
@@ -686,7 +707,17 @@ export async function bundleSsr(modules: Map<string, string>, entry: string, bun
 						return false
 					}
 				}
-				for (const cand of [`${base}.js`, join(base, 'index.js'), base]) {
+				for (const cand of [
+					`${base}.js`,
+					join(base, 'index.js'),
+					base,
+					// Split subpaths (`store`, `reactivity`, `legacy` ship
+					// `index-client.js`/`index-server.js` instead of `index.js`):
+					// sync SSR takes the server variant (package `default`
+					// condition), client as fallback.
+					join(base, 'index-server.js'),
+					join(base, 'index-client.js'),
+				]) {
 					if (isFile(cand)) return cand
 				}
 				return null

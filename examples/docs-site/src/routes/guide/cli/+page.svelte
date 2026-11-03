@@ -9,15 +9,15 @@
 <h1 class="text-4xl font-bold mt-2">CLI: <code class="text-2xl">swelte</code> commands</h1>
 <p class="py-4 opacity-80">Every command resolves the V toolchain itself (system <code>v</code>, else <code>@swelte/vvm</code>). Closed subcommand list — no aliases.</p>
 
-<div class="join join-vertical w-full">
-	<div class="collapse collapse-arrow join-item border border-base-300">
+<div class="border border-base-300 rounded-box overflow-hidden divide-y divide-base-300">
+	<div class="collapse collapse-arrow">
 		<input type="radio" name="cli-acc" checked />
 		<div class="collapse-title font-mono text-sm">swelte dev [--port N] [--backend N] [--root dir]</div>
 		<div class="collapse-content text-sm opacity-80">
 			<p>One command: V backend + Vite, HMR reload on <code>.v</code> change. <code>generate()</code> runs once pre-Vite so <code>.swelte/</code> exists. Dev sets same-origin <code>SWELTE_CORS_ORIGIN</code>; compare-then-write keeps idle dev quiet.</p>
 		</div>
 	</div>
-	<div class="collapse collapse-arrow join-item border border-base-300">
+	<div class="collapse collapse-arrow">
 		<input type="radio" name="cli-acc" />
 		<div class="collapse-title font-mono text-sm">swelte build [--target auto|static|node|edge] [--target-os linux|macos|windows]</div>
 		<div class="collapse-content text-sm opacity-80">
@@ -31,14 +31,14 @@
 			</ol>
 		</div>
 	</div>
-	<div class="collapse collapse-arrow join-item border border-base-300">
+	<div class="collapse collapse-arrow">
 		<input type="radio" name="cli-acc" />
 		<div class="collapse-title font-mono text-sm">swelte test [--update-snapshot]</div>
 		<div class="collapse-content text-sm opacity-80">
 			<p><code>generate()</code> → <code>v test</code> per dir → contract check (types↔stubs parity) → shape snapshot in <code>swelte.contract.json</code> (committed, drift = fail).</p>
 		</div>
 	</div>
-	<div class="collapse collapse-arrow join-item border border-base-300">
+	<div class="collapse collapse-arrow">
 		<input type="radio" name="cli-acc" />
 		<div class="collapse-title font-mono text-sm">swelte preview / export / check / init</div>
 		<div class="collapse-content text-sm opacity-80">

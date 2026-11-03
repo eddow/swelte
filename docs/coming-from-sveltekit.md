@@ -9,8 +9,8 @@ that bites during migration. Only built behavior is documented here; open work l
 
 | SvelteKit | Swelte | Notes |
 |---|---|---|
-| `+page.svelte` | `+page.svelte` | Same. Component per URL leaf. |
-| `+page.ts` / `+page.server.ts` | `+page.v` (`@[load]`) + `+page.ts` (universal) | Server-only `load` = HTML-navigation initial paint (`parent T` param replaces `parent()`); universal sibling `load({ params, props, url })` = sync view-model transform inside `renderRoute` (typed TS — ssr-qjs transpiles via `transpileSiblingLoad`, mirror of the `.svelte` `generate: 'server'` step; async only when `ssr=false`). |
+| `+page.svelte` | `+page.svelte` **or** `about.svelte` (same URL) | Same component model, two spellings: `about.svelte` ⇔ `about/+page.svelte` (both → `/about`; `src/routes/+page.svelte` ⇔ `/`). See leaf duality below. |
+| `+page.ts` / `+page.server.ts` | `+page.v` (`@[load]`) + `+page.ts` (universal) — or flat `about.v` + `about.ts` | Same duality as the `.svelte`: `about.v` ⇔ `about/+page.v`, `about.ts` ⇔ `about/+page.ts` (one triple per URL — mixing `foo.*` + `foo/+page.*` is a build error). Server-only `load` = HTML-navigation initial paint (`parent T` param replaces `parent()`); universal sibling `load({ params, props, url })` = sync view-model transform inside `renderRoute` (typed TS — ssr-qjs transpiles via `transpileSiblingLoad`, the mirror of the `.svelte` `generate: 'server'` step; async only when `ssr=false`). |
 | `+layout.svelte` | `+route.svelte` | Wrapper per subtree (nav + chrome), Svelte 5 `children` Snippet + `{@render children?.()}` outlet (not slots). SPA mount nests automatically; SSR `renderRoute` composes the chain server-side; client `hydrateSwelteRoute` hydrates the whole chain in place (SSR DOM adopted, leaf interactive; mismatch falls back to mount). |
 | `+layout.server.ts` | `+route.v` (`@[load]`) | Same cascade position. Level 0 takes `(req)`; deeper takes `(req, parent T)` — typed parent value instead of `await parent()`. Mismatch is a build error. |
 | `+server.ts` | `SwelteResponse` in the leaf `.v` | No standalone file. `@[get]`/`@[post]`/`@[put]`/`@[patch]`/`@[delete]` on the route file; one default per verb, `?q` qualifiers for many-per-file. Returns `string`/struct (JSON), `[]u8` (binary), `(int, string)` (status+text), or `SwelteResponse{ status, headers, cookies, body/body_bytes }` — full header/cookie/status/binary control, translated 1:1 into veb by `Hand`. |
@@ -18,7 +18,37 @@ that bites during migration. Only built behavior is documented here; open work l
 | `params/*.ts` matchers | `src/matchers.v` `@[matcher]` | Central file, V-only + codegen'd JS mirrors. `[id=integer]` builtin (digits, `Params` narrows to `number`); custom `@[matcher] (s string) bool` fns in the portable subset inline into `swelte_matcher_check` + both JS mirrors. Unknown name / bad shape / `time\|os\|net` import = build error. |
 | `hooks.server.ts` | `+route.v` `@[before]`/`@[after]` + `src/app.v` | Subtree middleware stays in `+route.v`; root `+route.v` is already the global head. `src/app.v` (`@[startup] () void|!void` once before `veb.run`, zero/one fn, no qualifier/params; `@[reroute](host, path)` to rewritten path or empty string, zero/one fn, no qualifier) handles boot + rewrite; `@[cron('60s'|'5m'|'1h')]` ticks (one-or-more fns, qualifier required) run on spawn loops (→ `specs/app.md`). No `handle/handleFetch/handleError`; `transformPageChunk` = `@[after]` string rewrite. |
 | `src/lib/server/*` | `src/lib/**/backend/*.v` or `*_backend.v` | Physical: backend-only files are a build error from browser/`#lib/` WASM imports. Same V compiles native + WASM for non-backend `#lib/`. |
-| `+page.v` naming | `+page.v` / legacy `index.v` (optional — `+page.svelte` alone renders) | `foo/+page.v` (or `foo/index.v`) claims `/foo` for the API dispatcher (verbs/`@[rpc]`/`@[load]`). `foo.v` + `foo/+page.v` together is a build error (one file per URL). |
+| `+page.v` naming | `+page.v` / legacy `index.v` (optional — `+page.svelte` alone renders) | `foo/+page.v` (or `foo/index.v`) claims `/foo` for the API dispatcher (verbs/`@[rpc]`/`@[load]`). Flat `foo.v` is the same URL (see leaf duality above). `foo.v` + `foo/+page.v` together is a build error (one file per URL). |
+
+### Leaf duality: `about.*` ⇔ `about/+page.*`
+
+Every page URL has **two spellings** — pick one triple per URL:
+
+```
+src/routes/about.svelte  ⇔  src/routes/about/+page.svelte   →  /about
+src/routes/about.v       ⇔  src/routes/about/+page.v        →  /about (API/load arms)
+src/routes/about.ts      ⇔  src/routes/about/+page.ts       →  universal load sibling
+src/routes/+page.svelte (+ .v / .ts)                        →  / (root)
+```
+
+(`index.*` is the accepted legacy spelling of `+page.*`, same URL.)
+
+* One file per URL: mixing `foo.svelte` + `foo/+page.svelte` (or `foo.v` +
+  `foo/+page.v`, or cross-extension `foo.svelte` + `foo/+page.v`) is a
+  build error — "claims the same URL".
+* `.svelte` and `.v` pair by **mod path**: `about.v` pairs with
+  `about.svelte`; `about/+page.v` pairs with `about/+page.svelte`. There is
+  no cross-pairing (`about.v` does not feed `about/+page.svelte`).
+* The sibling universal load (`export function load`) sits next to its
+  component: `about.ts` for `about.svelte`, `+page.ts` for `+page.svelte`.
+* When to use which: flat `about.*` for simple leaves; the `about/`
+  folder leaf when the page needs co-located siblings (`entries.ts` for
+  dynamic segments, per-route helpers) or must sit inside a `+route` guard's
+  directory — wrapping covers `foo/+page.*` and `foo/**/*`, never the flat
+  sibling `foo.*` (so a guarded page must be the folder leaf).
+* Under `src/routes/api/**` there is no `.svelte` partner (headless JSON):
+  `api/greet.v` → `/api/greet`. A routed `.v` outside `api/` with no
+  `.svelte` partner is an orphan warning.
 
 ## Routing
 
