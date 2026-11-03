@@ -4123,9 +4123,10 @@ export function initSwelteRouter(target) {
 					warnings.push(`harness: ${(e as Error).message}`)
 				}
 				// Client entry (engine-owned, like .swelte/server.v):
-				// templates/client/main.ts → .swelte/entry-main.ts.
-				// transformIndexHtml below points the script tag at it;
-				// src/main.ts stays a user-owned shim. routes.js is
+				// templates/client/main.ts → .swelte/entry-main.ts, plus the
+				// inverted user-setup imports from renderClientEntry
+				// (src/app.ts as ../src/app.js, src/app.css when present).
+				// routes.js is
 				// untyped JS: user `tsc --strict` would infer the
 				// defaulted `errorProps` param as required, so emit an
 				// adjacent .d.ts declaring it optional.
@@ -4196,14 +4197,15 @@ export function initSwelteRouter(target) {
 			return generate(activeRoot || process.cwd())
 		},
 		transformIndexHtml(html) {
-			// Point the entry script at the generated client entry
-			// (.swelte/entry-main.ts, engine-owned). src/main.ts remains a
-			// user-owned shim for eject/custom setups — the framework never
-			// requires editing it. Only rewrites the canonical /src/main.ts
-			// reference; custom entries are left alone.
+			// Entry script already points at the generated client entry
+			// (.swelte/entry-main.ts, engine-owned), which pulls user setup
+			// in via renderClientEntry (src/app.ts + src/app.css). Legacy
+			// projects still referencing the old /src/main.ts or /src/app.ts
+			// shims get rewritten to the generated entry; custom entries
+			// are left alone.
 			let out = html
-			if (out.includes('/src/main.ts')) {
-				out = out.replaceAll('/src/main.ts', '/.swelte/entry-main.ts')
+			for (const legacy of ['/src/main.ts', '/src/app.ts']) {
+				if (out.includes(legacy)) out = out.replaceAll(legacy, '/.swelte/entry-main.ts')
 			}
 			// SSR markers: Hand fills <!--ssr-head-->/<!--ssr-body--> when a
 			// renderer answers. Inject them into the #app host when absent

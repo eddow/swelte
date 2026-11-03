@@ -135,14 +135,28 @@ describe('config normalization (tmp roots)', () => {
 	})
 
 
-	it('renderClientEntry prepends hook only when src/client.ts exists', async () => {
+	it('renderClientEntry pulls src/app.ts + src/app.css via .js specifiers (no allowImportingTsExtensions)', async () => {
 		const { templatesDir } = await import('./config.js')
 		const fromUrl = import.meta.url
 		void templatesDir
 		const root = mkdtempSync(join(tmpdir(), 'swelte-cfg-'))
 		mkdirSync(join(root, 'src'), { recursive: true })
-		const noHook = renderClientEntry(root, fromUrl)
-		assert.ok(noHook.includes('Optional user hook'))
+		const none = renderClientEntry(root, fromUrl)
+		assert.ok(none.includes('Optional user hook'))
+		writeFileSync(join(root, 'src', 'app.ts'), 'export {}')
+		writeFileSync(join(root, 'src', 'app.css'), ':root{}')
+		const hook = renderClientEntry(root, fromUrl)
+		assert.ok(hook.startsWith(`import '../src/app.js'`))
+		assert.ok(hook.includes(`import '../src/app.css'`))
+		assert.ok(!hook.includes(`import '../src/client.js'`))
+	})
+
+	it('renderClientEntry honors legacy src/client.ts when app.ts is absent', async () => {
+		const { templatesDir } = await import('./config.js')
+		const fromUrl = import.meta.url
+		void templatesDir
+		const root = mkdtempSync(join(tmpdir(), 'swelte-cfg-'))
+		mkdirSync(join(root, 'src'), { recursive: true })
 		writeFileSync(join(root, 'src', 'client.ts'), 'export {}')
 		const hook = renderClientEntry(root, fromUrl)
 		assert.ok(hook.startsWith(`import '../src/client.js'`))

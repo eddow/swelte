@@ -336,18 +336,27 @@ export function renderHarness(
 	return src
 }
 
-/** Render the client entry: verbatim `templates/client/main.ts` (its
- *  `./routes.js` import already targets the `.swelte/` sibling).
- *  User hook: when `<root>/src/client.ts` exists it is imported for
- *  side effects (app setup) before the router mounts — engine composes,
- *  user fills. Never throws when the hook is absent. */
+/** Render the client entry: `templates/client/main.ts` verbatim (its
+ *  `./routes.js` import already targets the `.swelte/` sibling) plus
+ *  user-owned setup pulled in by the generated entry (inverted wiring):
+ *  when `<root>/src/app.ts` exists it is imported for side effects
+ *  (as `../src/app.js` — `.js` specifier so `tsc` stays clean without
+ *  `allowImportingTsExtensions`); legacy `<root>/src/client.ts` is
+ *  honored the same way when `app.ts` is absent. When
+ *  `<root>/src/app.css` exists it is imported too. Missing files emit
+ *  a comment line instead, so the entry never throws when the hooks
+ *  are absent. Legacy `src/main.ts` shims are NOT auto-imported: they
+ *  contain `import '../.swelte/entry-main.ts'` (reimporting the entry
+ *  would cycle) — move custom setup to `src/app.ts` and delete them. */
 export function renderClientEntry(root: string, fromUrl: string): string {
 	const file = join(templatesDir(fromUrl), 'client', 'main.ts')
 	const src = readFileSync(file, 'utf8')
-	const hook = existsSync(join(resolve(root), 'src', 'client.ts'))
-		? `import '../src/client.js'\n`
-		: `// Optional user hook: create src/client.ts for app-level setup.\n`
-	return hook + src
+	const lines: string[] = []
+	if (existsSync(join(resolve(root), 'src', 'app.ts'))) lines.push(`import '../src/app.js'`)
+	else if (existsSync(join(resolve(root), 'src', 'client.ts'))) lines.push(`import '../src/client.js'`)
+	else lines.push(`// Optional user hook: create src/app.ts for app-level setup.`)
+	if (existsSync(join(resolve(root), 'src', 'app.css'))) lines.push(`import '../src/app.css'`)
+	return lines.join('\n') + '\n' + src
 }
 
 /** Declaration bundle for the `$app/*` compat stubs (single source of

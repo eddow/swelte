@@ -3,8 +3,9 @@
 // the demo routes/lib on top (`--sample`, or interactive pick). Only
 // `__NAME__` is replaced. Generated files (server harness, client entry,
 // routers) are NEVER scaffolded — `dev`/`build` derive them into `.swelte/`.
-// src/main.ts ships as a thin user-owned shim; the plugin's
-// transformIndexHtml points the script tag at .swelte/entry-main.ts.
+// src/app.ts is the optional user-owned setup hook; the engine-owned
+// .swelte/entry-main.ts imports it (plus src/app.css when present), and the
+// plugin's transformIndexHtml points the script tag at .swelte/entry-main.ts.
 import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
