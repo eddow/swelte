@@ -27,6 +27,8 @@ export interface SsrQjsOptions {
 	csrf?: 'ignore' | 'enforce'
 	methodOverride?: boolean
 	version?: string
+	/** V+TS plugins (core `SweltePlugin` contract, implemented by `@swelte/plus`). */
+	plugins?: import('@swelte/core/vite').SweltePlugin[]
 }
 
 export function swelte(options: SsrQjsOptions = {}): Plugin[] {

@@ -1,6 +1,7 @@
 import { defineConfig } from 'vite';
 import { svelte } from '@sveltejs/vite-plugin-svelte';
 import { swelte } from '@swelte/ssr-qjs';
+import { jobsPlugin } from '@swelte/plus';
 import svelteConfig from './svelte.config.js';
 
 const vBackendUrl =
@@ -23,6 +24,8 @@ export default defineConfig({
     // the unified config for any option not passed here.
     swelte({
       vBackendUrl,
+      // Beyond-parity cron lives in @swelte/plus/jobs (core stays parity-only).
+      plugins: [jobsPlugin],
     }),
   ],
 });

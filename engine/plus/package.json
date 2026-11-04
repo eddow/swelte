@@ -1,0 +1,67 @@
+{
+  "name": "@swelte/plus",
+  "version": "0.1.1",
+  "description": "Swelte beyond-SvelteKit plugins \u2014 jobs (cron), SSE channels, SWR, offline outbox, WS, DB, images (V+TS).",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": "./dist/index.js",
+    "./jobs": "./dist/jobs.js",
+    "./service-worker": "./dist/service-worker.js",
+    "./swr": "./dist/swr.js",
+    "./sse-channels": "./dist/sse-channels.js",
+    "./outbox": "./dist/outbox.js"
+  },
+  "files": [
+    "README.md",
+    "dist",
+    "LICENSE-MIT",
+    "package.json"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "tsc -p tsconfig.json --watch",
+    "test": "node --test --test-reporter=spec \"dist-test/**/*.test.js\"",
+    "pretest": "tsc -p tsconfig.test.json",
+    "prepublishOnly": "npm run build"
+  },
+  "dependencies": {
+    "@swelte/core": "^0.1.1"
+  },
+  "peerDependencies": {
+    "svelte": "^5.0.0",
+    "vite": "^6.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.6",
+    "typescript": "^5.0.0"
+  },
+  "license": "MIT",
+  "author": {
+    "name": "Fran\u00e7ois Marie De Mey",
+    "email": "fmdm@emedware.dev",
+    "url": "https://github.com/eddow"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/eddow/swelte.git"
+  },
+  "homepage": "https://github.com/eddow/swelte",
+  "publishConfig": {
+    "access": "public"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "keywords": [
+    "swelte",
+    "svelte",
+    "sse",
+    "cron",
+    "jobs",
+    "offline",
+    "isr",
+    "websocket"
+  ]
+}

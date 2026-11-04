@@ -157,53 +157,43 @@ describe('generate() validation errors (tmp scaffold, no V binary)', () => {
 		assert.ok(sv.includes("if rerouted != '' { path = rerouted }"), sv.slice(0, 8000))
 	})
 
-	it('cron hooks: validation + spawn-loop codegen', async () => {
+	it('unregistered attrs parse to nothing (plugins register via extraAttrs)', async () => {
 		const { readFileSync, writeFileSync } = await import('node:fs')
-		// Missing qualifier -> build error.
+		const { parseVFile } = await import('./vite/parse.js')
+		// No plugin loaded: `@[cron]` is not a core attr, so the parser drops
+		// the fn entirely (same as any typo'd attr) — core output stays inert.
+		assert.deepEqual(
+			parseVFile('module s\n@[cron]\npub fn tick() { }').map((f) => f.attr),
+			[]
+		)
+		// The owning plugin registers it: fn parses with body for inlining.
+		assert.deepEqual(
+			parseVFile('module s\n@[cron]\npub fn tick() { }', ['cron']).map((f) => f.attr),
+			['cron']
+		)
 		let root = scaffold({ '+page.v': 'module p\n@[get] pub fn g() string { return "" }' })
 		writeFileSync(join(root, 'src', 'app.v'), 'module s\n@[cron]\npub fn tick() { }')
-		await assert.rejects(() => buildStart(root), /needs a duration qualifier/)
-		// Bad duration -> build error.
-		root = scaffold({ '+page.v': 'module p\n@[get] pub fn g() string { return "" }' })
-		writeFileSync(join(root, 'src', 'app.v'), "module s\n@[cron('daily')]\npub fn tick() { }")
-		await assert.rejects(() => buildStart(root), /bad duration/)
-		// Params -> build error.
-		root = scaffold({ '+page.v': 'module p\n@[get] pub fn g() string { return "" }' })
-		writeFileSync(join(root, 'src', 'app.v'), "module s\n@[cron('60s')]\npub fn tick(n int) { }")
-		await assert.rejects(() => buildStart(root), /takes no params/)
-		// Non-void return -> build error.
-		root = scaffold({ '+page.v': 'module p\n@[get] pub fn g() string { return "" }' })
-		writeFileSync(
-			join(root, 'src', 'app.v'),
-			"module s\n@[cron('60s')]\npub fn tick() string { return '' }"
-		)
-		await assert.rejects(() => buildStart(root), /must return void/)
-		// Misplaced @[cron] in routes -> build error.
+		await buildStart(root)
+		const svCron = readFileSync(join(root, '.swelte', 'server.v'), 'utf8')
+		assert.ok(!svCron.includes('swelte_cron'), 'core must emit no cron loops without the owning plugin')
+		// Unregistered @[cron] in routes → dropped at parse, route still builds.
 		root = scaffold({
 			'+page.v':
 				'module p\n@[cron(\'60s\')]\npub fn tick() { }\n@[get] pub fn g() string { return "" }',
 		})
 		writeFileSync(join(root, 'src', 'app.v'), 'module s')
-		await assert.rejects(() => buildStart(root), /only allowed in its own file/)
-		// Happy path: plain + fallible crons -> two loops, distinct sleeps.
-		root = scaffold({ '+page.v': 'module p\n@[get] pub fn g() string { return "" }' })
-		writeFileSync(
-			join(root, 'src', 'app.v'),
-			"module s\n@[cron('60s')]\npub fn tick() {\n\tprintln('tick')\n}\n@[cron('5m')]\npub fn sweep() !void {\n\tprintln('sweep')\n}"
-		)
 		await buildStart(root)
-		const sv = readFileSync(join(root, '.swelte', 'server.v'), 'utf8')
-		assert.ok(sv.includes('@[cron] (src/app.v)'))
-		assert.ok(sv.includes("println('tick')"))
-		assert.ok(sv.includes("println('sweep')"))
-		assert.ok(sv.includes('time.sleep(60 * time.second)'))
-		assert.ok(sv.includes('time.sleep(300 * time.second)'))
-		assert.ok(sv.includes('spawn swelte_cron_loop_1()'))
-		assert.ok(sv.includes('spawn swelte_cron_loop_2()'))
-		assert.ok(sv.includes('fn swelte_cron_1() {'))
-		assert.ok(sv.includes('fn swelte_cron_2() !void {'))
-		assert.ok(sv.includes("eprintln('[swelte:cron] ' + err.msg())"))
-
+		assert.ok(
+			!readFileSync(join(root, '.swelte', 'server.v'), 'utf8').includes('swelte_cron'),
+			'unregistered cron in routes must stay inert'
+		)
+		// Misplaced core hook in routes → own-file guard rejects before dispatch.
+		root = scaffold({
+			'+page.v':
+				'module p\n@[startup]\npub fn boot() { }\n@[get] pub fn g() string { return "" }',
+		})
+		writeFileSync(join(root, 'src', 'app.v'), 'module s')
+		await assert.rejects(() => buildStart(root), /only allowed in its own file/)
 		// No hooks → harness byte-identical to the template skeleton.
 		root = scaffold({ '+page.v': 'module p\n@[get] pub fn g() string { return "" }' })
 		await buildStart(root)

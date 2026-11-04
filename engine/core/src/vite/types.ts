@@ -10,6 +10,9 @@ export interface SweltePluginOptions {
 	/** V backend base URL for dev RPC proxy (e.g. http://localhost:8131).
 	 * Falls back to SWELTE_V_BACKEND_URL (injected by `swelte dev`). Unset = no proxy. */
 	vBackendUrl?: string
+	/** V+TS plugins (contracted in core, implemented outside it).
+	 * Default [] = parity-only output, byte-identical to today. */
+	plugins?: SweltePlugin[]
 	/** URL trailing-slash policy ('always'|'never'|'ignore'). Env SWELTE_TRAILING_SLASH wins. */
 	trailingSlash?: 'always' | 'never' | 'ignore'
 	/** Base path for generated URLs (SvelteKit `paths.base` equivalent). */
@@ -79,8 +82,8 @@ export interface RpcFn {
 		| 'matcher'
 		| 'startup'
 		| 'reroute'
-		| 'cron'
 		| 'error'
+		| (string & {})
 	qualifier?: string
 	params: RpcParam[]
 	vret: string
@@ -168,17 +171,6 @@ export interface MatcherDef {
 	jsBody: string
 }
 
-export interface CronHook {
-	/** Duration qualifier as written: '60s' | '5m' | '1h'. */
-	every: string
-	/** Interval in seconds (validated). */
-	seconds: number
-	/** Raw V body of the tick fn (inlined into a spawn loop). */
-	body: string
-	/** Whether the fn is fallible (`!void` — error logged, loop continues). */
-	fallible: boolean
-}
-
 export interface ServerHooks {
 	/** Raw V body of `@[startup]` (inlined into main before veb.run). */
 	startupBody?: string
@@ -189,8 +181,6 @@ export interface ServerHooks {
 	 * return '' to keep the message, or a sanitized replacement
 	 * (never leak internals to the client). Zero/one fn, no qualifier. */
 	errorBody?: string
-	/** `@[cron]` tick fns (spawn loop per fn in main). */
-	crons: CronHook[]
 	hasFile: boolean
 }
 
@@ -198,4 +188,70 @@ export interface WrapperMw {
 	wmod: string
 	src: string
 	mws: { name: string; attr: 'before' | 'after' }[]
+}
+
+/** V+TS plugin contract (consumed by core, implemented by plugin packages).
+ * Core stays standalone: an app using only parity features (verbs/rpc/sse
+ * per-request, serviceWorker/prerender/isr/offline literal)
+ * installs no plugin package. Plugins extend via these hooks only.
+ * `attr` stays core `RpcFn['attr']`-shaped; unknown attrs claimed by a plugin. */
+export interface SweltePluginRouteCtx {
+	prefix: string
+	mod: string
+	route: string
+}
+
+export interface SweltePluginHarness {
+	imports?: string
+	appFields?: string
+	/** V emitted BEFORE `fn main()` (top-level fns/types). */
+	main?: string
+	/** V emitted INSIDE `fn main()` (spawns, startup stmts). Spliced
+	 *  right after `mut app := &App{}` so ordering matches user hooks. */
+	mainInner?: string
+	beforeRequest?: string
+	protect?: string[]
+}
+
+export interface SweltePlugin {
+	name: string
+	/** Attrs this plugin claims (e.g. `['cron']`, `['ws']`, `['job']`). */
+	attrs: string[]
+	configKey?: string
+	validate?: (rel: string, fn: { name: string; attr: string; qualifier?: string }) => void
+	/** V fragment appended to the route leaf file. */
+	emitRoute?: (ctx: SweltePluginRouteCtx, fns: { name: string; attr: string }[]) => string
+	/** V fragment appended to server_gen.v. */
+	emitServerGen?: (routes: { route: string; prefix: string }[]) => string
+	harness?: (config: unknown) => SweltePluginHarness
+	/** App-level hooks from `src/app.v`: called with the parsed fns carrying
+	 * this plugin's attrs. Returns V spliced into the harness (e.g. cron
+	 * spawn loops). Core passes through; the plugin owns parse+validate+emit. */
+	loadAppHooks?: (root: string, srcDir?: string) => {
+		fragment?: SweltePluginHarness
+		errors?: string[]
+	}
+	/** TS declarations appended to types/<mod>.d.ts. */
+	clientDts?: (mod: string, fns: { name: string; attr: string }[]) => string
+	/** CLI commands merged into `swelte` (see `commands/types.ts` Command). */
+	cli?: {
+		name: string
+		summary: string
+		args?: { name: string; short?: string; help: string; value?: 'string' | 'number' | 'boolean' }[]
+		run: (ctx: {
+			argv: string[]
+			opts: Record<string, string | number | boolean>
+			rest: string[]
+			log: (m: string) => void
+			error: (m: string) => void
+		}) => Promise<void> | void
+	}[]
+}
+
+export function defineSweltePlugin(plugin: SweltePlugin): SweltePlugin {
+	if (!plugin.name) throw new Error('[swelte] plugin needs a name')
+	// Attr-claiming plugins (`jobs` → cron, future `ws`) list names here;
+	// augment-only plugins (sse-channels/swr/outbox) leave attrs empty and
+	// extend core via harness/CLI/DTS fragments. Empty is valid.
+	return plugin
 }

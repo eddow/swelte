@@ -344,8 +344,8 @@ export function templatesDir(fromUrl: string): string {
 
 /** Render the server harness: skeleton from templates/ + user hooks from
  *  `src/app.v` (`@[startup]` runs once in main, `@[reroute]` rewrites
- *  host/path in before_request, `@[error]` sanitizes error messages,
- *  `@[cron]` spawn loops in main).
+ *  host/path in before_request, `@[error]` sanitizes error messages)
+ *  plus plugin fragments (`fragments`, e.g. cron spawn loops from `@swelte/plus/jobs`).
  *  Absent hooks → byte-identical skeleton. */
 export function renderHarness(
 	_config: Required<SwelteOptions>,
@@ -354,8 +354,8 @@ export function renderHarness(
 		startupBody?: string
 		rerouteBody?: string
 		errorBody?: string
-		crons?: { seconds: number; body: string; fallible: boolean }[]
-	}
+	},
+	fragments?: { imports?: string; main?: string; mainInner?: string }[]
 ): string {
 	const file = join(templatesDir(fromUrl), 'harness', 'server.v')
 	let src = readFileSync(file, 'utf8')
@@ -364,37 +364,6 @@ export function renderHarness(
 			.split('\n')
 			.map((l) => (l.trim() === '' ? '' : '\t' + l))
 			.join('\n')
-	if (hooks?.crons?.length) {
-		const anchor = 'fn main() {'
-		let defs = ''
-		let spawns = ''
-		let n = 0
-		for (const c of hooks.crons) {
-			n++
-			const sig = c.fallible ? `fn swelte_cron_${n}() !void {` : `fn swelte_cron_${n}() {`
-			const call = c.fallible
-				? `swelte_cron_${n}() or { eprintln('[swelte:cron] ' + err.msg()) }`
-				: `swelte_cron_${n}()`
-			defs +=
-				`// @[cron] tick ${n} (src/app.v) — user body, top-level so fallible fns compile.\n` +
-				`${sig}\n` +
-				indent(c.body) +
-				'\n}\n' +
-				`fn swelte_cron_loop_${n}() {\n\tfor {\n\t\ttime.sleep(${c.seconds} * time.second)\n` +
-				indent(call) +
-				'\n\t}\n}\n'
-			spawns += `\tspawn swelte_cron_loop_${n}()\n`
-		}
-		const cronBlock =
-			'// @[cron] (src/app.v) — spawn + time.sleep loops, single-instance best-effort.\n' +
-			'// No watchdog: long-lived by design. Bodies must be idempotent.\n' +
-			spawns
-		if (src.includes(anchor)) src = src.replace(anchor, defs + anchor)
-		else src += '\n// @[cron] anchor missing — harness template changed.\n'
-		const mainAnchor = '\tmut app := &App{}'
-		if (src.includes(mainAnchor)) src = src.replace(mainAnchor, cronBlock + mainAnchor)
-		else src += '\n// @[cron] spawn anchor missing — harness template changed.\n'
-	}
 	if (hooks?.startupBody !== undefined) {
 		const anchor = '\tmut app := &App{}'
 		const inject =
@@ -454,6 +423,24 @@ export function renderHarness(
 			}
 			src = src.slice(0, idx) + inject + src.slice(i)
 		} else src += `\n${inject}`
+	}
+	for (const frag of fragments ?? []) {
+		if (frag.imports && src.includes('import veb'))
+			src = src.replace('import veb', `import veb\n${frag.imports}`)
+		if (frag.main) {
+			const anchor = 'fn main() {'
+			if (src.includes(anchor)) src = src.replace(anchor, `${frag.main}\n${anchor}`)
+			else src += `\n// [swelte] plugin main anchor missing — harness template changed.\n`
+		}
+		// mainInner splices INSIDE main, BEFORE `mut app := &App{}` (spawns,
+		// startup stmts). Matches the old cron splice: block + anchor on its
+		// own lines, startup injection (which rewrites the same anchor) lands
+		// after it, veb.run last. `main` fragments stay top-level pre-main.
+		if (frag.mainInner) {
+			const anchor = '\tmut app := &App{}'
+			if (src.includes(anchor)) src = src.replace(anchor, frag.mainInner + anchor)
+			else src += `\n// [swelte] plugin mainInner anchor missing — harness template changed.\n`
+		}
 	}
 	return src
 }

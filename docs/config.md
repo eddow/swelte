@@ -252,18 +252,20 @@ export const chunk = 'eager' | 'lazy' // default: 'inherit' (follow global mode)
   (`__swelteUrl` guard + `matchSegs`). Custom matchers project
   `string` (only `integer` narrows to `number`). Unknown name/bad
   shape = build error with file+line.
-* **`src/app.v` lifecycle** (`@[startup]`, `@[reroute]`, `@[cron]`; never
+* **`src/app.v` lifecycle** (`@[startup]`, `@[reroute]`; never
   routed/never importable from browser): `@[startup] () void|!void`
   (zero/one fn, no qualifier, no params) runs once before `veb.run`
   (throw aborts boot); `@[reroute] (host string, path string) string`
   (zero/one fn, no qualifier)
   runs first in `before_request` — before `trailingSlash`
   normalization, CSRF/CORS/static/dispatch
-  (`''` = no-op). `@[cron('60s'|'5m'|'1h')] () void|!void`
-  (one-or-more fns, qualifier required): each body runs on a
-  `spawn` + `time.sleep(<seconds>)` loop in `main`
-  (single-instance best-effort, no watchdog, idempotent bodies;
-  fallible `!void` errors are logged and the loop continues).
+  (`''` = no-op). `@[cron('60s'|'5m'|'1h')]` () void|!void` lives in
+  `@swelte/plus/jobs` (add `jobsPlugin` to `swelte({ plugins: [...] })`):
+  one-or-more fns, qualifier required; each body runs on a `spawn` +
+  `time.sleep(<seconds>)` loop in `main` (single-instance best-effort,
+  no watchdog, idempotent bodies; fallible `!void` errors are logged
+  and the loop continues). Without the plugin `@[cron]` is an
+  unknown-attr build error.
 * **`+route.svelte` nesting** (Svelte 5 `children` Snippet, not slots):
   every wrapper must declare `children` via `$props()` + `{@render
   children?.()}` (missing = SSR build error). SPA mount nests

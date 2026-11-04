@@ -9,9 +9,9 @@
 
 export type { SwelteConfig, SwelteOptions } from './gen/config.js'
 export { defineConfig } from './gen/config.js'
-export { cronSeconds, loadServerHooks } from './vite/hooks.js'
+export { loadServerHooks } from './vite/hooks.js'
 export { dynSegPattern, loadMatchers, transpileMatcherBody } from './vite/matchers.js'
-export { narrowArgParts, narrowCall, parseStructs, parseVFile, tsTypeFor } from './vite/parse.js'
+export { CORE_ATTRS, narrowArgParts, narrowCall, parseStructs, parseVFile, tsTypeFor } from './vite/parse.js'
 export { swelte, swelte as default } from './vite/plugin.js'
 export {
 	assertChunkHint,
@@ -58,7 +58,6 @@ export {
 } from './vite/service-worker.js'
 export { jsFetchFor, jsWasmFor, wasmParamKind, wasmReturnKind } from './vite/stubs.js'
 export type {
-	CronHook,
 	LoadFn,
 	MatcherDef,
 	PrerenderCrawl,
@@ -67,7 +66,11 @@ export type {
 	RpcParam,
 	ServerHooks,
 	SvelteRouteEntry,
+	SweltePlugin,
+	SweltePluginHarness,
 	SweltePluginOptions,
+	SweltePluginRouteCtx,
 	VStruct,
 	WrapperMw,
 } from './vite/types.js'
+export { defineSweltePlugin } from './vite/types.js'

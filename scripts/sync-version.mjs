@@ -9,7 +9,7 @@
 import { readFileSync, writeFileSync } from 'node:fs'
 
 const ROOT = 'package.json'
-const PACKAGES = ['engine/core', 'engine/vvm', 'engine/ssr-qjs', 'engine/mcp']
+const PACKAGES = ['engine/core', 'engine/vvm', 'engine/ssr-qjs', 'engine/mcp', 'engine/plus']
 
 function bump(v, kind) {
 	const [maj, min, pat] = v.split('.').map(Number)

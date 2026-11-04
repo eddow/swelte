@@ -109,6 +109,13 @@ export function swelte(options: SweltePluginOptions = {}): Plugin {
 		options.chunking === 'single' || options.chunking === 'layout' || options.chunking === 'route'
 			? options.chunking
 			: 'layout'
+	// V+TS plugins (core contract `SweltePlugin`; `@swelte/plus` is one
+	// collection — third-party plugins implement the same interface).
+	// Default [] = parity-only output, byte-identical to today. Plugin attrs
+	// (extraAttrs) parse with bodies through parseVFile; core ignores
+	// plugin-claimed fns everywhere except plugin validate() dispatch.
+	const plugins = options.plugins ?? []
+	const extraAttrs = [...new Set(plugins.flatMap((p) => p.attrs))]
 	// Resolved per-generate() against the Vite root (never at construction:
 	// outDir is relative and the cwd at plugin-construction time is not the
 	// project root when loaded via vite.config.ts).
@@ -279,9 +286,18 @@ export function swelte(options: SweltePluginOptions = {}): Plugin {
 					throw e
 				}
 				const knownMatchers = new Set(matchers.keys())
-				// Lifecycle hooks (`src/app.v`, `@[startup]`/`@[reroute]`).
-				// Missing file → no-op hooks (harness byte-identical).
+				// Lifecycle hooks (`src/app.v`, core attrs `@[startup]`/`@[reroute]`/`@[error]`).
+				// Missing file → no-op hooks (harness byte-identical). Plugins own
+				// their attrs via loadAppHooks: collected here, errors thrown like
+				// core shape errors, fragments merged into the harness fragments.
 				const hooks = loadServerHooks(root)
+				const appHookFragments: { imports?: string; main?: string; mainInner?: string }[] = []
+				for (const plug of plugins) {
+					if (!plug.loadAppHooks) continue
+					const got = plug.loadAppHooks(root)
+					if (got.errors?.length) throw new Error(got.errors[0])
+					if (got.fragment) appHookFragments.push(got.fragment)
+				}
 
 				function vSafe(mod: string): string {
 					return vFileSafe(mod)
@@ -625,22 +641,29 @@ ${list(params, (p) => `\t${p.name}${p.optional ? '?' : ''}: ${p.tstype}\n`)}}
 				{
 					for (const f of routeFiles) {
 						const src = readFileSync(f, 'utf8')
-						const allFns = parseVFile(src)
+						const allFns = parseVFile(src, extraAttrs)
 						const mwFns = allFns.filter((x) => x.attr === 'before' || x.attr === 'after')
 						const fns = allFns.filter((x) => x.attr !== 'before' && x.attr !== 'after')
 						const rpcFns = fns.filter((x) => x.attr === 'rpc')
 						const verbFns = fns.filter((x) => x.attr !== 'rpc')
 						const mod = modulePath(routesAbs, f)
 						const rel = relPosix(routesAbs, f)
+						// V+TS plugins: the parser only emits core attrs + plugin-claimed
+						// attrs (extraAttrs), so every fn here is known. Dispatch
+						// plugin-claimed fns to the owning plugin's validate(); core
+						// attrs fall through to the shape checks below.
+						for (const pl of plugins)
+							for (const fn of allFns.filter((x) => pl.attrs.includes(x.attr)))
+								pl.validate?.(`${routesDir}/${rel}`, fn)
 						for (const bad of allFns.filter(
 							(x) =>
 								x.attr === 'matcher' ||
 								x.attr === 'startup' ||
 								x.attr === 'reroute' ||
-								x.attr === 'cron'
+								x.attr === 'error'
 						))
 							throw new Error(
-								`[swelte] ${routesDir}/${rel}: @[${bad.attr}] ${bad.name} is only allowed in its own file (matcher → src/matchers.v, startup/reroute/cron → src/app.v).`
+								`[swelte] ${routesDir}/${rel}: @[${bad.attr}] ${bad.name} is only allowed in its own file (matcher → src/matchers.v, startup/reroute/error → src/app.v).`
 							)
 						const isWrapper = mod === '+route' || mod.endsWith('/+route')
 						if (isWrapper) {
@@ -823,8 +846,8 @@ ${list(params, (p) => `\t${p.name}${p.optional ? '?' : ''}: ${p.tstype}\n`)}}
 							const wf = `${join(routesAbs, ...wmod.split('/'))}.v`
 							if (!existsSync(wf)) continue
 							const wsrc = readFileSync(wf, 'utf8')
-							const mws = parseVFile(wsrc).filter((x) => x.attr === 'before' || x.attr === 'after')
-							const lds = parseVFile(wsrc).filter((x) => x.attr === 'load')
+							const mws = parseVFile(wsrc, extraAttrs).filter((x) => x.attr === 'before' || x.attr === 'after')
+							const lds = parseVFile(wsrc, extraAttrs).filter((x) => x.attr === 'load')
 							if (mws.length === 0 && lds.length === 0) continue
 							chain.push({
 								wmod,
@@ -833,10 +856,10 @@ ${list(params, (p) => `\t${p.name}${p.optional ? '?' : ''}: ${p.tstype}\n`)}}
 							})
 							for (const l of lds) loads.push({ ...l, mod: wmod, file: `${routesDir}/${wmod}.v` })
 						}
-						const fns = parseVFile(src).filter(
+						const fns = parseVFile(src, extraAttrs).filter(
 							(x) => x.attr !== 'before' && x.attr !== 'after' && x.attr !== 'load'
 						)
-						for (const l of parseVFile(src).filter((x) => x.attr === 'load'))
+						for (const l of parseVFile(src, extraAttrs).filter((x) => x.attr === 'load'))
 							loads.push({ ...l, mod: d.mod, file: `${routesDir}/${d.mod}.v` })
 						// Chain validation: level 0 takes (req); deeper levels
 						// take (req, parent T) where T is the previous level's
@@ -1002,16 +1025,16 @@ ${list(params, (p) => `\t${p.name}${p.optional ? '?' : ''}: ${p.tstype}\n`)}}
 								`[swelte] ${libDir}/${mod}.v:${b.line}: imports backend module '${b.imp}' — only #routes/*.v may import #lib/backend (V-to-V include at codegen time).`
 							)
 						}
-						const rpcFns = parseVFile(src).filter((x) => x.attr === 'rpc')
+						const rpcFns = parseVFile(src, extraAttrs).filter((x) => x.attr === 'rpc')
 						// §7: middleware/verbs are meaningless in #lib — keep the
 						// warn-and-expose-RPC behavior for verbs, extend it to
 						// @[before]/@[after].
-						const verbFns = parseVFile(src).filter(
+						const verbFns = parseVFile(src, extraAttrs).filter(
 							(x) => x.attr !== 'rpc' && x.attr !== 'before' && x.attr !== 'after'
 						)
 						for (const vf of [
 							...verbFns,
-							...parseVFile(src).filter((x) => x.attr === 'before' || x.attr === 'after'),
+							...parseVFile(src, extraAttrs).filter((x) => x.attr === 'before' || x.attr === 'after'),
 						]) {
 							warnings.push(
 								`${libDir}/${mod}.v: @[${vf.attr}] on ${vf.name} is ignored in #lib — only @[rpc] exposes (still exported as RPC)`
@@ -1082,7 +1105,7 @@ ${list(params, (p) => `\t${p.name}${p.optional ? '?' : ''}: ${p.tstype}\n`)}}
 					}
 					for (const f of listVFiles(routesAbs)) {
 						const src = readFileSync(f, 'utf8')
-						const fns = parseVFile(src)
+						const fns = parseVFile(src, extraAttrs)
 						if (fns.length === 0) continue
 						collect('routes', modulePath(routesAbs, f))
 					}
@@ -1091,7 +1114,7 @@ ${list(params, (p) => `\t${p.name}${p.optional ? '?' : ''}: ${p.tstype}\n`)}}
 							const mod = modulePath(libAbs, f)
 							if (isBackendMod(mod)) continue
 							const src = readFileSync(f, 'utf8')
-							const fns = parseVFile(src)
+							const fns = parseVFile(src, extraAttrs)
 							if (fns.length === 0) continue
 							collect('lib', mod)
 						}
@@ -1417,7 +1440,16 @@ export declare const dev: boolean
 				// as one V unit (harness `module main` + `routes/` + `server_gen.v`).
 				try {
 					const cfg = await loadConfig(root)
-					writeIfChanged(join(genDir, 'server.v'), renderHarness(cfg, import.meta.url, hooks))
+					const pluginHarness = [
+					...plugins
+						.map((pp) => pp.harness?.({}))
+						.filter((h) => h !== undefined),
+					...appHookFragments,
+				]
+				writeIfChanged(
+					join(genDir, 'server.v'),
+					renderHarness(cfg, import.meta.url, hooks, pluginHarness)
+				)
 				} catch (e) {
 					warnings.push(`harness: ${(e as Error).message}`)
 				}
@@ -1713,7 +1745,7 @@ export declare const dev: boolean
 						`[swelte] ${abs} is a +route.v wrapper (@[before]/@[after] middleware only) and cannot be imported in browser code.`
 					)
 				}
-				const fns = parseVFile(src).filter(
+				const fns = parseVFile(src, extraAttrs).filter(
 					(x) => x.attr !== 'before' && x.attr !== 'after' && x.attr !== 'load'
 				)
 				if (fns.length === 0) return 'export {}; // swelte: no RPC fns in this .v file'
@@ -1726,8 +1758,8 @@ export declare const dev: boolean
 						`[swelte] ${abs} is backend-only (#lib/backend) and cannot be imported in browser code.`
 					)
 				}
-				const rpcFns = parseVFile(src).filter((x) => x.attr === 'rpc')
-				const verbFns = parseVFile(src).filter(
+				const rpcFns = parseVFile(src, extraAttrs).filter((x) => x.attr === 'rpc')
+				const verbFns = parseVFile(src, extraAttrs).filter(
 					(x) => x.attr !== 'rpc' && x.attr !== 'before' && x.attr !== 'after'
 				)
 				const allFns = [...rpcFns, ...verbFns]
@@ -1916,7 +1948,7 @@ export declare const dev: boolean
 					const mod = modulePath(libAbs, f)
 					if (isBackendMod(mod)) continue
 					const src = readFileSync(f, 'utf8')
-					if (!parseVFile(src).some((x) => x.attr === 'rpc')) continue
+					if (!parseVFile(src, extraAttrs).some((x) => x.attr === 'rpc')) continue
 					mods.push(mod)
 					bodies.push(src)
 				}
@@ -1926,7 +1958,7 @@ export declare const dev: boolean
 					for (let i = 0; i < mods.length; i++) {
 						const mod = mods[i]
 						const src = bodies[i]
-						for (const fn of parseVFile(src).filter((x) => x.attr === 'rpc')) {
+						for (const fn of parseVFile(src, extraAttrs).filter((x) => x.attr === 'rpc')) {
 							if (seenFns.has(fn.name))
 								throw new Error(`WASM bundle: duplicate fn ${fn.name} (in ${mod}.v)`)
 							seenFns.add(fn.name)
@@ -2002,7 +2034,7 @@ pub fn swelte_alloc(n int) &u8 {
 									modules: mods.map((mod, i) => ({
 										mod,
 										file: `${libDir}/${mod}.v`,
-										functions: parseVFile(bodies[i])
+										functions: parseVFile(bodies[i], extraAttrs)
 											.filter((x) => x.attr === 'rpc')
 											.map((f) => f.name),
 									})),

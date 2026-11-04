@@ -17,7 +17,27 @@ function splitTopLevel(s: string, sep: string): string[] {
 	return out
 }
 
-export function parseVFile(src: string): RpcFn[] {
+/** Core attrs parsed without plugins. Plugins extend via `extraAttrs`
+ *  (e.g. `@swelte/plus/jobs` registers `cron`) — core itself names no
+ *  plugin attr. Unknown attrs stay dropped unless registered here. */
+export const CORE_ATTRS = [
+	'get',
+	'post',
+	'rpc',
+	'put',
+	'delete',
+	'patch',
+	'sse',
+	'before',
+	'after',
+	'load',
+	'matcher',
+	'startup',
+	'reroute',
+	'error',
+] as const
+
+export function parseVFile(src: string, extraAttrs: string[] = []): RpcFn[] {
 	const structs = parseStructs(src)
 	const structByName = new Map(structs.map((s) => [s.name, s]))
 	const fns: RpcFn[] = []
@@ -79,26 +99,7 @@ export function parseVFile(src: string): RpcFn[] {
 					`[swelte] @[sets_cookie] was removed — return SwelteResponse{ cookies: [...] } instead.`
 				)
 			}
-			if (
-				pm &&
-				[
-					'get',
-					'post',
-					'rpc',
-					'put',
-					'delete',
-					'patch',
-					'sse',
-					'before',
-					'after',
-					'load',
-					'matcher',
-					'startup',
-					'reroute',
-					'cron',
-					'error',
-				].includes(pm[1])
-			) {
+			if (pm && (CORE_ATTRS as readonly string[]).concat(extraAttrs).includes(pm[1])) {
 				verbs.push({ verb: pm[1], qualifier: pm[2] })
 			}
 		}
@@ -153,11 +154,14 @@ export function parseVFile(src: string): RpcFn[] {
 			vret = vret.slice(1).trim() || 'void'
 		}
 		if (vret === '' || vret === 'void') vret = 'void'
-		// Raw fn bodies for matcher/hook fns (transpiled/inlined at generate).
-		// Brace-balanced walk from the `{` that opens the fn body.
+		// Raw fn bodies for hook/app fns (transpiled/inlined at generate).
+		// Brace-balanced walk from the `{` that opens the fn body. Bodies are
+		// captured for matcher/core-hook attrs plus any plugin-registered attr
+		// (extraAttrs), so owning plugins can inline them; core ignores
+		// plugin-claimed fns everywhere else.
 		let body: string | undefined
 		let hookBody: string | undefined
-		if (verbs.some((vb) => ['matcher', 'startup', 'reroute', 'cron', 'error'].includes(vb.verb))) {
+		if (verbs.some((vb) => ['matcher', 'startup', 'reroute', 'error'].includes(vb.verb) || extraAttrs.includes(vb.verb))) {
 			const afterRet = i + (retMatch?.[0].length ?? 0)
 			const openIdx = merged.indexOf('{', afterRet)
 			if (openIdx >= 0) {
@@ -173,8 +177,7 @@ export function parseVFile(src: string): RpcFn[] {
 				if (bdepth === 0) {
 					const inner = merged.slice(openIdx + 1, j)
 					if (verbs.some((vb) => vb.verb === 'matcher')) body = inner
-					else if (verbs.some((vb) => ['startup', 'reroute', 'cron', 'error'].includes(vb.verb)))
-						hookBody = inner
+					else hookBody = inner
 				}
 			}
 		}
