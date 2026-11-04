@@ -31,5 +31,4 @@ Internal docs to modify Swelte (design rationale, decisions, ephemeral notes):
 
 Open tracking notes for the remaining polish:
 
-- `specs/docs.md` — doc review note (`svg icon`)
-- `specs/more.md` — open questions (code splitting)
+- `specs/per-page-prerender.md` — per-page `prerender` page option

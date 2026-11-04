@@ -1,8 +1,32 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="light">
 	<head>
 		<meta charset="utf-8" />
 		<meta name="viewport" content="width=device-width, initial-scale=1" />
+		<meta name="color-scheme" content="light dark" />
+		<link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+		<!-- Theme boot: stored pref wins, else OS. Inline + blocking so it runs
+			before first paint — src/app.ts is a deferred module and can only
+			re-apply after paint (flash). Keep THEME_KEY in sync with
+			src/lib/theme.ts. -->
+		<script>
+			try {
+				var t = localStorage.getItem('swelte-docs-theme');
+				if (!t) t = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+				document.documentElement.dataset.theme = t;
+			} catch (e) {
+				/* private mode — default theme stands */
+			}
+		</script>
+		<style>
+			html {
+				background: #fff;
+			}
+			html[data-theme='dark'] {
+				background: #1d232a;
+				color-scheme: dark;
+			}
+		</style>
 		<link rel="stylesheet" href="/src/app.css" />
 		<title>Swelte docs</title>
 	</head>

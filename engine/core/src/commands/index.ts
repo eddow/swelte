@@ -5,11 +5,9 @@ import { runPreview } from './preview.js'
 import { runInit } from './init.js'
 import { runTest } from './test.js'
 import { runExport } from './export.js'
-import { createRequire } from 'node:module'
+import { VERSION } from '../version.js'
 
-// Single truth: package.json version. No hardcoded VERSION constant.
-const require = createRequire(import.meta.url)
-export const VERSION: string = require('../../package.json').version
+export { VERSION }
 
 const devCmd: Command = {
 	name: 'dev',

@@ -1,8 +1,9 @@
 // `swelte init <dir>`: scaffold a new Swelte project.
 // `templates/base/` is the empty skeleton; `templates/sample/src/` overlays
 // the demo routes/lib on top (`--sample`, or interactive pick). Only
-// `__NAME__` is replaced. Generated files (server harness, client entry,
-// routers) are NEVER scaffolded — `dev`/`build` derive them into `.swelte/`.
+// `__NAME__` (+ `__SWELTE_VERSION__` in package.json) is replaced. Generated
+// files (server harness, client entry, routers) are NEVER scaffolded —
+// `dev`/`build` derive them into `.swelte/`.
 // src/app.ts is the optional user-owned setup hook; the engine-owned
 // .swelte/entry-main.ts imports it (plus src/app.css when present), and the
 // plugin's transformIndexHtml points the script tag at .swelte/entry-main.ts.
@@ -10,6 +11,7 @@ import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import * as readline from 'node:readline'
+import { VERSION } from '../version.js'
 import type { Ctx } from './types.js'
 
 function templatesRoot(): string {
@@ -63,18 +65,24 @@ export async function runInit(ctx: Ctx): Promise<void> {
 	const templates = templatesRoot()
 	cpSync(join(templates, 'base'), root, { recursive: true })
 	if (wantSample) cpSync(join(templates, 'sample', 'src'), join(root, 'src'), { recursive: true })
-	// Only placeholder: project name.
+	// Only placeholders: project name (+ engine version pin in package.json).
 	for (const rel of [
 		'package.json',
 		'svelte.config.js',
 		'index.html',
-		'src/app.html',
 		'src/routes/+page.svelte',
 		'src/routes/+page.v',
 	]) {
 		const abs = join(root, rel)
 		if (!existsSync(abs)) continue
-		writeFileSync(abs, readFileSync(abs, 'utf8').split('__NAME__').join(name))
+		writeFileSync(
+			abs,
+			readFileSync(abs, 'utf8')
+				.split('__NAME__')
+				.join(name)
+				.split('__SWELTE_VERSION__')
+				.join(VERSION)
+		)
 	}
 	ctx.log(`scaffolded ${wantSample ? 'sample' : 'empty'} project at ${root}`)
 	ctx.log('next: npm install && swelte dev')

@@ -2,15 +2,15 @@
 import type { Snippet } from 'svelte'
 import { onMount } from 'svelte'
 import { searchDocs } from '#lib/search.js'
+import { applyTheme, preferredTheme, setTheme, type Theme } from '#lib/theme.js'
 import { goto } from '@swelte/core'
 
 let { children }: { children?: Snippet } = $props()
 
-const THEME_KEY = 'swelte-docs-theme'
-
-// System default first (no stored pref → OS decides via CSS),
-// then explicit light/dark persisted in localStorage.
-// Client-only: runs in onMount, never during SSR.
+// System default first (no stored pref → OS decides), then explicit
+// light/dark persisted in localStorage. The read/apply logic lives in
+// #lib/theme.js, shared with the pre-hydration boot in src/app.ts, which
+// sets <html data-theme> before hydration. SSR renders the default (light).
 let dark = $state(false)
 
 let query = $state('')
@@ -21,40 +21,22 @@ let active = $state(0)
 // renders the shell (query starts empty) and hydrates interactivity.
 let results = $derived(typeof window === 'undefined' ? [] : searchDocs(query))
 
-function applyTheme(next: boolean) {
+function toggleTheme(next: boolean) {
 	dark = next
-	if (typeof document !== 'undefined') {
-		document.documentElement.dataset.theme = next ? 'dark' : 'light'
-		try {
-			localStorage.setItem(THEME_KEY, next ? 'dark' : 'light')
-		} catch {
-			// private mode — theme just won't persist
-		}
-	}
+	setTheme(next ? 'dark' : 'light')
 }
 
 // Theme + keyboard shortcut register client-side only (onMount is a
 // server noop during sync SSR render, so the callback never fires in
-// QJS — `document`/`window`/`localStorage` below only run in the
-// browser after hydration). `goto` stays inside the click handler,
-// where it never executes during SSR.
+// QJS — the `document`/`window` reads below only run in the browser
+// after hydration). `goto` stays inside the click handler, where it
+// never executes during SSR.
 onMount(() => {
-	const root = document.documentElement
-	let stored: string | null = null
-	try {
-		stored = localStorage.getItem(THEME_KEY)
-	} catch {
-		stored = null
-	}
-	if (stored === 'dark' || stored === 'light') {
-		// Boot script already applied this; just sync the toggle.
-		dark = stored === 'dark'
-		root.dataset.theme = stored
-	} else {
-		// No stored pref: follow the OS, then adopt it as explicit state
-		// (toggle shows the truth; next flip persists from here).
-		applyTheme(window.matchMedia?.('(prefers-color-scheme: dark)').matches ?? false)
-	}
+	// src/app.ts already applied the theme before hydration; just sync the
+	// toggle to it so the control shows the truth.
+	const theme: Theme = preferredTheme()
+	dark = theme === 'dark'
+	applyTheme(theme)
 	const onKey = (e: KeyboardEvent) => {
 		const t = e.target as HTMLElement | null
 		const typing = t != null && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA')
@@ -210,7 +192,7 @@ const groups: { title: string; links: { href: string; label: string }[] }[] = [
 					<input
 						type="checkbox"
 						checked={dark}
-						onchange={(e) => applyTheme(e.currentTarget.checked)}
+						onchange={(e) => toggleTheme(e.currentTarget.checked)}
 						aria-label="Toggle dark mode"
 					>
 					<svg

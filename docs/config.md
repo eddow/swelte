@@ -222,6 +222,13 @@ export const chunk = 'eager' | 'lazy' // default: 'inherit' (follow global mode)
 * **`SwelteRequest.locals` + cookie helpers**: `locals map[string]string`
   threaded dispatch → verbs/`load`; `swelte_cookie_get/set/set_full/delete` (+`swelte_text/json/status/bytes/redirect` constructors)
   emitted. `before_request` passes empty locals (middleware fills it).
+* **Static files** (`public/`): Vite's `publicDir` is untouched, so
+  `public/<file>` is served at `/<file>` in dev and copied to
+  `dist/<file>` on build (Vite's `emptyOutDir` keeps it after hashed
+  `dist/assets/`). `dist/index.html` is the SSR shell and the SPA
+  fallback — `serve_static` returns it (200) for any missing path, so
+  add real files (favicon, `robots.txt`) rather than relying on that
+  fallback for unknown URLs.
 * **`HEAD`/`OPTIONS`**: `GET` arms also match `HEAD` (same handler;
   `@[head]` is an alias onto the `GET` arm, never a separate default).
   `OPTIONS` is CORS-preflight-only — no user fn (`@[options]` on a

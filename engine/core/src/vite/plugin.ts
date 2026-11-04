@@ -1480,7 +1480,8 @@ export declare const dev: boolean
 			}
 			// SSR markers: Hand fills <!--ssr-head-->/<!--ssr-body--> when a
 			// renderer answers. Inject them into the #app host when absent
-			// (built dist/index.html has no markers — source app.html does).
+			// (source index.html keeps them; whatever shell the app ships
+			// may not, so this stays idempotent for both).
 			if (!out.includes('<!--ssr-body-->') && out.includes('<div id="app">')) {
 				out = out.replace('<div id="app">', '<div id="app"><!--ssr-body-->')
 			}

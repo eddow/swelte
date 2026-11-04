@@ -21,7 +21,8 @@
     "bin",
     "c",
     "shims",
-    "LICENSE-MIT"
+    "LICENSE-MIT",
+    "package.json"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.json",

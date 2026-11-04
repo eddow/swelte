@@ -11,6 +11,10 @@
     "dev": "npm run dev --workspace=examples/something",
     "build": "npm run build --workspace=examples/something",
     "build:engine": "npm run build --workspace=@swelte/core",
+    "version:sync": "node scripts/sync-version.mjs",
+    "version:patch": "node scripts/sync-version.mjs patch",
+    "version:minor": "node scripts/sync-version.mjs minor",
+    "version:major": "node scripts/sync-version.mjs major",
     "biome:check": "biome format .",
     "biome:format": "biome format --write .",
     "biome:format:unsafe": "biome format --write . --unsafe"
