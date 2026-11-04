@@ -58,6 +58,8 @@ toolchain — no manual install). `swelte build` typechecks, compiles
 
 ## Docs
 
+> 📚 [Documentation](https://swelte.emedware.dev/)
+
 Built behavior, user-facing only:
 
 - [SSR](https://github.com/eddow/swelte/blob/main/docs/ssr.md) — ownership, request path, `@[load]`
