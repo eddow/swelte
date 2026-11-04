@@ -1,17 +1,13 @@
 {
   "name": "@swelte/plus",
   "version": "0.1.1",
-  "description": "Swelte beyond-SvelteKit plugins \u2014 jobs (cron), SSE channels, SWR, offline outbox, WS, DB, images (V+TS).",
+  "description": "Swelte beyond-SvelteKit plugins \u2014 jobs (cron) (V+TS).",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
     ".": "./dist/index.js",
-    "./jobs": "./dist/jobs.js",
-    "./service-worker": "./dist/service-worker.js",
-    "./swr": "./dist/swr.js",
-    "./sse-channels": "./dist/sse-channels.js",
-    "./outbox": "./dist/outbox.js"
+    "./jobs": "./dist/jobs.js"
   },
   "files": [
     "README.md",
@@ -57,11 +53,7 @@
   "keywords": [
     "swelte",
     "svelte",
-    "sse",
     "cron",
-    "jobs",
-    "offline",
-    "isr",
-    "websocket"
+    "jobs"
   ]
 }

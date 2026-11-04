@@ -250,8 +250,8 @@ export interface SweltePlugin {
 
 export function defineSweltePlugin(plugin: SweltePlugin): SweltePlugin {
 	if (!plugin.name) throw new Error('[swelte] plugin needs a name')
-	// Attr-claiming plugins (`jobs` → cron, future `ws`) list names here;
-	// augment-only plugins (sse-channels/swr/outbox) leave attrs empty and
-	// extend core via harness/CLI/DTS fragments. Empty is valid.
+	// Attr-claiming plugins (`jobs` → cron) list names here; augment-only
+	// plugins leave attrs empty and extend core via harness/CLI/DTS
+	// fragments. Empty is valid.
 	return plugin
 }

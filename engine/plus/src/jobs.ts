@@ -1,10 +1,15 @@
-// `@swelte/plus/jobs` — cron → jobs (future.md #1).
-// Owns `@[cron]`: validate + spawn-loop emission. Core stays plugin-agnostic
-// (parses `cron` fns so the shape survives, ignores them everywhere unless
-// this plugin is loaded). Codegen is byte-identical to the old core splice:
-// top-level `swelte_cron_N`/`swelte_cron_loop_N` fns (via `main`) + spawns
-// inside `main` after `mut app := &App{}` (via `mainInner`), after @[startup].
-// Future: persistent tick log, missed-tick catchup, `retry(n)` + dead-letter.
+// `@swelte/plus/jobs` — cron ticks (future.md #1, best-effort tier).
+// Owns `@[cron]`: validate + single-scheduler emission. Core stays
+// plugin-agnostic (registers `cron` via extraAttrs so the shape parses with
+// bodies; ignores claimed fns everywhere unless this plugin is loaded).
+// Emission: top-level `swelte_cron_N` fns (via `main`) + ONE scheduler thread
+// (`spawn swelte_cron_run()` via `mainInner`, after @[startup]). The scheduler
+// holds per-tick deadlines, sleeps to the nearest one (idle = one sleeping
+// thread, zero wakeups/CPU), fires due ticks, and coalesces missed ticks
+// (`next = now + every`, never a catch-up burst). Cron starts at boot in the
+// container — no CLI, no SSH needed. Bodies must be idempotent
+// (single-instance best-effort, no watchdog). Future: persistent tick log,
+// missed-tick catchup, `retry(n)` + dead-letter.
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { defineSweltePlugin, parseVFile, type SweltePlugin } from '@swelte/core/vite'
@@ -63,34 +68,66 @@ function indent(body: string): string {
 		.join('\n')
 }
 
-/** V fragments for validated cron defs (byte-identical to the old core splice). */
+/** V fragments for validated cron defs: ONE scheduler thread.
+ *  `main`: top-level `swelte_cron_N` fns (user bodies, compile even when
+ *  fallible). `mainInner`: `// @[cron]` header + `spawn swelte_cron_run()`
+ *  + the `swelte_cron_run` multiplexer, spliced inside `main` before
+ *  `mut app := &App{}` (after @[startup] injection). The loop holds a
+ *  `next[i]` deadline (unix seconds) per tick, sleeps to the nearest one
+ *  (idle = a single sleeping thread, no wakeups), fires due ticks, and
+ *  coalesces overruns (`next = now + every`, never a catch-up burst).
+ *  Zero ticks → empty fragments (byte-identical harness when absent). */
 export function cronHarness(crons: JobsCronDef[]): { main: string; mainInner: string } {
+	if (crons.length === 0) return { main: '', mainInner: '' }
 	let defs = ''
-	let spawns = ''
+	const everies: number[] = []
+	const calls: string[] = []
 	let n = 0
 	for (const c of crons) {
 		n++
 		const sig = c.fallible ? `fn swelte_cron_${n}() !void {` : `fn swelte_cron_${n}() {`
-		const call = c.fallible
-			? `swelte_cron_${n}() or { eprintln('[swelte:cron] ' + err.msg()) }`
-			: `swelte_cron_${n}()`
 		defs +=
 			`// @[cron] tick ${n} (src/app.v) — user body, top-level so fallible fns compile.\n` +
 			`${sig}\n` +
 			indent(c.body) +
-			'\n}\n' +
-			`fn swelte_cron_loop_${n}() {\n\tfor {\n\t\ttime.sleep(${c.seconds} * time.second)\n` +
-			indent(call) +
-			'\n\t}\n}\n'
-		spawns += `\tspawn swelte_cron_loop_${n}()\n`
+			'\n}\n'
+		everies.push(c.seconds)
+		calls.push(
+			c.fallible
+				? `swelte_cron_${n}() or { eprintln('[swelte:cron] ' + err.msg()) }`
+				: `swelte_cron_${n}()`
+		)
 	}
-	// No trailing newline: the harness splices `${frag.main}\nfn main()`, which
-	// reproduces the old `defs + anchor` join byte for byte.
-	const main = defs.endsWith('\n') ? defs.slice(0, -1) : defs
+	// No trailing newline: the harness splices `${frag.main}\nfn main()`.
+	const inits = everies.map((sec) => `time.now().unix() + ${sec}`).join(', ')
+	const arms = everies
+		.map(
+			(sec, i) =>
+				`\t\tif now >= next[${i}] {\n\t\t\t${indent(calls[i])}\n\t\t\tnext[${i}] = now + ${sec}\n\t\t}`
+		)
+		.join('\n')
+	// Scheduler fn is top-level (V forbids nested fns); only the spawn
+	// lives inside `main`. `main` gains the trailing newline back so the
+	// harness splice `${frag.main}\nfn main()` stays well-formed.
+	const sched =
+		'fn swelte_cron_run() {\n' +
+		`\tmut next := [${inits}]\n` +
+		'\tfor {\n' +
+		'\t\tmut now := time.now().unix()\n' +
+		'\t\twait := next[0] - now\n' +
+		'\t\tfor d in next {\n' +
+		'\t\t\tif d - now < wait { wait = d - now }\n' +
+		'\t\t}\n' +
+		'\t\tif wait > 0 { time.sleep(wait * time.second) }\n' +
+		'\t\tnow = time.now().unix()\n' +
+		`${arms}\n` +
+		'\t}\n' +
+		'}\n'
+	const main = (defs + sched).endsWith('\n') ? (defs + sched).slice(0, -1) : defs + sched
 	const mainInner =
-		'// @[cron] (src/app.v) — spawn + time.sleep loops, single-instance best-effort.\n' +
-		'// No watchdog: long-lived by design. Bodies must be idempotent.\n' +
-		spawns
+		'// @[cron] (src/app.v) — one scheduler thread, sleeps to the nearest deadline.\n' +
+		'// No watchdog: long-lived by design. Missed ticks coalesce (no pile-up).\n' +
+		'\tspawn swelte_cron_run()\n'
 	return { main, mainInner }
 }
 
@@ -152,13 +189,4 @@ export const jobsPlugin: SweltePlugin = defineSweltePlugin({
 		return { errors: [(e as Error).message] }
 		}
 	},
-	cli: [
-		{
-			name: 'jobs',
-			summary: 'List cron ticks (persistent log — plus jobs lands next).',
-			run(ctx) {
-				ctx.log('no tick log yet (cron is best-effort spawn+sleep; persistent log lands next)')
-			},
-		},
-	],
 })

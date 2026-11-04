@@ -6,8 +6,9 @@ import type { Command } from './commands/types.js'
 import { parseArgs } from './commands/types.js'
 
 /** Resolve the active command list: core commands + plugin commands.
- * Plugins are optional — without them this is exactly COMMANDS. Pass the
- * loaded plugins to expose e.g. `swelte jobs` and friends. */
+ * Plugins are optional — without them this is exactly COMMANDS. Plugins may
+ * contribute commands (e.g. future tooling); container-run plugins like jobs
+ * intentionally expose none (cron starts at boot, no SSH needed). */
 export function resolveCommands(
 	plugins: { cli?: Command[] }[] = []
 ): Command[] {

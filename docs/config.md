@@ -261,10 +261,11 @@ export const chunk = 'eager' | 'lazy' // default: 'inherit' (follow global mode)
   normalization, CSRF/CORS/static/dispatch
   (`''` = no-op). `@[cron('60s'|'5m'|'1h')]` () void|!void` lives in
   `@swelte/plus/jobs` (add `jobsPlugin` to `swelte({ plugins: [...] })`):
-  one-or-more fns, qualifier required; each body runs on a `spawn` +
-  `time.sleep(<seconds>)` loop in `main` (single-instance best-effort,
-  no watchdog, idempotent bodies; fallible `!void` errors are logged
-  and the loop continues). Without the plugin `@[cron]` is an
+  one-or-more fns, qualifier required; one scheduler thread runs all
+  ticks (sleeps to the nearest deadline, idle = zero CPU; missed ticks
+  coalesce, no pile-up) in `main` (single-instance best-effort, no
+  watchdog, idempotent bodies; fallible `!void` errors are logged
+  and the scheduler continues). Without the plugin `@[cron]` is an
   unknown-attr build error.
 * **`+route.svelte` nesting** (Svelte 5 `children` Snippet, not slots):
   every wrapper must declare `children` via `$props()` + `{@render
