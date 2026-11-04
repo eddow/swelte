@@ -37,6 +37,10 @@ describe('tsTypeFor projection matrix (docs/types.md)', () => {
 		assert.equal(tsTypeFor('chan int'), 'unknown')
 	})
 
+	it('SSE emit callback projects, not unknown', () => {
+		assert.equal(tsTypeFor('fn (string) bool'), '(event: string) => boolean')
+	})
+
 	it('single ? unwrap then ! fallible strip', () => {
 		// `?!T` is not a real V shape; fallible is tracked separately.
 		const fns = parseVFile(`@[rpc] pub fn f() !string { return '' }`)

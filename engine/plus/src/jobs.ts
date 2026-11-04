@@ -57,7 +57,9 @@ export function validateCronFn(rel: string, fn: CronFnShape): void {
 	if (nparams !== 0)
 		throw new Error(`[swelte] ${rel}: @[cron] ${fn.name} takes no params (got ${nparams}).`)
 	if (fn.vret !== 'void')
-		throw new Error(`[swelte] ${rel}: @[cron] ${fn.name} must return void (got ${fn.vret || 'none'}).`)
+		throw new Error(
+			`[swelte] ${rel}: @[cron] ${fn.name} must return void (got ${fn.vret || 'none'}).`
+		)
 }
 
 /** Body indent: blank lines stay blank (matches core hook splicing). */
@@ -186,7 +188,7 @@ export const jobsPlugin: SweltePlugin = defineSweltePlugin({
 			if (crons.length === 0) return {}
 			return { fragment: cronHarness(crons) }
 		} catch (e) {
-		return { errors: [(e as Error).message] }
+			return { errors: [(e as Error).message] }
 		}
 	},
 })

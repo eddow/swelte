@@ -27,17 +27,41 @@ describe('plus contracts', () => {
 describe('jobs cron (moved from core generate-errors.test.ts)', () => {
 	it('validateCronFn rejects bad shapes', async () => {
 		const { validateCronFn } = await import('./jobs.js')
-		assert.throws(() => validateCronFn('src/app.v', { name: 'tick', attr: 'cron' }), /needs a duration qualifier/)
 		assert.throws(
-			() => validateCronFn('src/app.v', { name: 'tick', attr: 'cron', qualifier: 'daily', vret: 'void', params: [] }),
+			() => validateCronFn('src/app.v', { name: 'tick', attr: 'cron' }),
+			/needs a duration qualifier/
+		)
+		assert.throws(
+			() =>
+				validateCronFn('src/app.v', {
+					name: 'tick',
+					attr: 'cron',
+					qualifier: 'daily',
+					vret: 'void',
+					params: [],
+				}),
 			/bad duration/
 		)
 		assert.throws(
-			() => validateCronFn('src/app.v', { name: 'tick', attr: 'cron', qualifier: '60s', vret: 'void', params: [1] }),
+			() =>
+				validateCronFn('src/app.v', {
+					name: 'tick',
+					attr: 'cron',
+					qualifier: '60s',
+					vret: 'void',
+					params: [1],
+				}),
 			/takes no params/
 		)
 		assert.throws(
-			() => validateCronFn('src/app.v', { name: 'tick', attr: 'cron', qualifier: '60s', vret: 'string', params: [] }),
+			() =>
+				validateCronFn('src/app.v', {
+					name: 'tick',
+					attr: 'cron',
+					qualifier: '60s',
+					vret: 'string',
+					params: [],
+				}),
 			/must return void/
 		)
 	})
@@ -95,8 +119,13 @@ describe('jobs cron (moved from core generate-errors.test.ts)', () => {
 
 	it('validate() rejects misplaced @[cron] in routes', async () => {
 		assert.throws(
-			() => jobsPlugin.validate?.('src/routes/+page.v', { name: 'tick', attr: 'cron', qualifier: '60s' }),
-		/only allowed in src\/app\.v/
+			() =>
+				jobsPlugin.validate?.('src/routes/+page.v', {
+					name: 'tick',
+					attr: 'cron',
+					qualifier: '60s',
+				}),
+			/only allowed in src\/app\.v/
 		)
 	})
 })

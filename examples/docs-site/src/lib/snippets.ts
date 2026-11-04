@@ -131,6 +131,10 @@ export default defineConfig({
 		code: `{ "mcpServers": { "swelte": { "command": "node",
 	"args": ["./node_modules/@swelte/mcp/dist/index.js"] } } }`,
 	},
+	'skills-install': {
+		lang: 'bash',
+		code: `# Claude Code (user scope)\ncp -r .agents/skills/* ~/.claude/skills/\n# Codex (user scope)\ncp -r .agents/skills/* ~/.codex/skills/\n# Repo-local (any agent that reads .agents/)\ncp -r .agents/skills <your-project>/.agents/`,
+	},
 	'example-imports': {
 		lang: 'ts',
 		code: `import { get_greeting } from '#routes/+page.v'   // → GET / (JSON)

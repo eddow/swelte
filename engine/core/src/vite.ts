@@ -11,7 +11,14 @@ export type { SwelteConfig, SwelteOptions } from './gen/config.js'
 export { defineConfig } from './gen/config.js'
 export { loadServerHooks } from './vite/hooks.js'
 export { dynSegPattern, loadMatchers, transpileMatcherBody } from './vite/matchers.js'
-export { CORE_ATTRS, narrowArgParts, narrowCall, parseStructs, parseVFile, tsTypeFor } from './vite/parse.js'
+export {
+	CORE_ATTRS,
+	narrowArgParts,
+	narrowCall,
+	parseStructs,
+	parseVFile,
+	tsTypeFor,
+} from './vite/parse.js'
 export { swelte, swelte as default } from './vite/plugin.js'
 export {
 	assertChunkHint,

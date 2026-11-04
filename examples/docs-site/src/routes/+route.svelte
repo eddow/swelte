@@ -72,7 +72,7 @@ const groups: { title: string; links: { href: string; label: string }[] }[] = [
 			{ href: '/guide/offline', label: 'Offline' },
 			{ href: '/guide/ssr', label: 'SSR' },
 			{ href: '/guide/cli', label: 'CLI' },
-			{ href: '/guide/mcp', label: 'MCP' },
+			{ href: '/guide/mcp', label: 'Agents' },
 		],
 	},
 	{

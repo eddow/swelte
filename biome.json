@@ -6,7 +6,9 @@
 			"**/src/**/*.json",
 			"**/src/**/*.svelte",
 			"**/src/**/*.js",
-			"**/src/**/*.css"
+			"**/src/**/*.css",
+			"!**/src/lib/snippets.gen.ts",
+			"!**/coverage/**"
 		],
 		"ignoreUnknown": true
 	},

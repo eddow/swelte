@@ -9,14 +9,13 @@ import { parseArgs } from './commands/types.js'
  * Plugins are optional — without them this is exactly COMMANDS. Plugins may
  * contribute commands (e.g. future tooling); container-run plugins like jobs
  * intentionally expose none (cron starts at boot, no SSH needed). */
-export function resolveCommands(
-	plugins: { cli?: Command[] }[] = []
-): Command[] {
+export function resolveCommands(plugins: { cli?: Command[] }[] = []): Command[] {
 	const extra = plugins.flatMap((p) => p.cli ?? [])
 	if (!extra.length) return COMMANDS
 	const names = new Set(COMMANDS.map((c) => c.name))
 	for (const c of extra) {
-		if (names.has(c.name)) throw new Error(`[swelte] plugin command '${c.name}' collides with a core command`)
+		if (names.has(c.name))
+			throw new Error(`[swelte] plugin command '${c.name}' collides with a core command`)
 		names.add(c.name)
 	}
 	return [...COMMANDS, ...extra]

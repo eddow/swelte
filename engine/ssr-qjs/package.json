@@ -22,14 +22,17 @@
     "c",
     "shims",
     "LICENSE-MIT",
-    "package.json"
+    "package.json",
+    "skills"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "dev": "tsc -p tsconfig.json --watch",
     "test": "node --test --test-force-exit --test-reporter=spec \"dist-test/**/*.test.js\"",
     "pretest": "tsc -p tsconfig.test.json",
-    "prepublishOnly": "npm run build"
+    "prepublishOnly": "npm run build",
+    "prepack": "npm-skills refs materialize",
+    "postpack": "npm-skills refs restore"
   },
   "peerDependencies": {
     "@swelte/core": "^0.1.1",
@@ -43,7 +46,8 @@
   "devDependencies": {
     "@types/node": "^26.6.6",
     "typescript": "^5.0.0",
-    "vite": "^6.0.0"
+    "vite": "^6.0.0",
+    "npm-skills": "^0.5.1"
   },
   "license": "MIT",
   "author": {
@@ -67,5 +71,13 @@
     "ssr",
     "quickjs",
     "vite"
-  ]
+  ],
+  "npmSkills": {
+    "publish": {
+      "source": "skills",
+      "export": [
+        "swelte-ssr-load"
+      ]
+    }
+  }
 }

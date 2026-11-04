@@ -175,7 +175,10 @@ describe('generate() validation errors (tmp scaffold, no V binary)', () => {
 		writeFileSync(join(root, 'src', 'app.v'), 'module s\n@[cron]\npub fn tick() { }')
 		await buildStart(root)
 		const svCron = readFileSync(join(root, '.swelte', 'server.v'), 'utf8')
-		assert.ok(!svCron.includes('swelte_cron'), 'core must emit no cron loops without the owning plugin')
+		assert.ok(
+			!svCron.includes('swelte_cron'),
+			'core must emit no cron loops without the owning plugin'
+		)
 		// Unregistered @[cron] in routes → dropped at parse, route still builds.
 		root = scaffold({
 			'+page.v':
@@ -189,8 +192,7 @@ describe('generate() validation errors (tmp scaffold, no V binary)', () => {
 		)
 		// Misplaced core hook in routes → own-file guard rejects before dispatch.
 		root = scaffold({
-			'+page.v':
-				'module p\n@[startup]\npub fn boot() { }\n@[get] pub fn g() string { return "" }',
+			'+page.v': 'module p\n@[startup]\npub fn boot() { }\n@[get] pub fn g() string { return "" }',
 		})
 		writeFileSync(join(root, 'src', 'app.v'), 'module s')
 		await assert.rejects(() => buildStart(root), /only allowed in its own file/)

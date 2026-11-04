@@ -215,7 +215,7 @@ export interface SweltePluginHarness {
 
 export interface SweltePlugin {
 	name: string
-	/** Attrs this plugin claims (e.g. `['cron']`, `['ws']`, `['job']`). */
+	/** Attrs this plugin claims (e.g. `['cron']`). */
 	attrs: string[]
 	configKey?: string
 	validate?: (rel: string, fn: { name: string; attr: string; qualifier?: string }) => void
@@ -227,7 +227,10 @@ export interface SweltePlugin {
 	/** App-level hooks from `src/app.v`: called with the parsed fns carrying
 	 * this plugin's attrs. Returns V spliced into the harness (e.g. cron
 	 * spawn loops). Core passes through; the plugin owns parse+validate+emit. */
-	loadAppHooks?: (root: string, srcDir?: string) => {
+	loadAppHooks?: (
+		root: string,
+		srcDir?: string
+	) => {
 		fragment?: SweltePluginHarness
 		errors?: string[]
 	}

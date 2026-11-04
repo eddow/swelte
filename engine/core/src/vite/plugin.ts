@@ -846,7 +846,9 @@ ${list(params, (p) => `\t${p.name}${p.optional ? '?' : ''}: ${p.tstype}\n`)}}
 							const wf = `${join(routesAbs, ...wmod.split('/'))}.v`
 							if (!existsSync(wf)) continue
 							const wsrc = readFileSync(wf, 'utf8')
-							const mws = parseVFile(wsrc, extraAttrs).filter((x) => x.attr === 'before' || x.attr === 'after')
+							const mws = parseVFile(wsrc, extraAttrs).filter(
+								(x) => x.attr === 'before' || x.attr === 'after'
+							)
 							const lds = parseVFile(wsrc, extraAttrs).filter((x) => x.attr === 'load')
 							if (mws.length === 0 && lds.length === 0) continue
 							chain.push({
@@ -1034,7 +1036,9 @@ ${list(params, (p) => `\t${p.name}${p.optional ? '?' : ''}: ${p.tstype}\n`)}}
 						)
 						for (const vf of [
 							...verbFns,
-							...parseVFile(src, extraAttrs).filter((x) => x.attr === 'before' || x.attr === 'after'),
+							...parseVFile(src, extraAttrs).filter(
+								(x) => x.attr === 'before' || x.attr === 'after'
+							),
 						]) {
 							warnings.push(
 								`${libDir}/${mod}.v: @[${vf.attr}] on ${vf.name} is ignored in #lib — only @[rpc] exposes (still exported as RPC)`
@@ -1441,15 +1445,13 @@ export declare const dev: boolean
 				try {
 					const cfg = await loadConfig(root)
 					const pluginHarness = [
-					...plugins
-						.map((pp) => pp.harness?.({}))
-						.filter((h) => h !== undefined),
-					...appHookFragments,
-				]
-				writeIfChanged(
-					join(genDir, 'server.v'),
-					renderHarness(cfg, import.meta.url, hooks, pluginHarness)
-				)
+						...plugins.map((pp) => pp.harness?.({})).filter((h) => h !== undefined),
+						...appHookFragments,
+					]
+					writeIfChanged(
+						join(genDir, 'server.v'),
+						renderHarness(cfg, import.meta.url, hooks, pluginHarness)
+					)
 				} catch (e) {
 					warnings.push(`harness: ${(e as Error).message}`)
 				}

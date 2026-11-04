@@ -85,8 +85,8 @@
 				<td><code>+route.v</code> + <code>src/app.v</code></td>
 				<td>
 					Subtree middleware stays local;
-					<code>@&#91;startup]/@&#91;reroute]/@&#91;cron]</code>
-					handle boot + rewrite + ticks.
+					<code>@&#91;startup]/@&#91;reroute]</code>
+					handle boot + rewrite (ticks live in <code>@swelte/plus</code>).
 				</td>
 			</tr>
 			<tr>
@@ -98,17 +98,136 @@
 	</table>
 </div>
 
-<h2 class="text-2xl font-bold mt-8">Data & rendering deltas</h2>
+<h2 class="text-2xl font-bold mt-8">Data loading</h2>
 <ul class="list-disc list-inside opacity-80 space-y-1 mt-2 text-sm">
 	<li>
-		<code>load</code>
-		returns plain structs; no <code>fail(422, …)</code> helper — throw <code>!T</code> with a
+		<code>@&#91;load]</code>
+		is server-only, HTML-navigation initial paint. Interaction data comes from stubs (<code
+			>@&#91;get]</code
+		>/<code>@&#91;rpc]</code>). Components must not call stubs at top level during SSR (build error)
+		— move load-time data into
+		<code>$props()</code>, keep stubs for handlers.
+	</li>
+	<li>
+		Universal sibling <code>&lt;basename&gt;.ts</code> (<code>admin.ts</code>
+		for
+		<code>admin.svelte</code>) exports <code>load(&#123; params, props, url &#125;)</code> — a sync
+		view-model transform inside render (async only when <code>ssr = false</code>). No
+		<code>parent()</code>
+		— the parent value arrives as a typed fn param.
+	</li>
+	<li>
+		Cache tags: <code>depends(...tags)</code> registers tags;
+		<code>invalidate(...tags)</code>
+		/ <code>invalidateAll()</code> clear cached loads (client-side).
+	</li>
+	<li>
+		Load envelope: <code>SwelteLoadResult&#123; status, headers, cookies, body &#125;</code> opts
+		into status/headers/cookies on the HTML navigation. Non-200 renders
+		<code>+error</code>. Throw with status via <code>swelte_error(status, msg)</code> (V) /
+		<code>swelteError(status, msg)</code>
+		(TS); <code>isRedirect(e)</code> narrows 3xx.
+	</li>
+	<li>
+		No <code>fail(422, …)</code> helper — throw <code>!T</code> with a
 		<code>&#123; ok: false, fieldErrors &#125;</code>
 		body, narrow with <code>isFail(e)</code>.
 	</li>
+</ul>
+
+<h2 class="text-2xl font-bold mt-8">Client router</h2>
+<ul class="list-disc list-inside opacity-80 space-y-1 mt-2 text-sm">
+	<li>
+		History-driven: link-click interception (incl.
+		<code>data-sveltekit-reload</code>/<code>data-swelte-reload</code>
+		full-reload,
+		<code>...-noscroll</code>/<code>...-noreplace</code>/<code>...-preload-data</code>/<code
+			>...-preload-code</code
+		>
+		<code>off</code>
+		honored) + hover prefetch + <code>popstate</code>.
+	</li>
+	<li>
+		<code>goto(url, &#123; replaceState?, noPreload?, noPreloadCode? &#125;)</code>,
+		<code>preloadData(url)</code>
+		(JSON probe, no DOM write),
+		<code>preloadCode(url)</code>
+		(chunk warm, no DOM write),
+		<code>pushState(url, &#123; 'page-state' &#125;)</code>
+		/
+		<code>replaceState(url, &#123; 'page-state' &#125;)</code>
+		(shallow — no reload, no load re-run;
+		<code>page.state</code>
+		survives traversal, never sent to the server).
+	</li>
+	<li>
+		<code>captureSnapshot(fn)</code>
+		/ <code>restoreSnapshot(fn)</code> (manual
+		<code>export const snapshot</code>
+		lite — captured on <code>goto</code>, replayed on
+		<code>popstate</code>); <code>beforeNavigate</code> (cancellable via <code>cancel()</code>) /
+		<code>afterNavigate</code>
+		/ <code>onNavigate</code>;
+		<code>page</code>/<code>navigating</code>/<code>updated</code>
+		stores (<code>checkUpdated()</code>
+		flips <code>updated</code> by polling the
+		<code>X-Swelte-Version</code>
+		header).
+	</li>
+	<li>
+		Layout composition (<code>export const layout = false | true | 'dir'</code>
+		in the sibling
+		<code>.ts</code>
+		— no <code>@</code> files): <code>admin/login/+page.ts</code> with
+		<code>layout = false</code>
+		renders bare; <code>'admin'</code> keeps wrappers down to
+		<code>admin</code>; <code>true</code> pins the full chain back on. Composition-only — skipped
+		wrappers' <code>@&#91;load]</code>/<code>@&#91;before]</code>/<code>@&#91;after]</code>
+		still run.
+	</li>
+</ul>
+
+<h2 class="text-2xl font-bold mt-8">Rendering</h2>
+<ul class="list-disc list-inside opacity-80 space-y-1 mt-2 text-sm">
 	<li>
 		SSR is runtime-only (embedded QuickJS / sidecar), 50ms + 16MB budgets, SPA fallback. SSG is
 		additive (<code>prerender.entries</code>).
+	</li>
+	<li>
+		Per-route <code>ssr = false</code> (SPA shell, async universal load client-side) and
+		<code>csr = false</code>
+		(SSR HTML only — the client mount/hydrate is a no-op). Independent corners, same sibling
+		<code>.ts</code>
+		carrier.
+	</li>
+	<li>
+		Per-page <code>prerender = true | false | 'auto'</code> (leaf wins, else nearest explicit
+		wrapper, else global <code>prerender.entries</code>).
+	</li>
+	<li>
+		Service worker opt-in + offline fallback page; API/SSE stay network-only. ISR-lite stamps
+		<code>Cache-Control: public, max-age=0, s-maxage=N</code>
+		+
+		<code>X-Swelte-Revalidate</code>
+		(headers only, no background regen).
+	</li>
+	<li>
+		<code>serializedHeaders = [...]</code>
+		allowlists which load-envelope headers land on the HTML navigation (<code>Set-Cookie</code>
+		untouched, <code>Location</code> always passes). Per-route
+		<code>RouteId</code>
+		+ <code>Params</code> types (the <code>$types</code>-lite). Per-route
+		<code>limits</code>
+		override the global hardening knobs (single binary, no regions/runtime).
+	</li>
+</ul>
+
+<h2 class="text-2xl font-bold mt-8">Errors & platform</h2>
+<ul class="list-disc list-inside opacity-80 space-y-1 mt-2 text-sm">
+	<li>
+		Single global <code>+error.svelte</code> (<code>&#123; status?, message? &#125;</code>), renders
+		server- and client-side. <code>handleFetch(hook)</code> intercepts stub fetches (auth
+		headers/retries).
 	</li>
 	<li>
 		Aliases are <code>#routes / #lib</code> (hash style).

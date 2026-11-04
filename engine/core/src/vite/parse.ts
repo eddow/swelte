@@ -161,7 +161,13 @@ export function parseVFile(src: string, extraAttrs: string[] = []): RpcFn[] {
 		// plugin-claimed fns everywhere else.
 		let body: string | undefined
 		let hookBody: string | undefined
-		if (verbs.some((vb) => ['matcher', 'startup', 'reroute', 'error'].includes(vb.verb) || extraAttrs.includes(vb.verb))) {
+		if (
+			verbs.some(
+				(vb) =>
+					['matcher', 'startup', 'reroute', 'error'].includes(vb.verb) ||
+					extraAttrs.includes(vb.verb)
+			)
+		) {
 			const afterRet = i + (retMatch?.[0].length ?? 0)
 			const openIdx = merged.indexOf('{', afterRet)
 			if (openIdx >= 0) {
@@ -204,6 +210,9 @@ export function tsTypeFor(vType: string): string {
 	const t = vType.trim()
 	if (t === 'SwelteRequest') return 'SwelteRequest'
 	if (t === 'SwelteResponse') return 'SwelteResponse'
+	// SSE emit callback (harness-injected, never projected as a client arg):
+	// `emit fn (string) bool` is structural, not an unknown V type.
+	if (/^fn\s*\(\s*string\s*\)(\s*bool)?$/.test(t)) return '(event: string) => boolean'
 	if (/^string$/.test(t)) return 'string'
 	if (/^(bool)$/.test(t)) return 'boolean'
 	if (

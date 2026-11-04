@@ -93,6 +93,15 @@
 				<td>zero/one per file, never stacked; <code>(req[, parent]) → !R</code></td>
 			</tr>
 			<tr>
+				<td><code>SwelteLoadResult</code></td>
+				<td>— (load envelope)</td>
+				<td>
+					<code>&#123; status, headers, cookies, body &#125;</code>
+					opts the load into status/headers/cookies on the HTML navigation (plain values wrap in a
+					200 default envelope)
+				</td>
+			</tr>
+			<tr>
 				<td><code>@&#91;before] / @&#91;after]</code></td>
 				<td>— (middleware, <code>+route.v</code> only)</td>
 				<td>root→leaf / leaf→root; never exported to TS</td>
@@ -104,6 +113,26 @@
 	One default per verb per file (two <code>@&#91;post]</code> defaults = build error). Qualifiers
 	must be unique per verb. No attribute = internal helper.
 </p>
+
+<h2 class="text-2xl font-bold mt-8">Typed errors, request hooks, version polling</h2>
+<ul class="list-disc list-inside opacity-80 space-y-1 mt-2 text-sm">
+	<li>
+		<code>swelte_error(status, message)</code>
+		(V) / <code>swelteError(status, message)</code> (TS) throws with status preserved (→
+		<code>+error</code>
+		props);
+		<code>isRedirect(e)</code>
+		narrows 3xx (+ <code>Location</code>).
+	</li>
+	<li>
+		<code>handleFetch(hook)</code>
+		sees/rewrites every stub call (<code>&#123; base, fn, kind, args, qualifier, init &#125;</code>
+		→ rewritten
+		<code>RequestInit</code>); <code>checkUpdated()</code> flips the
+		<code>updated</code>
+		store when the <code>X-Swelte-Version</code> header changes.
+	</li>
+</ul>
 
 <h2 class="text-2xl font-bold mt-8">Routing knobs</h2>
 <ul class="list-disc list-inside opacity-80 space-y-1 mt-2">

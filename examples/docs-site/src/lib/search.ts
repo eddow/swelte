@@ -35,7 +35,7 @@ export const searchIndex: SearchEntry[] = [
 		label: 'RPC & routes',
 		group: 'Guide',
 		keywords:
-			'rpc routes .v attributes get post rpc sse load before after route groups dynamics matchers wrappers +route',
+			'rpc routes .v attributes get post rpc sse load swelteloadresult before after route groups dynamics matchers wrappers +route swelteerror isredirect handlefetch checkupdated updated',
 	},
 	{
 		href: '/guide/types',
@@ -60,7 +60,7 @@ export const searchIndex: SearchEntry[] = [
 		label: 'Config',
 		group: 'Guide',
 		keywords:
-			'config env svelte.config.js swelte key knobs prerender isr offline service worker ssr csr csp csrf locals cookies head options',
+			'config env svelte.config.js swelte key knobs prerender entries csr layout limits serializedheaders isr offline service worker ssr csp csrf locals cookies head options goto preloaddata preloadcode pushstate replacestate snapshot updated data-sveltekit',
 	},
 	{
 		href: '/guide/offline',
@@ -80,20 +80,22 @@ export const searchIndex: SearchEntry[] = [
 		href: '/guide/cli',
 		label: 'CLI',
 		group: 'Guide',
-		keywords: 'cli dev build preview test check init export target snapshot contract',
+		keywords:
+			'cli dev build preview test check init export target snapshot contract format json agents',
 	},
 	{
 		href: '/guide/mcp',
-		label: 'MCP',
+		label: 'Agents',
 		group: 'Guide',
-		keywords: 'mcp model context protocol tools agent ide diagnostics wasm maps',
+		keywords:
+			'agents mcp skills install model context protocol tools agent ide diagnostics wasm maps overview ssr svelte5 sveltekit delta routes',
 	},
 	{
 		href: '/from-sveltekit',
 		label: 'From SvelteKit',
 		group: 'Migrate',
 		keywords:
-			'sveltekit migrate +page +layout server load layout hooks lib matchers streaming stores navigation',
+			'sveltekit migrate +page +layout server load layout hooks lib matchers streaming stores navigation ssr csr prerender limits snapshot goto preloadcode pushstate serializedheaders handlefetch updated handleerror',
 	},
 	{
 		href: '/versus',

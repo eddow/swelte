@@ -21,11 +21,22 @@ function rootWith(files: Record<string, string>): string {
 
 describe('diagnostics parity (tmp fixtures)', () => {
 	it('orphan route', async () => {
+		// Orphan = a page-shaped leaf (@[load] paints HTML) with no .svelte
+		// partner. Verb-only leaves are JSON endpoints, not orphans.
 		const root = rootWith({
-			'src/routes/lonely.v': 'module l\n@[get] pub fn g() string { return "" }',
+			'src/routes/lonely.v':
+				'module l\n@[load] pub fn load_home(req SwelteRequest) string { return "" }',
 		})
 		const diags = await collectDiagnostics(root)
 		assert.ok(diags.some((d) => d.kind === 'orphan'))
+	})
+
+	it('verb-only leaf is not an orphan (JSON endpoint)', async () => {
+		const root = rootWith({
+			'src/routes/ping.v': 'module l\n@[get] pub fn g() string { return "" }',
+		})
+		const diags = await collectDiagnostics(root)
+		assert.ok(!diags.some((d) => d.kind === 'orphan'))
 	})
 
 	it('folder clash (foo.v vs foo/+page.v)', async () => {
@@ -61,6 +72,16 @@ describe('diagnostics parity (tmp fixtures)', () => {
 		})
 		const diags = await collectDiagnostics(root)
 		assert.ok(diags.some((d) => d.kind === 'backend-ts'))
+	})
+
+	it('framework singletons are not stray (src/app.v + matchers.v)', async () => {
+		const root = rootWith({
+			'src/routes/+page.v': 'module p\n@[get] pub fn g() string { return "" }',
+			'src/app.v': 'module app\n@[startup]\npub fn boot() {\n}',
+			'src/matchers.v': 'module matchers\n@[matcher]\npub fn slug(s string) bool { return true }',
+		})
+		const diags = await collectDiagnostics(root)
+		assert.ok(!diags.some((d) => d.kind === 'stray'))
 	})
 
 	it('SSE shape stays out (documented subset)', async () => {

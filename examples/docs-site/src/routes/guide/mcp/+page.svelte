@@ -7,14 +7,19 @@ import { codeHtml } from '#lib/snippets.gen.js'
 	<ul>
 		<li><a href="/">Home</a></li>
 		<li>Guide</li>
-		<li>MCP</li>
+		<li>Agents</li>
 	</ul>
 </div>
 
-<h1 class="text-4xl font-bold mt-2">MCP: <code class="text-2xl">@swelte/mcp</code> server</h1>
+<h1 class="text-4xl font-bold mt-2">Agents: MCP + skills</h1>
 <p class="py-4 opacity-80">
-	Gives IDE agents programmatic insight (route tree, type contracts, diagnostics) instead of
-	guessing from raw files. Transport is <strong>stdio only</strong>.
+	Two surfaces give agents programmatic insight (route tree, type contracts, diagnostics) instead of
+	guessing from raw files.
+</p>
+
+<h2 class="text-2xl font-bold mt-8">MCP server (<code class="text-lg">@swelte/mcp</code>)</h2>
+<p class="opacity-80 mt-2 text-sm">
+	Transport is <strong>stdio only</strong> — the IDE spawns the server, no ports or auth.
 </p>
 
 <div class="mt-2">
@@ -61,4 +66,57 @@ import { codeHtml } from '#lib/snippets.gen.js'
 			</tr>
 		</tbody>
 	</table>
+</div>
+
+<h2 class="text-2xl font-bold mt-8">Skills</h2>
+<p class="opacity-80 mt-2 text-sm">
+	Six playbooks in <code>.agents/skills/</code> — a skill tells the agent <em>how</em> to do the
+	work, the MCP tool gives it the live project facts. Prefer MCP tools over grepping
+	<code>src/routes/</code>
+	by hand.
+</p>
+<div class="overflow-x-auto mt-2">
+	<table class="table table-zebra table-sm">
+		<thead>
+			<tr>
+				<th>Skill</th>
+				<th>Use when</th>
+			</tr>
+		</thead>
+		<tbody>
+			<tr>
+				<td><code>swelte-overview</code></td>
+				<td>scaffolding, explaining, navigating (layout, CLI, <code>.swelte/</code>)</td>
+			</tr>
+			<tr>
+				<td><code>swelte-mcp</code></td>
+				<td>querying via the MCP server (routes, contracts, diagnostics)</td>
+			</tr>
+			<tr>
+				<td><code>swelte-ssr-load</code></td>
+				<td>adding <code>@&#91;load]</code> data, debugging SSR output</td>
+			</tr>
+			<tr>
+				<td><code>swelte-svelte5</code></td>
+				<td>creating/fixing <code>.svelte</code> files (runes only)</td>
+			</tr>
+			<tr>
+				<td><code>swelte-sveltekit-delta</code></td>
+				<td>porting SvelteKit apps, checking parity</td>
+			</tr>
+			<tr>
+				<td><code>swelte-v-routes</code></td>
+				<td>creating/fixing <code>.v</code> files (attrs, request shape, types)</td>
+			</tr>
+		</tbody>
+	</table>
+</div>
+
+<h2 class="text-2xl font-bold mt-8">Installing skills</h2>
+<p class="opacity-80 mt-2 text-sm">
+	No installer — copy the directories. A fresh clone already carries them under
+	<code>.agents/skills/</code>.
+</p>
+<div class="mt-2">
+	<Code snippet={codeHtml['skills-install']} dense title="terminal" />
 </div>

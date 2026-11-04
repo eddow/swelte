@@ -1,12 +1,13 @@
 # Swelte: parity audit + next steps
 
-TODO: Document (in .md and in examples/docs-site)
+All P0/P1/P2 items below are DONE and documented in both `docs/*.md`
+and the browseable twin `examples/docs-site/` (guide + from-sveltekit pages).
 
 ## 1. Where you are (built)
 
-`coming-from-sveltekit.md` + `example.md` prove: routing/groups/dynamics/`[...rest]`/`[[slug]]`/matchers, `+route.svelte` nesting, `@[load]` cascade + universal `+page.ts`, verbs+`?q` + `fail`-lite + `deserialize` + `use:enhance`/`applyAction`, `@[get|rpc|sse]` + `SwelteResponse`, `locals`+cookies, `trailingSlash/base/assets/csp/csrf/methodOverride/version`, `ssr=false`-lite, `HEAD/OPTIONS`, SSR QJS + budgets, SSG `entries: off|static|all` + `entries.ts`, ISR-headers, SW opt-in, `offline.fallback`, `--target static|node|edge`, `swelte export`, contract snapshot, `startup/reroute/cron`, `goto/preloadData/pushState/before|after|onNavigate/depends/invalidate/invalidateAll/page/navigating/updated`.
+`coming-from-sveltekit.md` + `example.md` prove: routing/groups/dynamics/`[...rest]`/`[[slug]]`/matchers, `+route.svelte` nesting, `@[load]` cascade + universal `+page.ts`, verbs+`?q` + `fail`-lite + `deserialize` + `use:enhance`/`applyAction`, `@[get|rpc|sse]` + `SwelteResponse`, `locals`+cookies, `trailingSlash/base/assets/csp/csrf/methodOverride/version`, `ssr=false`-lite, `HEAD/OPTIONS`, SSR QJS + budgets, SSG `entries: off|static|all` + `entries.ts`, ISR-headers, SW opt-in, `offline.fallback`, `--target static|node|edge`, `swelte export`, contract snapshot, `startup`/`reroute` (scheduled ticks live in `@swelte/plus`, see `future.md` item 1), `goto/preloadData/pushState/before|after|onNavigate/depends/invalidate/invalidateAll/page/navigating/updated`.
 
-`cron` is already beyond SvelteKit (`@[cron('60s')]`, `spawn+sleep` loop).
+Beyond SvelteKit already: scheduled ticks via `@swelte/plus/jobs` (`jobsPlugin`, one scheduler thread — see `future.md` item 1).
 
 ## 2. Missed equivalence (SvelteKit can, Swelte can't yet)
 
@@ -45,15 +46,14 @@ preview direct + CLI; dispatch-level also vs the dev backend).
    keep the 400 default. Redirects stay `SwelteResponse` (verbs) / envelope
    `3xx+Location` (loads). TS `swelteError(status,msg)` + `isRedirect(e)`
    (`sdk.ts`, re-exported via `$app/navigation`).
-4. **`updated` store**: DONE (stale ref `sdk.ts:504` removed — now
-   `sdk.ts:~639`). Server stamps `X-Swelte-Version` on every response
+4. **`updated` store**: DONE. Server stamps `X-Swelte-Version` on every response
    (baked from `package.json` version, `SWELTE_VERSION` wins).
    `checkUpdated()` — `HEAD /` (same-origin, no body) with one same-origin
    `GET /` fallback on 404/405 + meta-tag seed — flips `updated` only on
    header change/mismatch. `handleFetch` hooks bypassed via captured
    `origFetch` (no recursion).
 5. **`handleFetch`**: DONE. `handleFetch(hook)`/`clearFetchHooks()`
-   (`sdk.ts:~137`): sees/rewrites every stub fetch
+   (`sdk.ts`): sees/rewrites every stub fetch
    (`{base,fn,kind,args,qualifier,init}` → rewritten `RequestInit` or void);
    throw surfaces as the stub error. Re-exported from `$app/navigation`.
 

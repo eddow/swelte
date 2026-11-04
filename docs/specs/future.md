@@ -14,10 +14,9 @@ SvelteKit couldn't / didn't:
 3. **First-class `@[ws]`**: not started. SvelteKit has no WS primitive. V
    `veb` + Svelte runes = typed socket Rooms/broadcast to pair with
    existing `@[sse]` list/emit modes.
-4. **SSE broadcast primitive**: SSE stays in core (per-request list/emit is
-   SvelteKit parity, not beyond). Channels (`emit('room', msg)`) not
-   started — the `sse-channels` skeleton (helpers only, no emission) was
-   removed; re-add when it has real V emission behind it.
+4. **SSE broadcast channels**: per-request list/emit lives in core (parity).
+   Cross-request `emit('room', msg)` not started — re-add only with real
+   V emission behind it.
 5. **ISR → SWR background regen**: today headers-only
    (`s-maxage+X-Swelte-Revalidate`) in core (parity). Background regen
    (re-render on timer + atomic `dist/*.html` swap) not started — the `swr`

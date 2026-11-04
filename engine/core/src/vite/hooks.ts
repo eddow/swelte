@@ -32,8 +32,7 @@ export function loadServerHooks(root: string, srcDir = 'src'): ServerHooks {
 	let reroute: RpcFn | undefined
 	let handleError: RpcFn | undefined
 	for (const fn of fns) {
-		if (fn.attr !== 'startup' && fn.attr !== 'reroute' && fn.attr !== 'error')
-			continue
+		if (fn.attr !== 'startup' && fn.attr !== 'reroute' && fn.attr !== 'error') continue
 		if (fn.qualifier)
 			throw new Error(
 				`[swelte] ${rel}: @[${fn.attr}] ${fn.name} takes no qualifier (one hook per kind).`

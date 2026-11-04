@@ -80,6 +80,16 @@ export async function collectDiagnostics(root: string): Promise<Diagnostic[]> {
 			const rel = relPosix(routesAbs, f)
 			const mod = rel.replace(/\.v$/, '')
 			if (mod === 'index' || mod === '+page' || mod.startsWith('api/')) continue
+			// JSON-only leaves need no .svelte partner (examples/tests
+			// dyn-items/[id].v): a verb/@[rpc] without @[load] never paints
+			// HTML, so requiring a page would flag every API-shaped route.
+			let src = ''
+			try {
+				src = readFileSync(f, 'utf8')
+			} catch {
+				src = ''
+			}
+			if (src && !/@\[\s*load\b/.test(src)) continue
 			const sveltePage = join(routesAbs, mod, '+page.svelte')
 			const svelteIndex = join(routesAbs, mod, 'index.svelte')
 			const svelteMatch = join(
@@ -156,6 +166,9 @@ export async function collectDiagnostics(root: string): Promise<Diagnostic[]> {
 		if (existsSync(srcAbs)) {
 			const rBase = routesDir.startsWith('src/') ? routesDir.slice(4) : routesDir
 			const lBase = libDir.startsWith('src/') ? libDir.slice(4) : libDir
+			// Framework-owned singletons: lifecycle hooks + param matchers
+			// live directly under src/ by design (see docs/coming-from-sveltekit.md).
+			const owned = new Set(['app.v', 'matchers.v'])
 			for (const f of listVFiles(srcAbs)) {
 				const rel = f
 					.slice(srcAbs.length + 1)
@@ -163,6 +176,7 @@ export async function collectDiagnostics(root: string): Promise<Diagnostic[]> {
 					.join('/')
 				if (rel === rBase || rel.startsWith(`${rBase}/`)) continue
 				if (rel === lBase || rel.startsWith(`${lBase}/`)) continue
+				if (owned.has(rel)) continue
 				warn(
 					`src/${rel}`,
 					'stray',

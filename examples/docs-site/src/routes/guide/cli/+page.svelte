@@ -71,8 +71,8 @@
 				</li>
 				<li>
 					<code>check</code>
-					— diagnostics, no side effects (<code>--format json</code>
-					for agents)
+					— diagnostics, no side effects (<code>--format text|json</code>; json is the agent/CI
+					shape, same as MCP <code>check</code>)
 				</li>
 				<li>
 					<code>init</code>

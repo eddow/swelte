@@ -13,21 +13,25 @@
     "dist",
     "bin",
     "LICENSE-MIT",
-    "package.json"
+    "package.json",
+    "skills"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "dev": "tsc -p tsconfig.json --watch",
     "test": "node --test --test-reporter=spec \"dist-test/**/*.test.js\"",
     "pretest": "tsc -p tsconfig.test.json",
-    "prepublishOnly": "npm run build"
+    "prepublishOnly": "npm run build",
+    "prepack": "npm-skills refs materialize",
+    "postpack": "npm-skills refs restore"
   },
   "dependencies": {
     "@swelte/core": "^0.1.1"
   },
   "devDependencies": {
     "@types/node": "^26.6.6",
-    "typescript": "^5.0.0"
+    "typescript": "^5.0.0",
+    "npm-skills": "^0.5.1"
   },
   "engines": {
     "node": ">=20"
@@ -52,5 +56,13 @@
     "svelte",
     "ai",
     "agents"
-  ]
+  ],
+  "npmSkills": {
+    "publish": {
+      "source": "skills",
+      "export": [
+        "swelte-mcp"
+      ]
+    }
+  }
 }
