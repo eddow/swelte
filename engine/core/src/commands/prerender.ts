@@ -69,10 +69,11 @@ export async function runPrerender(
 	hooks: PrerenderHooks
 ): Promise<{ pages: string[]; isrHeaders: Record<string, string> }> {
 	const empty = { pages: [], isrHeaders: {} as Record<string, string> }
-	const prerender = cfg['prerender'] as { entries?: unknown; concurrency?: unknown } | undefined
-	const mode =
-		prerender?.entries === 'all' || prerender?.entries === 'static' ? prerender.entries : 'off'
-	if (mode === 'off') return empty
+	// Global mode gates the bulk crawl — but per-page flags (`export const
+	// prerender = true | 'auto'`) carry their own include even under
+	// 'off' (leaf > wrapper > global; `false` excludes even under cover).
+	// entries.json only lists what generate() resolved, so when global is
+	// off we still crawl the explicitly-flagged subset.
 	const genEntries = join(resolve(root), String(cfg['outDir'] ?? '.swelte'), 'entries.json')
 	let crawl: CrawlFile
 	try {
@@ -82,7 +83,8 @@ export async function runPrerender(
 	}
 	const urls = crawlUrls(crawl)
 	if (urls.length === 0) return empty
-	const rawConc = prerender?.concurrency
+	const prerenderCfg = cfg['prerender'] as { concurrency?: unknown } | undefined
+	const rawConc = prerenderCfg?.concurrency
 	const conc =
 		typeof rawConc === 'number' && Number.isFinite(rawConc) && rawConc > 0 ? Math.floor(rawConc) : 4
 	const distDir = String(cfg['distDir'] ?? 'dist')
@@ -91,7 +93,10 @@ export async function runPrerender(
 	await killPort(probePort, () => {})
 	const child: ChildProcess = spawn(binary, [], {
 		cwd: root,
-		env: { ...process.env, PORT: String(probePort), SWELTE_DIST: distDir },
+		// SSR on: the crawl needs real HTML (dispatch-only JSON 200s are
+		// skipped). The QJS bridge is embedded in the built binary, so
+		// SWELTE_SSR=1 needs no sidecar.
+		env: { ...process.env, PORT: String(probePort), SWELTE_DIST: distDir, SWELTE_SSR: '1' },
 		stdio: ['ignore', 'pipe', 'pipe'],
 	})
 	try {

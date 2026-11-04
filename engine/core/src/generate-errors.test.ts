@@ -218,11 +218,17 @@ describe('generate() validation errors (tmp scaffold, no V binary)', () => {
 		const { writeFileSync } = await import('node:fs')
 		// Wrong params -> build error.
 		let root = scaffold({ '+page.v': 'module p\n@[get] pub fn g() string { return "" }' })
-		writeFileSync(join(root, 'src', 'app.v'), 'module s\n@[error]\npub fn oops(msg string) string { return msg }')
+		writeFileSync(
+			join(root, 'src', 'app.v'),
+			'module s\n@[error]\npub fn oops(msg string) string { return msg }'
+		)
 		await assert.rejects(() => buildStart(root), /must take \(message string, status int\)/)
 		// Non-string return -> build error.
 		root = scaffold({ '+page.v': 'module p\n@[get] pub fn g() string { return "" }' })
-		writeFileSync(join(root, 'src', 'app.v'), 'module s\n@[error]\npub fn oops(message string, status int) void { }')
+		writeFileSync(
+			join(root, 'src', 'app.v'),
+			'module s\n@[error]\npub fn oops(message string, status int) void { }'
+		)
 		await assert.rejects(() => buildStart(root), /must return string/)
 		// Two @[error] fns -> build error.
 		root = scaffold({ '+page.v': 'module p\n@[get] pub fn g() string { return "" }' })
@@ -245,11 +251,43 @@ describe('generate() validation errors (tmp scaffold, no V binary)', () => {
 		assert.ok(sv.includes('fn swelte_sanitize_error(message string, status int) string {'))
 	})
 
+	it('P0 item 3: server_gen emits IError-typed helpers (status preservation)', async () => {
+		const { emitServerGen } = await import('./vite/server-gen.js')
+		const gen = emitServerGen(
+			[{ route: '/plain', mod: 'plain', prefix: 'r_' }],
+			new Set(),
+			new Map(),
+			[],
+			[],
+			[]
+		)
+		// SwelteError implements IError (msg/code) so `return swelte_error(..)`
+		// compiles as a !T throw; err_typed keeps >=400 statuses, err_bad
+		// keeps the 400 default for plain throws.
+		assert.ok(gen.includes('pub fn (e SwelteError) msg() string {'))
+		assert.ok(gen.includes('pub fn (e SwelteError) code() int {'))
+		assert.ok(
+			gen.includes('fn swelte_err_typed(path string, fn_name string, err IError) SwelteResponse {')
+		)
+		assert.ok(gen.includes('fn swelte_load_err_typed(err IError) SwelteLoadResult {'))
+		assert.ok(gen.includes('SwelteLoadResult{ status: st,'), gen.slice(0, 6000))
+	})
+
 	it('P1 items 6+12: server_gen emits swelte_no_csr + swelte_route_limits', async () => {
 		const { emitServerGen } = await import('./vite/server-gen.js')
-		const gen = emitServerGen([{ route: '/plain', mod: 'plain', prefix: 'r_' }], new Set(), new Map(), [], ['/plain'], [
-			{ route: '/limited', limits: { rate: 10, rateWindowMs: 60000, timeoutMs: 5000, bodyLimit: 1048576 } },
-		])
+		const gen = emitServerGen(
+			[{ route: '/plain', mod: 'plain', prefix: 'r_' }],
+			new Set(),
+			new Map(),
+			[],
+			['/plain'],
+			[
+				{
+					route: '/limited',
+					limits: { rate: 10, rateWindowMs: 60000, timeoutMs: 5000, bodyLimit: 1048576 },
+				},
+			]
+		)
 		assert.ok(gen.includes('pub fn swelte_no_csr(path string) bool {'), gen.slice(0, 2000))
 		assert.ok(gen.includes('if norm_path == "/plain" { return true }'))
 		assert.ok(gen.includes('pub struct SwelteRouteLimits {'))
@@ -267,15 +305,27 @@ describe('generate() validation errors (tmp scaffold, no V binary)', () => {
 
 	it('P2 serializedHeaders: server_gen emits the allowlist table', async () => {
 		const { emitServerGen } = await import('./vite/server-gen.js')
-		const gen = emitServerGen([], new Set(), new Map(), [], [], [], [
-			{ route: '/shop', headers: ['x-foo', 'X-Bar'] },
-			{ route: '/empty', headers: [] },
-		])
+		const gen = emitServerGen(
+			[],
+			new Set(),
+			new Map(),
+			[],
+			[],
+			[],
+			[
+				{ route: '/shop', headers: ['x-foo', 'X-Bar'] },
+				{ route: '/empty', headers: [] },
+			]
+		)
 		assert.ok(gen.includes('pub struct SwelteRouteSerializedHeaders {'))
 		assert.ok(
-			gen.includes('out << SwelteRouteSerializedHeaders{ route: "/shop", names: ["x-foo", "X-Bar"] }')
+			gen.includes(
+				'out << SwelteRouteSerializedHeaders{ route: "/shop", names: ["x-foo", "X-Bar"] }'
+			)
 		)
-		assert.ok(gen.includes('out << SwelteRouteSerializedHeaders{ route: "/empty", names: []string{} }'))
+		assert.ok(
+			gen.includes('out << SwelteRouteSerializedHeaders{ route: "/empty", names: []string{} }')
+		)
 		// Shared predicate: dynamic rows route through swelte_match_route so
 		// `/users/[id]` hints fire for `/users/42` (static rows keep
 		// exact-or-prefix). Emitted once, used by both tables.
@@ -286,10 +336,10 @@ describe('generate() validation errors (tmp scaffold, no V binary)', () => {
 
 	it('P2 serializedHeaders: hint validation + leaf-over-wrapper precedence', async () => {
 		const { assertSerializedHeadersHint, collectSvelteManifest } = await import('./vite.js')
-		assert.deepEqual(assertSerializedHeadersHint('f', `export const serializedHeaders = ['x-a', "X-B2"]`), [
-			'x-a',
-			'X-B2',
-		])
+		assert.deepEqual(
+			assertSerializedHeadersHint('f', `export const serializedHeaders = ['x-a', "X-B2"]`),
+			['x-a', 'X-B2']
+		)
 		assert.deepEqual(assertSerializedHeadersHint('f', `export const serializedHeaders = []`), [])
 		assert.equal(assertSerializedHeadersHint('f', `export const x = 1`), null)
 		// Typed declarations parse — and a bad typed one still errors instead

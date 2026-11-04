@@ -853,9 +853,7 @@ describe('item 11 — codegen golden project (sample-overlay variant + routes.js
 		// Layout-cut page mounts bare (no wrappers); plain leaf keeps its csr flag.
 		assert.ok(js.includes('/admin/users'), 'layout-cut route present')
 		assert.ok(js.includes('csr: false'), 'csr=false leaf flagged')
-		const mani = JSON.parse(
-			readFileSync(join(root, '.swelte', 'ssr-manifest.json'), 'utf8')
-		) as {
+		const mani = JSON.parse(readFileSync(join(root, '.swelte', 'ssr-manifest.json'), 'utf8')) as {
 			routes: { route: string; svelte: string; kind: string; csr: boolean; layout: unknown }[]
 			wrappersByRoute: Record<string, string[]>
 		}
@@ -903,9 +901,9 @@ describe('item 11 — codegen golden project (sample-overlay variant + routes.js
 		assert.deepEqual(routePaths, [
 			`{ path: "/admin/users", page: __swelteLoad_admin_users__page, wrappers: [], chunkMods: ["admin/users/+page"], hasLoad: true },`,
 		])
-		const mani = JSON.parse(
-			readFileSync(join(root, '.swelte', 'ssr-manifest.json'), 'utf8')
-		) as { routes: { route: string; hasData: boolean; layout: unknown }[] }
+		const mani = JSON.parse(readFileSync(join(root, '.swelte', 'ssr-manifest.json'), 'utf8')) as {
+			routes: { route: string; hasData: boolean; layout: unknown }[]
+		}
 		const leaf = mani.routes.find((r) => r.route === '/admin/users')
 		assert.equal(leaf?.hasData, true)
 		assert.equal(leaf?.layout, false)

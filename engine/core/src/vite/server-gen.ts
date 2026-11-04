@@ -467,9 +467,37 @@ pub:
 	message string
 }
 
+pub fn (e SwelteError) msg() string {
+	return e.message
+}
+
+pub fn (e SwelteError) code() int {
+	return e.status
+}
+
 pub fn swelte_error(status int, message string) SwelteError {
 	st := if status < 400 { 500 } else { status }
 	return SwelteError{ status: st, message: message }
+}
+
+fn swelte_err_typed(path string, fn_name string, err IError) SwelteResponse {
+	st := err.code()
+	if st >= 400 {
+		return SwelteResponse{ status: st, headers: {'Content-Type': 'application/json'}, body: '{"error":' + json.encode(err.msg()) + ',"fn":' + json.encode(fn_name) + ',"path":' + json.encode(path) + '}' }
+	}
+	return swelte_err_bad(path, fn_name, err.msg())
+}
+
+// Thrown load errors keep the status (P0 item 3, load half): a typed
+// swelte_error throw from @[load] becomes a status-carrying
+// envelope (harness renders +error with that status); plain throws keep
+// the old default envelope (200 + empty body).
+fn swelte_load_err_typed(err IError) SwelteLoadResult {
+	st := err.code()
+	if st >= 400 {
+		return SwelteLoadResult{ status: st, body: '{"status":' + st.str() + ',"message":' + json.encode(err.msg()) + '}' }
+	}
+	return SwelteLoadResult{ body: '{}' }
 }
 
 pub fn swelte_bytes(data []u8, content_type string) SwelteResponse {
@@ -761,7 +789,11 @@ pub fn swelte_sse_emit_for(prefix string, qualifier string, req SwelteRequest, e
 		// serves the SPA shell; async universal loads stay client-only.
 		`pub fn swelte_no_ssr(path string) bool {`,
 		...(noSsrRoutes.length ? [`\tnorm_path := swelte_normalize_path(path)`] : [`\t_ = path`]),
-		...noSsrRoutes.map((r) => r.includes('[') ? `\tif m, _ := swelte_match_route(${vJsonStr(r)}, norm_path); m { return true }` : `\tif norm_path == ${vJsonStr(r)} { return true }`),
+		...noSsrRoutes.map((r) =>
+			r.includes('[')
+				? `\tif m, _ := swelte_match_route(${vJsonStr(r)}, norm_path); m { return true }`
+				: `\tif norm_path == ${vJsonStr(r)} { return true }`
+		),
 		`\treturn false
 }`,
 		// csr=false-lite: Hand still serves the SSR HTML; the client router
@@ -769,7 +801,11 @@ pub fn swelte_sse_emit_for(prefix string, qualifier string, req SwelteRequest, e
 		// The predicate stays server-visible for logs/contracts.
 		`pub fn swelte_no_csr(path string) bool {`,
 		...(noCsrRoutes.length ? [`\tnorm_path := swelte_normalize_path(path)`] : [`\t_ = path`]),
-		...noCsrRoutes.map((r) => r.includes('[') ? `\tif m, _ := swelte_match_route(${vJsonStr(r)}, norm_path); m { return true }` : `\tif norm_path == ${vJsonStr(r)} { return true }`),
+		...noCsrRoutes.map((r) =>
+			r.includes('[')
+				? `\tif m, _ := swelte_match_route(${vJsonStr(r)}, norm_path); m { return true }`
+				: `\tif norm_path == ${vJsonStr(r)} { return true }`
+		),
 		`\treturn false
 }`,
 		// Per-route limits table (P1 item 12 lite): longest-prefix match in
@@ -955,11 +991,11 @@ module routes
 	const aftersLeafFirst = [...afters].reverse()
 	const beforeCalls = list(befores, (b) => {
 		const bn = b.includes('_') ? b.slice(b.lastIndexOf('_') + 1) : b
-		return `\tswelte_req = ${b}(swelte_req) or { return swelte_err_bad(path, '${bn}', err.msg()) }\n`
+		return `\tswelte_req = ${b}(swelte_req) or { return swelte_err_typed(path, '${bn}', err) }\n`
 	})
 	const afterCalls = list(aftersLeafFirst, (a) => {
 		const an = a.includes('_') ? a.slice(a.lastIndexOf('_') + 1) : a
-		return `\tswelte_res = ${a}(swelte_req, swelte_res) or { return swelte_err_bad(path, '${an}', err.msg()) }\n`
+		return `\tswelte_res = ${a}(swelte_req, swelte_res) or { return swelte_err_typed(path, '${an}', err) }\n`
 	})
 	if (befores.length === 0 && afters.length === 0) {
 		return [
@@ -1111,8 +1147,8 @@ pub fn ${prefix}swelte_load(req SwelteRequest) !SwelteLoadResult {
 	const chained = loads
 		.map((l, i) =>
 			i === 0
-				? `\tmut frag_${i} := ${fnPrefix(l)}${l.name}(req) or { return err }`
-				: `\tmut frag_${i} := ${fnPrefix(l)}${l.name}(req, frag_${i - 1}) or { return err }`
+				? `\tmut frag_${i} := ${fnPrefix(l)}${l.name}(req) or { return swelte_load_err_typed(err) }`
+				: `\tmut frag_${i} := ${fnPrefix(l)}${l.name}(req, frag_${i - 1}) or { return swelte_load_err_typed(err) }`
 		)
 		.join('\n')
 	const leaf = loads.length - 1
@@ -1171,11 +1207,11 @@ export function dispatchBody(
 \t\t\treturn swelte_status(s_${uid}, b_${uid})`
 		const body = isTupleRet.test(fn.vret)
 			? fn.fallible
-				? `\t\t\tres := ${call} or { return swelte_err_bad(path, fn_name, err.msg()) }
+				? `\t\t\tres := ${call} or { return swelte_err_typed(path, fn_name, err) }
 ${tupleBody(resExpr)}`
 				: `${tupleBody(`(${call})`)}`
 			: fn.fallible
-				? `\t\t\tres := ${call} or { return swelte_err_bad(path, fn_name, err.msg()) }
+				? `\t\t\tres := ${call} or { return swelte_err_typed(path, fn_name, err) }
 \t\t\treturn ${wrapRet(resExpr)}`
 				: fn.vret === 'void'
 					? `\t\t\t${call}
@@ -1260,11 +1296,11 @@ ${body}
 \t\t\treturn swelte_status(s_${uid}, b_${uid})`
 		const body = isTupleRet.test(h.vret)
 			? h.fallible
-				? `\t\t\tres := ${call} or { return swelte_err_bad(path, ${vJsonStr(h.name)}, err.msg()) }
+				? `\t\t\tres := ${call} or { return swelte_err_typed(path, ${vJsonStr(h.name)}, err) }
 ${tupleStat('res')}`
 				: `${tupleStat(`(${call})`)}`
 			: h.fallible
-				? `\t\t\tres := ${call} or { return swelte_err_bad(path, ${vJsonStr(h.name)}, err.msg()) }
+				? `\t\t\tres := ${call} or { return swelte_err_typed(path, ${vJsonStr(h.name)}, err) }
 \t\t\treturn ${wrap('res')}`
 				: h.vret === 'void'
 					? `\t\t\t${call}\n\t\t\treturn swelte_json('{}')`

@@ -485,6 +485,10 @@ describe('route helpers', () => {
 		] as never)
 		assert.ok(plain.includes('!SwelteLoadResult'), plain.slice(0, 400))
 		assert.ok(plain.includes('SwelteLoadResult{ body: json.encode(frag_0) }'))
+		assert.ok(
+			plain.includes('or { return swelte_load_err_typed(err) }'),
+			'cascade must route throws through the typed helper'
+		)
 		const env = emitLoadCascade('swelte_x_', [
 			{
 				mod: 'x/+page',

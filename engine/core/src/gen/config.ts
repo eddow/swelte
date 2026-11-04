@@ -440,8 +440,20 @@ export function renderHarness(
 			"\tif sanitized != '' { return sanitized }\n" +
 			'\treturn message\n' +
 			'}\n'
-		if (src.includes(anchor)) src = src.replace(anchor, inject)
-		else src += `\n${inject}`
+		const idx = src.indexOf(anchor)
+		if (idx >= 0) {
+			// Consume the template default body (through its closing brace):
+			// the old code replaced only the anchor line and left
+			// `\t_ = status\n\treturn message\n}` behind — invalid V.
+			const bodyStart = idx + anchor.length
+			let depth = 1
+			let i = bodyStart
+			for (; i < src.length && depth > 0; i++) {
+				if (src[i] === '{') depth++
+				else if (src[i] === '}') depth--
+			}
+			src = src.slice(0, idx) + inject + src.slice(i)
+		} else src += `\n${inject}`
 	}
 	return src
 }

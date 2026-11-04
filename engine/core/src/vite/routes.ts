@@ -223,8 +223,7 @@ export function assertLayoutHint(file: string, src: string): false | true | stri
 	const decl = layoutDecl(src)
 	if (!decl) return null
 	const line = lineOf(src, decl.index)
-	const msg =
-		`[swelte] ${file}:${line}: bad layout hint '${decl.rhs}' (want false | true | 'ancestor-dir', e.g. export const layout = false or export const layout = 'admin').`
+	const msg = `[swelte] ${file}:${line}: bad layout hint '${decl.rhs}' (want false | true | 'ancestor-dir', e.g. export const layout = false or export const layout = 'admin').`
 	if (decl.rhs === 'false') return false
 	if (decl.rhs === 'true') return true
 	// Only complete quoted strings reach the dir check — unquoted garbage
@@ -317,7 +316,9 @@ export function assertLimitsHint(file: string, src: string): RouteLimits | null 
 		}
 		const v = parseInt(kv[2], 10)
 		if (!Number.isFinite(v) || v <= 0) {
-			throw new Error(`[swelte] ${file}:${line}: bad limits hint — '${kv[1]}' must be a positive int.`)
+			throw new Error(
+				`[swelte] ${file}:${line}: bad limits hint — '${kv[1]}' must be a positive int.`
+			)
 		}
 		out[allow[kv[1]]] = v
 	}
@@ -521,10 +522,7 @@ export function collectSvelteManifest(
 			limits: (() => {
 				const sib = siblingSrc(f.replace(/\.svelte$/, '.ts'))
 				if (!sib) return null
-				return assertLimitsHint(
-					`${routesDir}/${relPosixTop(routesAbs, sib.file)}`,
-					sib.src
-				)
+				return assertLimitsHint(`${routesDir}/${relPosixTop(routesAbs, sib.file)}`, sib.src)
 			})(),
 			chunk: (() => {
 				const sib = siblingSrc(f.replace(/\.svelte$/, '.ts'))

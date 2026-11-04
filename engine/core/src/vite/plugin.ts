@@ -917,15 +917,23 @@ ${list(params, (p) => `\t${p.name}${p.optional ? '?' : ''}: ${p.tstype}\n`)}}
 								if (e.ssr === false) noSsrRoutes.push(e.route)
 								if (e.csr === false) noCsrRoutes.push(e.route)
 								if (e.limits) routeLimits.push({ route: e.route, limits: e.limits })
-							if (e.serializedHeaders)
-								serializedHeaders.push({ route: e.route, headers: e.serializedHeaders })
+								if (e.serializedHeaders)
+									serializedHeaders.push({ route: e.route, headers: e.serializedHeaders })
 							}
 						} catch {
 							/* no svelte routes */
 						}
 						writeIfChanged(
 							join(routesGenDir, `server_gen.v`),
-							emitServerGen(dispatched, sseMods, matchers, noSsrRoutes, noCsrRoutes, routeLimits, serializedHeaders)
+							emitServerGen(
+								dispatched,
+								sseMods,
+								matchers,
+								noSsrRoutes,
+								noCsrRoutes,
+								routeLimits,
+								serializedHeaders
+							)
 						)
 					}
 					// Leaf-vs-index clash: foo.v + foo/index.v (or +page.v) both exist.
@@ -1329,7 +1337,11 @@ export declare const dev: boolean
 						const dir = mod.includes('/') ? mod.slice(0, mod.lastIndexOf('/')) : ''
 						const cut = svelteEntries.find((e) => e.svelte === pageSvelte)?.layout ?? null
 						const dirOfW = (w: string): string =>
-							w.endsWith('/+route.svelte') ? w.slice(0, -'/+route.svelte'.length) : w === '+route.svelte' ? '' : w
+							w.endsWith('/+route.svelte')
+								? w.slice(0, -'/+route.svelte'.length)
+								: w === '+route.svelte'
+									? ''
+									: w
 						const chain: string[] = []
 						let cur = dir
 						for (;;) {

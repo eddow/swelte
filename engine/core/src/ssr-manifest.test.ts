@@ -362,7 +362,8 @@ describe('collectSvelteManifest (tmp routes)', () => {
 			'plain.svelte': '<h1>p</h1>',
 			'plain.ts': 'export const csr = false',
 			'limited.svelte': '<h1>l</h1>',
-			'limited.ts': 'export const limits = { rate: 10, rateWindowMs: 60000, timeoutMs: 5000, bodyLimit: 1048576 }',
+			'limited.ts':
+				'export const limits = { rate: 10, rateWindowMs: 60000, timeoutMs: 5000, bodyLimit: 1048576 }',
 		})
 		const { entries } = collectSvelteManifest(routesAbs, 'src/routes', new Set())
 		const by = (svelte: string) => entries.find((e: SvelteRouteEntry) => e.svelte === svelte)

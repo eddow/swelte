@@ -33,7 +33,10 @@ export async function startPreview() {
   if (mode === 'direct') {
     state.child = spawnChild(binary, [], {
       cwd: root,
-      env: { PORT: String(port), SWELTE_DIST: 'dist', SWELTE_SSR: '1' },
+      // Mirror `swelte preview` config forwarding (svelte.config.js
+      // version stamp): the raw binary only stamps X-Swelte-Version
+      // when SWELTE_VERSION is set — keep both serves identical.
+      env: { PORT: String(port), SWELTE_DIST: 'dist', SWELTE_SSR: '1', SWELTE_VERSION: '9.9.9-test' },
     })
     await waitHttp(port, { ms: 15000 })
   } else {

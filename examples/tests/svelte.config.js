@@ -9,5 +9,8 @@ export default defineConfig({
     routesDir: 'src/routes',
     libDir: 'src/lib',
     outDir: '.swelte',
+    // Parity probe (P0 item 4): baked version stamp → X-Swelte-Version
+    // header on every response (SWELTE_VERSION env wins when set).
+    version: '9.9.9-test',
   },
 });

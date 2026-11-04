@@ -605,7 +605,27 @@ fn (mut app App) before_request(mut ctx Ctx) veb.Result {
 				ctx.res.header.add(.set_cookie, c.to_header())
 			}
 			if load_res.status != 200 {
-				err_json := '{"status":' + load_res.status.str() + ',"message":"error"}'
+				// P0 item 2, redirect half: a load-side 3xx + Location is not
+				// an error — answer the redirect directly (Location already
+				// set above, kept even when serializedHeaders omits it).
+				if load_res.status >= 300 && load_res.status < 400 {
+					loc := load_res.headers['Location'] or { load_res.headers['location'] or { '' } }
+					if loc != '' {
+						ctx.res.set_status(http.status_from_int(load_res.status))
+						return ctx.send_response_to_client('text/html; charset=utf-8', '<!doctype html><html><head><meta http-equiv="refresh" content="0;url=' + swelte_html_escape(loc) + '"></head><body><a href="' + swelte_html_escape(loc) + '">redirect</a></body></html>')
+					}
+				}
+				mut err_json := '{"status":' + load_res.status.str() + ',"message":"error"}'
+				// Thrown typed loads (swelte_load_err_typed) carry their
+				// message in the envelope body — thread it into +error
+				// props, sanitized before send (P1 item 7).
+				lmsg_tmp := load_res.body.all_after('"message":')
+				if lmsg_tmp != load_res.body {
+					lmsg_q := lmsg_tmp.trim_space()
+					if lmsg_q.starts_with('"') {
+						err_json = '{"status":' + load_res.status.str() + ',"message":' + swelte_json_str(swelte_sanitize_error(lmsg_q[1..].all_before('"'), load_res.status)) + '}'
+					}
+				}
 				joined_err, ok_err := swelte_render_page('/+error', err_json)
 				if ok_err {
 					head := swelte_page_head_split(joined_err)
@@ -618,6 +638,16 @@ fn (mut app App) before_request(mut ctx Ctx) veb.Result {
 				}
 				ctx.res.set_status(http.status_from_int(load_res.status))
 				return ctx.send_response_to_client('text/html; charset=utf-8', props_json)
+			}
+			// Load-side redirect that reached the render-miss fallback (no
+			// +error render, or 3xx without Location above): keep the
+			// redirect contract (status + Location) instead of the shell.
+			if load_res.status >= 300 && load_res.status < 400 {
+				loc := load_res.headers['Location'] or { load_res.headers['location'] or { '' } }
+				if loc != '' {
+					ctx.res.set_status(http.status_from_int(load_res.status))
+					return ctx.send_response_to_client('text/html; charset=utf-8', '<!doctype html><html><head><meta http-equiv="refresh" content="0;url=' + swelte_html_escape(loc) + '"></head><body><a href="' + swelte_html_escape(loc) + '">redirect</a></body></html>')
+				}
 			}
 			joined, ok := swelte_render_page(path, props_json)
 			if ok {
@@ -632,7 +662,9 @@ fn (mut app App) before_request(mut ctx Ctx) veb.Result {
 		} else if status >= 400 && body.contains('not found') {
 			// Unknown path → global +error 404 when SSR is on; without
 			// +error.svelte the static/SPA fallback below still applies.
-			joined, ok := swelte_render_page('/+error', '{"status":404,"message":"not found"}')
+			// @[error] sanitizes the stock message too (P1 item 7).
+			nf_msg := swelte_json_str(swelte_sanitize_error('not found', 404))
+			joined, ok := swelte_render_page('/+error', '{"status":404,"message":' + nf_msg + '}')
 			if ok {
 				head := swelte_page_head_split(joined)
 				html, _ := swelte_split_head_body(joined, true)
@@ -643,7 +675,16 @@ fn (mut app App) before_request(mut ctx Ctx) veb.Result {
 				)
 			}
 		} else if status >= 400 {
-			joined, ok := swelte_render_page('/+error', '{"status":' + status.str() + ',"message":"error"}')
+			// Dispatch-throw errors (typed or plain): thread the message
+			// into +error props with the status — sanitized before send
+			// (P1 item 7), never the raw throw text.
+			mut dmsg := 'error'
+			dtmp := body.all_after('"error":"')
+			if dtmp != body {
+				dmsg = dtmp.all_before('"')
+			}
+			dmsg = swelte_sanitize_error(dmsg, status)
+			joined, ok := swelte_render_page('/+error', '{"status":' + status.str() + ',"message":' + swelte_json_str(dmsg) + '}')
 			if ok {
 				head := swelte_page_head_split(joined)
 				html, _ := swelte_split_head_body(joined, true)
@@ -894,9 +935,10 @@ fn swelte_min_shell() string {
 
 // Page-data path: resolve `path` to a routes prefix (same precedence as
 // swelte_route), build a SwelteRequest, run the load cascade.
-// Any throw → default envelope '{}' (renderer falls back to +error via its
-// own path); route miss → default envelope (static shell). The envelope
-// carries status/headers/cookies for the HTML navigation (P0 item 2);
+// Any throw → status-carrying envelope (typed throws via
+// swelte_load_err_typed, plain throws keep the '{}' default); route miss
+// → default envelope (static shell). The envelope carries
+// status/headers/cookies for the HTML navigation (P0 item 2);
 // the JSON branch (client router fetch) reads the same fields.
 fn swelte_page_props(
 	path string

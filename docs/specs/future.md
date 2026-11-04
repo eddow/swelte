@@ -17,7 +17,9 @@ Ordered by user pain:
 All five shipped. `per-page-prerender.md` header already says
 `IMPLEMENTED (P0 item 1)`. `coming-from-sveltekit.md` + `docs/rpc.md` +
 `docs/config.md` document the behavior; `route-helpers.test.ts` +
-`sdk-errors.test.ts` pin it.
+`sdk-errors.test.ts` pin it. **E2E: `examples/tests` parity battery**
+(`tests/e2e/battery.js` `defineParityContract` + `defineParitySsrContract`,
+preview direct + CLI; dispatch-level also vs the dev backend).
 
 1. **Per-page `prerender` (`true|false|'auto'`)**: DONE. Carrier is
    `export const prerender` in the sibling `.ts` (leaf `+page.ts` or
@@ -59,7 +61,9 @@ All five shipped. `per-page-prerender.md` header already says
 
 Router + render + hooks batch. `coming-from-sveltekit.md` + `config.md`
 document the behavior; `ssr-manifest.test.ts` + `sdk-errors.test.ts` +
-`generate-errors.test.ts` + `codegen-shape.test.ts` pin it.
+`generate-errors.test.ts` + `codegen-shape.test.ts` pin it. **E2E: same
+`examples/tests` parity battery** (layout cut, `csr` manifest flag,
+`@`-error sanitize, reroute, per-route limits, preload link options).
 
 6. **`csr=false`**: DONE (lite). `export const csr = false` in the
    sibling `.ts` (leaf or `+route.ts` wrapper) renders SSR HTML only —
@@ -116,6 +120,9 @@ document the behavior; `ssr-manifest.test.ts` + `sdk-errors.test.ts` +
 ### P2 — polish — DONE (verified, 225/225 tests pass)
 
 All three closed. Streaming SSR stays a locked non-goal (QJS sync).
+**E2E: same `examples/tests` parity battery** (serializedHeaders
+allowlist, async paginated `entries.ts`, per-page prerender dist
+artifacts: `true` written even under `entries:'off'`, `false` excluded).
 
 1. **`entries()` async/paginated**: DONE. `collectPrerenderEntries`
    already `await`s the sibling `entries.ts` export (`await (fn as

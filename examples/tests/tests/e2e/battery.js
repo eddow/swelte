@@ -7,7 +7,234 @@
 // time (node:test registers `it` sync, `before()` fills state later).
 import { it } from 'node:test'
 import assert from 'node:assert/strict'
-import { get } from './helpers.js'
+import { get, headRaw } from './helpers.js'
+
+/** Parity battery (docs/specs/future.md §2): every shipped P0/P1/P2 item
+ * with an HTTP-observable surface. Runs against build outputs (preview:
+ * direct + CLI) and the V backend in dev (Vite HTML != SSR HTML, so these
+ * assert dispatch/envelope behavior, not SSR markers).
+ *
+ * Browser-only halves stay in engine unit scope (sdk-errors.test.ts):
+ * handleFetch rewrite, updated-store flip, preloadCode/goto/pushState/
+ * captureSnapshot client nav, csr=false no-mount, layout-cut client nav.
+ * What IS pinned here: status codes, envelope headers/cookies, manifest
+ * + routes.js flags, and dist prerender artifacts.
+ */
+export function defineParityContract(getState, label = 'parity') {
+  // Dispatch-level: provable against the bare V backend (dev) and the
+  // built server (preview). No SSR renderer needed.
+  const json = { accept: 'application/json' }
+
+  // P0 item 3: typed errors keep their status; plain throws stay 400.
+  it(`${label}: typed verb error keeps 403 (plain stays 400)`, async () => {
+    const { base, runnable } = getState()
+    if (!runnable) return
+    const typed = await get(base + '/typed?deny', json)
+    assert.equal(typed.status, 403)
+    assert.ok((await typed.text()).includes('forbidden-typed'))
+    const plain = await get(base + '/boom', json)
+    assert.equal(plain.status, 400)
+  })
+
+  // P1 item 7, JSON half: @[error] sanitizes JSON error bodies.
+  it(`${label}: @[error] sanitizes JSON error bodies`, async () => {
+    const { base, runnable } = getState()
+    if (!runnable) return
+    const j = await get(base + '/typed?deny', json)
+    assert.ok((await j.text()).includes('safe:forbidden-typed'))
+  })
+
+  // P0 item 4: version stamp on GET (every response carries it).
+  it(`${label}: X-Swelte-Version stamped on responses`, async () => {
+    const { base, runnable } = getState()
+    if (!runnable) return
+    const res = await get(base + '/api/ping?payload=test', json)
+    assert.equal(res.headers.get('x-swelte-version'), '9.9.9-test')
+  })
+
+  // P1 item 10, dispatch half: the cut leaf answers 200 (chrome asserts
+  // need SSR HTML — see defineParitySsrContract).
+  it(`${label}: layout-cut leaf dispatches 200`, async () => {
+    const { base, runnable } = getState()
+    if (!runnable) return
+    const bare = await get(base + '/bare-sub/leaf?probe=1', json)
+    assert.equal(bare.status, 200)
+  })
+
+  // P1 item 12: per-route rate limit fires on its own route.
+  // The limiter is per-IP (shared bucket), so loop until 429 (limit 2
+  // means at most a few hits) instead of asserting an exact ordinal.
+  it(`${label}: per-route limits 429 /limited quickly`, async () => {
+    const { base, runnable } = getState()
+    if (!runnable) return
+    let capped = false
+    for (let i = 0; i < 6 && !capped; i++) {
+      const res = await get(base + '/limited?probe=' + i, json)
+      if (res.status === 429) capped = true
+      else assert.equal(res.status, 200)
+      await res.text().catch(() => {})
+    }
+    assert.ok(capped, 'per-route rate limit never fired within 6 hits')
+  })
+
+  // P1 item 6 + P2 items: manifest + routes.js + dist artifacts.
+  // Dev serves the V backend without dist/, so these assert where
+  // `root` is provided and skip otherwise.
+  it(`${label}: manifest/routes.js carry csr/layout/limits/serialized/prerender`, async () => {
+    const { runnable, root } = getState()
+    if (!runnable || !root) return
+    const { existsSync, readFileSync } = await import('node:fs')
+    const { join } = await import('node:path')
+    const mf = join(root, '.swelte', 'ssr-manifest.json')
+    if (!existsSync(mf)) {
+      console.log('skip: no ssr-manifest (dev without generate?)')
+      return
+    }
+    const parsed = JSON.parse(readFileSync(mf, 'utf8'))
+    const byRoute = new Map(parsed.routes.map((r) => [r.route, r]))
+    assert.equal(byRoute.get('/no-csr')?.csr, false, 'csr=false missing from manifest')
+    assert.equal(byRoute.get('/bare-sub/leaf')?.layout, false, 'layout=false missing from manifest')
+    assert.ok(byRoute.get('/limited')?.limits?.rate === 2, 'limits missing from manifest')
+    assert.deepEqual(byRoute.get('/load-filter')?.serializedHeaders, ['x-keep'])
+    assert.equal(byRoute.get('/prerender-true')?.prerender, 'prerender-true')
+    const routesJs = join(root, '.swelte', 'routes.js')
+    if (existsSync(routesJs)) {
+      const js = readFileSync(routesJs, 'utf8')
+      assert.ok(js.includes('csr: false'), 'csr:false missing from routes.js')
+    }
+  })
+
+  it(`${label}: per-page prerender writes true, skips false`, async () => {
+    const { runnable, root } = getState()
+    if (!runnable || !root) return
+    const { existsSync, readFileSync } = await import('node:fs')
+    const { join } = await import('node:path')
+    const distTrue = join(root, 'dist', 'prerender-true', 'index.html')
+    if (!existsSync(distTrue)) {
+      console.log('skip: no prerendered dist/prerender-true (needs swelte build with prerender crawl)')
+      return
+    }
+    assert.ok(readFileSync(distTrue, 'utf8').includes('prerender-true'), 'prerendered HTML missing marker')
+    assert.ok(!existsSync(join(root, 'dist', 'prerender-false', 'index.html')), 'prerender=false leaked into dist')
+  })
+}
+
+/** SSR-level parity (docs/specs/future.md §2): asserts that need the SSR
+ * renderer (load envelope on HTML navigations, +error HTML, reroute
+ * content, layout chrome, link options, HEAD framing). Runs against build
+ * outputs ONLY (preview: direct + CLI) — never against the dev backend,
+ * which has no renderer by design (static/SPA/JSON when SWELTE_SSR_URL
+ * is unset). Browser-only halves stay in engine unit scope
+ * (sdk-errors.test.ts).
+ */
+export function defineParitySsrContract(getState, label = 'parity-ssr') {
+  const html = { accept: 'text/html,application/xhtml+xml' }
+
+  // P0 item 2: load envelope lands on the HTML navigation.
+  it(`${label}: load-cookie sets header + cookie on HTML nav`, async () => {
+    const { base, runnable } = getState()
+    if (!runnable) return
+    const res = await get(base + '/load-cookie', html)
+    const body = await res.text()
+    assert.equal(res.status, 200)
+    assert.equal(res.headers.get('x-load-probe'), 'cookie-item')
+    const setCookie = res.headers.raw?.['set-cookie'] ?? res.headers.get('set-cookie') ?? ''
+    const joined = Array.isArray(setCookie) ? setCookie.join(', ') : String(setCookie)
+    assert.ok(joined.includes('load_probe=envelope'), `missing load cookie: ${joined}`)
+    assert.ok(body.includes('envelope-cookie'), body.slice(0, 300))
+  })
+
+  // P0 item 2: load-side status renders +error with that status.
+  it(`${label}: load-status 404 renders +error HTML`, async () => {
+    const { base, runnable } = getState()
+    if (!runnable) return
+    const res = await get(base + '/load-status', html)
+    assert.equal(res.status, 404)
+    assert.ok((res.headers.get('content-type') ?? '').includes('html'))
+  })
+
+  // P0 item 2, redirect half: 3xx + Location, never an error page.
+  it(`${label}: load-redirect answers 303 + Location`, async () => {
+    const { base, runnable } = getState()
+    if (!runnable) return
+    const res = await get(base + '/load-redirect', html)
+    assert.equal(res.status, 303)
+    assert.equal(res.headers.get('location'), '/')
+  })
+
+  // P2 item 2: serializedHeaders allowlist filters the envelope.
+  it(`${label}: load-filter keeps x-keep, drops x-drop`, async () => {
+    const { base, runnable } = getState()
+    if (!runnable) return
+    const res = await get(base + '/load-filter', html)
+    assert.equal(res.status, 200)
+    assert.equal(res.headers.get('x-keep'), 'kept')
+    assert.equal(res.headers.get('x-drop'), null)
+    assert.ok((await res.text()).includes('filtered'), 'SSR props missing')
+  })
+
+  // P0 item 3, load half: thrown typed error keeps its status in +error HTML.
+  it(`${label}: typed load error lands in +error HTML with 403`, async () => {
+    const { base, runnable } = getState()
+    if (!runnable) return
+    const res = await get(base + '/typed?mode=fail', html)
+    assert.equal(res.status, 403)
+    assert.ok((res.headers.get('content-type') ?? '').includes('html'))
+    assert.ok((await res.text()).includes('safe:forbidden-typed'), 'sanitized load message missing from +error HTML')
+  })
+
+  // P1 item 7, HTML half: @[error] sanitizes HTML error bodies.
+  it(`${label}: @[error] sanitizes HTML error bodies`, async () => {
+    const { base, runnable } = getState()
+    if (!runnable) return
+    const h = await get(base + '/boom', html)
+    assert.ok((await h.text()).includes('safe:boom'), 'HTML error not sanitized')
+  })
+
+  // reroute hook: /old-parity serves /.
+  it(`${label}: @[reroute] rewrites /old-parity to /`, async () => {
+    const { base, runnable } = getState()
+    if (!runnable) return
+    const res = await get(base + '/old-parity', html)
+    assert.equal(res.status, 200)
+    assert.ok((await res.text()).includes('hello tests'), 'reroute did not serve /')
+  })
+
+  // P0 item 4, HEAD half: version stamp on HEAD (raw socket — veb's HEAD
+  // framing trips node:http's strict parser even though headers are sent).
+  it(`${label}: X-Swelte-Version stamped on HEAD`, async () => {
+    const { base, runnable } = getState()
+    if (!runnable) return
+    const h = await headRaw(base + '/')
+    assert.equal(h.status, 200)
+    assert.equal(h.headers.get('x-swelte-version'), '9.9.9-test')
+  })
+
+  // P1 item 10: layout=false renders outside the wrapper chain.
+  it(`${label}: layout cut omits wrapper chrome, control keeps it`, async () => {
+    const { base, runnable } = getState()
+    if (!runnable) return
+    const bare = await get(base + '/bare-sub/leaf', html)
+    assert.equal(bare.status, 200)
+    const bareBody = await bare.text()
+    assert.ok(!bareBody.includes('data-wrapper="bare-sub"'), 'wrapper leaked into cut page')
+    assert.ok(bareBody.includes('bare leaf'), bareBody.slice(0, 300))
+    const kept = await get(base + '/bare-sub/wrapped', html)
+    assert.equal(kept.status, 200)
+    assert.ok((await kept.text()).includes('data-wrapper="bare-sub"'), 'control lost its wrapper')
+  })
+
+  // P1 item 9: link preload/reload options survive SSR HTML.
+  it(`${label}: data-sveltekit link options present in SSR HTML`, async () => {
+    const { base, runnable } = getState()
+    if (!runnable) return
+    const res = await get(base + '/preload', html)
+    assert.equal(res.status, 200)
+    const body = await res.text()
+    assert.ok(body.includes('data-sveltekit-preload-data'), 'preload-data attr missing')
+    assert.ok(body.includes('data-sveltekit-reload'), 'reload attr missing')
+  })
+}
 
 /** Shared contract: JSON bypass + error pages + liveness.
  * getState() -> { base, runnable }. `base` is the built server in preview

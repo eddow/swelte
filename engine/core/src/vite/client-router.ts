@@ -74,8 +74,7 @@ export function emitClientRouter(input: ClientRouterInput): ClientRouterOutput {
 		const { entries: svelteEntries } = collectSvelteManifest(routesAbs, routesDir, vMods)
 		svelteEntriesForChunk = svelteEntries
 		for (const e of svelteEntries) {
-			if (e.layout !== null)
-				layoutByMod.set(e.svelte.replace(/\.svelte$/, ''), e.layout)
+			if (e.layout !== null) layoutByMod.set(e.svelte.replace(/\.svelte$/, ''), e.layout)
 			if (typeof e.csr === 'boolean') csrByMod.set(e.svelte.replace(/\.svelte$/, ''), e.csr)
 		}
 		const dispMods = new Set(dispatched.map((d) => d.mod))
