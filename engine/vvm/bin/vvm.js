@@ -2,8 +2,8 @@
 // vvm — V Version Manager (nvm for V).
 // Installs V toolchains into <vvm>/versions/<version>/ and exposes the
 // active one via node_modules/.bin/v (npm bin-link to bin/v-shim.js).
-import { execFileSync } from 'node:child_process';
-import { createWriteStream, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { execFileSync, execSync } from 'node:child_process';
+import { chmodSync, createWriteStream, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -214,11 +214,199 @@ export async function installVersion(version, { force = false, root = VVM_ROOT }
   return dir;
 }
 
+export const DEFAULT_ZIG_VERSION = '0.15.2';
+
+const ZIG_ASSETS = {
+	'linux-x64': 'zig-x86_64-linux-{v}.tar.xz',
+	'linux-arm64': 'zig-aarch64-linux-{v}.tar.xz',
+	'darwin-arm64': 'zig-aarch64-macos-{v}.tar.xz',
+	'darwin-x64': 'zig-x86_64-macos-{v}.tar.xz',
+	'win32-x64': 'zig-x86_64-windows-{v}.zip',
+	'win32-arm64': 'zig-aarch64-windows-{v}.zip',
+};
+
+/** Normalize a target OS value (aliases + case-insensitive). */
+export function normalizeTargetOsName(raw) {
+	const v = String(raw ?? '').trim().toLowerCase();
+	if (v === 'linux') return 'linux';
+	if (v === 'macos' || v === 'mac' || v === 'darwin') return 'macos';
+	if (v === 'windows' || v === 'win32' || v === 'win') return 'windows';
+	return '';
+}
+
+/** Normalize a target arch value (aliases + case-insensitive). */
+export function normalizeTargetArchName(raw) {
+	const v = String(raw ?? '').trim().toLowerCase();
+	if (v === 'amd64' || v === 'x64' || v === 'x86_64' || v === 'x86-64') return 'amd64';
+	if (v === 'arm64' || v === 'aarch64') return 'arm64';
+	return '';
+}
+
+/** zig `-target` triple for a (os, arch) pair. gnu default (musl needs
+ *  extra link flags for V's GC backtrace) — boots on debian:stable-slim. */
+export function zigTriple(os, arch) {
+	const a = arch === 'arm64' ? 'aarch64' : 'x86_64';
+	if (os === 'macos') return `${a}-macos`;
+	if (os === 'windows') return `${a}-windows-gnu`;
+	return `${a}-linux-gnu`;
+}
+
+export function zigDir(root = VVM_ROOT) {
+	return join(versionsDir(root), 'zig');
+}
+
+export function zigBinary(root = VVM_ROOT) {
+	return join(zigDir(root), process.platform === 'win32' ? 'zig.exe' : 'zig');
+}
+
+export function zigVersionFile(root = VVM_ROOT) {
+	return join(zigDir(root), '.zig-version');
+}
+
+/** Absolute wrapper path for a target (`zig-cc-<os>-<arch>[.cmd]`). */
+export function zigCcWrapperPath(os, arch, root = VVM_ROOT) {
+	const ext = process.platform === 'win32' ? '.cmd' : '';
+	return join(zigDir(root), `zig-cc-${os}-${arch}${ext}`);
+}
+
+export function zigDownloadUrl(version, hostKey) {
+	const asset = ZIG_ASSETS[hostKey ?? platformKey()];
+	if (!asset) throw new Error(`unsupported platform for zig (${process.platform}/${process.arch})`);
+	return `https://ziglang.org/download/${version}/${asset.replace('{v}', version)}`;
+}
+
+function extractTarball(archive, outDir) {
+	mkdirSync(outDir, { recursive: true });
+	if (archive.endsWith('.zip')) {
+		if (process.platform === 'win32') {
+			execFileSync('powershell', ['-NoProfile', '-Command', `Expand-Archive -Force '${archive}' '${outDir}'`], { stdio: 'inherit' });
+		} else {
+			execFileSync('unzip', ['-q', '-o', archive, '-d', outDir], { stdio: 'inherit' });
+		}
+		return;
+	}
+	// .tar.xz — system tar handles it on all three OSes (macOS ships bsdtar).
+	execFileSync('tar', ['-xf', archive, '-C', outDir], { stdio: 'inherit' });
+}
+
+/** Download + extract zig into versions/zig/ (idempotent unless force). */
+export async function ensureZig({ version = DEFAULT_ZIG_VERSION, force = false, root = VVM_ROOT } = {}) {
+	const bin = zigBinary(root);
+	const marker = zigVersionFile(root);
+	if (!force && existsSync(bin) && existsSync(marker) && readFileSync(marker, 'utf8').trim() === version) {
+		return { bin, cached: true };
+	}
+	const url = zigDownloadUrl(version);
+	const archive = join(tmpdir(), `vvm-zig-${Date.now()}-${url.split('/').pop()}`);
+	console.log(`vvm: downloading zig ${version} (${url})`);
+	await download(url, archive);
+	const stage = join(versionsDir(root), `.stage-zig-${Date.now()}`);
+	rmSync(stage, { recursive: true, force: true });
+	mkdirSync(stage, { recursive: true });
+	extractTarball(archive, stage);
+	flattenSingleDir(stage);
+	rmSync(zigDir(root), { recursive: true, force: true });
+	mkdirSync(versionsDir(root), { recursive: true });
+	renameSync(stage, zigDir(root));
+	rmSync(archive, { force: true });
+	writeFileSync(marker, `${version}\n`);
+	if (process.platform !== 'win32') {
+		try { chmodSync(bin, 0o755); } catch { /* best effort */ }
+	}
+	execFileSync(bin, ['version'], { stdio: ['ignore', 'pipe', 'ignore'] });
+	console.log(`vvm: zig ${version} → ${zigDir(root)}`);
+	return { bin, cached: false };
+}
+
+/** Write the `zig-cc-<os>-<arch>` wrapper forwarding to `zig cc -target`. */
+export function writeZigCcWrapper(zigBin, os, arch, { root = VVM_ROOT } = {}) {
+	const triple = zigTriple(os, arch);
+	const wrapper = zigCcWrapperPath(os, arch, root);
+	mkdirSync(dirname(wrapper), { recursive: true });
+	if (process.platform === 'win32') {
+		writeFileSync(wrapper, `@echo off\r\n\"${zigBin}\" cc -target ${triple} %*\r\n`);
+	} else {
+		writeFileSync(wrapper, `#!/bin/sh\nexec \"${zigBin}\" cc -target ${triple} \"$@\"\n`);
+		try { chmodSync(wrapper, 0o755); } catch { /* best effort */ }
+	}
+	return wrapper;
+}
+
+/** Declared cross targets: explicit args win, then SWELTE_TARGET_OS/ARCH
+ *  env, then the closest package.json `swelte.targetOs/targetArch`.
+ *  No declaration → [] (prepare becomes a no-op, zig not installed). */
+export function declaredTargets({ os, arch } = {}) {
+	const envOs = normalizeTargetOsName(process.env.SWELTE_TARGET_OS);
+	const envArch = normalizeTargetArchName(process.env.SWELTE_TARGET_ARCH);
+	let cfgOs = '', cfgArch = '';
+	let dir = process.cwd();
+	for (let i = 0; i < 8; i++) {
+		const pkg = join(dir, 'package.json');
+		if (existsSync(pkg)) {
+			try {
+				const sw = JSON.parse(readFileSync(pkg, 'utf8')).swelte ?? {};
+				cfgOs = normalizeTargetOsName(sw.targetOs);
+				cfgArch = normalizeTargetArchName(sw.targetArch);
+			} catch { /* malformed — ignore */ }
+			break;
+		}
+		const parent = dirname(dir);
+		if (parent === dir) break;
+		dir = parent;
+	}
+	const finalOs = normalizeTargetOsName(os) || envOs || cfgOs;
+	const finalArch = normalizeTargetArchName(arch) || envArch || cfgArch;
+	if (!finalOs && !finalArch) return [];
+	return [{ os: finalOs, arch: finalArch }];
+}
+
+/** Host pair in (os, arch) form. */
+export function hostPair() {
+	const os = process.platform === 'win32' ? 'windows' : process.platform === 'darwin' ? 'macos' : 'linux';
+	const arch = process.arch === 'arm64' ? 'arm64' : 'amd64';
+	return { os, arch };
+}
+
+/** `vvm prepare`: ensure zig + write wrappers for the declared targets
+ *  AND the host pair (native builds fall back to the host wrapper when
+ *  no system compiler exists — stock Windows/macOS). No args = derive
+ *  from SWELTE_TARGET_OS/ARCH or package.json. */
+export async function prepareCross({ os, arch, zigVersion, force = false, root = VVM_ROOT } = {}) {
+	const explicit = [{ os: normalizeTargetOsName(os), arch: normalizeTargetArchName(arch) }].filter(
+		(t) => t.os || t.arch
+	);
+	const wanted = explicit.length > 0 ? explicit : declaredTargets({});
+	const host = hostPair();
+	// Always prep the host wrapper too: it is the native-build fallback
+	// on compiler-less machines, and a no-op (mtime/cached check) when
+	// zig is already installed.
+	const pairs = [...wanted.map((t) => ({ os: t.os || host.os, arch: t.arch || host.arch })), host];
+	// Dedup by os-arch.
+	const seen = new Set();
+	const concrete = pairs.filter((t) => {
+		const k = `${t.os}-${t.arch}`;
+		if (seen.has(k)) return false;
+		seen.add(k);
+		return true;
+	});
+	const { bin } = await ensureZig({ version: zigVersion ?? process.env.SWELTE_ZIG_VERSION ?? DEFAULT_ZIG_VERSION, force, root });
+	const wrappers = concrete.map((t) => {
+		const w = writeZigCcWrapper(bin, t.os, t.arch, { root });
+		console.log(`vvm prepare: ${t.os}-${t.arch} → ${w} (zig -target ${zigTriple(t.os, t.arch)})`);
+		return w;
+	});
+	return { zig: bin, wrappers };
+}
+
 function printHelp() {
   console.log(`vvm ${VVM_VERSION} — V Version Manager
 Usage: vvm <command> [args]
 
   install <version> [--force]   Download + extract V (e.g. vvm install 0.5.2, vvm install latest)
+  prepare [--target-os O] [--target-arch A] [--zig-version V] [--force]
+                              Ensure zig + write zig-cc-<os>-<arch> wrapper(s).
+                              No flags = derive from SWELTE_TARGET_OS/ARCH
+                              or package.json swelte.targetOs/targetArch.
   use <version>                 Set active version (writes .active-version)
   ls | list                     List installed versions (* = active)
   which                         Print path of the active v binary
@@ -237,6 +425,29 @@ async function main(argv) {
     const version = normalizeVersion(rest.find((a) => !a.startsWith('-')) || process.env.SWELTE_V_VERSION || process.env.SWELTE_V_VERSION || DEFAULT_V_VERSION);
     const force = rest.includes('--force') || rest.includes('-f');
     await installVersion(version, { force });
+    return;
+  }
+  if (cmd === 'prepare') {
+    const flag = (name) => {
+      const i = rest.findIndex((a) => a === `--${name}` || a.startsWith(`--${name}=`));
+      if (i === -1) return '';
+      const eq = rest[i].indexOf('=');
+      if (eq !== -1) return rest[i].slice(eq + 1);
+      return rest[i + 1] && !rest[i + 1].startsWith('-') ? rest[i + 1] : '';
+    };
+    const os = flag('target-os');
+    const arch = flag('target-arch');
+    const zigVersion = flag('zig-version');
+    if (os && !normalizeTargetOsName(os)) {
+      console.error(`vvm prepare: invalid --target-os '${os}' (want linux|macos|windows)`);
+      process.exit(1);
+    }
+    if (arch && !normalizeTargetArchName(arch)) {
+      console.error(`vvm prepare: invalid --target-arch '${arch}' (want amd64|arm64)`);
+      process.exit(1);
+    }
+    const force = rest.includes('--force') || rest.includes('-f');
+    await prepareCross({ os, arch, zigVersion: zigVersion || undefined, force });
     return;
   }
   if (cmd === 'use') {

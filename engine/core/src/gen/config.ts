@@ -59,11 +59,19 @@ export interface SwelteOptions {
 	 *  `macos` | `windows` — passed as `-os <os>` to the `v -o` server
 	 *  link. Unset = host-native. CLI flag wins, `SWELTE_TARGET_OS` env
 	 *  middle, this config last. `build`-only: `dev`/`preview`/`test`
-	 *  stay host-native. QJS projects cross trivially only when
-	 *  core-only: an embedded QuickJS bridge needs a per-OS
-	 *  `libqjs-<os>.a` (host-prebuilt `libqjs.a` mismatch = build error).
+	 *  stay host-native. QJS projects cross only via the zig-cc wrapper
+	 *  (per-OS-ARCH `libqjs-<os>-<arch>.a`); without it the build fails
+	 *  fast instead of silently linking the wrong ABI.
 	 *  WASM untouched: always `-os browser`. */
 	targetOs?: 'linux' | 'macos' | 'windows' | string
+	/** Cross-build arch (`swelte build --target-arch` fallback). `amd64` |
+	 *  `arm64` (`x64`/`x86_64`/`aarch64` aliases accepted) — passed as
+	 *  `-arch <arch>` to the `v -o` server link. Unset = host-native.
+	 *  Same CLI > `SWELTE_TARGET_ARCH` env > config precedence as targetOs.
+	 *  Declaring it lets `npm i` prep the machine: `@swelte/vvm`
+	 *  postinstall downloads zig + writes the `zig-cc-<os>-<arch>`
+	 *  wrapper `swelte build` uses as `-cc` for that target. */
+	targetArch?: 'amd64' | 'arm64' | string
 	/** Offline fallback page (opt-in service worker remainder): precached
 	 *  `dist/offline.html` served by `sw.js` on navigation failure. */
 	offline?: SwelteOfflineOptions
@@ -90,12 +98,17 @@ export interface SwelteOfflineOptions {
 /** Resolved config: optionals filled, nested unions widened so `Required`
  *  stays sound (TS `Required` does not distribute into nested optionals). */
 export interface ResolvedSwelteOptions
-	extends Omit<Required<SwelteOptions>, 'prerender' | 'offline' | 'target' | 'targetOs'> {
+	extends Omit<
+		Required<SwelteOptions>,
+		'prerender' | 'offline' | 'target' | 'targetOs' | 'targetArch'
+	> {
 	prerender: { entries: 'static' | 'all' | 'off'; concurrency: number }
 	offline: { fallback: string }
 	target: 'auto' | 'static' | 'node' | 'edge'
 	/** Cross-build OS: `linux` | `macos` | `windows` or `''` (= host-native). */
 	targetOs: 'linux' | 'macos' | 'windows' | ''
+	/** Cross-build arch: `amd64` | `arm64` or `''` (= host-native). */
+	targetArch: 'amd64' | 'arm64' | ''
 }
 
 /** Build the project config: `preprocess` + friends stay enumerable for the
@@ -154,6 +167,7 @@ function normalize(raw: SwelteOptions | null | undefined): ResolvedSwelteOptions
 		isr: normalizeIsr(r.isr),
 		target: normalizeTarget(r.target),
 		targetOs: normalizeTargetOs(r.targetOs),
+		targetArch: normalizeTargetArch(r.targetArch),
 		offline: normalizeOffline(r.offline),
 		chunking: normalizeChunking(r.chunking),
 	} as ResolvedSwelteOptions
@@ -198,6 +212,20 @@ function normalizeTarget(raw: SwelteOptions['target']): ResolvedSwelteOptions['t
 	return 'auto'
 }
 
+/** Lenient `swelte.targetArch` normalize: known arch (case-insensitive,
+ *  `x64`/`x86_64`/`aarch64` aliases accepted) or `''` (= host-native).
+ *  Never throws — CLI/env validation reports. */
+function normalizeTargetArch(
+	raw: SwelteOptions['targetArch']
+): ResolvedSwelteOptions['targetArch'] {
+	const v = String(raw ?? '')
+		.trim()
+		.toLowerCase()
+	if (v === 'amd64' || v === 'x64' || v === 'x86_64' || v === 'x86-64') return 'amd64'
+	if (v === 'arm64' || v === 'aarch64') return 'arm64'
+	return ''
+}
+
 /** Lenient `swelte.targetOs` normalize: known OS (case-insensitive) or
  * `''` (= host-native). Never throws — CLI/env validation reports. */
 function normalizeTargetOs(raw: SwelteOptions['targetOs']): ResolvedSwelteOptions['targetOs'] {
@@ -228,8 +256,10 @@ function normalizeServiceWorker(
 }
 
 /** Load `<root>/svelte.config.js` (default export), reading the `swelte` key;
- *  missing file/key falls back to defaults. Also honors a legacy
- *  `<root>/swelte.config.ts` default export during migration. */
+ *  missing file/key falls back to `<root>/package.json`'s `swelte` key
+ *  (deploy-target declaration lives with the package, e.g. docs-site's
+ *  targetOs/targetArch that `npm i` uses to prep zig), then to defaults.
+ *  Also honors a legacy `<root>/swelte.config.ts` default export. */
 export async function loadConfig(root: string): Promise<ResolvedSwelteOptions> {
 	const dir = resolve(root)
 	const files = [
@@ -244,22 +274,56 @@ export async function loadConfig(root: string): Promise<ResolvedSwelteOptions> {
 				default?: SwelteConfig | SwelteOptions
 			}
 			const d = mod.default as SwelteConfig | SwelteOptions | undefined
-			if (!d) return normalize({})
+			if (!d) return normalize(readPackageSwelte(dir))
 			// svelte.config.* carries our fields under the `swelte` key
 			// (non-enumerable since defineConfig hides it from the svelte()
 			// plugin — direct access still reads it); legacy swelte.config.ts
 			// held them at the top level.
 			const maybeSwelte = (d as SwelteConfig).swelte as SwelteOptions | undefined
 			const opts = maybeSwelte ?? (d as SwelteOptions)
-			return normalize(opts)
+			return normalize(mergePackageSwelte(dir, opts))
 		} catch (e) {
 			// Never silent: a syntax error in svelte.config.js previously
 			// fell back to defaults (wrong dirs, confusing codegen).
 			console.warn(`[swelte] ${file} failed to load, using defaults: ${(e as Error).message}`)
-			return normalize({})
+			return normalize(readPackageSwelte(dir))
 		}
 	}
-	return normalize({})
+	return normalize(readPackageSwelte(dir))
+}
+
+/** Read `<dir>/package.json`'s `swelte` key (deploy-target declaration).
+ *  Never throws — missing/malformed = {}. */
+function readPackageSwelte(dir: string): SwelteOptions {
+	try {
+		const pkg = join(dir, 'package.json')
+		if (!existsSync(pkg)) return {}
+		const sw = (JSON.parse(readFileSync(pkg, 'utf8')) as { swelte?: unknown }).swelte
+		if (!sw || typeof sw !== 'object' || Array.isArray(sw)) return {}
+		return sw as SwelteOptions
+	} catch {
+		return {}
+	}
+}
+
+/** svelte.config wins field-by-field; package.json fills the gaps the
+ *  config file leaves unset (so `swelte.targetOs` in package.json is a
+ *  real fallback, not dead config). Explicit `''`/undefined in the file
+ *  still count as unset — normalize() treats them as host-native anyway. */
+function mergePackageSwelte(dir: string, fileOpts: SwelteOptions): SwelteOptions {
+	const pkg = readPackageSwelte(dir)
+	if (Object.keys(pkg).length === 0) return fileOpts
+	const out = { ...pkg, ...fileOpts }
+	// svelte.config `targetOs: ''` must not clobber package.json's value:
+	// re-apply package fields the file left empty/undefined.
+	for (const k of ['targetOs', 'targetArch'] as const) {
+		const fv = (fileOpts as Record<string, unknown>)[k]
+		const pv = (pkg as Record<string, unknown>)[k]
+		if ((fv === '' || fv === undefined) && pv !== undefined && pv !== '') {
+			;(out as Record<string, unknown>)[k] = pv
+		}
+	}
+	return out
 }
 
 /** Resolve the on-disk templates dir (works from src/ and dist/). */

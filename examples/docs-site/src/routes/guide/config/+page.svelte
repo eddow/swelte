@@ -63,7 +63,8 @@ import { codeHtml } from '#lib/snippets.gen.js'
 			<ul class="text-sm opacity-80 list-disc list-inside space-y-1">
 				<li>
 					<code>src/app.v</code>: <code>@&#91;startup]</code> (boot once),
-					<code>@&#91;reroute]</code> (rewrite first), <code>@&#91;cron('60s')]</code> ticks
+					<code>@&#91;reroute]</code>
+					(rewrite first), <code>@&#91;cron('60s')]</code> ticks
 				</li>
 				<li><code>locals map[string]string</code> threaded through dispatch + cookie helpers</li>
 				<li>

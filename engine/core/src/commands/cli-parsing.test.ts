@@ -87,4 +87,32 @@ describe('CLI parsing', () => {
 			assert.throws(() => parseArgs(findCommand(n)!, ['--target-os', 'linux']), /unknown option/)
 		}
 	})
+
+	it('build --target-arch parses (build-only, same contract as --target-os)', () => {
+		const build = findCommand('build')!
+		const { opts } = parseArgs(build, ['--target-arch', 'arm64'])
+		assert.equal(opts['target-arch'], 'arm64')
+		const { opts: eq } = parseArgs(build, ['--target-arch=amd64'])
+		assert.equal(eq['target-arch'], 'amd64')
+		// no short flag: -t stays the deploy-target shim
+		const { opts: t } = parseArgs(build, ['-t', 'node'])
+		assert.equal(t.target, 'node')
+		assert.equal(t['target-arch'], undefined)
+		// dev/preview/test reject it (build-only)
+		for (const n of ['dev', 'preview', 'test']) {
+			assert.throws(() => parseArgs(findCommand(n)!, ['--target-arch', 'arm64']), /unknown option/)
+		}
+	})
+
+	it('build --local parses (boolean, build-only)', () => {
+		const build = findCommand('build')!
+		const { opts } = parseArgs(build, ['--local'])
+		assert.equal(opts.local, true)
+		const { opts: eq } = parseArgs(build, ['--local=false'])
+		assert.equal(eq.local, false)
+		// dev/preview/test reject it (build-only)
+		for (const n of ['dev', 'preview', 'test']) {
+			assert.throws(() => parseArgs(findCommand(n)!, ['--local']), /unknown option/)
+		}
+	})
 })

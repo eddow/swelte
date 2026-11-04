@@ -18,7 +18,7 @@ passes the CSRF guard; config knobs forward to env (env wins when set).
 so idle `dev` stays quiet (no phantom HMR), and the watcher ignores
 `.swelte/` output — regenerating never re-triggers itself.
 
-## `swelte build [--root dir] [--output path] [--port N] [--target auto|static|node|edge] [--target-os linux|macos|windows]`
+## `swelte build [--root dir] [--output path] [--port N] [--target auto|static|node|edge] [--target-os linux|macos|windows] [--target-arch amd64|arm64] [--local]`
 
 1. `generate()` into `.swelte/` (`routes/*.v` + `server_gen.v` +
    `.swelte/server.v` harness). Emits dev `.swelte/dev/<mod>.wasm` per file
@@ -31,13 +31,22 @@ so idle `dev` stays quiet (no phantom HMR), and the watcher ignores
 3. QJS bridge pass: adapter's `generateBundle` emits
    `routes/swelte_qjs_bridge.v` + `dist/ssr/render.js`; regenerate so
    `server_gen.v` compiles against it (core-only: idempotent, no bridge).
-   Rebuild `libqjs.a` (mtime-guarded).
+   Rebuild `libqjs.a` host-native, or `libqjs-<os>-<arch>.a` when cross
+   (mtime-guarded, compiled under the zig-cc wrapper).
 4. `v -o dist/server .swelte/server.v` (single artifact; QJS projects
-   add `-enable-globals -cc <system-gcc>`).
-   Cross-build: `--target-os <os>` (CLI wins, `SWELTE_TARGET_OS` env
-   middle, `swelte.targetOs` config last) prepends `-os <os>` to the
-   link. Unknown CLI/env value = build error (`linux|macos|windows`
-   only); unknown config value falls back to host-native.
+   add `-enable-globals -cc <cc>`).
+   Cross-build: `--target-os <os> --target-arch <arch>` (CLI wins,
+   `SWELTE_TARGET_OS`/`SWELTE_TARGET_ARCH` env middle,
+   `swelte.targetOs`/`swelte.targetArch` config last — config also reads
+   `<root>/package.json`'s `swelte` key as fallback) passes
+   `-os <os> -arch <arch> -cc <zig-cc wrapper> -d use_bundled_libgc` to
+   the link. Unknown CLI/env value = build error (`linux|macos|windows`
+   × `amd64|arm64` only); unknown config value falls back to host-native.
+   `vvm prepare` (auto-run by postinstall when a target is declared)
+   downloads zig + writes the wrapper — `npm i` preps the machine.
+   `--local` forces host-native, ignoring the package.json declaration
+   (local preview on a machine whose package.json declares a deploy
+   target); it cannot be combined with `--target-os/--target-arch`.
 5. Prerender crawl (only when `prerender.entries` is `static`|`all`):
    boot the binary on an ephemeral port, GET each crawl URL, write
    additive `dist/<route>/index.html` (root `/` shell never
@@ -53,12 +62,9 @@ so idle `dev` stays quiet (no phantom HMR), and the watcher ignores
    honored by `Hand` but core sets nothing.
    Cross-build: skipped — the foreign binary can't boot on this host,
    so the build asserts artifacts only (`dist/` + binary exist).
-   Core-only projects cross trivially today; with a QJS embed the build
-   fails fast unless a per-OS `.swelte/qjs/libqjs-<os>.a` exists (the
-   host-prebuilt `libqjs.a` would link the wrong ABI — needs a per-OS
-   prebuilt or a from-source QJS compile under the target cc).
-   WASM is untouched by `--target-os` (always `-os browser`), and
-   `dev`/`preview`/`test` stay host-native (the flag is build-only).
+   WASM is untouched by `--target-os/--target-arch` (always
+   `-os browser`), and `dev`/`preview`/`test` stay host-native
+   (the flags are build-only).
 
 ## `swelte test [--root dir] [--update-snapshot | -u]`
 

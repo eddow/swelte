@@ -776,9 +776,14 @@ describe('item 11 — codegen golden project (sample-overlay variant + routes.js
 		const lazy = readFileSync(join(root, '.swelte', 'routes.js'), 'utf8')
 		assert.ok(lazy.includes('__swelteLoad_'), 'layout default must emit lazy loaders')
 		assert.ok(lazy.includes('chunkMods'), 'layout default must emit chunk membership')
-		assert.ok(!lazy.includes("from '../src/routes/"), 'layout default must not statically import routes')
+		assert.ok(
+			!lazy.includes("from '../src/routes/"),
+			'layout default must not statically import routes'
+		)
 		const mani = JSON.parse(readFileSync(join(root, '.swelte', 'ssr-manifest.json'), 'utf8'))
-		const admin = (mani.routes as { route: string; chunk: string }[]).find((r) => r.route === '/admin')
+		const admin = (mani.routes as { route: string; chunk: string }[]).find(
+			(r) => r.route === '/admin'
+		)
 		assert.equal(admin?.chunk, 'inherit', 'no hint = inherit')
 		await generate(root, { chunking: 'single' })
 		const single = readFileSync(join(root, '.swelte', 'routes.js'), 'utf8')

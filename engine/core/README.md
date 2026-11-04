@@ -3,6 +3,8 @@
 [![npm version](https://img.shields.io/npm/v/@swelte/core.svg)](https://www.npmjs.com/package/@swelte/core)
 [![npm downloads](https://img.shields.io/npm/dm/@swelte/core.svg)](https://www.npmjs.com/package/@swelte/core)
 
+> 📚 [Documentation](https://swelte.emedware.dev/)
+
 Swelte framework core — V + Svelte unified RPC bridge (Vite plugin, client runtime, CLI).
 
 ## Entry points (`package.json` exports)
@@ -13,6 +15,7 @@ Swelte framework core — V + Svelte unified RPC bridge (Vite plugin, client run
 | `@swelte/core/vite` | `dist/vite.js` | node (Vite plugin) |
 | `@swelte/core/cli` | `dist/cli.js` | node only (imports `node:*`) |
 | `@swelte/core/config` | `dist/gen/config.js` | node (svelte.config.js loading) |
+| `@swelte/core/diagnostics` | `dist/gen/diagnostics.js` | node (`swelte check`) |
 | `@swelte/core/toolchain` | `dist/toolchain.js` | node (V binary resolution) |
 | `swelte` (bin) | `bin/swelte.js` → `dist/cli.js` | shell |
 

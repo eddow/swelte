@@ -21,8 +21,9 @@
 		<div class="collapse-content text-sm opacity-80">
 			<p>
 				One command: V backend + Vite, HMR reload on <code>.v</code> change.
-				<code>generate()</code> runs once pre-Vite so <code>.swelte/</code> exists. Dev sets
-				same-origin <code>SWELTE_CORS_ORIGIN</code>; compare-then-write keeps idle dev quiet.
+				<code>generate()</code>
+				runs once pre-Vite so <code>.swelte/</code> exists. Dev sets same-origin
+				<code>SWELTE_CORS_ORIGIN</code>; compare-then-write keeps idle dev quiet.
 			</p>
 		</div>
 	</div>
@@ -52,7 +53,8 @@
 			<p>
 				<code>generate()</code>
 				→ <code>v test</code> per dir → contract check (types↔stubs parity) → shape snapshot in
-				<code>swelte.contract.json</code> (committed, drift = fail).
+				<code>swelte.contract.json</code>
+				(committed, drift = fail).
 			</p>
 		</div>
 	</div>

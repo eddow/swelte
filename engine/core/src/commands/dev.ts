@@ -230,7 +230,7 @@ export async function runDev(ctx: Ctx): Promise<void> {
 	const root = resolve(String(ctx.opts.root ?? process.cwd()))
 	const port = takePort(ctx.opts.port, 5174)
 	const backend = takePort(ctx.opts.backend, 8131)
-	const { resolveV, vVersion, toolchainEnv, resolveCC } = await import('../toolchain.js')
+	const { resolveV, vVersion, toolchainEnv, resolveHostCC } = await import('../toolchain.js')
 	const { loadConfig } = await import('../gen/config.js')
 	const v = resolveV(import.meta.url)
 	ctx.log(`V toolchain: ${vVersion(v)} (${v})`)
@@ -295,13 +295,22 @@ export async function runDev(ctx: Ctx): Promise<void> {
 		// as argv — hence `v expects that -enable-globals exists`).
 		// Bridge pass: the QJS bridge uses __global, so dev needs the same
 		// `-enable-globals -cc <abs>` pair the build uses when it exists.
+		// Host cc prefers the system compiler, falls back to the
+		// vvm-managed host zig-cc wrapper (stock Windows/macOS: no gcc).
 		let vArgs: string[] = ['run', join(genAbs, 'server.v')]
 		try {
 			if (existsSync(join(genAbs, 'routes', 'swelte_qjs_bridge.v'))) {
-				vArgs = ['-enable-globals', '-cc', resolveCC(), 'run', join(genAbs, 'server.v')]
+				const cc = resolveHostCC(import.meta.url)
+				if (!cc) {
+					throw new Error(
+						'no C compiler: install gcc/clang or run `npx vvm prepare` (writes the host zig-cc wrapper)'
+					)
+				}
+				vArgs = ['-enable-globals', '-cc', cc, 'run', join(genAbs, 'server.v')]
 				ctx.log(`QJS embed: -enable-globals -cc ${vArgs[2]} (bridge present)`)
 			}
-		} catch {
+		} catch (e) {
+			if ((e as Error).message?.includes('no C compiler')) throw e
 			/* core-only */
 		}
 		vChild = spawn(v, vArgs, {

@@ -44,6 +44,177 @@ export function resolveCC(): string {
 /** Cross-build OS (`swelte build --target-os`): V `-os` values. */
 export type SwelteTargetOs = 'linux' | 'macos' | 'windows'
 
+/** Cross-build arch (`swelte build --target-arch`): V `-arch` values.
+
+ *  V's C backend knows `amd64 | arm64` (plus i386/arm32/rv* for embedded).
+
+ *  Deploy targets are amd64/arm64 only — the rest are rejected at resolve. */
+export type SwelteTargetArch = 'amd64' | 'arm64'
+
+/** Host arch in V `-arch` vocabulary (`process.arch` mapped). */
+export function hostTargetArch(): SwelteTargetArch {
+	if (process.arch === 'arm64') return 'arm64'
+	return 'amd64'
+}
+
+/** Lenient normalize for the `swelte.targetArch` config key: known arch
+ *  (case-insensitive, `x64`/`x86_64`/`aarch64` aliases accepted) or `''`
+ *  (= host-native). Unknown/empty → `''` (config never throws). */
+export function normalizeTargetArch(raw: unknown): SwelteTargetArch | '' {
+	const v = String(raw ?? '')
+		.trim()
+		.toLowerCase()
+	if (v === 'amd64' || v === 'x64' || v === 'x86_64' || v === 'x86-64') return 'amd64'
+	if (v === 'arm64' || v === 'aarch64') return 'arm64'
+	return ''
+}
+
+/** Strict assert for CLI/env values: throws listing the valid set. */
+export function assertTargetArch(raw: unknown, where: string): SwelteTargetArch {
+	const v = normalizeTargetArch(raw)
+	if (v !== '') return v
+	throw new Error(`invalid ${where} '${String(raw)}' (want amd64|arm64)`)
+}
+
+/** Precedence: CLI flag wins, `SWELTE_TARGET_ARCH` middle, config fallback.
+ *  Returns `''` for host-native (nothing passed). CLI/env values are
+ *  strict (unknown throws); config is lenient (unknown → host). */
+export function resolveTargetArch(opts: {
+	cli?: unknown
+	env?: unknown
+	config?: unknown
+}): SwelteTargetArch | '' {
+	const cli = String(opts.cli ?? '').trim()
+	if (cli !== '') return assertTargetArch(cli, '--target-arch')
+	const env = String(opts.env ?? process.env.SWELTE_TARGET_ARCH ?? '').trim()
+	if (env !== '') return assertTargetArch(env, 'SWELTE_TARGET_ARCH')
+	return normalizeTargetArch(opts.config)
+}
+
+/** `v -o` flag slice for the target arch: `['-arch', arch]` or `[]` (host). */
+export function vArchArgs(targetArch: SwelteTargetArch | '' | unknown): string[] {
+	const t = normalizeTargetArch(targetArch)
+	return t === '' ? [] : ['-arch', t]
+}
+
+/** zig `-target` triple fragment for a (os, arch) pair. Empty arch =
+ *  host arch. Windows/macOS triples need no ABI suffix (zig defaults:
+ *  gnu for windows, none for macos); Linux pins gnu (musl needs extra
+ *  link flags for V's GC backtrace) — boots on debian:stable-slim. */
+export function zigTargetTriple(
+	os: SwelteTargetOs | '' | unknown,
+	arch: SwelteTargetArch | '' | unknown
+): string {
+	const o = normalizeTargetOs(os)
+	const a = normalizeTargetArch(arch) || hostTargetArch()
+	const host = o === '' ? hostTargetOs() : o
+	const tripleArch = a === 'arm64' ? 'aarch64' : 'x86_64'
+	if (host === 'macos') return `${tripleArch}-macos`
+	if (host === 'windows') return `${tripleArch}-windows-gnu`
+	return `${tripleArch}-linux-gnu`
+}
+
+/** Path of the vvm-managed `zig` binary (versions/zig/zig[.exe]), or ''.
+
+ *  Never throws — callers fall back to PATH `zig` or fail with a hint. */
+export function vvmZig(fromUrl: string): string {
+	try {
+		const root = dirname(fileURLToPath(fromUrl))
+		const require = createRequire(fromUrl)
+		let vvmDir = ''
+		try {
+			vvmDir = dirname(require.resolve('@swelte/vvm/package.json'))
+		} catch {
+			/* not installed — try sibling */
+		}
+		const candidates = vvmDir
+			? [vvmDir, join(root, '..', '..', 'vvm')]
+			: [join(root, '..', '..', 'vvm')]
+		for (const dir of candidates) {
+			const bin = join(dir, 'versions', 'zig', process.platform === 'win32' ? 'zig.exe' : 'zig')
+			if (existsSync(bin)) return bin
+		}
+	} catch {
+		/* fall through */
+	}
+	return ''
+}
+
+/** Resolve a zig binary: vvm-managed first, else PATH `zig`, else ''.
+
+ *  `vvm prepare` installs it (postinstall ensures it when a target arch
+ *  is declared); `which zig` on a bare machine is the fallback. */
+export function resolveZig(fromUrl: string): string {
+	const managed = vvmZig(fromUrl)
+	if (managed) return managed
+	try {
+		const probe = process.platform === 'win32' ? 'where' : 'which'
+		return (
+			execSync(`${probe} zig`, { stdio: ['ignore', 'pipe', 'ignore'], env: toolchainEnv() })
+				.toString()
+				.trim()
+				.split('\n')[0] || ''
+		)
+	} catch {
+		return ''
+	}
+}
+
+/** Absolute host-pair zig-cc wrapper (`zig-cc-<hostOs>-<hostArch>`), or ''.
+
+ *  Native builds prefer the system compiler (zero behavior change on
+ *  machines that have gcc) and fall back to this — so stock Windows/macOS
+ *  (no gcc) build out of `npm i` once `vvm prepare` has run. */
+export function zigCcHost(fromUrl: string): string {
+	return zigCcWrapper(fromUrl, hostTargetOs(), hostTargetArch())
+}
+
+/** C compiler for NATIVE builds: system cc when present, else the
+ *  vvm-managed host-pair zig-cc wrapper, else '' (callers fail with the
+ *  `npx vvm prepare` hint). One rule for build/dev/qjs — no drift. */
+export function resolveHostCC(fromUrl: string): string {
+	const sys = resolveCC()
+	if (sys !== 'gcc') return sys
+	// resolveCC's bare-'gcc' fallback is only usable when gcc is really on
+	// PATH (Unix dev machines). Otherwise prefer the hermetic wrapper.
+	const host = zigCcHost(fromUrl)
+	if (host) return host
+	try {
+		execSync(process.platform === 'win32' ? 'where gcc' : 'which gcc', {
+			stdio: ['ignore', 'pipe', 'ignore'],
+			env: toolchainEnv(),
+		})
+		return 'gcc'
+	} catch {
+		return ''
+	}
+}
+
+/** Absolute path of the vvm-managed zig-cc wrapper for a target, or ''.
+
+ *  The wrapper is `<vvm>/versions/zig/zig-cc-<os>-<arch>[.cmd]` —
+
+ *  written by `vvm prepare`. A wrapper (not bare `zig cc`) because V
+ *  invokes `-cc <compiler>` with gcc-style flags; the wrapper injects
+ *  `-target <triple>` before forwarding. Per-target files so concurrent
+ *  builds for different targets don't race on one script. */
+export function zigCcWrapper(
+	fromUrl: string,
+	os: SwelteTargetOs | '' | unknown,
+	arch: SwelteTargetArch | '' | unknown
+): string {
+	const zig = resolveZig(fromUrl)
+	if (!zig) return ''
+	const o = normalizeTargetOs(os) || hostTargetOs()
+	const a = normalizeTargetArch(arch) || hostTargetArch()
+	const ext = process.platform === 'win32' ? '.cmd' : ''
+	const name = `zig-cc-${o}-${a}${ext}`
+	const dir = dirname(zig)
+	const wrapper = join(dir, name)
+	if (existsSync(wrapper)) return wrapper
+	return ''
+}
+
 /** Host OS in V `-os` vocabulary (`process.platform` mapped). */
 export function hostTargetOs(): SwelteTargetOs {
 	if (process.platform === 'win32') return 'windows'

@@ -1,7 +1,7 @@
 {
   "devDependencies": {
     "@sveltejs/vite-plugin-svelte": "^5.0.0",
-    "@swelte/vvm": "^0.1.0",
+    "@swelte/vvm": "^0.1.1",
     "@tailwindcss/vite": "^4.0.0",
     "daisyui": "^5.0.0",
     "tailwindcss": "^4.0.0",
@@ -9,21 +9,27 @@
     "vite": "^6.0.0"
   },
   "dependencies": {
-    "@swelte/core": "^0.1.0",
-    "@swelte/ssr-qjs": "^0.1.0",
+    "@swelte/core": "^0.1.1",
+    "@swelte/ssr-qjs": "^0.1.1",
     "shiki": "^4.6.0",
     "svelte": "^5.0.0"
   },
   "name": "docs-site",
   "private": true,
+  "swelte": {
+    "targetOs": "linux",
+    "targetArch": "amd64"
+  },
   "scripts": {
     "highlight": "node scripts/highlight-code.mjs",
     "predev": "npm run highlight",
     "prebuild": "npm run highlight",
     "build": "swelte build",
+    "build:local": "swelte build --local",
+    "build:vercel": "swelte build",
     "dev": "swelte dev",
     "preview": "swelte preview"
   },
   "type": "module",
-  "version": "0.1.0"
+  "version": "0.1.1"
 }

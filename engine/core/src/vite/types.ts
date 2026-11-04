@@ -41,6 +41,9 @@ export interface SweltePluginOptions {
 	 *  build.ts-owned (WASM always `-os browser`). Present so inline
 	 *  plugin options never leak an "unknown option" warning. */
 	targetOs?: string
+	/** Cross-build arch passthrough (`swelte build --target-arch` fallback).
+	 *  Same contract as targetOs: the `v -o -arch` link is build.ts-owned. */
+	targetArch?: string
 }
 
 export interface RpcParam {

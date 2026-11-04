@@ -1,0 +1,6 @@
+# Slim prebuilt context: only dist/ + this Dockerfile ship.
+# Everything else (sources, node_modules, .swelte/, scripts) stays local.
+*
+!dist
+!dist/**
+!Dockerfile.vercel

@@ -126,7 +126,8 @@
 	</li>
 	<li>
 		Wrappers <code>+route.svelte</code> (Svelte 5 <code>children</code> snippet) +
-		<code>+route.v</code> middleware nest root→leaf.
+		<code>+route.v</code>
+		middleware nest root→leaf.
 	</li>
 </ul>
 

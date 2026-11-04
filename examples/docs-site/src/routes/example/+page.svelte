@@ -13,8 +13,9 @@ import { codeHtml } from '#lib/snippets.gen.js'
 <h1 class="text-4xl font-bold mt-2">Example: <code class="text-2xl">something</code></h1>
 <p class="py-4 opacity-80">
 	Canonical demo of <code>.v</code> imports: <code>#routes/</code> server RPC +
-	<code>#lib/</code> isomorphic WASM + structured errors. Built with <code>swelte build</code>,
-	served with <code>swelte preview</code>.
+	<code>#lib/</code>
+	isomorphic WASM + structured errors. Built with <code>swelte build</code>, served with
+	<code>swelte preview</code>.
 </p>
 
 <h2 class="text-2xl font-bold">Route tour</h2>

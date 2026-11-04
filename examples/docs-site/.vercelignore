@@ -1,0 +1,8 @@
+# Vercel upload context: `dist/` is gitignored but MUST upload —
+# allowlist it explicitly alongside the project files Vercel needs.
+# Everything else falls back to Vercel's defaults (node_modules etc.
+# excluded automatically).
+!dist
+!dist/**
+!Dockerfile.vercel
+!package.json

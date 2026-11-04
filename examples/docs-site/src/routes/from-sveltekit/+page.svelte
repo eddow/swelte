@@ -26,8 +26,10 @@
 				<td><code>+page.svelte</code> or <code>about.svelte</code></td>
 				<td>
 					Same component, two spellings: <code>about.svelte</code> ⇔
-					<code>about/+page.svelte</code> (both → <code>/about</code>). One triple per URL — mixing
-					<code>foo.*</code> + <code>foo/+page.*</code> is a build error.
+					<code>about/+page.svelte</code>
+					(both → <code>/about</code>). One triple per URL — mixing
+					<code>foo.*</code>
+					+ <code>foo/+page.*</code> is a build error.
 				</td>
 			</tr>
 			<tr>
@@ -47,8 +49,8 @@
 				<td><code>+route.svelte</code></td>
 				<td>
 					Wrapper per subtree, <code>children</code> snippet +
-					<code>&#123;@render&#125;</code> outlet. SSR composes the chain server-side; client
-					hydrates it in place.
+					<code>&#123;@render&#125;</code>
+					outlet. SSR composes the chain server-side; client hydrates it in place.
 				</td>
 			</tr>
 			<tr>
@@ -83,7 +85,8 @@
 				<td><code>+route.v</code> + <code>src/app.v</code></td>
 				<td>
 					Subtree middleware stays local;
-					<code>@&#91;startup]/@&#91;reroute]/@&#91;cron]</code> handle boot + rewrite + ticks.
+					<code>@&#91;startup]/@&#91;reroute]/@&#91;cron]</code>
+					handle boot + rewrite + ticks.
 				</td>
 			</tr>
 			<tr>
@@ -100,7 +103,8 @@
 	<li>
 		<code>load</code>
 		returns plain structs; no <code>fail(422, …)</code> helper — throw <code>!T</code> with a
-		<code>&#123; ok: false, fieldErrors &#125;</code> body, narrow with <code>isFail(e)</code>.
+		<code>&#123; ok: false, fieldErrors &#125;</code>
+		body, narrow with <code>isFail(e)</code>.
 	</li>
 	<li>
 		SSR is runtime-only (embedded QuickJS / sidecar), 50ms + 16MB budgets, SPA fallback. SSG is
@@ -108,7 +112,8 @@
 	</li>
 	<li>
 		Aliases are <code>#routes / #lib</code> (hash style).
-		<code>$app/stores|state|navigation</code> re-export the Swelte router; no
+		<code>$app/stores|state|navigation</code>
+		re-export the Swelte router; no
 		<code>$app/forms</code>, no <code>$env/*</code>.
 	</li>
 	<li>Single artifact: <code>dist/server</code> + <code>dist/</code>. No Node at runtime.</li>

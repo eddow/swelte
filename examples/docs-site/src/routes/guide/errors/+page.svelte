@@ -36,7 +36,8 @@ import { codeHtml } from '#lib/snippets.gen.js'
 				<td><span class="badge badge-error badge-sm">404</span></td>
 				<td>
 					unknown <code>@&#91;rpc]</code> fn (+ <code>available</code> list), unknown path, unknown
-					<code>?q</code> qualifier
+					<code>?q</code>
+					qualifier
 				</td>
 			</tr>
 			<tr>
@@ -68,7 +69,8 @@ import { codeHtml } from '#lib/snippets.gen.js'
 <div class="alert alert-info mt-6">
 	<span
 		>Env knobs share one rule: unset, invalid, <code>0</code>, or negative → built-in default.
-		<code>0</code> means default, never “off”.</span
+		<code>0</code>
+		means default, never “off”.</span
 	>
 </div>
 

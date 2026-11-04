@@ -10,3 +10,4 @@ server
 docs-site
 .DS_Store
 node_modules/
+.vercel

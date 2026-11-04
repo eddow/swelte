@@ -1,46 +1,35 @@
-# Manual Vercel container deploy for docs-site (Swelte: V binary + dist/).
-# Vercel builds this file in the cloud and runs the container on Fluid
-# compute. The binary serves dist/ + API on one port; Vercel routes all
-# traffic to it. $PORT is injected by the platform — the Dockerfile default
-# (8131) only applies to local `docker run` without -e PORT.
+# Manual Vercel prebuilt deploy for docs-site (Swelte: V binary + dist/).
+# Vercel builds THIS file in the cloud from uploaded LOCAL dist/ output —
+# no Node, no V toolchain, no zig in the cloud. Build locally first:
 #
+#   npm run build:vercel     # swelte build → linux/amd64 from package.json
+#   vercel deploy            # preview URL
+#   vercel deploy --prod     # production
+#
+# The `swelte.targetOs/targetArch` in package.json is the deploy target:
+# `@swelte/vvm` postinstall preps the machine on `npm i` (zig +
+# zig-cc-linux-amd64 wrapper), and plain `swelte build` reads it — no
+# flags needed. `npm run build:local` (`swelte build --local`) forces a
+# host-native build for local preview, ignoring the declaration.
 # Vercel project settings (dashboard → project → Settings):
 #   Root Directory: examples/docs-site
 #   Dockerfile Path: Dockerfile.vercel  (default when only one Dockerfile.* exists)
 #
-# Manual deploy (Vercel CLI, from repo root):
-#   cd examples/docs-site
-#   vercel deploy                    # preview URL
-#   vercel deploy --prod             # production
-#
 # Notes:
-# - Build stage needs gcc + git + node (V toolchain via @swelte/vvm,
-#   QuickJS archive via gcc, shiki highlight via node).
-# - Runtime stage is debian slim + the prebuilt dist/ only (no toolchain).
+# - `dist/` is gitignored but MUST be in the upload context: `.vercelignore`
+#   allowlists it explicitly (Vercel excludes gitignored output by default).
+# - `.dockerignore` excludes everything except dist/ + this Dockerfile —
+#   the context stays small and no source/toolchain leaks in.
 # - SSR is embedded QuickJS: SWELTE_SSR=1 reads dist/ssr/render.js in-process.
-# - No EXPOSE needed for Vercel (platform injects $PORT); kept for `docker run`.
+# - $PORT is injected by the platform — the default (8131) only applies
+#   to local `docker run` without -e PORT. No EXPOSE needed for Vercel
+#   (kept for `docker run`).
+# - glibc floor: zig targets x86_64-linux-gnu; the debian:stable-slim
+#   runtime must be >= the glibc zig links against (bookworm/slim is fine).
 
-# ---------- build ----------
-FROM node:22-bookworm AS build
-RUN apt-get update && apt-get install -y --no-install-recommends gcc git unzip ca-certificates \
-	&& rm -rf /var/lib/apt/lists/*
-WORKDIR /app
-# Install docs-site deps from the npm registry (self-contained: no monorepo needed).
-# Keep package.json + scripts/ + sources; npm resolves @swelte/* from the registry.
-COPY package.json ./
-COPY scripts/ ./scripts/
-COPY src/ ./src/
-COPY index.html svelte.config.js tsconfig.json vite.config.ts ./
-RUN npm install
-# V toolchain (postinstall downloads V 0.5.2 unless present) + full static build
-RUN npm run highlight && npx swelte build
-# Drop the dev-only toolchain weight before copying to runtime
-RUN rm -rf node_modules/.cache /root/.npm
-
-# ---------- runtime ----------
 FROM debian:stable-slim
 WORKDIR /app
-COPY --from=build /app/dist ./dist
+COPY dist ./dist
 EXPOSE 8131
 ENV PORT=8131 SWELTE_DIST=dist SWELTE_SSR=1
 CMD ["./dist/server"]

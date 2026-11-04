@@ -30,7 +30,8 @@ export default defineConfig({
     prerender: { entries: 'off', concurrency: 4 }, // 'off' | 'static' | 'all' → entries.json + dist/*.html
     isr: {},                  // { '/blog': 60 } → Cache-Control s-maxage + X-Swelte-Revalidate
     target: 'auto',           // 'auto' | 'static' | 'node' | 'edge' — packaging only
-    targetOs: '',             // '' (host) | 'linux' | 'macos' | 'windows' — `v -o -os` cross (build-only; CLI --target-os wins, $SWELTE_TARGET_OS middle)
+    targetOs: '',             // '' (host) | 'linux' | 'macos' | 'windows' — `v -o -os` cross (build-only; CLI --target-os wins, $SWELTE_TARGET_OS middle, package.json swelte key fallback)
+    targetArch: '',           // '' (host) | 'amd64' | 'arm64' — `v -o -arch` cross (same precedence via --target-arch / $SWELTE_TARGET_ARCH)
     offline: { fallback: 'off' }, // 'off' | 'offline.html' | custom — SW precache + dist file
     chunking: 'layout',       // 'layout' (default) | 'single' | 'route' — client code-splitting ($SWELTE_CHUNKING wins)
   },

@@ -3,11 +3,14 @@
 // Roadmap §6: prod WASM bundle compiles in the plugin's generateBundle
 // hook (`v -b wasm -os browser` → dist/assets/app_lib-*.wasm, exactly
 // one *.wasm in dist/assets/ — the [swelte] log line proves it).
-// Cross-build: `swelte build --target-os <os>` (linux|macos|windows,
-// also SWELTE_TARGET_OS / swelte.targetOs) passes `-os <os>` to the
-// `v -o` link; smoke probe + prerender crawl skip (foreign binary can't
-// boot — assert artifacts only). WASM untouched (always `-os browser`);
-// QJS embed fails fast unless a per-OS libqjs-<os>.a exists.
+// Cross-build: `swelte build --target-os <os> --target-arch <arch>`
+// (linux|macos|windows × amd64|arm64; also SWELTE_TARGET_OS/ARCH env or
+// swelte.targetOs/targetArch config) passes `-os <os> -arch <arch>` to
+// the `v -o` link and `-cc <zig-cc wrapper>` when the target differs
+// from host (`vvm prepare` installs zig + writes the wrapper on `npm i`).
+// Smoke probe + prerender crawl skip (foreign binary can't boot — assert
+// artifacts only). WASM untouched (always `-os browser`); QJS needs the
+// per-OS-ARCH `libqjs-<os>-<arch>.a` (built by the same zig wrapper).
 import { execFileSync } from 'node:child_process'
 import { existsSync, readdirSync, statSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
@@ -80,28 +83,70 @@ export async function runBuild(ctx: Ctx): Promise<void> {
 	const outBinary = String(ctx.opts.output ?? join(root, 'dist', 'server'))
 	const targetFlag = String(ctx.opts.target ?? '').toLowerCase()
 	let targetIsrHeaders: Record<string, string> = {}
-	const { resolveV, vVersion, toolchainEnv, resolveCC, resolveTargetOs, hostTargetOs, vOsArgs } =
-		await import('../toolchain.js')
+	const {
+		resolveV,
+		vVersion,
+		toolchainEnv,
+		resolveTargetOs,
+		resolveTargetArch,
+		hostTargetOs,
+		hostTargetArch,
+		vOsArgs,
+		vArchArgs,
+		zigCcWrapper,
+		resolveHostCC,
+	} = await import('../toolchain.js')
 	const { loadConfig } = await import('../gen/config.js')
 	const v = resolveV(import.meta.url)
 	ctx.log(`V toolchain: ${vVersion(v)} (${v})`)
 	ctx.log(`root ${root}`)
 	const cfg = await loadConfig(root)
 	const genAbs = join(root, cfg.outDir)
-	// Cross-build OS (build-only): CLI wins, SWELTE_TARGET_OS middle,
-	// `swelte.targetOs` config last. Host-native = '' (no -os flag).
-	// WASM untouched: plugin always uses `-os browser`. dev/preview/test
-	// stay host-native (this flag is build-only).
+	// Cross-build OS × arch (build-only): CLI wins, SWELTE_TARGET_OS/ARCH
+	// middle, `swelte.targetOs/targetArch` config last (config itself falls
+	// back to package.json's `swelte` key). `--local` forces host-native,
+	// ignoring the declaration — for local preview builds on a machine
+	// whose package.json declares a deploy target. Host-native = ''
+	// (no -os/-arch flag). WASM untouched: plugin always uses `-os browser`.
+	// dev/preview/test stay host-native (these flags are build-only).
+	const local = ctx.opts.local === true || String(ctx.opts.local ?? '').toLowerCase() === 'true'
 	const crossOs = ctx.opts['target-os'] ?? ctx.opts.targetOs
-	const targetOs = resolveTargetOs({ cli: crossOs, config: cfg.targetOs })
-	const cross = targetOs !== ''
-	if (cross) {
-		ctx.log(`target OS: ${targetOs} (host ${hostTargetOs()} — smoke probe skipped, artifacts only)`)
-		// Forward to adapter generateBundle passes (QJS link): env wins in
-		// the precedence chain, so publish the resolved OS for any
-		// downstream reader that only sees env.
-		process.env.SWELTE_TARGET_OS = targetOs
+	const crossArch = ctx.opts['target-arch'] ?? ctx.opts.targetArch
+	const cfgOs = local ? '' : cfg.targetOs
+	const cfgArch = local ? '' : cfg.targetArch
+	const targetOs = resolveTargetOs({ cli: crossOs, config: cfgOs })
+	const targetArch = resolveTargetArch({ cli: crossArch, config: cfgArch })
+	if (local && (crossOs !== undefined || crossArch !== undefined)) {
+		throw new Error(
+			'--local cannot be combined with --target-os/--target-arch (it means host-native)'
+		)
 	}
+	if (local) ctx.log('target: host-native (--local, package.json declaration ignored)')
+	const effArch = targetArch === '' ? hostTargetArch() : targetArch
+	const effOs = targetOs === '' ? hostTargetOs() : targetOs
+	// A build is only "cross" when the EFFECTIVE pair differs from host:
+	// asking for the host pair explicitly is still a native build (probe on).
+	const cross = effOs !== hostTargetOs() || effArch !== hostTargetArch()
+	// zig-cc wrapper: only needed when cross. Resolves the vvm-installed
+	// wrapper for the EFFECTIVE pair (explicit target-os without
+	// target-arch still cross-compiles the arch == host arch).
+	let zigCc = ''
+	if (cross) {
+		zigCc = zigCcWrapper(import.meta.url, effOs, effArch)
+		if (zigCc) ctx.log(`cross cc: ${zigCc}`)
+	}
+	if (cross) {
+		ctx.log(
+			`target: ${effOs}-${effArch} (host ${hostTargetOs()}-${hostTargetArch()} — smoke probe skipped, artifacts only)`
+		)
+	}
+	// Forward to adapter generateBundle passes (QJS link): env wins in the
+	// precedence chain there, so publish the resolved EFFECTIVE pair for
+	// any downstream reader that only sees env — but only when the caller
+	// didn't set them (an outer `SWELTE_TARGET_OS=… npx swelte build`
+	// without flags resolves the same way anyway).
+	if (!process.env.SWELTE_TARGET_OS) process.env.SWELTE_TARGET_OS = effOs
+	if (!process.env.SWELTE_TARGET_ARCH) process.env.SWELTE_TARGET_ARCH = effArch
 	// Item pass-through: build env for the smoke probe — config knobs
 	// become env when not already set (same env-wins rule as §11).
 	if (!process.env.SWELTE_TRAILING_SLASH && cfg.trailingSlash !== 'ignore')
@@ -134,6 +179,17 @@ export async function runBuild(ctx: Ctx): Promise<void> {
 		ctx.log('generated .swelte/')
 	} catch (e) {
 		throw new Error(`codegen failed: ${(e as Error).message}`)
+	}
+	// 1b. Diagnostics (warn-only, never fails the build): same scans as
+	// `swelte check` so orphans/clashes/unknown-types surface in the normal
+	// flow instead of only when someone remembers to run `check`.
+	try {
+		const { collectDiagnostics } = await import('../gen/diagnostics.js')
+		for (const d of await collectDiagnostics(root)) {
+			ctx.log(`check: ${d.file}:${d.line} [${d.kind}] ${d.message}`)
+		}
+	} catch {
+		/* diagnostics must never break a build */
 	}
 	// Single `v -o`: it typechecks as it compiles (0.5.2 has no `v check`).
 	// The old flow ran a throwaway typecheck compile first — same errors,
@@ -181,44 +237,83 @@ export async function runBuild(ctx: Ctx): Promise<void> {
 	}
 	// 4. `v -o` the server binary into dist/ AFTER the wipe (dist-adjacent,
 	// never the project root). Target the harness file (see typecheck).
-	// QJS projects need -enable-globals (bridge cache) + system cc (V's
+	// QJS projects need -enable-globals (bridge cache) + a cc (V's
 	// bundled tcc cannot compile quickjs.c — but we link the prebuilt
-	// .a, so any cc works; gcc preferred).
+	// .a, so any cc works; system cc preferred, zig-cc wrapper fallback
+	// so stock Windows/macOS build with no gcc installed).
 	// Conda-safe: absolute cc path + conda-free PATH (conda's ld shadows
 	// the system linker and breaks every V C-link step).
 	// Detect: bridge file present → QJS flags.
+	const coreOnly = !existsSync(join(genAbs, 'routes', 'swelte_qjs_bridge.v'))
+	if (coreOnly && !cross) ctx.log('core-only project: no QJS embed, links natively')
+	if (coreOnly && cross) ctx.log('core-only project: no QJS embed, cross needs only zig-cc')
+	// Native cc: system first, host-pair zig wrapper fallback ('' when
+	// neither exists — the guards below fail with the prepare hint).
+	const nativeCc = cross ? '' : resolveHostCC(import.meta.url)
 	let vExtra: string[] = []
-	try {
-		const { existsSync } = await import('node:fs')
-		if (existsSync(join(genAbs, 'routes', 'swelte_qjs_bridge.v'))) {
-			// QJS embed is the hard part of cross-build: libqjs.a is
-			// prebuilt for the HOST. Needs per-OS prebuilt
-			// (libqjs-<os>.a) or from-source compile under the target
-			// cc. A host-prebuilt archive silently links the wrong ABI,
-			// so cross + bridge = fail fast. Core-only projects cross
-			// trivially today. The adapter publishes per-OS archives as
-			// `.swelte/qjs/libqjs-<os>.a` (bridge `#flag`s that name);
-			// until then this guard stays.
-			if (cross && !existsSync(join(genAbs, 'qjs', `libqjs-${targetOs}.a`))) {
-				throw new Error(
-					`cross-build --target-os ${targetOs} with QJS embed: no per-OS archive at .swelte/qjs/libqjs-${targetOs}.a ` +
-						`(only the host-prebuilt libqjs.a exists, which would link the wrong ABI). ` +
-						`Remove the SSR bridge for a core-only cross, or rebuild libqjs.a under the target cc.`
-				)
-			}
-			vExtra = ['-enable-globals', '-cc', resolveCC()]
-			ctx.log(`QJS embed: -enable-globals -cc ${vExtra[vExtra.length - 1]} (bridge present)`)
+	if (!coreOnly) {
+		// Cross + bridge: needs the per-OS-ARCH archive or the host
+		// libqjs.a would silently link the wrong ABI — fail fast with
+		// the exact fix (adapter builds it under the same zig wrapper).
+		if (cross && !existsSync(join(genAbs, 'qjs', `libqjs-${effOs}-${effArch}.a`))) {
+			throw new Error(
+				`cross-build ${effOs}-${effArch} with QJS embed: no per-target archive at .swelte/qjs/libqjs-${effOs}-${effArch}.a ` +
+					`(the host-prebuilt libqjs.a would link the wrong ABI). ` +
+					`Run: npx vvm prepare --target-os ${effOs} --target-arch ${effArch} (builds the archive under zig-cc).`
+			)
 		}
-	} catch (e) {
-		/* core-only — unless it's our cross guard above */
-		if ((e as Error).message?.includes('cross-build --target-os')) throw e
+		if (cross && !zigCc) {
+			throw new Error(
+				`cross-build ${effOs}-${effArch}: no zig-cc wrapper (run: npx vvm prepare --target-os ${effOs} --target-arch ${effArch})`
+			)
+		}
+		if (!cross && !nativeCc) {
+			throw new Error(
+				'no C compiler: install gcc/clang or run `npx vvm prepare` (writes the host zig-cc wrapper)'
+			)
+		}
+		vExtra = ['-enable-globals', '-cc', cross ? zigCc : nativeCc]
+		if (cross) {
+			// Target cc ships no host-arch libgc: compile V's bundled GC
+			// from source under the target cc (proven: -d use_bundled_libgc
+			// + zig-cc links clean on linux-aarch64-gnu).
+			vExtra.push('-d', 'use_bundled_libgc')
+		}
+		ctx.log(
+			`QJS embed: -enable-globals -cc ${cross ? zigCc : nativeCc}${cross ? ' -d use_bundled_libgc' : ''} (bridge present)`
+		)
+	} else if (cross) {
+		// Core-only cross still needs the wrapper as the C compiler.
+		if (!zigCc) {
+			throw new Error(
+				`cross-build ${effOs}-${effArch}: no zig-cc wrapper (run: npx vvm prepare --target-os ${effOs} --target-arch ${effArch})`
+			)
+		}
+		vExtra = ['-cc', zigCc, '-d', 'use_bundled_libgc']
+	} else if (!nativeCc) {
+		// Core-only native without any cc: V would fall back to its
+		// bundled tcc and fail late — fail fast with the fix instead.
+		throw new Error(
+			'no C compiler: install gcc/clang or run `npx vvm prepare` (writes the host zig-cc wrapper)'
+		)
 	}
 	try {
-		execFileSync(v, [...vOsArgs(targetOs), '-o', outBinary, ...vExtra, join(genAbs, 'server.v')], {
-			cwd: root,
-			stdio: ['ignore', 'pipe', 'pipe'],
-			env: toolchainEnv(),
-		})
+		execFileSync(
+			v,
+			[
+				...vOsArgs(targetOs),
+				...vArchArgs(targetArch),
+				'-o',
+				outBinary,
+				...vExtra,
+				join(genAbs, 'server.v'),
+			],
+			{
+				cwd: root,
+				stdio: ['ignore', 'pipe', 'pipe'],
+				env: toolchainEnv(),
+			}
+		)
 	} catch (e) {
 		const err = e as { stderr?: Buffer; stdout?: Buffer; message?: string }
 		throw new Error(
@@ -226,7 +321,7 @@ export async function runBuild(ctx: Ctx): Promise<void> {
 				`\n(hint: conda on PATH ships a conflicting ld — build strips conda dirs; if this persists, run with a clean PATH or conda deactivate)`
 		)
 	}
-	ctx.log(`V binary: ${outBinary}`)
+	ctx.log(`V binary: ${outBinary} (${effOs}-${effArch})`)
 	// 4b. Prerender/SSG crawl (docs (built) item 3): additive
 	// `dist/*.html` only. Boots the built binary on an ephemeral port,
 	// GETs each crawl URL with browser Accept, writes 200 HTML to
@@ -256,7 +351,7 @@ export async function runBuild(ctx: Ctx): Promise<void> {
 	// Hand will proxy (its contract), but core sets nothing.
 	// Cross-build: foreign binary can't boot — assert artifacts only.
 	if (cross) {
-		ctx.log(`build done: ${outBinary} + dist/ (cross ${targetOs}, smoke skipped)`)
+		ctx.log(`build done: ${outBinary} + dist/ (cross ${effOs}-${effArch}, smoke skipped)`)
 	} else {
 		const probePort = takePort(ctx.opts.port, 4173)
 		await killPort(probePort, ctx.log)

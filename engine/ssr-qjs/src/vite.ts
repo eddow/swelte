@@ -69,14 +69,20 @@ export function swelte(options: SsrQjsOptions = {}): Plugin[] {
 			// routes/swelte_qjs_bridge.v (generate() picks it up next run;
 			// `swelte build` runs generate→vite→v-o, so the bridge compiles
 			// into the binary on the following build — see buildQjsProd).
+			// Cross: build.ts publishes the resolved SWELTE_TARGET_OS/ARCH
+			// env before vite runs; targetCc resolves the vvm zig-cc
+			// wrapper (resolveTargetCc — dependency-free, never imports core
+			// from the adapter's build path).
 			try {
-				const { buildQjsProd } = await import('./qjs.js')
+				const { buildQjsProd, resolveTargetCc } = await import('./qjs.js')
+				const targetCc = resolveTargetCc(import.meta.url)
 				const prod = buildQjsProd({
 					root,
 					renderJs: outFile,
 					outDir,
 					timeoutMs: renderTimeoutMs,
 					memoryMB: renderMemoryMB,
+					...(targetCc ? { targetCc } : {}),
 				})
 				console.log(`[swelte:ssr-qjs] QJS bridge: ${prod.bridge}`)
 				if (prod.qjscNote) console.log(`[swelte:ssr-qjs] ${prod.qjscNote}`)

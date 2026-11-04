@@ -108,7 +108,9 @@ async function throwForStatus(base: string, fn: string, res: Response): Promise<
 			base,
 			fn,
 			res.status,
-			{ error: 'got HTML shell instead of JSON (route served dist/index.html)' } as SwelteErrorShape,
+			{
+				error: 'got HTML shell instead of JSON (route served dist/index.html)',
+			} as SwelteErrorShape,
 			raw.slice(0, 200)
 		)
 	}
@@ -614,9 +616,7 @@ export async function goto(
 	if (!fn) throw new Error('swelte: goto() needs the client router (browser + entry-main boot)')
 	await fn(url, opts)
 }
-export async function preloadData(
-	url: string | URL
-): Promise<{
+export async function preloadData(url: string | URL): Promise<{
 	route: string
 	params: Record<string, string>
 	data: unknown

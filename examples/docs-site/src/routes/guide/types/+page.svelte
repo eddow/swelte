@@ -79,7 +79,9 @@ import { codeHtml } from '#lib/snippets.gen.js'
 <div class="alert alert-info mt-6">
 	<span
 		>Per-route <code>RouteId</code> + <code>Params</code> types ship in every
-		<code>types/routes/*.d.ts</code> — the <code>$types</code>-lite. Unknown names project
-		<code>unknown</code> + warning.</span
+		<code>types/routes/*.d.ts</code>
+		— the <code>$types</code>-lite. Unknown names project
+		<code>unknown</code>
+		+ warning.</span
 	>
 </div>

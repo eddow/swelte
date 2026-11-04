@@ -42,6 +42,16 @@ const buildCmd: Command = {
 			help: 'Cross-build OS: linux | macos | windows (also SWELTE_TARGET_OS, swelte.targetOs)',
 			value: 'string',
 		},
+		{
+			name: 'target-arch',
+			help: 'Cross-build arch: amd64 | arm64 (also SWELTE_TARGET_ARCH, swelte.targetArch)',
+			value: 'string',
+		},
+		{
+			name: 'local',
+			help: 'Force host-native build, ignoring the package.json swelte.targetOs/targetArch declaration',
+			value: 'boolean',
+		},
 	],
 	async run(ctx: Ctx) {
 		await runBuild(ctx)

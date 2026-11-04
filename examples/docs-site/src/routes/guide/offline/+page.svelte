@@ -14,8 +14,9 @@
 <div class="alert alert-info">
 	<span
 		>Enable with <code>swelte.serviceWorker.enabled: true</code> in <code>svelte.config.js</code> or
-		<code>SWELTE_SW=1</code> in the env (env wins). See <code>docs/config.md</code> §Service worker
-		+ §Offline fallback page.</span
+		<code>SWELTE_SW=1</code>
+		in the env (env wins). See <code>docs/config.md</code> §Service worker + §Offline fallback
+		page.</span
 	>
 </div>
 

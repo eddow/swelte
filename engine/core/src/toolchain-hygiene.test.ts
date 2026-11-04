@@ -2,12 +2,20 @@ import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import {
 	assertTargetOs,
+	assertTargetArch,
 	hostTargetOs,
+	hostTargetArch,
 	normalizeTargetOs,
+	normalizeTargetArch,
 	resolveTargetOs,
+	resolveTargetArch,
+	resolveHostCC,
+	resolveCC,
 	sanitizedPath,
 	toolchainEnv,
 	vOsArgs,
+	vArchArgs,
+	zigTargetTriple,
 } from './toolchain.js'
 
 describe('toolchain PATH hygiene', () => {
@@ -73,5 +81,62 @@ describe('cross-build target OS (docs/cli.md)', () => {
 		assert.deepEqual(vOsArgs('linux'), ['-os', 'linux'])
 		assert.deepEqual(vOsArgs('macos'), ['-os', 'macos'])
 		assert.deepEqual(vOsArgs('windows'), ['-os', 'windows'])
+	})
+
+	it('hostTargetArch maps process.arch to V -arch vocabulary', () => {
+		const host = hostTargetArch()
+		assert.ok(host === 'amd64' || host === 'arm64')
+	})
+
+	it('normalizeTargetArch is lenient (aliases + case-insensitive, bad -> host)', () => {
+		assert.equal(normalizeTargetArch('amd64'), 'amd64')
+		assert.equal(normalizeTargetArch('X64'), 'amd64')
+		assert.equal(normalizeTargetArch('x86_64'), 'amd64')
+		assert.equal(normalizeTargetArch('AARCH64'), 'arm64')
+		assert.equal(normalizeTargetArch('arm64'), 'arm64')
+		assert.equal(normalizeTargetArch(''), '')
+		assert.equal(normalizeTargetArch(undefined), '')
+		assert.equal(normalizeTargetArch('riscv'), '')
+	})
+
+	it('assertTargetArch is strict (CLI/env report bad values)', () => {
+		assert.equal(assertTargetArch('arm64', 'x'), 'arm64')
+		assert.equal(assertTargetArch('X86_64', 'x'), 'amd64')
+		assert.throws(() => assertTargetArch('riscv', '--target-arch'), /want amd64\|arm64/)
+	})
+
+	it('resolveTargetArch precedence: CLI > env > config > host', () => {
+		assert.equal(resolveTargetArch({ cli: 'arm64', env: 'amd64', config: 'amd64' }), 'arm64')
+		assert.equal(resolveTargetArch({ cli: '', env: 'amd64', config: 'arm64' }), 'amd64')
+		assert.equal(resolveTargetArch({ cli: '', env: '', config: 'arm64' }), 'arm64')
+		assert.equal(resolveTargetArch({ cli: '', env: '', config: '' }), '')
+		assert.equal(resolveTargetArch({}), '')
+		assert.throws(() => resolveTargetArch({ cli: 'riscv' }), /invalid --target-arch/)
+		assert.throws(() => resolveTargetArch({ cli: '', env: 'riscv' }), /invalid SWELTE_TARGET_ARCH/)
+		assert.equal(resolveTargetArch({ cli: '', env: '', config: 'riscv' }), '')
+	})
+
+	it('vArchArgs shapes the v -o flag slice (host = no flag)', () => {
+		assert.deepEqual(vArchArgs(''), [])
+		assert.deepEqual(vArchArgs(undefined), [])
+		assert.deepEqual(vArchArgs('amd64'), ['-arch', 'amd64'])
+		assert.deepEqual(vArchArgs('arm64'), ['-arch', 'arm64'])
+		assert.deepEqual(vArchArgs('x86_64'), ['-arch', 'amd64'])
+	})
+
+	it('zigTargetTriple maps pairs to zig -target vocabulary', () => {
+		assert.equal(zigTargetTriple('linux', 'amd64'), 'x86_64-linux-gnu')
+		assert.equal(zigTargetTriple('linux', 'arm64'), 'aarch64-linux-gnu')
+		assert.equal(zigTargetTriple('macos', 'arm64'), 'aarch64-macos')
+		assert.equal(zigTargetTriple('macos', 'amd64'), 'x86_64-macos')
+		assert.equal(zigTargetTriple('windows', 'amd64'), 'x86_64-windows-gnu')
+		assert.equal(zigTargetTriple('windows', 'arm64'), 'aarch64-windows-gnu')
+	})
+
+	it('resolveHostCC prefers system cc, falls back to the host zig wrapper', () => {
+		const cc = resolveHostCC(import.meta.url)
+		assert.ok(typeof cc === 'string' && cc.length > 0)
+		// On this Linux dev machine gcc exists → absolute system path.
+		assert.ok(cc === resolveCC() || cc.includes('zig-cc-'))
 	})
 })

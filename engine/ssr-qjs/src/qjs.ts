@@ -12,6 +12,7 @@
 import { execFileSync, execSync } from 'node:child_process'
 import { existsSync, mkdirSync, readdirSync, statSync, writeFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
+import { createRequire } from 'node:module'
 import { fileURLToPath } from 'node:url'
 
 /** Conda-free PATH: conda ships its own `ld` that shadows the system linker
@@ -72,13 +73,107 @@ export interface QjsProdOut {
 	qjscNote: string
 }
 
+/** Effective cross pair from SWELTE_TARGET_OS/ARCH env (build.ts publishes
+ *  the resolved pair before vite runs). Returns '' when native. Shared by
+ *  buildQjsProd + resolveTargetCc — one normalize, no drift. */
+export function qjsTargetPair(): { os: string; arch: string; cross: boolean } {
+	const normOs = (v: unknown): string => {
+		const s = String(v ?? '')
+			.trim()
+			.toLowerCase()
+		return s === 'linux' || s === 'macos' || s === 'windows' ? s : ''
+	}
+	const normArch = (v: unknown): string => {
+		const s = String(v ?? '')
+			.trim()
+			.toLowerCase()
+		if (s === 'amd64' || s === 'x64' || s === 'x86_64' || s === 'x86-64') return 'amd64'
+		if (s === 'arm64' || s === 'aarch64') return 'arm64'
+		return ''
+	}
+	const hostOs =
+		process.platform === 'win32' ? 'windows' : process.platform === 'darwin' ? 'macos' : 'linux'
+	const hostArch = process.arch === 'arm64' ? 'arm64' : 'amd64'
+	const os = normOs(process.env.SWELTE_TARGET_OS) || hostOs
+	const arch = normArch(process.env.SWELTE_TARGET_ARCH) || hostArch
+	return { os, arch, cross: os !== hostOs || arch !== hostArch }
+}
+
+/** Host C compiler: system cc when present, else the vvm-managed host-pair
+ *  zig-cc wrapper, else ''. Mirrors core's resolveHostCC dependency-free
+ *  (the adapter never imports core on the build path). */
+export function resolveHostNativeCC(fromUrl: string): string {
+	const sys = resolveSystemCC()
+	if (sys !== 'gcc') return sys
+	const hostOs =
+		process.platform === 'win32' ? 'windows' : process.platform === 'darwin' ? 'macos' : 'linux'
+	const hostArch = process.arch === 'arm64' ? 'arm64' : 'amd64'
+	const ext = process.platform === 'win32' ? '.cmd' : ''
+	const candidates: string[] = []
+	try {
+		const require = createRequire(fromUrl)
+		candidates.push(join(dirname(require.resolve('@swelte/vvm/package.json')), 'versions', 'zig'))
+	} catch {
+		/* not installed — sibling fallback below */
+	}
+	candidates.push(join(dirname(fileURLToPath(fromUrl)), '..', '..', 'vvm', 'versions', 'zig'))
+	for (const dir of candidates) {
+		const w = join(dir, `zig-cc-${hostOs}-${hostArch}${ext}`)
+		if (existsSync(w)) return w
+	}
+	try {
+		execSync(process.platform === 'win32' ? 'where gcc' : 'which gcc', {
+			stdio: ['ignore', 'pipe', 'ignore'],
+		})
+		return 'gcc'
+	} catch {
+		return ''
+	}
+}
+
+/** Resolve the zig-cc wrapper for the effective cross pair, or undefined
+ *  when native. Throws with the fix when cross but no wrapper exists
+ *  (PATH zig without a wrapper can't work — V needs a gcc-style `-cc`
+ *  path that already carries `-target`). Dependency-free: never imports
+ *  @swelte/core from the adapter's build path. */
+export function resolveTargetCc(fromUrl: string): string | undefined {
+	const { os, arch, cross } = qjsTargetPair()
+	if (!cross) return undefined
+	const ext = process.platform === 'win32' ? '.cmd' : ''
+	const candidates: string[] = []
+	try {
+		const require = createRequire(fromUrl)
+		candidates.push(join(dirname(require.resolve('@swelte/vvm/package.json')), 'versions', 'zig'))
+	} catch {
+		/* not installed — sibling fallback below */
+	}
+	candidates.push(join(dirname(fileURLToPath(fromUrl)), '..', '..', 'vvm', 'versions', 'zig'))
+	for (const dir of candidates) {
+		const w = join(dir, `zig-cc-${os}-${arch}${ext}`)
+		if (existsSync(w)) return w
+	}
+	throw new Error(
+		`[swelte:ssr-qjs] cross-build ${os}-${arch}: no zig-cc wrapper ` +
+			`(run: npx vvm prepare --target-os ${os} --target-arch ${arch})`
+	)
+}
+
 export function buildQjsProd(opts: {
 	root: string
 	renderJs: string
 	outDir?: string
 	timeoutMs?: number
 	memoryMB?: number
+	/** Cross-build OS (build.ts publishes the resolved effective OS
+	 *  via env when flags are used). Empty = host-native. */
+	targetOs?: string
+	/** Cross-build arch (same contract as targetOs). Empty = host-native. */
+	targetArch?: string
+	/** Explicit C compiler (the zig-cc wrapper when cross). Overrides
+	 *  the resolved default. */
+	targetCc?: string
 }): QjsProdOut {
+	const fromUrlForCc = import.meta.url
 	const root = resolve(opts.root)
 	const outDir = String(opts.outDir ?? '.swelte')
 	const genAbs = join(root, outDir)
@@ -88,12 +183,34 @@ export function buildQjsProd(opts: {
 	if (!existsSync(join(cDir, 'swelte_qjs.c'))) {
 		throw new Error(`[swelte:ssr-qjs] vendored QuickJS not found at ${cDir}`)
 	}
+	// Target pair from env (build.ts publishes the resolved effective pair
+	// before vite runs). Shared normalize via qjsTargetPair — one rule.
+	const { os: effOs, arch: effArch, cross } = qjsTargetPair()
+	// Archive name: host keeps `libqjs.a` (bridge `#flag` compat); cross
+	// gets per-target `libqjs-<os>-<arch>.a` so a stale host archive can
+	// never silently link the wrong ABI. Object files are per-target too
+	// (`quickjs.<os>-<arch>.o`) — one qjs/ dir, no clobber between targets.
+	const lib = cross ? join(qjsDir, `libqjs-${effOs}-${effArch}.a`) : join(qjsDir, 'libqjs.a')
+	const objSuffix = cross ? `.${effOs}-${effArch}.o` : '.o'
 	// Absolute system cc + conda-free env: conda's ld shadows the system
 	// linker and breaks both this archive step and V's later `v -o` link.
-	const cc = resolveSystemCC()
-	if (!cc) throw new Error('[swelte:ssr-qjs] no C compiler (gcc/cc/clang) for QJS prod link')
+	// Native prefers the system compiler, falls back to the vvm-managed
+	// host zig-cc wrapper (stock Windows/macOS: no gcc — `npm i` preps it).
+	// Cross: the target zig-cc wrapper (same compiler V uses for the link).
+	const cc = cross
+		? String(opts.targetCc ?? '') || resolveTargetCc(fromUrlForCc) || resolveSystemCC()
+		: resolveHostNativeCC(fromUrlForCc)
+	if (!cc)
+		throw new Error(
+			'[swelte:ssr-qjs] no C compiler (gcc/cc/clang) for QJS prod link — run `npx vvm prepare` (writes the host zig-cc wrapper)'
+		)
+	if (cross && !opts.targetCc) {
+		throw new Error(
+			`[swelte:ssr-qjs] cross-build ${effOs}-${effArch}: no zig-cc wrapper ` +
+				`(run: npx vvm prepare --target-os ${effOs} --target-arch ${effArch})`
+		)
+	}
 	const ccEnv = toolchainEnv()
-	const lib = join(qjsDir, 'libqjs.a')
 	const cFiles = readdirSync(cDir)
 		.filter((f) => f.endsWith('.c'))
 		.sort()
@@ -117,7 +234,7 @@ export function buildQjsProd(opts: {
 	if (rebuild) {
 		const objs: string[] = []
 		for (const f of cFiles) {
-			const o = join(qjsDir, f.replace(/\.c$/, '.o'))
+			const o = join(qjsDir, f.replace(/\.c$/, objSuffix))
 			execFileSync(
 				cc,
 				[
@@ -137,7 +254,12 @@ export function buildQjsProd(opts: {
 			)
 			objs.push(o)
 		}
-		execFileSync('ar', ['rcs', lib, ...objs], { stdio: ['ignore', 'pipe', 'pipe'], env: ccEnv })
+		// `ar` from the wrapper's dir when cross (zig ships llvm-ar next
+		// to zig); host PATH `ar` otherwise. Sync — this function is sync.
+		let arBin = 'ar'
+		const llvmAr = join(dirname(cc), process.platform === 'win32' ? 'llvm-ar.exe' : 'llvm-ar')
+		if (cross && existsSync(llvmAr)) arBin = llvmAr
+		execFileSync(arBin, ['rcs', lib, ...objs], { stdio: ['ignore', 'pipe', 'pipe'], env: ccEnv })
 	}
 	const timeoutMs = opts.timeoutMs ?? 50
 	const memoryMB = opts.memoryMB ?? 16

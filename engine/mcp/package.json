@@ -1,6 +1,6 @@
 {
   "name": "@swelte/mcp",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Swelte MCP server — route tree, type contracts, and diagnostics for IDE agents (stdio).",
   "type": "module",
   "main": "./dist/index.js",
@@ -23,7 +23,7 @@
     "prepublishOnly": "npm run build"
   },
   "dependencies": {
-    "@swelte/core": "^0.1.0"
+    "@swelte/core": "^0.1.1"
   },
   "devDependencies": {
     "@types/node": "^26.6.6",

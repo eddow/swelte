@@ -96,10 +96,11 @@ describe('config normalization (tmp roots)', () => {
 		assert.deepEqual(off.isr, {})
 		assert.equal(off.target, 'auto')
 		assert.equal(off.targetOs, '')
+		assert.equal(off.targetArch, '')
 		assert.equal(off.offline.fallback, 'off')
 		writeFileSync(
 			join(root, 'svelte.config.js'),
-			`export default { swelte: { prerender: { entries: 'all', concurrency: 2 }, isr: { '/blog': 60, '/x': -1 }, target: 'node', targetOs: 'macos', offline: { fallback: true } } }`
+			`export default { swelte: { prerender: { entries: 'all', concurrency: 2 }, isr: { '/blog': 60, '/x': -1 }, target: 'node', targetOs: 'macos', targetArch: 'arm64', offline: { fallback: true } } }`
 		)
 		const on = await loadConfig(root)
 		assert.equal(on.prerender.entries, 'all')
@@ -107,24 +108,47 @@ describe('config normalization (tmp roots)', () => {
 		assert.deepEqual(on.isr, { '/blog': 60 })
 		assert.equal(on.target, 'node')
 		assert.equal(on.targetOs, 'macos')
+		assert.equal(on.targetArch, 'arm64')
 		assert.equal(on.offline.fallback, 'offline.html')
 	})
 
-	it('cross-build targetOs normalizes (case-insensitive, bad -> host)', async () => {
+	it('package.json swelte key is the config fallback (deploy target)', async () => {
+		const root = mkdtempSync(join(tmpdir(), 'swelte-cfg-'))
+		writeFileSync(
+			join(root, 'package.json'),
+			JSON.stringify({ name: 'x', swelte: { targetOs: 'linux', targetArch: 'arm64' } })
+		)
+		// No svelte.config at all → package.json wins.
+		const cfg = await loadConfig(root)
+		assert.equal(cfg.targetOs, 'linux')
+		assert.equal(cfg.targetArch, 'arm64')
+		// svelte.config wins field-by-field; package fills only the gaps.
+		writeFileSync(
+			join(root, 'svelte.config.js'),
+			`export default { swelte: { targetOs: 'macos' } }`
+		)
+		const merged = await loadConfig(root)
+		assert.equal(merged.targetOs, 'macos')
+		assert.equal(merged.targetArch, 'arm64')
+	})
+
+	it('cross-build targetOs/targetArch normalize (case-insensitive, aliases, bad -> host)', async () => {
 		const root = mkdtempSync(join(tmpdir(), 'swelte-cfg-'))
 		writeFileSync(
 			join(root, 'svelte.config.js'),
-			`export default { swelte: { targetOs: 'Windows' } }`
+			`export default { swelte: { targetOs: 'Windows', targetArch: 'X86_64' } }`
 		)
 		const cfg = await loadConfig(root)
 		assert.equal(cfg.targetOs, 'windows')
+		assert.equal(cfg.targetArch, 'amd64')
 		const root2 = mkdtempSync(join(tmpdir(), 'swelte-cfg-'))
 		writeFileSync(
 			join(root2, 'svelte.config.js'),
-			`export default { swelte: { targetOs: 'plan9' } }`
+			`export default { swelte: { targetOs: 'plan9', targetArch: 'riscv' } }`
 		)
 		const bad = await loadConfig(root2)
 		assert.equal(bad.targetOs, '')
+		assert.equal(bad.targetArch, '')
 	})
 
 	it('bad prerender/target/offline fall back to defaults', async () => {
@@ -147,11 +171,17 @@ describe('config normalization (tmp roots)', () => {
 		// One root per case: loadConfig cache-busts by ms timestamp, so two
 		// writes in the same millisecond would read the first module.
 		const root2 = mkdtempSync(join(tmpdir(), 'swelte-cfg-'))
-		writeFileSync(join(root2, 'svelte.config.js'), `export default { swelte: { chunking: 'route' } }`)
+		writeFileSync(
+			join(root2, 'svelte.config.js'),
+			`export default { swelte: { chunking: 'route' } }`
+		)
 		const on = await loadConfig(root2)
 		assert.equal(on.chunking, 'route')
 		const root3 = mkdtempSync(join(tmpdir(), 'swelte-cfg-'))
-		writeFileSync(join(root3, 'svelte.config.js'), `export default { swelte: { chunking: 'sometimes' } }`)
+		writeFileSync(
+			join(root3, 'svelte.config.js'),
+			`export default { swelte: { chunking: 'sometimes' } }`
+		)
 		const bad = await loadConfig(root3)
 		assert.equal(bad.chunking, 'layout')
 		process.env.SWELTE_CHUNKING = 'single'
