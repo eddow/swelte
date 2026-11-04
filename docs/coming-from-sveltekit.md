@@ -112,9 +112,12 @@ src/routes/+page.svelte (+ .v / .ts)                        →  / (root)
   stores. `page` shape: `{ url, params, route, data?, error?, state? }`.
   Client mounts merge preloaded JSON into leaf props automatically
   (`{ params, ...data }`, same shape as SSR props).
-  Layout reset (`+page@.svelte`, SvelteKit `+page@layout` lite):
-  `admin/login/+page@.svelte` renders bare (no `+route` nesting);
-  `+page@admin` keeps wrappers down to `admin`.
+  Layout composition (`export const layout = false | true | 'dir'` in the
+  sibling `.ts`; SvelteKit `+page@layout` ergo, no `@` files):
+  `admin/login/+page.ts` with `layout = false` renders bare (no `+route`
+  nesting); `'admin'` keeps wrappers down to `admin`; `true` pins the full
+  chain back on; a wrapper's `false` bares its whole subtree. (Composition
+  only — skipped wrappers' `@[load]`/`@[before]`/`@[after]` still run.)
 * Server `fetch` in `load`: `swelte_fetch(req, mut out_cookies, method,
   path, body, content_type, qualifier)` dispatches sibling routes
   in-process (no loopback socket), forwards `Cookie`/`Authorization`

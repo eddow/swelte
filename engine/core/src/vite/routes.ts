@@ -28,33 +28,13 @@ export function listVFiles(dir: string, base?: string): string[] {
 	return listFilesWithExt(dir, '.v', base)
 }
 
-export function svelteModKind(mod: string): 'page' | 'wrapper' | 'error' | 'plain' | 'reset' | null {
+export function svelteModKind(mod: string): 'page' | 'wrapper' | 'error' | 'plain' | null {
 	const base = mod.includes('/') ? mod.slice(mod.lastIndexOf('/') + 1) : mod
 	if (base === '+page' || base === 'index') return 'page'
 	if (base === '+route') return 'wrapper'
 	if (base === '+error') return 'error'
-	// Layout reset (`+page@.html` lite, SvelteKit `+page@layout` cousin):
-	// `admin/+page@.svelte` renders OUTSIDE the wrapper chain (no +route
-	// nesting). The `@` suffix pins the cut: `@` alone = skip ALL wrappers
-	// (page mounts bare); `@name` = skip down TO that ancestor dir
-	// (`+page@admin` keeps `admin/+route` + above, drops deeper ones).
-	// Folder must still own the URL (`foo/+page@.svelte` ⇔ `/foo`).
-	const at = base.indexOf('@')
-	if (base.startsWith('+page@') || base === '+page@' || (at > 0 && base.endsWith('@'))) {
-		const cut = base.slice(base.indexOf('@') + 1)
-		if (cut === '' || /^[A-Za-z0-9_.-]+$/.test(cut)) return 'reset'
-	}
 	if (base.startsWith('+')) return null
 	return 'plain'
-}
-
-/** Layout-reset cut for a `+page@…` mod: `''` (bare `@` = skip all
- * wrappers) or the ancestor dir to keep down to (`admin` keeps
- * `admin/+route` + above). Null = not a reset page. */
-export function svelteResetCut(mod: string): string | null {
-	if (svelteModKind(mod) !== 'reset') return null
-	const base = mod.includes('/') ? mod.slice(mod.lastIndexOf('/') + 1) : mod
-	return base.slice(base.indexOf('@') + 1).replace(/\.svelte$/, '')
 }
 
 /** Route groups `(name)` — disk-only folders that contribute no URL segment.
@@ -72,7 +52,7 @@ export function stripRouteGroups(mod: string): string {
 export function svelteRouteFor(mod: string): string | null {
 	const kind = svelteModKind(mod)
 	if (kind === null || kind === 'wrapper' || kind === 'error') return null
-	if (kind === 'page' || kind === 'reset') {
+	if (kind === 'page') {
 		const dir = mod.includes('/') ? mod.slice(0, mod.lastIndexOf('/')) : ''
 		const stripped = stripRouteGroups(dir)
 		// A page that lives ONLY inside groups (`(mkt)/+page`) is `/` — same
@@ -204,6 +184,111 @@ export function readCsrFlag(src: string): boolean {
 	return !/export\s+const\s+csr\s*=\s*false/.test(src)
 }
 
+/** Match `export const layout = <value>` (optional `: T` annotation
+ * tolerated, like `assertSerializedHeadersHint`). Returns the whole match
+ * plus value region for file+line errors. */
+function layoutDecl(src: string): { rhs: string; index: number } | null {
+	// Value must sit on the same line as the declaration (hint readers are
+	// single-line by design). The type annotation form (`: T =`) is
+	// tolerated like `serializedHeaders` — `rhs` still carries just the
+	// value; a `|` union marker can only appear inside the annotation
+	// because a bare value never contains one.
+	const m = /export\s+const\s+layout\s*(?::\s*[^=;\n]+?)?=\s*([^\n;]+)/.exec(src)
+	if (!m) return null
+	return { rhs: m[1].trim(), index: m.index }
+}
+
+/** Per-route layout composition: `export const layout = false | true |
+ * 'dir'` in the sibling `.ts` (leaf or `+route.ts` wrapper). `false` =
+ * bare (no wrappers), `true` = explicit full chain, `'dir'` = keep
+ * wrappers at-or-above that ancestor dir. Absent/no match = `null`
+ * (inherit: keep walking up in `resolveLayoutHint`).
+ * Quoted-but-unknown value passes through here — `assertLayoutHint`
+ * turns it into a file+line build error at the call site. */
+export function readLayoutHint(src: string): false | true | string | null {
+	const decl = layoutDecl(src)
+	if (!decl) return null
+	if (decl.rhs === 'false') return false
+	if (decl.rhs === 'true') return true
+	const m = /^['"]([^'"]*)['"]$/.exec(decl.rhs)
+	if (!m) return decl.rhs
+	return m[1]
+}
+
+/** Validate a layout hint at the call site (file+line build error). Empty
+ * string, unquoted non-boolean values, and paths that escape the leaf's
+ * ancestry are rejected here; a quoted dir that is not an ancestor wrapper
+ * dir is rejected by `resolveLayoutHint` (which knows the chain). */
+export function assertLayoutHint(file: string, src: string): false | true | string | null {
+	const decl = layoutDecl(src)
+	if (!decl) return null
+	const line = lineOf(src, decl.index)
+	const msg =
+		`[swelte] ${file}:${line}: bad layout hint '${decl.rhs}' (want false | true | 'ancestor-dir', e.g. export const layout = false or export const layout = 'admin').`
+	if (decl.rhs === 'false') return false
+	if (decl.rhs === 'true') return true
+	// Only complete quoted strings reach the dir check — unquoted garbage
+	// (`123`, `someVar`, unbalanced quotes) is a hint error, not a cut.
+	// Leading/trailing `/` keep their error too (cuts are dirs, not paths).
+	const m = /^['"]([^'"]+)['"]$/.exec(decl.rhs)
+	if (m === null) {
+		throw new Error(msg)
+	}
+	const cut = m[1].normalize('NFC')
+	// Dots move (`..`) or hide (`.hidden`); groups/dynamics (`(a)`,
+	// `[id]`) are separate routing features. Cuts stay plain single-path
+	// dirs so a plain string compare against ancestor wrapper dirs is exact.
+	if (
+		cut.includes('.') ||
+		cut.includes('(') ||
+		cut.includes('[') ||
+		!/^[A-Za-z0-9_-]+(\/[A-Za-z0-9_-]+)*$/.test(cut)
+	) {
+		throw new Error(msg)
+	}
+	return cut
+}
+
+/** Resolve the layout composition for one leaf entry: the leaf sibling
+ * `.ts` wins, else the nearest wrapper `+route.ts` with an explicit hint
+ * (starting at the leaf's OWN dir, walking up — mirrors the
+ * `serializedHeaders` walk). `ancestors` = raw ancestor dirs that own a
+ * wrapper (same basis as `chainFor`, unstripped). A named cut that is not
+ * an ancestor wrapper dir is a file+line build error naming the file that
+ * set it. `null` = inherit (no hint anywhere → full chain). */
+export function resolveLayoutHint(
+	routesDir: string,
+	routesAbs: string,
+	route: string,
+	leafSib: { src: string; file: string } | null,
+	ancestors: string[]
+): false | true | string | null {
+	const tag = (abs: string): string => `${routesDir}/${relPosixTop(routesAbs, abs)}`
+	if (leafSib) {
+		const hint = assertLayoutHint(tag(leafSib.file), leafSib.src)
+		if (hint !== null) {
+			if (typeof hint === 'boolean' || ancestors.includes(hint)) return hint
+			throw new Error(
+				`[swelte] ${tag(leafSib.file)}: bad layout cut '${hint}' — no ancestor wrapper at that dir (chain for ${route}: ${ancestors.length ? ancestors.map((a) => (a === '' ? '<root>' : a)).join(', ') : 'bare (no +route.svelte above)'}).`
+			)
+		}
+	}
+	const segs = route === '/' ? [] : route.split('/').filter(Boolean)
+	for (let i = segs.length; i >= 0; i--) {
+		const dir = segs.slice(0, i).join('/')
+		const cand = dir === '' ? `${routesAbs}/+route.ts` : `${routesAbs}/${dir}/+route.ts`
+		const hit = siblingSrc(cand)
+		if (!hit) continue
+		const hint = assertLayoutHint(tag(hit.file), hit.src)
+		if (hint === null) continue
+		if (typeof hint === 'boolean' || ancestors.includes(hint)) return hint
+		throw new Error(
+			`[swelte] ${tag(hit.file)}: bad layout cut '${hint}' — no ancestor wrapper at that dir (chain for ${route}: ${ancestors.length ? ancestors.map((a) => (a === '' ? '<root>' : a)).join(', ') : 'bare (no +route.svelte above)'}).`
+		)
+	}
+	return null
+}
+
 function lineOf(src: string, idx: number): number {
 	return src.slice(0, idx).split('\n').length
 }
@@ -317,6 +402,15 @@ export function collectSvelteManifest(
 	for (const f of files.sort()) {
 		const rel = relPosixTop(routesAbs, f)
 		const mod = rel.replace(/\.svelte$/, '')
+		// Layout reset moved to `export const layout` (sibling `.ts`):
+		// an `@` stem no longer means anything, and `+page@`/`about@`
+		// silently became a different URL — fail loud with the fix.
+		const stem = mod.includes('/') ? mod.slice(mod.lastIndexOf('/') + 1) : mod
+		if (stem.includes('@')) {
+			throw new Error(
+				`[swelte] ${routesDir}/${rel}: layout reset moved to \`export const layout\` — rename to ${routesDir}/${mod.replace(/@.*$/, '')}.svelte and set it in the sibling .ts (export const layout = false | true | 'ancestor-dir').`
+			)
+		}
 		const kind = svelteModKind(mod)
 		if (kind === null) continue
 		if (kind === 'error') {
@@ -339,6 +433,7 @@ export function collectSvelteManifest(
 				chunk: 'inherit',
 				prerender: 'inherit',
 				serializedHeaders: null,
+				layout: null,
 			})
 			continue
 		}
@@ -364,6 +459,7 @@ export function collectSvelteManifest(
 				serializedHeaders: sib
 					? assertSerializedHeadersHint(`${routesDir}/${relPosixTop(routesAbs, sib.file)}`, sib.src)
 					: null,
+				layout: null,
 			})
 			continue
 		}
@@ -388,8 +484,30 @@ export function collectSvelteManifest(
 		entries.push({
 			route,
 			svelte: rel,
-			kind: kind as 'page' | 'plain' | 'reset',
-			...(kind === 'reset' ? { reset: svelteResetCut(mod) ?? '' } : {}),
+			kind: kind as 'page' | 'plain',
+			// Wrapper layouts for the URL that a named cut resolves against
+			// (raw ancestor dirs owning a wrapper — same rule as `chainFor`).
+			// Only svelte entries scan for now; the wrapper set used by the
+			// SSR manifest / routes.js filters identically.
+			layout: resolveLayoutHint(
+				routesDir,
+				routesAbs,
+				route,
+				siblingSrc(f.replace(/\.svelte$/, '.ts')),
+				(() => {
+					const ancestors: string[] = []
+					const dir = mod.includes('/') ? mod.slice(0, mod.lastIndexOf('/')) : ''
+					let cur = dir
+					for (;;) {
+						const cand =
+							cur === '' ? `${routesAbs}/+route.svelte` : `${routesAbs}/${cur}/+route.svelte`
+						if (existsSync(cand)) ancestors.push(cur)
+						if (cur === '') break
+						cur = cur.includes('/') ? cur.slice(0, cur.lastIndexOf('/')) : ''
+					}
+					return ancestors
+				})()
+			),
 			hasData: vMods.has(mod),
 			hasUniversalLoad: universalLoadKind(f.replace(/\.svelte$/, '.ts')),
 			ssr: (() => {
@@ -650,7 +768,7 @@ export function modulePath(root: string, file: string): string {
  *  `wrapperMods` = set of mods (`admin/+route`) owning a wrapper. */
 export function chunkKeyFor(
 	mode: 'single' | 'layout' | 'route',
-	entry: { svelte: string; kind: 'page' | 'plain' | 'error' | 'wrapper' | 'reset'; chunk?: string },
+	entry: { svelte: string; kind: 'page' | 'plain' | 'error' | 'wrapper'; chunk?: string },
 	wrapperMods: Set<string>
 ): string {
 	const hint = entry.chunk ?? 'inherit'

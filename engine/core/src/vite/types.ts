@@ -102,11 +102,14 @@ export interface LoadFn extends RpcFn {
 export interface SvelteRouteEntry {
 	route: string
 	svelte: string
-	kind: 'page' | 'plain' | 'error' | 'wrapper' | 'reset'
+	kind: 'page' | 'plain' | 'error' | 'wrapper'
 	hasData: boolean
-	/** Layout-reset cut (`+page@…` only): `''` = skip all wrappers, or the
-	 * ancestor dir to keep down to. Absent otherwise. */
-	reset?: string
+	/** Layout composition (`export const layout` in the sibling `.ts`, leaf
+	 * wins, else nearest explicit wrapper): `false` = bare (no wrappers),
+	 * `true` = explicit full chain, `'dir'` = keep wrappers at-or-above that
+	 * ancestor dir. `null` = inherit (absent everywhere = full chain, the
+	 * only historical behavior). */
+	layout: false | true | string | null
 	/** Per-route csr flag: `export const csr = false` in the sibling `.ts`
 	 * renders SSR HTML only (no client mount/hydrate for that leaf).
 	 * Default `true`. */

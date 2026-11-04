@@ -51,18 +51,21 @@ export function emitClientRouter(input: ClientRouterInput): ClientRouterOutput {
 	const { routesAbs, routesDir, dispatched, routeFiles, vMods, matchers, appChunking } = input
 	const svelteOnly: { route: string; mod: string; wrappers: string[] }[] = []
 	let svelteEntriesForChunk: SvelteRouteEntry[] = []
-	const resetByMod = new Map<string, string>()
+	const layoutByMod = new Map<string, false | true | string>()
 	const csrByMod = new Map<string, boolean>()
-	// Layout reset (`+page@…`): cut the wrapper chain. Bare `@` drops all
-	// wrappers (page mounts bare); `@name` keeps wrappers at-or-above the
-	// named ancestor dir. Shared by dispatched + svelte-only entries.
+	// Layout composition (`export const layout` in the sibling `.ts`):
+	// `false` mounts the page bare; `'dir'` keeps wrappers at-or-above the
+	// named ancestor dir; `true`/absent keeps the full chain. Shared by
+	// dispatched + svelte-only entries.
 	const cutWrappers = (mod: string, wrappers: string[]): string[] => {
-		const cut = resetByMod.get(mod)
-		if (cut === undefined) return wrappers
-		if (cut === '') return []
+		const cut = layoutByMod.get(mod)
+		if (cut === undefined || cut === null || cut === true) return wrappers
+		if (cut === false) return []
 		const dirOf = (w: string): string =>
 			w.endsWith('/+route') ? w.slice(0, -'/+route'.length) : w === '+route' ? '' : w
 		// Keep wrappers at-or-above the named ancestor (root-first order).
+		// resolveLayoutHint already rejected non-ancestor dirs, so a miss
+		// here can only mean the wrapper set changed under us — keep bare.
 		const idx = wrappers.findIndex((w) => dirOf(w) === cut)
 		if (idx < 0) return []
 		return wrappers.slice(0, idx + 1)
@@ -71,15 +74,15 @@ export function emitClientRouter(input: ClientRouterInput): ClientRouterOutput {
 		const { entries: svelteEntries } = collectSvelteManifest(routesAbs, routesDir, vMods)
 		svelteEntriesForChunk = svelteEntries
 		for (const e of svelteEntries) {
-			if (e.kind === 'reset' && typeof e.reset === 'string')
-				resetByMod.set(e.svelte.replace(/\.svelte$/, ''), e.reset)
+			if (e.layout !== null)
+				layoutByMod.set(e.svelte.replace(/\.svelte$/, ''), e.layout)
 			if (typeof e.csr === 'boolean') csrByMod.set(e.svelte.replace(/\.svelte$/, ''), e.csr)
 		}
 		const dispMods = new Set(dispatched.map((d) => d.mod))
 		for (const e of svelteEntries) {
 			if (e.kind === 'wrapper' || e.kind === 'error') continue
 			const mod = e.svelte.replace(/\.svelte$/, '')
-			if (e.kind !== 'reset' && dispMods.has(mod)) continue // already covered by dispatched UI entry
+			if (dispMods.has(mod)) continue // already covered by dispatched UI entry
 			const dir = mod.includes('/') ? mod.slice(0, mod.lastIndexOf('/')) : ''
 			const wrappers: string[] = []
 			let cur = dir
@@ -110,14 +113,7 @@ export function emitClientRouter(input: ClientRouterInput): ClientRouterOutput {
 	const entries: { route: string; mod: string; wrappers: string[] }[] = []
 	for (const d of dispatched) {
 		const pageFile = `${join(routesAbs, ...d.mod.split('/'))}.svelte`
-		// Layout-reset pages (`+page@…`) carry the `@` in the mod: the
-		// dispatched `.svelte` path is the literal file stem.
-		const resetMatch = [...resetByMod.keys()].find((m) => m.replace(/@.*$/, '') === d.mod)
-		const pageFileReset =
-			resetMatch !== undefined
-				? `${join(routesAbs, ...resetMatch.split('/'))}.svelte`
-				: null
-		if (!existsSync(pageFile) && !pageFileReset) continue // headless API route: no UI
+		if (!existsSync(pageFile)) continue // headless API route: no UI
 		const dir = d.mod.includes('/') ? d.mod.slice(0, d.mod.lastIndexOf('/')) : ''
 		const wrappers: string[] = []
 		let cur = dir
@@ -128,8 +124,7 @@ export function emitClientRouter(input: ClientRouterInput): ClientRouterOutput {
 			if (cur === '') break
 			cur = cur.includes('/') ? cur.slice(0, cur.lastIndexOf('/')) : ''
 		}
-		const mod = pageFileReset ? resetMatch! : d.mod
-		entries.push({ route: d.route, mod, wrappers: cutWrappers(mod, wrappers) })
+		entries.push({ route: d.route, mod: d.mod, wrappers: cutWrappers(d.mod, wrappers) })
 	}
 	for (const s of svelteOnly) entries.push({ ...s, wrappers: cutWrappers(s.mod, s.wrappers) })
 	const rank = (p: string) => (p.includes('[') ? (p.includes('...') ? 2 : 1) : 0)
@@ -153,7 +148,7 @@ export function emitClientRouter(input: ClientRouterInput): ClientRouterOutput {
 			chunkMode,
 			{
 				svelte: `${mod}.svelte`,
-				kind: (n?.kind ?? 'page') as 'page' | 'plain' | 'error' | 'wrapper' | 'reset',
+				kind: (n?.kind ?? 'page') as 'page' | 'plain' | 'error' | 'wrapper',
 				chunk: n?.chunk ?? 'inherit',
 			},
 			wrapperMods

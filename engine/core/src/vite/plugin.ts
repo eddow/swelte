@@ -1321,16 +1321,13 @@ export declare const dev: boolean
 					const wrapperSet = new Set(
 						svelteEntries.filter((e) => e.kind === 'wrapper').map((e) => e.svelte)
 					)
-					// Reset-aware chain: bare `+page@` mounts with no wrappers; `+page@name`
-					// keeps wrappers at-or-above the named ancestor dir (mirrors routes.js cutWrappers).
-					const resetBySvelte = new Map<string, string>()
-					for (const e of svelteEntries) {
-						if (e.kind === 'reset') resetBySvelte.set(e.svelte, (e as { reset?: string }).reset ?? '')
-					}
+					// Layout composition (`export const layout` in the sibling
+					// `.ts`, resolved per leaf at manifest time — mirrors
+					// routes.js cutWrappers).
 					const chainFor = (pageSvelte: string): string[] => {
 						const mod = pageSvelte.replace(/\.svelte$/, '')
 						const dir = mod.includes('/') ? mod.slice(0, mod.lastIndexOf('/')) : ''
-						const cut = resetBySvelte.get(pageSvelte)
+						const cut = svelteEntries.find((e) => e.svelte === pageSvelte)?.layout ?? null
 						const dirOfW = (w: string): string =>
 							w.endsWith('/+route.svelte') ? w.slice(0, -'/+route.svelte'.length) : w === '+route.svelte' ? '' : w
 						const chain: string[] = []
@@ -1341,13 +1338,13 @@ export declare const dev: boolean
 							if (cur === '') break
 							cur = cur.includes('/') ? cur.slice(0, cur.lastIndexOf('/')) : ''
 						}
-						if (cut !== undefined) {
-							if (cut === '') return []
-							const idx = chain.findIndex((w) => dirOfW(w) === cut)
-							if (idx < 0) return []
-							return chain.slice(0, idx + 1)
-						}
-						return chain
+						if (cut === false) return []
+						if (cut === null || cut === true) return chain
+						const idx = chain.findIndex((w) => dirOfW(w) === cut)
+						// resolveLayoutHint already rejected non-ancestor dirs, so a
+						// miss here can only mean the wrapper set changed under us.
+						if (idx < 0) return []
+						return chain.slice(0, idx + 1)
 					}
 					const wrappersByRoute: Record<string, string[]> = {}
 					for (const e of svelteEntries) {
@@ -1369,7 +1366,7 @@ export declare const dev: boolean
 								csr: e.csr,
 								limits: e.limits ?? null,
 								serializedHeaders: e.serializedHeaders ?? null,
-								...(e.kind === 'reset' ? { reset: (e as { reset?: string }).reset ?? '' } : {}),
+								layout: e.layout ?? null,
 								chunk: e.chunk ?? 'inherit',
 								prerender: e.prerender ?? 'inherit',
 							}))

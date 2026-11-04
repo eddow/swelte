@@ -87,12 +87,21 @@ document the behavior; `ssr-manifest.test.ts` + `sdk-errors.test.ts` +
    `data-sveltekit-preload-data/preload-code/reload/noscroll/noreplace`
    (with `data-swelte-*` aliases for the reload opt-out). `goto` takes
    `{ noPreload?, noPreloadCode? }`.
-10. **Layout reset (`+page@.html`)**: DONE (lite). `admin/login/+page@.svelte`
-    renders outside the `+route.svelte` chain (`svelteModKind: 'reset'`,
-    same URL rules as a leaf); `@` bare = skip all wrappers,
-    `@admin` = keep wrappers down to `admin`. `routes.js` cuts the chain;
-    `ssr-manifest.json` surfaces `kind: 'reset'` + `reset` cut;
-    `+layout@` / named-layout (`+page@named`) stays unsupported.
+10. **Layout composition (`export const layout`)**: DONE.
+    `admin/login/+page.ts` with `layout = false` renders outside the
+    `+route.svelte` chain (same URL rules as a leaf — plain-named
+    `about.svelte` reads `about.ts` identically); `'admin'` keeps wrappers
+    down to `admin`; `true` pins the full chain back on under a bare
+    subtree. `routes.js` cuts the chain; `ssr-manifest.json` surfaces
+    `layout` per route. Leaf wins, else nearest explicit wrapper — so a
+    wrapper's `false` bares a whole subtree (SvelteKit `+layout@` ergo),
+    something the old filename carrier could never express. Backend data
+    channels work under cuts (ordinary `+page.v` dispatch — the old
+    `+page@.svelte` + `.v` combo emitted a bogus `/admin/users/+page@`
+    route). Composition-only by design: skipped wrappers' `@[load]` /
+    `@[before]` / `@[after]` still run (`+route.v` doubles as middleware).
+    No `@` in filenames: stale `+page@.svelte` / `about@.svelte` files fail
+    the build with the rename + one-line fix.
 11. **`$app/forms`, `$env/*`, `$service-worker`, `$app/server`**: LOCKED
     NON-GOALS (documented in `coming-from-sveltekit.md`). `#app/paths` +
     `#app/environment` + `SWELTE_*` stay the surface; typed

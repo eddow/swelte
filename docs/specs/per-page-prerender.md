@@ -25,7 +25,7 @@ export const prerender = true | false | 'auto';
   - `.v`-only routes (no `.svelte`/`.ts` sibling) follow the global mode (no flag carrier).
   - ISR/offline/target shims unaffected (headers/packaging only).
 - Call sites: `collectPrerenderEntries` resolves flags + partitions (`partitionPrerender`); bad values are file+line build errors.
-- Sibling `.ts` remains the only knob carrier (same regex pattern as `export const ssr` / `export const chunk`).
+- Sibling `.ts` is the only knob carrier (same regex pattern as `export const ssr` / `export const chunk`, now joined by `export const layout`).
 
 ```ts
 // about/+page.ts (leaf) or about/+route.ts (subtree)

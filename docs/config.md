@@ -129,11 +129,20 @@ for `/users/42`; `ssr-manifest.json` surfaces `serializedHeaders`). No
 `transformPageChunk` callback — `@[after]` already rewrites the whole
 `SwelteResponse` body.
 
-Layout reset (SvelteKit `+page@layout` lite): `admin/login/+page@.svelte`
-(file stem carries the `@`) claims `/admin/login` but renders outside
-the whole `+route.svelte` chain; `+page@admin` keeps wrappers down to
-`admin`. Same URL rules as plain leaves (`routes.js` cuts the wrapper
-chain; `ssr-manifest.json` surfaces `kind: 'reset'` + `reset` cut).
+Layout composition (SvelteKit `+page@layout` ergo, no `@` in the
+filename): `export const layout = false | true | 'dir'` in the sibling
+`.ts` (leaf wins, else nearest explicit wrapper; file+line build error on
+bad shape). `false` renders that page outside the whole `+route.svelte`
+chain; `'dir'` keeps wrappers at-or-above that ancestor dir (`'admin'`
+keeps `admin/+route` + above); `true` pins the full chain back on under a
+bare subtree. A wrapper's `layout = false` bares its whole subtree —
+set `layout = true` on one leaf to opt it back in. Same URL rules as
+plain leaves (`routes.js` cuts the wrapper chain; `ssr-manifest.json`
+surfaces `layout` per route). Composition-only: a skipped wrapper's
+`@[load]`/`@[before]`/`@[after]` still run — Swelte `+route.v` doubles as
+middleware, unlike SvelteKit `+layout` (whose `load` the reset also
+skips). Stale `+page@.svelte` files fail the build with the rename +
+one-line fix.
 
 ## Deploy targets (packaging only, no Node runtime)
 

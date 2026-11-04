@@ -5,12 +5,14 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
 	collectSvelteManifest,
-	svelteResetCut,
 	svelteRouteFor,
 	siblingLoadSource,
 	universalLoadKind,
 	chunkKeyFor,
 	readCsrFlag,
+	assertLayoutHint,
+	readLayoutHint,
+	resolveLayoutHint,
 	assertLimitsHint,
 } from './vite.js'
 import type { SvelteRouteEntry } from './vite.js'
@@ -168,36 +170,191 @@ describe('collectSvelteManifest (tmp routes)', () => {
 			chunkKeyFor('layout', { svelte: '+error.svelte', kind: 'error', chunk: 'inherit' }, wrappers),
 			'app'
 		)
-		// reset pages chunk like pages (same dir rules).
+		// layout-cut leaves chunk like pages (same dir rules).
 		assert.equal(
 			chunkKeyFor(
 				'layout',
-				{ svelte: 'admin/+page@.svelte', kind: 'reset', chunk: 'inherit' } as never,
+				{ svelte: 'admin/+page.svelte', kind: 'page', chunk: 'inherit' } as never,
 				wrappers
 			),
 			'layout:admin'
 		)
 	})
 
-	it('P1 item 10: +page@ reset cuts the wrapper chain (bare + named)', () => {
+	it('readLayoutHint: false/true/quoted dirs; rejects malformed', () => {
+		assert.equal(readLayoutHint('export const layout = false'), false)
+		assert.equal(readLayoutHint('export const layout = true'), true)
+		assert.equal(readLayoutHint(`export const layout = 'admin'`), 'admin')
+		assert.equal(readLayoutHint(`export const layout = "a/b"`), 'a/b')
+		// normalize the annotation away — the union marker `|` can only
+		// appear inside the annotation (a bare value never contains one),
+		// so `: boolean | string` is tolerated like plain `: string`.
+		assert.equal(readLayoutHint('export const layout: boolean | string = false;'), false)
+		assert.equal(readLayoutHint(`export const layout = 'admin'; // keep admin`), 'admin')
+		assert.equal(readLayoutHint('export function load() { return {} }'), null)
+		// Unquoted garbage passes through for assertLayoutHint to reject.
+		assert.equal(readLayoutHint('export const layout = 123'), '123')
+		// An unclosed quote leaves a trailing `'`: without balanced quotes
+		// the `;`-terminated regex grabs the comment too, so the check is
+		// that unbalanced quoting never resolves to a clean value.
+		const unbalanced = readLayoutHint(`export const layout = 'admin`)
+		assert.ok(unbalanced !== 'admin')
+		assert.throws(
+			() => assertLayoutHint('f.ts:1', `export const layout = 'admin`),
+			/bad layout hint/
+		)
+
+		assert.equal(assertLayoutHint('f.ts', 'export const layout = false'), false)
+		assert.equal(assertLayoutHint('f.ts', 'export const layout = true'), true)
+		assert.equal(assertLayoutHint('f.ts', `export const layout = 'admin'`), 'admin')
+		assert.equal(assertLayoutHint('f.ts', `export const layout = "a/b"`), 'a/b')
+		assert.equal(assertLayoutHint('f.ts', 'export const layout: boolean | string = false;'), false)
+		assert.equal(assertLayoutHint('f.ts', 'no hint here'), null)
+		assert.throws(
+			() => assertLayoutHint('f.ts:1', `export const layout = ''`),
+			/bad layout hint ''/
+		)
+		assert.throws(() => assertLayoutHint('f.ts:1', 'export const layout = 123'), /bad layout hint/)
+		assert.throws(
+			() => assertLayoutHint('f.ts:1', 'export const layout = someVar'),
+			/bad layout hint/
+		)
+		assert.throws(
+			() => assertLayoutHint('f.ts:1', `export const layout = '../admin'`),
+			/bad layout hint/
+		)
+		// Explicit unsupported shapes stay build errors, not cuts.
+		assert.throws(
+			() => assertLayoutHint('f.ts:1', `export const layout = 'admin/'`),
+			/bad layout hint/
+		)
+		assert.throws(
+			() => assertLayoutHint('f.ts:1', `export const layout = '/admin'`),
+			/bad layout hint/
+		)
+		// Dots move (`..`), groups (`(a)`) and dynamics (`[id]`) are never
+		// legal cut dirs; `my.dir` fails the plain-dir rule too.
+		for (const bad of [`'..'`, `'(a)'`, `'[id]'`, `'my.dir'`]) {
+			assert.throws(
+				() => assertLayoutHint('f.ts:1', `export const layout = ${bad}`),
+				/bad layout hint/,
+				bad
+			)
+		}
+	})
+
+	it('resolveLayoutHint: leaf > nearest wrapper; named cut validated', () => {
+		const routesAbs = join(tmpdir(), 'swelte-layout-nonexistent')
+		// Leaf wins over wrapper.
+		assert.equal(
+			resolveLayoutHint(
+				'src/routes',
+				routesAbs,
+				'/admin',
+				{ src: 'export const layout = false', file: join(routesAbs, 'admin', '+page.ts') },
+				['admin', '']
+			),
+			false
+		)
+		// Null leaf hint → no wrappers → null (inherit).
+		assert.equal(
+			resolveLayoutHint(
+				'src/routes',
+				routesAbs,
+				'/admin',
+				{ src: 'export function load() {}', file: join(routesAbs, 'admin', '+page.ts') },
+				[]
+			),
+			null
+		)
+		// Named cut that is not an ancestor wrapper dir fails with the file.
+		assert.throws(
+			() =>
+				resolveLayoutHint(
+					'src/routes',
+					routesAbs,
+					'/admin/settings',
+					{
+						src: `export const layout = 'nope'`,
+						file: join(routesAbs, 'admin', 'settings', '+page.ts'),
+					},
+					['admin', '']
+				),
+			/no ancestor wrapper at that dir/
+		)
+	})
+
+	it('layout knob: bare, named, plain-named; chain defaults stay full', () => {
 		const routesAbs = tmpRoutes({
 			'+route.svelte': '<slot />',
 			'admin/+route.svelte': '<slot />',
 			'admin/+page.svelte': '<h1>a</h1>',
-			'admin/login/+page@.svelte': '<h1>bare login</h1>',
-			'admin/settings/+page@admin.svelte': '<h1>settings</h1>',
+			'admin/login/+page.svelte': '<h1>bare login</h1>',
+			'admin/login/+page.ts': 'export const layout = false',
+			'admin/settings/+page.svelte': '<h1>settings</h1>',
+			'admin/settings/+page.ts': `export const layout = 'admin'`,
+			// Plain-named leaf: layout works off about.ts, route stays /about.
+			'about.svelte': '<h1>about</h1>',
+			'about.ts': 'export const layout = false',
 		})
 		const { entries } = collectSvelteManifest(routesAbs, 'src/routes', new Set())
 		const by = (svelte: string) => entries.find((e: SvelteRouteEntry) => e.svelte === svelte)
-		// Reset pages claim the same URL as a plain leaf would.
-		assert.equal(by('admin/login/+page@.svelte')?.kind, 'reset')
-		assert.equal(by('admin/login/+page@.svelte')?.route, '/admin/login')
-		assert.equal(svelteResetCut('admin/login/+page@'), '')
-		assert.equal(by('admin/settings/+page@admin.svelte')?.route, '/admin/settings')
-		assert.equal(svelteResetCut('admin/settings/+page@admin'), 'admin')
-		// Plain leaves still mount inside wrappers.
-		assert.equal(by('admin/+page.svelte')?.kind, 'page')
+		assert.equal(by('admin/login/+page.svelte')?.layout, false)
+		assert.equal(by('admin/login/+page.svelte')?.route, '/admin/login')
+		assert.equal(by('admin/settings/+page.svelte')?.layout, 'admin')
+		assert.equal(by('about.svelte')?.layout, false)
+		assert.equal(by('about.svelte')?.route, '/about')
+		assert.equal(by('about.svelte')?.kind, 'plain')
+		// Plain leaves inherit the full chain.
+		assert.equal(by('admin/+page.svelte')?.layout, null)
 		assert.equal(by('admin/+page.svelte')?.route, '/admin')
+	})
+
+	it('layout knob: subtree reset + true escape; bad hints fail', () => {
+		const routesAbs = tmpRoutes({
+			'+route.svelte': '<slot />',
+			'admin/+route.svelte': '<slot />',
+			'admin/+route.ts': 'export const layout = false',
+			'admin/a/+page.svelte': '<h1>a</h1>',
+			'admin/a/+page.ts': 'export const layout = true',
+			'admin/b/+page.svelte': '<h1>b</h1>',
+		})
+		const { entries } = collectSvelteManifest(routesAbs, 'src/routes', new Set())
+		const by = (svelte: string) => entries.find((e: SvelteRouteEntry) => e.svelte === svelte)
+		// Whole admin subtree bares; the `true` leaf opts back into the full chain.
+		assert.equal(by('admin/b/+page.svelte')?.layout, false)
+		assert.equal(by('admin/a/+page.svelte')?.layout, true)
+
+		const badCut = tmpRoutes({
+			'admin/+route.svelte': '<slot />',
+			'admin/x/+page.svelte': '<h1>x</h1>',
+			'admin/x/+page.ts': `export const layout = 'nope'`,
+		})
+		assert.throws(
+			() => collectSvelteManifest(badCut, 'src/routes', new Set()),
+			/no ancestor wrapper at that dir/
+		)
+		const badShape = tmpRoutes({
+			'plain/+page.svelte': '<h1>p</h1>',
+			'plain/+page.ts': 'export const layout = 123',
+		})
+		assert.throws(() => collectSvelteManifest(badShape, 'src/routes', new Set()), /bad layout hint/)
+		const staleMod = tmpRoutes({
+			'+route.svelte': '<slot />',
+			'admin/login/+page@.svelte': '<h1>stale</h1>',
+		})
+		assert.throws(
+			() => collectSvelteManifest(staleMod, 'src/routes', new Set()),
+			/layout reset moved to `export const layout`/
+		)
+		const stalePlain = tmpRoutes({
+			'+page.svelte': '<h1>home</h1>',
+			'about@.svelte': '<h1>about</h1>',
+		})
+		assert.throws(
+			() => collectSvelteManifest(stalePlain, 'src/routes', new Set()),
+			/layout reset moved to `export const layout`/
+		)
 	})
 
 	it('P1 items 6+12: csr=false + limits hints read from the sibling .ts', () => {

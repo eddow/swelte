@@ -81,6 +81,11 @@ describe('route helpers', () => {
 		// the `+route` wrapper (folder router, no URL of its own).
 		assert.equal(svelteRouteFor('api/greet'), '/api/greet')
 		assert.equal(svelteRouteFor('admin/+route'), null)
+		// No `@` carrier anymore: `+page@` is an unknown `+`-file (dropped),
+		// `about@` is a plain leaf at its literal URL.
+		assert.equal(svelteModKind('admin/+page@'), null)
+		assert.equal(svelteModKind('about@'), 'plain')
+		assert.equal(svelteRouteFor('about@'), '/about@')
 	})
 
 	it('roadmap §1.1 route groups strip from URL, keep on disk', () => {
