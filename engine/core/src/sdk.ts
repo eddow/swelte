@@ -567,8 +567,7 @@ export function isPageData<T>(r: SwelteLoadResult<T>): r is { data: T } {
 
 // §1.2 depends/invalidate + §1.4 client-router navigation stores.
 // Pure-TS client state (no V side, no SSR): tracks the current page,
-// navigation status, and per-route load cache tags. `updated` is a stub
-// flag (no version check yet — §4 snapshot export will feed it).
+// navigation status, and per-route load cache tags.
 
 export interface SweltePageState {
 	url: string
@@ -577,6 +576,10 @@ export interface SweltePageState {
 	data?: unknown
 	error?: SweltePageError
 	form?: unknown
+	/** Shallow-routing state (SvelteKit `page.state` lite): set via
+	 * `pushState(url, { page-state })` / `replaceState(url, { page-state })`,
+	 * survives history traversal, never sent to the server. */
+	state?: Record<string, unknown>
 }
 
 export interface SwelteNavigatingState {
@@ -744,6 +747,93 @@ export async function pushState(
 	await fn(url, state)
 }
 
+/** Shallow replace (SvelteKit `replaceState` lite): swaps the current
+ * history entry without navigation or load re-run. `state` may carry
+ * `page-state` (surfaced on `page.state`, survives popstate); anything
+ * else rides the raw history entry untouched. */
+export async function replaceState(
+	url: string | URL,
+	state: Record<string, unknown> = {}
+): Promise<void> {
+	const fn = __routerFn('replaceState')
+	if (!fn)
+		throw new Error('swelte: replaceState() needs the client router (browser + entry-main boot)')
+	await fn(url, state)
+}
+
+/** `preloadCode` (SvelteKit lite): warm the route's JS chunk(s) without
+ * fetching data or touching the DOM. Resolves the lazy chunk loaders for
+ * the route (layout + page share one round-trip via the comp cache);
+ * static / eager routes resolve to a no-op `{ route, params, cached }`.
+ * Pair with `preloadData` for the full SvelteKit `preloadData+preloadCode`
+ * hover-prefetch. */
+export async function preloadCode(url: string | URL): Promise<{
+	route: string
+	params: Record<string, string>
+	cached: boolean
+} | null> {
+	const fn = __routerFn('preloadCode')
+	if (!fn)
+		throw new Error('swelte: preloadCode() needs the client router (browser + entry-main boot)')
+	return (await fn(url)) as {
+		route: string
+		params: Record<string, string>
+		cached: boolean
+	} | null
+}
+
+/** Snapshot capture/restore hook (SvelteKit `export const snapshot` lite,
+ * manual form). `captureSnapshot()` runs every registered capturer
+ * (last-registered wins per key, merged shallow); `restoreSnapshot(snap)`
+ * replays them. The client router captures on `goto`/`__navigateTo` and
+ * restores on `popstate` traversal when the history entry carries one —
+ * components opt in without a compiler transform:
+ *
+ *   const off = captureSnapshot(() => ({ scroll: window.scrollY }))
+ *   restoreSnapshot((s) => { if (s.scroll) window.scrollTo(0, s.scroll) })
+ */
+type SwelteSnapshot = Record<string, unknown>
+type SwelteSnapshotCapture = () => SwelteSnapshot
+type SwelteSnapshotRestore = (snap: SwelteSnapshot) => void
+const snapshotCapturers = new Set<SwelteSnapshotCapture>()
+const snapshotRestorers = new Set<SwelteSnapshotRestore>()
+
+export function captureSnapshot(fn: SwelteSnapshotCapture): () => void {
+	snapshotCapturers.add(fn)
+	return () => {
+		snapshotCapturers.delete(fn)
+	}
+}
+
+export function restoreSnapshot(fn: SwelteSnapshotRestore): () => void {
+	snapshotRestorers.add(fn)
+	return () => {
+		snapshotRestorers.delete(fn)
+	}
+}
+
+export function __swelteCaptureSnapshot(): SwelteSnapshot {
+	const out: SwelteSnapshot = {}
+	for (const fn of [...snapshotCapturers]) {
+		try {
+			Object.assign(out, fn())
+		} catch {
+			/* capturer must never break navigation */
+		}
+	}
+	return out
+}
+
+export function __swelteRestoreSnapshot(snap: SwelteSnapshot): void {
+	for (const fn of [...snapshotRestorers]) {
+		try {
+			fn(snap)
+		} catch {
+			/* restorer must never break traversal */
+		}
+	}
+}
+
 // §1.2 load cache: route-key → tags. `depends()` registers the current
 // load's tags during execution; `invalidate(tag)` re-runs loads that
 // declared the tag; `invalidateAll()` clears everything.
@@ -784,6 +874,8 @@ export function __swelteTrackLoad(key: string, fn: () => unknown): unknown {
 // directly — entry-main wires it once at boot).
 export const __beforeNav = beforeNav
 export const __afterNav = afterNav
+export const __captureSnapshot = __swelteCaptureSnapshot
+export const __restoreSnapshot = __swelteRestoreSnapshot
 
 if (typeof globalThis !== 'undefined') {
 	const g = globalThis as Record<string, unknown>
@@ -794,6 +886,8 @@ if (typeof globalThis !== 'undefined') {
 			updated,
 			__beforeNav: beforeNav,
 			__afterNav: afterNav,
+			__swelteCaptureSnapshot,
+			__swelteRestoreSnapshot,
 		}
 	}
 }

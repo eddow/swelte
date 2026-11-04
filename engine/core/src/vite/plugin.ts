@@ -50,6 +50,7 @@ import { jsFetchFor, jsWasmFor, wasmParamKind, wasmReturnKind } from './stubs.js
 import type {
 	LoadFn,
 	MatcherDef,
+	RouteLimits,
 	RpcFn,
 	RpcParam,
 	SweltePluginOptions,
@@ -900,29 +901,28 @@ ${list(params, (p) => `\t${p.name}${p.optional ? '?' : ''}: ${p.tstype}\n`)}}
 						// §4 ssr=false-lite: sibling `export const ssr = false`
 						// opts the route out — Hand serves the SPA shell
 						// (swelte_no_ssr predicate in server_gen.v).
+						// csr=false-lite: sibling `export const csr = false`
+						// renders SSR HTML only — client mount/hydrate no-op
+						// (swelte_no_csr predicate + routes.js `csr: false`).
+						// limits-lite: sibling `export const limits = {...}`
+						// (leaf wins, else nearest explicit wrapper) lands in
+						// the `swelte_route_limits()` table in server_gen.v.
 						const noSsrRoutes: string[] = []
+						const noCsrRoutes: string[] = []
+						const routeLimits: { route: string; limits: RouteLimits }[] = []
 						try {
-							for (const f of listFilesWithExt(routesAbs, '.svelte')) {
-								const rel = relPosixTop(routesAbs, f)
-								const mod = rel.replace(/\.svelte$/, '')
-								const route = svelteRouteFor(mod)
-								if (route === null) continue
-								const sib = siblingLoadSource(f.replace(/\.svelte$/, '.ts'))
-								if (!sib) continue
-								let src = ''
-								try {
-									src = readFileSync(sib, 'utf8')
-								} catch {
-									continue
-								}
-								if (/export\s+const\s+ssr\s*=\s*false/.test(src)) noSsrRoutes.push(route)
+							for (const e of collectSvelteManifest(routesAbs, routesDir, vMods).entries) {
+								if (e.kind === 'wrapper' || e.kind === 'error') continue
+								if (e.ssr === false) noSsrRoutes.push(e.route)
+								if (e.csr === false) noCsrRoutes.push(e.route)
+								if (e.limits) routeLimits.push({ route: e.route, limits: e.limits })
 							}
 						} catch {
 							/* no svelte routes */
 						}
 						writeIfChanged(
 							join(routesGenDir, `server_gen.v`),
-							emitServerGen(dispatched, sseMods, matchers, noSsrRoutes)
+							emitServerGen(dispatched, sseMods, matchers, noSsrRoutes, noCsrRoutes, routeLimits)
 						)
 					}
 					// Leaf-vs-index clash: foo.v + foo/index.v (or +page.v) both exist.
@@ -1154,7 +1154,11 @@ declare module '*.v' {
 						`	export const updated: unknown`,
 						`	export function goto(url: string, opts?: unknown): Promise<void>`,
 						`	export function preloadData(url: string): Promise<unknown>`,
+						`	export function preloadCode(url: string): Promise<unknown>`,
 						`	export function pushState(url: string, state?: unknown): Promise<void>`,
+						`	export function replaceState(url: string, state?: unknown): Promise<void>`,
+						`	export function captureSnapshot(fn: unknown): () => void`,
+						`	export function restoreSnapshot(fn: unknown): () => void`,
 						`	export function beforeNavigate(fn: unknown): () => void`,
 						`	export function afterNavigate(fn: unknown): () => void`,
 						`	export function onNavigate(fn: unknown): () => void`,
@@ -1166,7 +1170,11 @@ declare module '*.v' {
 						`	export const updated: unknown`,
 						`	export function goto(url: string, opts?: unknown): Promise<void>`,
 						`	export function preloadData(url: string): Promise<unknown>`,
+						`	export function preloadCode(url: string): Promise<unknown>`,
 						`	export function pushState(url: string, state?: unknown): Promise<void>`,
+						`	export function replaceState(url: string, state?: unknown): Promise<void>`,
+						`	export function captureSnapshot(fn: unknown): () => void`,
+						`	export function restoreSnapshot(fn: unknown): () => void`,
 						`	export function beforeNavigate(fn: unknown): () => void`,
 						`	export function afterNavigate(fn: unknown): () => void`,
 						`	export function onNavigate(fn: unknown): () => void`,
@@ -1178,10 +1186,18 @@ declare module '*.v' {
 						`	export const updated: unknown`,
 						`	export function goto(url: string, opts?: unknown): Promise<void>`,
 						`	export function preloadData(url: string): Promise<unknown>`,
+						`	export function preloadCode(url: string): Promise<unknown>`,
 						`	export function pushState(url: string, state?: unknown): Promise<void>`,
+						`	export function replaceState(url: string, state?: unknown): Promise<void>`,
+						`	export function captureSnapshot(fn: unknown): () => void`,
+						`	export function restoreSnapshot(fn: unknown): () => void`,
 						`	export function beforeNavigate(fn: unknown): () => void`,
 						`	export function afterNavigate(fn: unknown): () => void`,
 						`	export function onNavigate(fn: unknown): () => void`,
+						`	export function checkUpdated(): Promise<boolean>`,
+						`	export function handleFetch(fn: unknown): () => void`,
+						`	export function swelteError(status: number, message: string): unknown`,
+						`	export function isRedirect(e: unknown): boolean`,
 						`}`,
 						``
 					)
@@ -1237,7 +1253,7 @@ declare module '*.v' {
 export { page, navigating, updated } from '@swelte/core'
 `
 					const GEN_NAV_JS = `// Auto-generated by swelte. Do not edit.
-export { goto, preloadData, pushState, beforeNavigate, afterNavigate, onNavigate, checkUpdated, handleFetch, swelteError, isRedirect } from '@swelte/core'
+export { goto, preloadData, preloadCode, pushState, replaceState, captureSnapshot, restoreSnapshot, beforeNavigate, afterNavigate, onNavigate, checkUpdated, handleFetch, swelteError, isRedirect } from '@swelte/core'
 `
 					const GEN_ENV_JS = `// Auto-generated by swelte. Do not edit.
 export const browser = typeof window !== 'undefined';
@@ -1302,9 +1318,18 @@ export declare const dev: boolean
 					const wrapperSet = new Set(
 						svelteEntries.filter((e) => e.kind === 'wrapper').map((e) => e.svelte)
 					)
+					// Reset-aware chain: bare `+page@` mounts with no wrappers; `+page@name`
+					// keeps wrappers at-or-above the named ancestor dir (mirrors routes.js cutWrappers).
+					const resetBySvelte = new Map<string, string>()
+					for (const e of svelteEntries) {
+						if (e.kind === 'reset') resetBySvelte.set(e.svelte, (e as { reset?: string }).reset ?? '')
+					}
 					const chainFor = (pageSvelte: string): string[] => {
 						const mod = pageSvelte.replace(/\.svelte$/, '')
 						const dir = mod.includes('/') ? mod.slice(0, mod.lastIndexOf('/')) : ''
+						const cut = resetBySvelte.get(pageSvelte)
+						const dirOfW = (w: string): string =>
+							w.endsWith('/+route.svelte') ? w.slice(0, -'/+route.svelte'.length) : w === '+route.svelte' ? '' : w
 						const chain: string[] = []
 						let cur = dir
 						for (;;) {
@@ -1312,6 +1337,12 @@ export declare const dev: boolean
 							if (wrapperSet.has(cand)) chain.unshift(cand)
 							if (cur === '') break
 							cur = cur.includes('/') ? cur.slice(0, cur.lastIndexOf('/')) : ''
+						}
+						if (cut !== undefined) {
+							if (cut === '') return []
+							const idx = chain.findIndex((w) => dirOfW(w) === cut)
+							if (idx < 0) return []
+							return chain.slice(0, idx + 1)
 						}
 						return chain
 					}
@@ -1332,6 +1363,9 @@ export declare const dev: boolean
 								hasData: e.hasData,
 								hasUniversalLoad: e.hasUniversalLoad,
 								ssr: e.ssr,
+								csr: e.csr,
+								limits: e.limits ?? null,
+								...(e.kind === 'reset' ? { reset: (e as { reset?: string }).reset ?? '' } : {}),
 								chunk: e.chunk ?? 'inherit',
 								prerender: e.prerender ?? 'inherit',
 							}))

@@ -213,4 +213,54 @@ describe('generate() validation errors (tmp scaffold, no V binary)', () => {
 		const skeleton = rf(jn(templatesDir(import.meta.url), 'harness', 'server.v'), 'utf8')
 		assert.equal(readFileSync(join(root, '.swelte', 'server.v'), 'utf8'), skeleton)
 	})
+
+	it('@[error] hook: validation + sanitize-fn codegen', async () => {
+		const { writeFileSync } = await import('node:fs')
+		// Wrong params -> build error.
+		let root = scaffold({ '+page.v': 'module p\n@[get] pub fn g() string { return "" }' })
+		writeFileSync(join(root, 'src', 'app.v'), 'module s\n@[error]\npub fn oops(msg string) string { return msg }')
+		await assert.rejects(() => buildStart(root), /must take \(message string, status int\)/)
+		// Non-string return -> build error.
+		root = scaffold({ '+page.v': 'module p\n@[get] pub fn g() string { return "" }' })
+		writeFileSync(join(root, 'src', 'app.v'), 'module s\n@[error]\npub fn oops(message string, status int) void { }')
+		await assert.rejects(() => buildStart(root), /must return string/)
+		// Two @[error] fns -> build error.
+		root = scaffold({ '+page.v': 'module p\n@[get] pub fn g() string { return "" }' })
+		writeFileSync(
+			join(root, 'src', 'app.v'),
+			'module s\n@[error]\npub fn a(message string, status int) string { return "" }\n@[error]\npub fn b(message string, status int) string { return "" }'
+		)
+		await assert.rejects(() => buildStart(root), /two @\[error\] fns/)
+		// Happy path: sanitizer body replaces the default fn.
+		root = scaffold({ '+page.v': 'module p\n@[get] pub fn g() string { return "" }' })
+		writeFileSync(
+			join(root, 'src', 'app.v'),
+			"module s\n@[error]\npub fn scrub(message string, status int) string {\n\tif status >= 500 { return 'internal error' }\n\treturn ''\n}"
+		)
+		await buildStart(root)
+		const { readFileSync: rf2 } = await import('node:fs')
+		const sv = rf2(join(root, '.swelte', 'server.v'), 'utf8')
+		assert.ok(sv.includes('@[error] (src/app.v)'), sv.slice(0, 4000))
+		assert.ok(sv.includes("return 'internal error'"), sv.slice(0, 8000))
+		assert.ok(sv.includes('fn swelte_sanitize_error(message string, status int) string {'))
+	})
+
+	it('P1 items 6+12: server_gen emits swelte_no_csr + swelte_route_limits', async () => {
+		const { emitServerGen } = await import('./vite/server-gen.js')
+		const gen = emitServerGen([{ route: '/plain', mod: 'plain', prefix: 'r_' }], new Set(), new Map(), [], ['/plain'], [
+			{ route: '/limited', limits: { rate: 10, rateWindowMs: 60000, timeoutMs: 5000, bodyLimit: 1048576 } },
+		])
+		assert.ok(gen.includes('pub fn swelte_no_csr(path string) bool {'), gen.slice(0, 2000))
+		assert.ok(gen.includes('if norm_path == "/plain" { return true }'))
+		assert.ok(gen.includes('pub struct SwelteRouteLimits {'))
+		assert.ok(
+			gen.includes(
+				'out << SwelteRouteLimits{ route: "/limited", rate: 10, rate_window_ms: 60000, timeout_ms: 5000, body_limit: 1048576 }'
+			)
+		)
+		// Empty lists keep the predicates total (no-route fallback).
+		const empty = emitServerGen([], new Set(), new Map(), [], [], [])
+		assert.ok(empty.includes('pub fn swelte_no_csr(path string) bool {'))
+		assert.ok(empty.includes('mut out := []SwelteRouteLimits{}'))
+	})
 })

@@ -92,6 +92,29 @@ routes follow the global mode (no sibling carrier).
 `X-Swelte-Revalidate: N` (longest prefix wins). Headers only — no
 background revalidation, runtime default unchanged.
 
+Per-route rendering flags (SvelteKit `ssr`/`csr` page options): `export
+const ssr = false` opts the route out of SSR (SPA shell); `export const
+csr = false` renders SSR HTML only (client mount/hydrate no-op —
+`swelte_no_csr()` + `csr: false` in `routes.js`; `ssr-manifest.json`
+surfaces `csr` per route). Independent corners, same sibling `.ts`
+carrier (leaf wins, else nearest explicit wrapper for `csr`).
+
+Per-route limits (SvelteKit `config` lite, single-binary): `export const
+limits = { rate, rateWindowMs, timeoutMs, bodyLimit }` in the sibling
+`.ts` (leaf wins, else nearest explicit wrapper; absent = global env
+defaults). All fields optional positive ints; bad shape = file+line
+build error. Longest-prefix match in `Hand` overrides `SWELTE_RATE_LIMIT`
+/ `SWELTE_RATE_WINDOW_MS` / `SWELTE_HANDLER_TIMEOUT_MS` /
+`SWELTE_BODY_LIMIT` on that route (`server_gen.v`
+`swelte_route_limits()` table; `ssr-manifest.json` surfaces `limits`).
+No regions/runtime — one binary, one deploy target.
+
+Layout reset (SvelteKit `+page@layout` lite): `admin/login/+page@.svelte`
+(file stem carries the `@`) claims `/admin/login` but renders outside
+the whole `+route.svelte` chain; `+page@admin` keeps wrappers down to
+`admin`. Same URL rules as plain leaves (`routes.js` cuts the wrapper
+chain; `ssr-manifest.json` surfaces `kind: 'reset'` + `reset` cut).
+
 ## Deploy targets (packaging only, no Node runtime)
 
 `--target` flag wins, else `swelte.target`. `auto` (default) = no extra

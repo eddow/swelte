@@ -56,12 +56,10 @@ so idle `dev` stays quiet (no phantom HMR), and the watcher ignores
 6. Target shim (packaging only): `--target` wins, else `swelte.target`
    (`static` → `dist/.swelte-static`, `node` →
    `dist/Dockerfile.swelte`, `edge` → `dist/_headers`).
-7. Smoke: boot the binary, probe `/` + `/api/greet` (when the route
-   exists), stop. Static shell + JSON only — SSR HTML is the adapter's
-   proof, core never starts an engine. `SWELTE_SSR_URL` in the env is
-   honored by `Hand` but core sets nothing.
-   Cross-build: skipped — the foreign binary can't boot on this host,
-   so the build asserts artifacts only (`dist/` + binary exist).
+7. Artifacts only: assert `dist/server` + `dist/index.html` exist.
+   No boot, no ports — build never listens (cross-built, sandboxed,
+   or Windows binaries may not execute here; booting belongs to
+   `swelte preview` / the preview e2e / `swelte-ssr check`).
    WASM is untouched by `--target-os/--target-arch` (always
    `-os browser`), and `dev`/`preview`/`test` stay host-native
    (the flags are build-only).

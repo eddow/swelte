@@ -3,7 +3,7 @@ import { join } from 'node:path'
 import { list } from './fs.js'
 import { narrowCall, parseStructs } from './parse.js'
 import { vPrefix } from './routes.js'
-import type { LoadFn, MatcherDef, RpcFn, WrapperMw } from './types.js'
+import type { LoadFn, MatcherDef, RouteLimits, RpcFn, WrapperMw } from './types.js'
 
 export function doubleClaimCheck(
 	routesAbs: string,
@@ -311,7 +311,9 @@ export function emitServerGen(
 	dispatched: { route: string; mod: string; prefix: string }[],
 	sseMods: Set<string> = new Set(),
 	matcherDefs?: Map<string, MatcherDef>,
-	noSsrRoutes: string[] = []
+	noSsrRoutes: string[] = [],
+	noCsrRoutes: string[] = [],
+	routeLimits: { route: string; limits: RouteLimits }[] = []
 ): string {
 	/** Dynamic route arms (section 8): static beats dynamic; among dynamics,
 	 * fewer [segs] first, [...rest] catch-all last (stable sort). */
@@ -758,8 +760,35 @@ pub fn swelte_sse_emit_for(prefix string, qualifier string, req SwelteRequest, e
 		// serves the SPA shell; async universal loads stay client-only.
 		`pub fn swelte_no_ssr(path string) bool {`,
 		...(noSsrRoutes.length ? [`\tnorm_path := swelte_normalize_path(path)`] : [`\t_ = path`]),
-		...noSsrRoutes.map((r) => `\tif norm_path == ${vJsonStr(r)} { return true }`),
+		...noSsrRoutes.map((r) => r.includes('[') ? `\tif m, _ := swelte_match_route(${vJsonStr(r)}, norm_path); m { return true }` : `\tif norm_path == ${vJsonStr(r)} { return true }`),
 		`\treturn false
+}`,
+		// csr=false-lite: Hand still serves the SSR HTML; the client router
+		// no-ops the mount/hydrate for these routes (routes.js `csr: false`).
+		// The predicate stays server-visible for logs/contracts.
+		`pub fn swelte_no_csr(path string) bool {`,
+		...(noCsrRoutes.length ? [`\tnorm_path := swelte_normalize_path(path)`] : [`\t_ = path`]),
+		...noCsrRoutes.map((r) => r.includes('[') ? `\tif m, _ := swelte_match_route(${vJsonStr(r)}, norm_path); m { return true }` : `\tif norm_path == ${vJsonStr(r)} { return true }`),
+		`\treturn false
+}`,
+		// Per-route limits table (P1 item 12 lite): longest-prefix match in
+		// Hand picks rate/rateWindowMs/timeoutMs/bodyLimit overrides; empty
+		// table = global env defaults everywhere.
+		`pub struct SwelteRouteLimits {
+	pub mut:
+		route string
+		rate int
+		rate_window_ms int
+		timeout_ms int
+		body_limit int
+}`,
+		`pub fn swelte_route_limits() []SwelteRouteLimits {`,
+		`\tmut out := []SwelteRouteLimits{}`,
+		...routeLimits.map(
+			(e) =>
+				`\tout << SwelteRouteLimits{ route: ${vJsonStr(e.route)}, rate: ${e.limits.rate ?? 0}, rate_window_ms: ${e.limits.rateWindowMs ?? 0}, timeout_ms: ${e.limits.timeoutMs ?? 0}, body_limit: ${e.limits.bodyLimit ?? 0} }`
+		),
+		`\treturn out
 }`,
 	]
 	return o.join('\n')

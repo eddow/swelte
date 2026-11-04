@@ -53,6 +53,16 @@ export interface RpcParam {
 	optional: boolean
 }
 
+/** Per-route request limits (`export const limits = {...}` in the sibling
+ * `.ts`: leaf wins, else nearest explicit wrapper, else null = global env
+ * defaults). All fields optional positive ints. */
+export interface RouteLimits {
+	rate?: number
+	rateWindowMs?: number
+	timeoutMs?: number
+	bodyLimit?: number
+}
+
 export interface RpcFn {
 	name: string
 	attr:
@@ -70,6 +80,7 @@ export interface RpcFn {
 		| 'startup'
 		| 'reroute'
 		| 'cron'
+		| 'error'
 	qualifier?: string
 	params: RpcParam[]
 	vret: string
@@ -91,8 +102,19 @@ export interface LoadFn extends RpcFn {
 export interface SvelteRouteEntry {
 	route: string
 	svelte: string
-	kind: 'page' | 'plain' | 'error' | 'wrapper'
+	kind: 'page' | 'plain' | 'error' | 'wrapper' | 'reset'
 	hasData: boolean
+	/** Layout-reset cut (`+page@…` only): `''` = skip all wrappers, or the
+	 * ancestor dir to keep down to. Absent otherwise. */
+	reset?: string
+	/** Per-route csr flag: `export const csr = false` in the sibling `.ts`
+	 * renders SSR HTML only (no client mount/hydrate for that leaf).
+	 * Default `true`. */
+	csr: boolean
+	/** Per-route request limits (`export const limits = {...}` in the
+	 * sibling `.ts`, leaf wins, else nearest explicit wrapper, else null
+	 * = global env defaults). Enforced by Hand in `before_request`. */
+	limits: RouteLimits | null
 	/** Sibling universal load (`<basename>.ts` next to the `.svelte`,
 	 * e.g. `admin.ts` for `admin.svelte`, `+page.ts` for `+page.svelte`).
 	 * `'sync'` = SSR-applied in renderRoute; `'async'` = client-only
@@ -154,6 +176,11 @@ export interface ServerHooks {
 	startupBody?: string
 	/** Raw V body of `@[reroute]` (inlined into before_request). */
 	rerouteBody?: string
+	/** Raw V body of `@[error]` (SvelteKit `handleError` lite): called
+	 * with the throw's message + status before the `+error` mapping;
+	 * return '' to keep the message, or a sanitized replacement
+	 * (never leak internals to the client). Zero/one fn, no qualifier. */
+	errorBody?: string
 	/** `@[cron]` tick fns (spawn loop per fn in main). */
 	crons: CronHook[]
 	hasFile: boolean

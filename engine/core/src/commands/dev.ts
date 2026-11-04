@@ -183,7 +183,7 @@ export async function waitPort(port: number, ms: number): Promise<boolean> {
 	return !(await portFree(port))
 }
 
-/** Contract the build smoke probe asserts against a booted artifact:
+/** Contract the preview/e2e probe asserts against a booted artifact (test-only helper:
  * page HTML on `/` (browser accept), greet API when the route exists,
  * JSON-accept shape otherwise. Exported for the smoke-matrix tests:
  * pass a stub binary (`node -e` server) to exercise the matrix without

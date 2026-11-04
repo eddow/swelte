@@ -5,10 +5,13 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
 	collectSvelteManifest,
+	svelteResetCut,
 	svelteRouteFor,
 	siblingLoadSource,
 	universalLoadKind,
 	chunkKeyFor,
+	readCsrFlag,
+	assertLimitsHint,
 } from './vite.js'
 import type { SvelteRouteEntry } from './vite.js'
 
@@ -164,6 +167,66 @@ describe('collectSvelteManifest (tmp routes)', () => {
 		assert.equal(
 			chunkKeyFor('layout', { svelte: '+error.svelte', kind: 'error', chunk: 'inherit' }, wrappers),
 			'app'
+		)
+		// reset pages chunk like pages (same dir rules).
+		assert.equal(
+			chunkKeyFor(
+				'layout',
+				{ svelte: 'admin/+page@.svelte', kind: 'reset', chunk: 'inherit' } as never,
+				wrappers
+			),
+			'layout:admin'
+		)
+	})
+
+	it('P1 item 10: +page@ reset cuts the wrapper chain (bare + named)', () => {
+		const routesAbs = tmpRoutes({
+			'+route.svelte': '<slot />',
+			'admin/+route.svelte': '<slot />',
+			'admin/+page.svelte': '<h1>a</h1>',
+			'admin/login/+page@.svelte': '<h1>bare login</h1>',
+			'admin/settings/+page@admin.svelte': '<h1>settings</h1>',
+		})
+		const { entries } = collectSvelteManifest(routesAbs, 'src/routes', new Set())
+		const by = (svelte: string) => entries.find((e: SvelteRouteEntry) => e.svelte === svelte)
+		// Reset pages claim the same URL as a plain leaf would.
+		assert.equal(by('admin/login/+page@.svelte')?.kind, 'reset')
+		assert.equal(by('admin/login/+page@.svelte')?.route, '/admin/login')
+		assert.equal(svelteResetCut('admin/login/+page@'), '')
+		assert.equal(by('admin/settings/+page@admin.svelte')?.route, '/admin/settings')
+		assert.equal(svelteResetCut('admin/settings/+page@admin'), 'admin')
+		// Plain leaves still mount inside wrappers.
+		assert.equal(by('admin/+page.svelte')?.kind, 'page')
+		assert.equal(by('admin/+page.svelte')?.route, '/admin')
+	})
+
+	it('P1 items 6+12: csr=false + limits hints read from the sibling .ts', () => {
+		const routesAbs = tmpRoutes({
+			'plain.svelte': '<h1>p</h1>',
+			'plain.ts': 'export const csr = false',
+			'limited.svelte': '<h1>l</h1>',
+			'limited.ts': 'export const limits = { rate: 10, rateWindowMs: 60000, timeoutMs: 5000, bodyLimit: 1048576 }',
+		})
+		const { entries } = collectSvelteManifest(routesAbs, 'src/routes', new Set())
+		const by = (svelte: string) => entries.find((e: SvelteRouteEntry) => e.svelte === svelte)
+		assert.equal(by('plain.svelte')?.csr, false)
+		assert.equal(by('limited.svelte')?.csr, true)
+		assert.deepEqual(by('limited.svelte')?.limits, {
+			rate: 10,
+			rateWindowMs: 60000,
+			timeoutMs: 5000,
+			bodyLimit: 1048576,
+		})
+		assert.equal(by('plain.svelte')?.limits, null)
+		assert.equal(readCsrFlag('export const csr = true'), true)
+		assert.equal(readCsrFlag('export const x = 1'), true)
+		assert.throws(
+			() => assertLimitsHint('r/+page.ts', 'export const limits = { rate: "fast" }'),
+			/bad limits hint/
+		)
+		assert.throws(
+			() => assertLimitsHint('r/+page.ts', 'export const limits = { rate: 0 }'),
+			/must be a positive int/
 		)
 	})
 })

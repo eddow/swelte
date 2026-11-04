@@ -43,7 +43,7 @@ prod: browser ──► V :PORT ── static dist/ + same API routes
 Requires: Node 20+.
 
 ```sh
-npx swelte init myapp && cd myapp
+npx @swelte/core init myapp && cd myapp
 npm install
 npx swelte dev    # Vite :5174 + V backend :8131, one command
 # open http://localhost:5174

@@ -51,14 +51,35 @@ export function emitClientRouter(input: ClientRouterInput): ClientRouterOutput {
 	const { routesAbs, routesDir, dispatched, routeFiles, vMods, matchers, appChunking } = input
 	const svelteOnly: { route: string; mod: string; wrappers: string[] }[] = []
 	let svelteEntriesForChunk: SvelteRouteEntry[] = []
+	const resetByMod = new Map<string, string>()
+	const csrByMod = new Map<string, boolean>()
+	// Layout reset (`+page@…`): cut the wrapper chain. Bare `@` drops all
+	// wrappers (page mounts bare); `@name` keeps wrappers at-or-above the
+	// named ancestor dir. Shared by dispatched + svelte-only entries.
+	const cutWrappers = (mod: string, wrappers: string[]): string[] => {
+		const cut = resetByMod.get(mod)
+		if (cut === undefined) return wrappers
+		if (cut === '') return []
+		const dirOf = (w: string): string =>
+			w.endsWith('/+route') ? w.slice(0, -'/+route'.length) : w === '+route' ? '' : w
+		// Keep wrappers at-or-above the named ancestor (root-first order).
+		const idx = wrappers.findIndex((w) => dirOf(w) === cut)
+		if (idx < 0) return []
+		return wrappers.slice(0, idx + 1)
+	}
 	try {
 		const { entries: svelteEntries } = collectSvelteManifest(routesAbs, routesDir, vMods)
 		svelteEntriesForChunk = svelteEntries
+		for (const e of svelteEntries) {
+			if (e.kind === 'reset' && typeof e.reset === 'string')
+				resetByMod.set(e.svelte.replace(/\.svelte$/, ''), e.reset)
+			if (typeof e.csr === 'boolean') csrByMod.set(e.svelte.replace(/\.svelte$/, ''), e.csr)
+		}
 		const dispMods = new Set(dispatched.map((d) => d.mod))
 		for (const e of svelteEntries) {
 			if (e.kind === 'wrapper' || e.kind === 'error') continue
 			const mod = e.svelte.replace(/\.svelte$/, '')
-			if (dispMods.has(mod)) continue // already covered by dispatched UI entry
+			if (e.kind !== 'reset' && dispMods.has(mod)) continue // already covered by dispatched UI entry
 			const dir = mod.includes('/') ? mod.slice(0, mod.lastIndexOf('/')) : ''
 			const wrappers: string[] = []
 			let cur = dir
@@ -89,7 +110,14 @@ export function emitClientRouter(input: ClientRouterInput): ClientRouterOutput {
 	const entries: { route: string; mod: string; wrappers: string[] }[] = []
 	for (const d of dispatched) {
 		const pageFile = `${join(routesAbs, ...d.mod.split('/'))}.svelte`
-		if (!existsSync(pageFile)) continue // headless API route: no UI
+		// Layout-reset pages (`+page@…`) carry the `@` in the mod: the
+		// dispatched `.svelte` path is the literal file stem.
+		const resetMatch = [...resetByMod.keys()].find((m) => m.replace(/@.*$/, '') === d.mod)
+		const pageFileReset =
+			resetMatch !== undefined
+				? `${join(routesAbs, ...resetMatch.split('/'))}.svelte`
+				: null
+		if (!existsSync(pageFile) && !pageFileReset) continue // headless API route: no UI
 		const dir = d.mod.includes('/') ? d.mod.slice(0, d.mod.lastIndexOf('/')) : ''
 		const wrappers: string[] = []
 		let cur = dir
@@ -100,9 +128,10 @@ export function emitClientRouter(input: ClientRouterInput): ClientRouterOutput {
 			if (cur === '') break
 			cur = cur.includes('/') ? cur.slice(0, cur.lastIndexOf('/')) : ''
 		}
-		entries.push({ route: d.route, mod: d.mod, wrappers })
+		const mod = pageFileReset ? resetMatch! : d.mod
+		entries.push({ route: d.route, mod, wrappers: cutWrappers(mod, wrappers) })
 	}
-	for (const s of svelteOnly) entries.push(s)
+	for (const s of svelteOnly) entries.push({ ...s, wrappers: cutWrappers(s.mod, s.wrappers) })
 	const rank = (p: string) => (p.includes('[') ? (p.includes('...') ? 2 : 1) : 0)
 	entries.sort((a, b) => rank(a.route) - rank(b.route) || a.route.localeCompare(b.route))
 	// Chunking: global mode (single|layout|route, default layout) + per-file
@@ -124,7 +153,7 @@ export function emitClientRouter(input: ClientRouterInput): ClientRouterOutput {
 			chunkMode,
 			{
 				svelte: `${mod}.svelte`,
-				kind: (n?.kind ?? 'page') as 'page' | 'plain' | 'error' | 'wrapper',
+				kind: (n?.kind ?? 'page') as 'page' | 'plain' | 'error' | 'wrapper' | 'reset',
 				chunk: n?.chunk ?? 'inherit',
 			},
 			wrapperMods
@@ -219,10 +248,12 @@ function matchSegs(pattern, pathname) {
 export const ROUTES = [
 `)
 	for (const e of entries) {
+		const noCsr = csrByMod.get(e.mod) === false
+		const csrFlag = noCsr ? ', csr: false' : ''
 		if (!lazy) {
 			const wraps = e.wrappers.map((w) => sym(w, '_Wrap')).join(', ')
 			o.push(
-				`\t{ path: ${JSON.stringify(e.route)}, page: ${sym(e.mod, '_Page')}, wrappers: [${wraps}], hasLoad: ${loadMods.has(e.mod) || e.wrappers.some((w) => loadMods.has(w)) ? 'true' : 'false'} },`
+				`\t{ path: ${JSON.stringify(e.route)}, page: ${sym(e.mod, '_Page')}, wrappers: [${wraps}], hasLoad: ${loadMods.has(e.mod) || e.wrappers.some((w) => loadMods.has(w)) ? 'true' : 'false'}${csrFlag} },`
 			)
 		} else {
 			// Lazy: resolve members through their chunk loaders, cache in
@@ -230,7 +261,7 @@ export const ROUTES = [
 			const wraps = e.wrappers.map((w) => loaderSym(w)).join(', ')
 			const mods = [e.mod, ...e.wrappers].map((m) => JSON.stringify(m)).join(', ')
 			o.push(
-				`\t{ path: ${JSON.stringify(e.route)}, page: ${loaderSym(e.mod)}, wrappers: [${wraps}], chunkMods: [${mods}], hasLoad: ${loadMods.has(e.mod) || e.wrappers.some((w) => loadMods.has(w)) ? 'true' : 'false'} },`
+				`\t{ path: ${JSON.stringify(e.route)}, page: ${loaderSym(e.mod)}, wrappers: [${wraps}], chunkMods: [${mods}], hasLoad: ${loadMods.has(e.mod) || e.wrappers.some((w) => loadMods.has(w)) ? 'true' : 'false'}${csrFlag} },`
 			)
 		}
 	}
@@ -271,6 +302,8 @@ export async function mountSwelteRoute(target, pathname, errorProps = undefined)
 	for (const r of ROUTES) {
 		const params = matchSegs(r.path, path)
 		if (!params) continue
+		// csr=false: SSR HTML only — client mount is a no-op (server HTML stays).
+		if (r.csr === false) return { params, path: r.path }
 		const __rc = await __swelteResolveRoute(r)
 		const __page = __rc.page
 		const __wraps = __rc.wrappers
@@ -337,6 +370,8 @@ export async function hydrateSwelteRoute(target, pathname, errorProps = undefine
 		for (const r of ROUTES) {
 			const params = matchSegs(r.path, path)
 			if (!params) continue
+			// csr=false: SSR HTML only - hydration is a deliberate no-op (server HTML stays).
+			if (r.csr === false) return { params, path: r.path, hydrated: false }
 			if (r.wrappers.length > 0) {
 				// Root-first closure chain: the outermost hydrate()'s
 				// children snippet invokes the next wrapper with *its*
@@ -402,9 +437,16 @@ export async function goto(url, opts) {
 	__setNavigating({ from, to })
 	const cancelled = await __runGuards('before', { from: __routerMounted, to })
 	if (cancelled) { __setNavigating(null); return }
-	if (!opts.replaceState) history.pushState({}, '', to)
-	else history.replaceState({}, '', to)
+	if (!opts.replaceState) history.pushState(__swelteHistState(), '', to)
+	else history.replaceState(__swelteHistState(), '', to)
 	await __navigateTo(to, opts)
+}
+function __swelteSnap() { try { const sdk = __routerSdk(); return sdk && sdk.__swelteCaptureSnapshot ? sdk.__swelteCaptureSnapshot() : {} } catch { return {} } }
+function __swelteHistState(pageState) { return { 'swelte:snap': __swelteSnap(), ...(pageState !== undefined ? { 'page-state': pageState } : {}) } }
+function __swelteRestore(histState) { try { const sdk = __routerSdk(); const snap = histState && typeof histState === 'object' ? histState['swelte:snap'] : undefined; if (snap && typeof snap === 'object' && sdk && sdk.__swelteRestoreSnapshot) sdk.__swelteRestoreSnapshot(snap) } catch {} }
+function __sweltePageStateOf(histState, fallback) {
+if (histState && typeof histState === 'object' && histState['page-state'] && typeof histState['page-state'] === 'object') return histState['page-state']
+return fallback
 }
 export async function preloadData(url) {
 	const to = typeof url === 'string' ? url : url.pathname
@@ -420,8 +462,23 @@ export async function preloadData(url) {
 	} catch (e) { return { route: hit.route.path, params: hit.params, data: null, status: 0 } }
 }
 export async function pushState(url, state) {
-	history.pushState(state ?? {}, '', typeof url === 'string' ? url : url.pathname)
-	if (state && state.page) __setPage(state.page)
+	state = state || {}
+	const pageState = state['page-state']
+	history.pushState(__swelteHistState(pageState), '', typeof url === 'string' ? url : url.pathname)
+	if (pageState) __setPage({ ...(__routerMounted || {}), state: pageState })
+}
+export async function replaceState(url, state) {
+	state = state || {}
+	const pageState = state['page-state']
+	history.replaceState(__swelteHistState(pageState), '', typeof url === 'string' ? url : url.pathname)
+	if (pageState) __setPage({ ...(__routerMounted || {}), state: pageState })
+}
+export async function preloadCode(url) {
+	const to = typeof url === 'string' ? url : url.pathname
+	const hit = __matchRoute(to)
+	if (!hit) return null
+	if (hit.route.chunkMods) { try { await __swelteResolveRoute(hit.route) } catch {} }
+	return { route: hit.route.path, params: hit.params, cached: true }
 }
 async function __navigateTo(pathname, opts) {
 	opts = opts || {}
@@ -449,30 +506,54 @@ async function __navigateTo(pathname, opts) {
 			if (res.ok) data = await res.json().catch(() => null)
 		} catch { /* offline/static — mount with params only */ }
 	}
-	if (hit.route.chunkMods) { try { await __swelteResolveRoute(hit.route) } catch {} }
+	if (!opts.noPreloadCode && hit.route.chunkMods) { try { await __swelteResolveRoute(hit.route) } catch {} }
 	const out = await mountSwelteRoute(target, pathname, data ? { params: hit.params, data } : undefined)
-	__routerMounted = { url: pathname, params: out.params ?? hit.params, route: out.path ?? hit.route.path, data }
+	const popState = opts && typeof opts === 'object' ? opts.popstate : undefined
+	__routerMounted = { url: pathname, params: out.params ?? hit.params, route: out.path ?? hit.route.path, data, state: popState }
 	__setPage(__routerMounted); __setNavigating(null)
 	await __runGuards('after', { from, to: __routerMounted })
 }
 export function initSwelteRouter(target) {
 	__routerTarget = target || document.getElementById('app')
-	if (typeof globalThis !== 'undefined') { globalThis.__swelteRoutes = { goto, preloadData, pushState, initSwelteRouter } }
+	if (typeof globalThis !== 'undefined') { globalThis.__swelteRoutes = { goto, preloadData, preloadCode, pushState, replaceState, initSwelteRouter } }
 	if (typeof window === 'undefined' || !__routerTarget) return () => {}
+	const gotoOptsFor = (a, href) => {
+		const opts = {}
+		if (a.hasAttribute('data-sveltekit-noscroll') || a.hasAttribute('data-swelte-noscroll')) opts.noscroll = true
+		if (a.hasAttribute('data-sveltekit-noreplace') || a.hasAttribute('data-swelte-noreplace')) opts.replaceState = true
+		const preload = a.getAttribute('data-sveltekit-preload-data') ?? a.getAttribute('data-swelte-preload')
+		if (preload === 'off' || a.hasAttribute('data-sveltekit-reload')) opts.noPreload = true
+		if (a.getAttribute('data-sveltekit-preload-code') === 'off') opts.noPreloadCode = true
+		void href
+		return opts
+	}
+	const onHover = (e) => {
+		const a = e.target && e.target.closest ? e.target.closest('a[href]') : null
+		if (!a) return
+		const href = a.getAttribute('href')
+		if (!href || href.startsWith('#') || href.includes(':') || a.target === '_blank') return
+		if (a.hasAttribute('download') || a.getAttribute('rel') === 'external') return
+		if (a.getAttribute('data-sveltekit-preload-data') === 'off' || a.getAttribute('data-swelte-preload') === 'off') return
+		if (a.hasAttribute('data-sveltekit-reload') || a.hasAttribute('data-swelte-reload')) return
+		preloadData(href).catch(() => {})
+		if (a.getAttribute('data-sveltekit-preload-code') !== 'off') preloadCode(href).catch(() => {})
+	}
 	const onClick = (e) => {
 		const a = e.target && e.target.closest ? e.target.closest('a[href]') : null
 		if (!a) return
 		const href = a.getAttribute('href')
 		if (!href || href.startsWith('#') || href.includes(':') || a.target === '_blank') return
-		if (a.hasAttribute('download') || a.getAttribute('rel') === 'external' || a.hasAttribute('data-swelte-reload')) return
+		if (a.hasAttribute('download') || a.getAttribute('rel') === 'external') return
+		if (a.hasAttribute('data-sveltekit-reload') || a.hasAttribute('data-swelte-reload')) return
 		if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return
 		e.preventDefault()
-		goto(href)
+		goto(href, gotoOptsFor(a, href))
 	}
-	const onPop = () => { __navigateTo(location.pathname) }
+	const onPop = () => { __swelteRestore(history.state); __navigateTo(location.pathname, { popstate: __sweltePageStateOf(history.state, undefined) }) }
+	window.addEventListener('pointerover', onHover)
 	window.addEventListener('click', onClick)
 	window.addEventListener('popstate', onPop)
-	return () => { window.removeEventListener('click', onClick); window.removeEventListener('popstate', onPop) }
+	return () => { window.removeEventListener('pointerover', onHover); window.removeEventListener('click', onClick); window.removeEventListener('popstate', onPop) }
 }
 `)
 	return { lines: o, chunks }

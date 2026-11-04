@@ -69,7 +69,7 @@ never blank/JSON for navigations.
 * `GET` navigations never redirect (§12 `303` is POST-only).
 * `Accept: application/json` bypasses SSR — API stays JSON (same
 handler, content-negotiated). `curl` without a browser Accept and
-the `swelte build` smoke probe see static/SPA + JSON, never SSR.
+bare `curl` probes see static/SPA + JSON, never SSR (build asserts artifacts only — booting is `swelte preview`).
 * `swelte preview` auto-sets `SWELTE_SSR=1` when the QJS bridge
 artifact exists (detection only — core never starts an engine).
 Explicit `SWELTE_SSR` / `SWELTE_SSR_URL` in the env still win.

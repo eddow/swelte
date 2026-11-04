@@ -12,12 +12,12 @@ that bites during migration. Only built behavior is documented here.
 | `+page.svelte` | `+page.svelte` **or** `about.svelte` (same URL) | Same component model, two spellings: `about.svelte` ⇔ `about/+page.svelte` (both → `/about`; `src/routes/+page.svelte` ⇔ `/`). See leaf duality below. |
 | `+page.ts` / `+page.server.ts` | `+page.v` (`@[load]`) + `+page.ts` (universal) — or flat `about.v` + `about.ts` | Same duality as the `.svelte`: `about.v` ⇔ `about/+page.v`, `about.ts` ⇔ `about/+page.ts` (one triple per URL — mixing `foo.*` + `foo/+page.*` is a build error). Server-only `load` = HTML-navigation initial paint (`parent T` param replaces `parent()`); universal sibling `load({ params, props, url })` = sync view-model transform inside `renderRoute` (typed TS — ssr-qjs transpiles via `transpileSiblingLoad`, the mirror of the `.svelte` `generate: 'server'` step; async only when `ssr=false`). |
 | `+layout.svelte` | `+route.svelte` | Wrapper per subtree (nav + chrome), Svelte 5 `children` Snippet + `{@render children?.()}` outlet (not slots). SPA mount nests automatically; SSR `renderRoute` composes the chain server-side; client `hydrateSwelteRoute` hydrates the whole chain in place (SSR DOM adopted, leaf interactive; mismatch falls back to mount). |
-| `+layout.ts` | `+route.ts` | Sibling of `+route.svelte`: carries `ssr` / universal `load` for the wrapper level and `export const chunk` (subtree pin — see `config.md` §Chunking). The cut itself reads the `.svelte`; the `.ts` only pins. |
+| `+layout.ts` | `+route.ts` | Sibling of `+route.svelte`: carries `ssr`/`csr` / universal `load` / `prerender` / `limits` for the wrapper level (leaf wins, else nearest explicit wrapper) and `export const chunk` (subtree pin — see `config.md` §Chunking). The cut itself reads the `.svelte`; the `.ts` only pins. |
 | `+layout.server.ts` | `+route.v` (`@[load]`) | Same cascade position. Level 0 takes `(req)`; deeper takes `(req, parent T)` — typed parent value instead of `await parent()`. Mismatch is a build error. |
 | `+server.ts` | `SwelteResponse` in the leaf `.v` | No standalone file. `@[get]`/`@[post]`/`@[put]`/`@[patch]`/`@[delete]` on the route file; one default per verb, `?q` qualifiers for many-per-file. Returns `string`/struct (JSON), `[]u8` (binary), `(int, string)` (status+text), or `SwelteResponse{ status, headers, cookies, body/body_bytes }` — full header/cookie/status/binary control, translated 1:1 into veb by `Hand`. |
 | `+error.svelte` (per-dir) | single global `+error.svelte` | By design — no per-directory inheritance. Props `{ status?, message? }`, renders server-side and client-side (via `loadPage`). |
 | `params/*.ts` matchers | `src/matchers.v` `@[matcher]` | Central file, V-only + codegen'd JS mirrors. `[id=integer]` builtin (digits, `Params` narrows to `number`); custom `@[matcher] (s string) bool` fns in the portable subset inline into `swelte_matcher_check` + both JS mirrors. Unknown name / bad shape / `time\|os\|net` import = build error. |
-| `hooks.server.ts` | `+route.v` `@[before]`/`@[after]` + `src/app.v` | Subtree middleware stays in `+route.v`; root `+route.v` is already the global head. `src/app.v` (`@[startup] () void|!void` once before `veb.run`, zero/one fn, no qualifier/params; `@[reroute](host, path)` to rewritten path or empty string, zero/one fn, no qualifier) handles boot + rewrite; `@[cron('60s'|'5m'|'1h')]` ticks (one-or-more fns, qualifier required) run on spawn loops (built — see `config.md`). No `handle/handleFetch/handleError`; `transformPageChunk` = `@[after]` string rewrite. |
+| `hooks.server.ts` | `+route.v` `@[before]`/`@[after]` + `src/app.v` | Subtree middleware stays in `+route.v`; root `+route.v` is already the global head. `src/app.v` (`@[startup] () void|!void` once before `veb.run`; `@[reroute](host, path)` to rewritten path or `''`; `@[error](message, status)` → sanitized message (`''` = keep, SvelteKit `handleError` lite — applied to JSON + HTML error bodies before send); each zero/one fn, no qualifier) handles boot + rewrite + error sanitize; `@[cron('60s'\|'5m'\|'1h')]` ticks (one-or-more fns, qualifier required) run on spawn loops (built — see `config.md`). No `handle`/`handleFetch` (client `handleFetch(hook)` in `sdk.ts` covers stub interception); `transformPageChunk` = `@[after]` string rewrite. |
 | `src/lib/server/*` | `src/lib/**/backend/*.v` or `*_backend.v` | Physical: backend-only files are a build error from browser/`#lib/` WASM imports. Same V compiles native + WASM for non-backend `#lib/`. |
 | `+page.v` naming | `+page.v` / legacy `index.v` (optional — `+page.svelte` alone renders) | `foo/+page.v` (or `foo/index.v`) claims `/foo` for the API dispatcher (verbs/`@[rpc]`/`@[load]`). Flat `foo.v` is the same URL (see leaf duality above). `foo.v` + `foo/+page.v` together is a build error (one file per URL). |
 
@@ -97,13 +97,24 @@ src/routes/+page.svelte (+ .v / .ts)                        →  / (root)
   `invalidate(...tags)` clears matching load keys, `invalidateAll()`
   clears all (`sdk.ts`, client-side).
 * Client router (history-driven, entry-main boots `initSwelteRouter`):
-  link-click interception + `popstate`; `goto(url, { replaceState?,
-  noPreload? })`, `preloadData(url)` (JSON probe, no DOM write),
-  `pushState(url, state)`; `beforeNavigate` (cancellable via `cancel()`),
-  `afterNavigate`/`onNavigate`; `page`/`navigating`/`updated` stores.
-  `page` shape: `{ url, params, route, data?, error? }`.
+  link-click interception (incl. `data-sveltekit-reload`/`data-swelte-reload`
+  full-reload, `data-sveltekit-noscroll`/`...-noreplace` + `...-preload-data`
+  `off`/`...-preload-code` `off` honored) + hover prefetch
+  (`data-sveltekit-preload-data`/`data-swelte-preload`) + `popstate`;
+  `goto(url, { replaceState?, noPreload?, noPreloadCode? })`,
+  `preloadData(url)` (JSON probe, no DOM write), `preloadCode(url)` (chunk
+  warm, no DOM write), `pushState(url, { 'page-state' })` /
+  `replaceState(url, { 'page-state' })` (shallow — no reload, no load
+  re-run; `page.state` survives traversal); `captureSnapshot(fn)` /
+  `restoreSnapshot(fn)` (manual `export const snapshot` lite — captured on
+  `goto`, replayed on `popstate`); `beforeNavigate` (cancellable via
+  `cancel()`), `afterNavigate`/`onNavigate`; `page`/`navigating`/`updated`
+  stores. `page` shape: `{ url, params, route, data?, error?, state? }`.
   Client mounts merge preloaded JSON into leaf props automatically
   (`{ params, ...data }`, same shape as SSR props).
+  Layout reset (`+page@.svelte`, SvelteKit `+page@layout` lite):
+  `admin/login/+page@.svelte` renders bare (no `+route` nesting);
+  `+page@admin` keeps wrappers down to `admin`.
 * Server `fetch` in `load`: `swelte_fetch(req, mut out_cookies, method,
   path, body, content_type, qualifier)` dispatches sibling routes
   in-process (no loopback socket), forwards `Cookie`/`Authorization`
@@ -134,7 +145,11 @@ src/routes/+page.svelte (+ .v / .ts)                        →  / (root)
 * Per-route `ssr=false`-lite: `export const ssr = false` in the
   sibling `.ts` opts the route out — `Hand` skips the renderer
   (`swelte_no_ssr()`), serves the SPA shell; async universal `load`
-  + client router take over. No `csr=false` islands.
+  + client router take over.
+* Per-route `csr=false`-lite (the opposite corner): `export const csr =
+  false` renders SSR HTML only — the client mount/hydrate is a no-op
+  (`swelte_no_csr()` predicate + `csr: false` in `routes.js`; `ssr-manifest.json`
+  surfaces `csr` per route). Independent of `ssr=false`.
 * Per-page `prerender`: `export const prerender = true | false | 'auto'`
   in the sibling `.ts` (leaf or `+route.ts` wrapper) — leaf > wrapper >
   global `prerender.entries`. `false` excludes even under global cover;
@@ -165,8 +180,11 @@ src/routes/+page.svelte (+ .v / .ts)                        →  / (root)
   `page`/`navigating`/`updated` from `@swelte/core` (`checkUpdated()`
   flips `updated` by polling the `X-Swelte-Version` header);
   `$app/navigation` re-exports
-  `goto`/`preloadData`/`pushState`/`beforeNavigate`/`afterNavigate`/`onNavigate`/`handleFetch`/`swelteError`/`isRedirect`.
-  No `$app/forms`, no `$env/static|dynamic/*`.
+  `goto`/`preloadData`/`preloadCode`/`pushState`/`replaceState`/
+  `captureSnapshot`/`restoreSnapshot`/`beforeNavigate`/`afterNavigate`/
+  `onNavigate`/`handleFetch`/`swelteError`/`isRedirect`.
+  No `$app/forms`, no `$env/static|dynamic/*` (locked non-goals —
+  `#app/paths` + `#app/environment` + `SWELTE_*` stay the surface).
 * Streaming: client bundles compile with
   `compilerOptions.experimental.async` (see `templates/base/vite.config.ts`),
   so `<await>` Suspense resolves in the browser. SSR stays sync

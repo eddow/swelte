@@ -3,6 +3,7 @@ import { join, relative, resolve, sep } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { dynSegPattern } from './matchers.js'
 import type { SvelteRouteEntry } from './types.js'
+import type { RouteLimits } from './types.js'
 
 export function listFilesWithExt(dir: string, ext: string, base?: string): string[] {
 	if (!existsSync(dir)) return []
@@ -27,13 +28,33 @@ export function listVFiles(dir: string, base?: string): string[] {
 	return listFilesWithExt(dir, '.v', base)
 }
 
-export function svelteModKind(mod: string): 'page' | 'wrapper' | 'error' | 'plain' | null {
+export function svelteModKind(mod: string): 'page' | 'wrapper' | 'error' | 'plain' | 'reset' | null {
 	const base = mod.includes('/') ? mod.slice(mod.lastIndexOf('/') + 1) : mod
 	if (base === '+page' || base === 'index') return 'page'
 	if (base === '+route') return 'wrapper'
 	if (base === '+error') return 'error'
+	// Layout reset (`+page@.html` lite, SvelteKit `+page@layout` cousin):
+	// `admin/+page@.svelte` renders OUTSIDE the wrapper chain (no +route
+	// nesting). The `@` suffix pins the cut: `@` alone = skip ALL wrappers
+	// (page mounts bare); `@name` = skip down TO that ancestor dir
+	// (`+page@admin` keeps `admin/+route` + above, drops deeper ones).
+	// Folder must still own the URL (`foo/+page@.svelte` ⇔ `/foo`).
+	const at = base.indexOf('@')
+	if (base.startsWith('+page@') || base === '+page@' || (at > 0 && base.endsWith('@'))) {
+		const cut = base.slice(base.indexOf('@') + 1)
+		if (cut === '' || /^[A-Za-z0-9_.-]+$/.test(cut)) return 'reset'
+	}
 	if (base.startsWith('+')) return null
 	return 'plain'
+}
+
+/** Layout-reset cut for a `+page@…` mod: `''` (bare `@` = skip all
+ * wrappers) or the ancestor dir to keep down to (`admin` keeps
+ * `admin/+route` + above). Null = not a reset page. */
+export function svelteResetCut(mod: string): string | null {
+	if (svelteModKind(mod) !== 'reset') return null
+	const base = mod.includes('/') ? mod.slice(mod.lastIndexOf('/') + 1) : mod
+	return base.slice(base.indexOf('@') + 1).replace(/\.svelte$/, '')
 }
 
 /** Route groups `(name)` — disk-only folders that contribute no URL segment.
@@ -51,7 +72,7 @@ export function stripRouteGroups(mod: string): string {
 export function svelteRouteFor(mod: string): string | null {
 	const kind = svelteModKind(mod)
 	if (kind === null || kind === 'wrapper' || kind === 'error') return null
-	if (kind === 'page') {
+	if (kind === 'page' || kind === 'reset') {
 		const dir = mod.includes('/') ? mod.slice(0, mod.lastIndexOf('/')) : ''
 		const stripped = stripRouteGroups(dir)
 		// A page that lives ONLY inside groups (`(mkt)/+page`) is `/` — same
@@ -177,6 +198,47 @@ export function readSsrFlag(src: string): boolean {
 	return !/export\s+const\s+ssr\s*=\s*false/.test(src)
 }
 
+/** Per-route csr flag: `export const csr = false` renders SSR HTML only
+ * (no client JS mount/hydrate for that leaf). Default `true`. */
+export function readCsrFlag(src: string): boolean {
+	return !/export\s+const\s+csr\s*=\s*false/.test(src)
+}
+
+function lineOf(src: string, idx: number): number {
+	return src.slice(0, idx).split('\n').length
+}
+
+export function assertLimitsHint(file: string, src: string): RouteLimits | null {
+	const m = /export\s+const\s+limits\s*=\s*\{([^}]*)\}/.exec(src)
+	if (!m) return null
+	const line = lineOf(src, m.index)
+	const body = m[1]
+	const out: RouteLimits = {}
+	const allow: Record<string, keyof RouteLimits> = {
+		rate: 'rate',
+		rateWindowMs: 'rateWindowMs',
+		timeoutMs: 'timeoutMs',
+		timeout: 'timeoutMs',
+		bodyLimit: 'bodyLimit',
+	}
+	for (const part of body.split(',')) {
+		const t = part.trim()
+		if (t === '') continue
+		const kv = /^([A-Za-z_][A-Za-z0-9_]*)\s*:\s*([0-9]+)$/.exec(t)
+		if (!kv || !(kv[1] in allow)) {
+			throw new Error(
+				`[swelte] ${file}:${line}: bad limits hint — want e.g. export const limits = { rate: 10, rateWindowMs: 60000, timeoutMs: 5000, bodyLimit: 1048576 } (keys rate|rateWindowMs|timeoutMs|bodyLimit, positive ints).`
+			)
+		}
+		const v = parseInt(kv[2], 10)
+		if (!Number.isFinite(v) || v <= 0) {
+			throw new Error(`[swelte] ${file}:${line}: bad limits hint — '${kv[1]}' must be a positive int.`)
+		}
+		out[allow[kv[1]]] = v
+	}
+	return out
+}
+
 /** Partition a crawl pattern list by per-page flags: `false` always drops
  * (even under global cover); `true`/`'auto'` includes even under 'off';
  * `inherit` follows the global mode. `flags` maps pattern → explicit flag
@@ -236,6 +298,8 @@ export function collectSvelteManifest(
 				hasData: false,
 				hasUniversalLoad: false,
 				ssr: true,
+				csr: true,
+				limits: null,
 				chunk: 'inherit',
 				prerender: 'inherit',
 			})
@@ -250,6 +314,10 @@ export function collectSvelteManifest(
 				hasData: vMods.has(mod),
 				hasUniversalLoad: universalLoadKind(f.replace(/\.svelte$/, '.ts')),
 				ssr: sib ? readSsrFlag(sib.src) : true,
+				csr: sib ? readCsrFlag(sib.src) : true,
+				limits: sib
+					? assertLimitsHint(`${routesDir}/${relPosixTop(routesAbs, sib.file)}`, sib.src)
+					: null,
 				chunk: sib
 					? assertChunkHint(`${routesDir}/${relPosixTop(routesAbs, sib.file)}`, sib.src)
 					: 'inherit',
@@ -280,12 +348,25 @@ export function collectSvelteManifest(
 		entries.push({
 			route,
 			svelte: rel,
-			kind: kind as 'page' | 'plain',
+			kind: kind as 'page' | 'plain' | 'reset',
+			...(kind === 'reset' ? { reset: svelteResetCut(mod) ?? '' } : {}),
 			hasData: vMods.has(mod),
 			hasUniversalLoad: universalLoadKind(f.replace(/\.svelte$/, '.ts')),
 			ssr: (() => {
 				const sib = siblingSrc(f.replace(/\.svelte$/, '.ts'))
 				return sib ? readSsrFlag(sib.src) : true
+			})(),
+			csr: (() => {
+				const sib = siblingSrc(f.replace(/\.svelte$/, '.ts'))
+				return sib ? readCsrFlag(sib.src) : true
+			})(),
+			limits: (() => {
+				const sib = siblingSrc(f.replace(/\.svelte$/, '.ts'))
+				if (!sib) return null
+				return assertLimitsHint(
+					`${routesDir}/${relPosixTop(routesAbs, sib.file)}`,
+					sib.src
+				)
 			})(),
 			chunk: (() => {
 				const sib = siblingSrc(f.replace(/\.svelte$/, '.ts'))
@@ -500,7 +581,7 @@ export function modulePath(root: string, file: string): string {
  *  `wrapperMods` = set of mods (`admin/+route`) owning a wrapper. */
 export function chunkKeyFor(
 	mode: 'single' | 'layout' | 'route',
-	entry: { svelte: string; kind: 'page' | 'plain' | 'error' | 'wrapper'; chunk?: string },
+	entry: { svelte: string; kind: 'page' | 'plain' | 'error' | 'wrapper' | 'reset'; chunk?: string },
 	wrapperMods: Set<string>
 ): string {
 	const hint = entry.chunk ?? 'inherit'

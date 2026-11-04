@@ -15,7 +15,6 @@ import { execFileSync } from 'node:child_process'
 import { existsSync, readdirSync, statSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import type { Ctx } from './types.js'
-import { killPort, portFree, probeSmoke, takePort, waitPort } from './dev.js'
 
 // Deploy-target shims (docs (built) item 4): packaging only, no
 // Node runtime. `static` = pure `dist/` (no server consumer); `node` =
@@ -344,63 +343,16 @@ export async function runBuild(ctx: Ctx): Promise<void> {
 			throw new Error(`prerender failed: ${(e as Error).message}`)
 		}
 	}
-	// 5. Smoke: boot the binary, probe page + API, stop. Engine-agnostic:
-	// static shell + JSON only. SSR HTML is the adapter's proof (its own
-	// check boots the sidecar + asserts markers) — core never imports or
-	// starts an engine. If SWELTE_SSR_URL happens to be set in the env,
-	// Hand will proxy (its contract), but core sets nothing.
-	// Cross-build: foreign binary can't boot — assert artifacts only.
-	if (cross) {
-		ctx.log(`build done: ${outBinary} + dist/ (cross ${effOs}-${effArch}, smoke skipped)`)
-	} else {
-		const probePort = takePort(ctx.opts.port, 4173)
-		await killPort(probePort, ctx.log)
-		const hasGreetRoute =
-			existsSync(join(root, cfg.routesDir, 'api', 'greet.v')) ||
-			existsSync(join(root, cfg.routesDir, 'api', 'greet', '+page.v')) ||
-			existsSync(join(root, cfg.routesDir, 'api', 'greet', 'index.v'))
-		const child = (await import('node:child_process')).spawn(outBinary, [], {
-			cwd: root,
-			env: {
-				...process.env,
-				PORT: String(probePort),
-				SWELTE_DIST: 'dist',
-			},
-			stdio: ['ignore', 'pipe', 'pipe'],
-		})
-		let logged = ''
-		child.on('error', (e: Error) => {
-			logged += `\nspawn failed: ${(e as Error).message}`
-		})
-		child.stderr?.on('data', (d: Buffer) => {
-			logged += d.toString()
-		})
-		child.stdout?.on('data', (d: Buffer) => {
-			logged += d.toString()
-		})
-		try {
-			try {
-				await probeSmoke(probePort, hasGreetRoute, ctx.log)
-			} catch (e) {
-				throw new Error(`${(e as Error).message}\n${logged}`)
-			}
-		} finally {
-			try {
-				child.kill('SIGTERM')
-			} catch {
-				/* ignore */
-			}
-			await new Promise((r) => setTimeout(r, 800))
-			try {
-				child.kill('SIGKILL')
-			} catch {
-				/* ignore */
-			}
-			// Best-effort port cleanup (Linux-only tool — skip elsewhere).
-			await killPort(probePort, () => {})
-		}
-		ctx.log(`build done: ${outBinary} + dist/`)
-	}
+	// 5. Artifacts only — no boot, no ports. Build must never listen:
+	// cross-built (or sandboxed, or Windows) binaries may not execute here,
+	// and boot-probing belongs to dedicated procedures (`swelte preview`,
+	// the preview e2e, `swelte-ssr check` for the adapter path). Assert the
+	// artifacts exist instead.
+	if (!existsSync(outBinary)) throw new Error(`build artifact missing: ${outBinary}`)
+	if (!existsSync(join(root, cfg.distDir, 'index.html')))
+		throw new Error(`build artifact missing: ${join(root, cfg.distDir, 'index.html')}`)
+	if (cross) ctx.log(`build done: ${outBinary} + dist/ (cross ${effOs}-${effArch}, artifacts only)`)
+	else ctx.log(`build done: ${outBinary} + dist/ (artifacts only — verify with \`swelte preview\`)`)
 	// 6. Target shim (packaging only): `--target` flag wins, else config.
 	writeTargetShim(
 		root,

@@ -96,6 +96,7 @@ export function parseVFile(src: string): RpcFn[] {
 					'startup',
 					'reroute',
 					'cron',
+					'error',
 				].includes(pm[1])
 			) {
 				verbs.push({ verb: pm[1], qualifier: pm[2] })
@@ -156,7 +157,7 @@ export function parseVFile(src: string): RpcFn[] {
 		// Brace-balanced walk from the `{` that opens the fn body.
 		let body: string | undefined
 		let hookBody: string | undefined
-		if (verbs.some((vb) => ['matcher', 'startup', 'reroute', 'cron'].includes(vb.verb))) {
+		if (verbs.some((vb) => ['matcher', 'startup', 'reroute', 'cron', 'error'].includes(vb.verb))) {
 			const afterRet = i + (retMatch?.[0].length ?? 0)
 			const openIdx = merged.indexOf('{', afterRet)
 			if (openIdx >= 0) {
@@ -172,7 +173,7 @@ export function parseVFile(src: string): RpcFn[] {
 				if (bdepth === 0) {
 					const inner = merged.slice(openIdx + 1, j)
 					if (verbs.some((vb) => vb.verb === 'matcher')) body = inner
-					else if (verbs.some((vb) => ['startup', 'reroute', 'cron'].includes(vb.verb)))
+					else if (verbs.some((vb) => ['startup', 'reroute', 'cron', 'error'].includes(vb.verb)))
 						hookBody = inner
 				}
 			}

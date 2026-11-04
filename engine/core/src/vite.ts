@@ -15,6 +15,7 @@ export { narrowArgParts, narrowCall, parseStructs, parseVFile, tsTypeFor } from 
 export { swelte, swelte as default } from './vite/plugin.js'
 export {
 	assertChunkHint,
+	assertLimitsHint,
 	assertPrerenderHint,
 	chunkKeyFor,
 	collectPrerenderEntries,
@@ -26,6 +27,7 @@ export {
 	modulePath,
 	partitionPrerender,
 	readChunkHint,
+	readCsrFlag,
 	readPrerenderHint,
 	readSsrFlag,
 	relPosix,
@@ -36,6 +38,7 @@ export {
 	siblingSrc,
 	stripRouteGroups,
 	svelteModKind,
+	svelteResetCut,
 	svelteRouteFor,
 	universalLoadKind,
 	validateDynamicSegs,
@@ -56,6 +59,7 @@ export type {
 	LoadFn,
 	MatcherDef,
 	PrerenderCrawl,
+	RouteLimits,
 	RpcFn,
 	RpcParam,
 	ServerHooks,

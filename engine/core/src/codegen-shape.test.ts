@@ -796,4 +796,50 @@ describe('item 11 — codegen golden project (sample-overlay variant + routes.js
 		assert.ok(entry.includes('await mountSwelteRoute'), 'entry must await mount')
 		assert.ok(entry.includes('function __swelteBoot()'), 'boot must be a called fn')
 	})
+
+	it('P1 router: shallow state + preloadCode + link attrs + reset cut + csr', async () => {
+		const root = scaffold()
+		mkdirSync(join(root, 'src', 'routes', 'admin', 'users'), { recursive: true })
+		writeFileSync(
+			join(root, 'src', 'routes', 'admin', '+route.svelte'),
+			'<script>let { children } = $props()</script>{@render children?.()}'
+		)
+		writeFileSync(join(root, 'src', 'routes', 'admin', 'users', '+page@.svelte'), '<h1>bare</h1>')
+		mkdirSync(join(root, 'src', 'routes', 'plain'), { recursive: true })
+		writeFileSync(join(root, 'src', 'routes', 'plain', '+page.svelte'), '<h1>p</h1>')
+		writeFileSync(join(root, 'src', 'routes', 'plain', '+page.ts'), 'export const csr = false')
+		await generate(root)
+		const js = readFileSync(join(root, '.swelte', 'routes.js'), 'utf8')
+		// preloadCode + replaceState exported through the router handle.
+		assert.ok(js.includes('preloadCode'), 'routes.js must export preloadCode')
+		assert.ok(js.includes('replaceState'), 'routes.js must export replaceState')
+		// SvelteKit data-* attrs honored alongside the data-swelte-* aliases.
+		assert.ok(js.includes('data-sveltekit-preload-data'), 'hover preload honors data-sveltekit-*')
+		assert.ok(js.includes('data-sveltekit-reload'), 'click honors data-sveltekit-reload')
+		assert.ok(js.includes('data-sveltekit-noscroll'), 'noscroll honored')
+		// Reset page mounts bare (no wrappers); plain leaf keeps its csr flag.
+		assert.ok(js.includes('/admin/users'), 'reset route present')
+		assert.ok(js.includes('csr: false'), 'csr=false leaf flagged')
+		const mani = JSON.parse(
+			readFileSync(join(root, '.swelte', 'ssr-manifest.json'), 'utf8')
+		) as {
+			routes: { route: string; svelte: string; kind: string; csr: boolean }[]
+			wrappersByRoute: Record<string, string[]>
+		}
+		const bare = mani.routes.find((r) => r.route === '/admin/users')
+		assert.equal(bare?.kind, 'reset', 'reset kind surfaced in the manifest')
+		assert.equal(bare?.csr, true, 'csr defaults true')
+		const plain = mani.routes.find((r) => r.route === '/plain')
+		assert.equal(plain?.csr, false, 'csr=false surfaced in the manifest')
+		// Reset cut honored in wrappersByRoute: bare reset page mounts with no wrappers,
+		// csr=false leaf still chains its wrapper for SSR composition.
+		assert.deepEqual(
+			mani.wrappersByRoute['./admin/users/+page@.svelte'] ?? null,
+			null,
+			'reset page has no wrapper chain'
+		)
+		assert.ok(!('./plain/+page.svelte' in mani.wrappersByRoute), 'root leaf has no wrapper chain')
+		// csr=false: hydrate is a deliberate no-op (SSR HTML stays).
+		assert.ok(js.includes('if (r.csr === false) return'), 'hydrate guards csr=false')
+	})
 })

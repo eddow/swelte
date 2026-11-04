@@ -12,13 +12,14 @@ export function cronSeconds(every: string): number {
 	return n * mult
 }
 
-/** Validate + collect `@[startup]`/`@[reroute]`/`@[cron]` from `src/app.v`.
+/** Validate + collect `@[startup]`/`@[reroute]`/`@[error]`/`@[cron]` from `src/app.v`.
  * `@[startup]`: `() void|!void`, zero/one fn, no qualifier. `@[reroute]`:
- * `(host string, path string) string`, zero/one fn, no qualifier.
- * `@[cron('60s'|'5m'|'1h')]`: `() void|!void`, one-or-more fns, qualifier
- * required and must be a duration literal. Missing file → no-op hooks
- * (byte-identical harness when absent). No TS callable; `pub struct`s are
- * NOT projected (Hand-level, not layout). */
+ * `(host string, path string) string`, zero/one fn, no qualifier. `@[error]`:
+ * `(message string, status int) string` (return '' = keep message, else
+ * sanitized replacement), zero/one fn, no qualifier. `@[cron('60s'|'5m'|'1h')]`:
+ * `() void|!void`, one-or-more fns, qualifier required and must be a duration
+ * literal. Missing file → no-op hooks (byte-identical harness when absent).
+ * No TS callable; `pub struct`s are NOT projected (Hand-level, not layout). */
 export function loadServerHooks(root: string, srcDir = 'src'): ServerHooks {
 	const file = join(root, srcDir, 'app.v')
 	const legacy = join(root, srcDir, 'server.v')
@@ -37,8 +38,10 @@ export function loadServerHooks(root: string, srcDir = 'src'): ServerHooks {
 	const out: ServerHooks = { hasFile: true, crons: [] }
 	let startup: RpcFn | undefined
 	let reroute: RpcFn | undefined
+	let handleError: RpcFn | undefined
 	for (const fn of fns) {
-		if (fn.attr !== 'startup' && fn.attr !== 'reroute' && fn.attr !== 'cron') continue
+		if (fn.attr !== 'startup' && fn.attr !== 'reroute' && fn.attr !== 'cron' && fn.attr !== 'error')
+			continue
 		if (fn.attr === 'cron') {
 			if (!fn.qualifier)
 				throw new Error(
@@ -89,6 +92,29 @@ export function loadServerHooks(root: string, srcDir = 'src'): ServerHooks {
 					`[swelte] ${rel}: @[startup] ${fn.name} must return void (got ${fn.vret || 'none'}).`
 				)
 			startup = fn
+		} else if (fn.attr === 'error') {
+			if (handleError)
+				throw new Error(
+					`[swelte] ${rel}: two @[error] fns (${handleError.name} + ${fn.name}) — one error hook per app.`
+				)
+			if (fn.qualifier)
+				throw new Error(
+					`[swelte] ${rel}: @[error] ${fn.name} takes no qualifier (one hook per app).`
+				)
+			if (
+				fn.params.length !== 2 ||
+				fn.params[0].vtype !== 'string' ||
+				fn.params[1].vtype !== 'int'
+			) {
+				throw new Error(
+					`[swelte] ${rel}: @[error] ${fn.name} must take (message string, status int) (got (${fn.params.map((p) => p.vtype).join(', ')})).`
+				)
+			}
+			if (fn.vret !== 'string')
+				throw new Error(
+					`[swelte] ${rel}: @[error] ${fn.name} must return string (sanitized message, '' = keep).`
+				)
+			handleError = fn
 		} else {
 			if (reroute)
 				throw new Error(
@@ -111,5 +137,6 @@ export function loadServerHooks(root: string, srcDir = 'src'): ServerHooks {
 	}
 	if (startup?.hookBody !== undefined) out.startupBody = startup.hookBody
 	if (reroute?.hookBody !== undefined) out.rerouteBody = reroute.hookBody
+	if (handleError?.hookBody !== undefined) out.errorBody = handleError.hookBody
 	return out
 }

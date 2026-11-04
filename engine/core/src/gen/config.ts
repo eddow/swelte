@@ -344,7 +344,8 @@ export function templatesDir(fromUrl: string): string {
 
 /** Render the server harness: skeleton from templates/ + user hooks from
  *  `src/app.v` (`@[startup]` runs once in main, `@[reroute]` rewrites
- *  host/path in before_request, `@[cron]` spawn loops in main).
+ *  host/path in before_request, `@[error]` sanitizes error messages,
+ *  `@[cron]` spawn loops in main).
  *  Absent hooks → byte-identical skeleton. */
 export function renderHarness(
 	_config: Required<SwelteOptions>,
@@ -352,6 +353,7 @@ export function renderHarness(
 	hooks?: {
 		startupBody?: string
 		rerouteBody?: string
+		errorBody?: string
 		crons?: { seconds: number; body: string; fallible: boolean }[]
 	}
 ): string {
@@ -425,6 +427,22 @@ export function renderHarness(
 			src += '\n// @[reroute] anchor missing — harness template changed.\n'
 		}
 	}
+	if (hooks?.errorBody !== undefined) {
+		const anchor = 'fn swelte_sanitize_error(message string, status int) string {'
+		const inject =
+			'// @[error] (src/app.v) — SvelteKit handleError lite: sanitize the\n' +
+			'// throw message before it reaches the client (+error props / JSON).\n' +
+			"// Return '' to keep the message, or a sanitized replacement.\n" +
+			'fn swelte_sanitize_error(message string, status int) string {\n' +
+			'\tsanitized := (fn (message string, status int) string {\n' +
+			indent(indent(hooks.errorBody)) +
+			'\n\t})(message, status)\n' +
+			"\tif sanitized != '' { return sanitized }\n" +
+			'\treturn message\n' +
+			'}\n'
+		if (src.includes(anchor)) src = src.replace(anchor, inject)
+		else src += `\n${inject}`
+	}
 	return src
 }
 
@@ -462,7 +480,11 @@ export declare const navigating: SwelteStore<SwelteNavigatingState | null>
 export declare const updated: SwelteStore<boolean>
 export declare function goto(url: string, opts?: unknown): Promise<void>
 export declare function preloadData(url: string): Promise<unknown>
+export declare function preloadCode(url: string): Promise<unknown>
 export declare function pushState(url: string, state?: unknown): Promise<void>
+export declare function replaceState(url: string, state?: unknown): Promise<void>
+export declare function captureSnapshot(fn: unknown): () => void
+export declare function restoreSnapshot(fn: unknown): () => void
 export declare function beforeNavigate(fn: unknown): () => void
 export declare function afterNavigate(fn: unknown): () => void
 export declare function onNavigate(fn: unknown): () => void

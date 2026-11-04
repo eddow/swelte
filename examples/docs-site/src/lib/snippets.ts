@@ -17,13 +17,13 @@ export interface SnippetSource {
 export const snippets: Record<string, SnippetSource> = {
 	'home-install': {
 		lang: 'bash',
-		code: `npx swelte init myapp && cd myapp
+		code: `npx @swelte/core init myapp && cd myapp
 npm install
 npx swelte dev    # Vite :5174 + V backend :8131`,
 	},
 	'install-steps': {
 		lang: 'bash',
-		code: `npx swelte init myapp && cd myapp
+		code: `npx @swelte/core init myapp && cd myapp
 npm install
 npx swelte dev    # Vite :5174 + V backend :8131
 

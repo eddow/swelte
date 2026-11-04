@@ -10,7 +10,7 @@ Swelte MCP server — route tree, type contracts, and diagnostics for IDE agents
 ## Usage
 
 ```sh
-npx swelte-mcp            # stdio server (takes no args)
+npx @swelte/mcp            # stdio server (takes no args)
 swelte-mcp --help         # usage
 swelte-mcp --version      # version
 ```

@@ -148,8 +148,8 @@ fn swelte_route_spawned(c SwelteRouteCall, ch chan SwelteRouteOut) {
 	ch <- SwelteRouteOut{ res: res }
 }
 
-fn swelte_call_route(path string, method string, query map[string]string, headers map[string]string, cookies map[string]string, locals map[string]string, body string, content_type string, qualifier string) SwelteRouteOut {
-	budget := swelte_handler_timeout_ms()
+fn swelte_call_route_timeout(path string, method string, query map[string]string, headers map[string]string, cookies map[string]string, locals map[string]string, body string, content_type string, qualifier string, budget_ms i64) SwelteRouteOut {
+	budget := if budget_ms > 0 { budget_ms } else { swelte_handler_timeout_ms() }
 	ch := chan SwelteRouteOut{cap: 1}
 	call := SwelteRouteCall{path, method, query, headers, cookies, locals, body, content_type,
 		qualifier}
@@ -173,6 +173,34 @@ fn swelte_html_escape(s string) string {
 	out = out.replace('>', '&gt;')
 	out = out.replace('"', '&quot;')
 	return out
+}
+
+// @[error] default (SvelteKit `handleError` lite): sanitize the throw
+// message before it reaches the client (+error props / JSON). The
+// generate() hook replaces this whole fn with the user's
+// `@[error] (message string, status int) string` body when src/app.v
+// defines one. Return '' to keep the message, else the replacement.
+fn swelte_sanitize_error(message string, status int) string {
+	_ = status
+	return message
+}
+
+// Per-route limits lookup (P1 item 12 lite): longest-prefix match over
+// `routes.swelte_route_limits()`; 0 fields = no override (fall through
+// to the global env knob). Pure + fast — runs before the rate/body gates.
+fn swelte_limits_for(path string) routes.SwelteRouteLimits {
+	mut best := routes.SwelteRouteLimits{}
+	mut best_len := -1
+	norm := if path.len > 1 && path.ends_with('/') { path[..path.len - 1] } else { path }
+	for lim in routes.swelte_route_limits() {
+		r := lim.route
+		hit := if r == '/' { true } else { norm == r || norm.starts_with(r + '/') }
+		if hit && r.len > best_len {
+			best = lim
+			best_len = r.len
+		}
+	}
+	return best
 }
 
 fn mime_for(path string) string {
@@ -339,14 +367,42 @@ fn (mut app App) before_request(mut ctx Ctx) veb.Result {
 	content_type := ctx.req.header.get(.content_type) or { '' }
 	// §11 Hardening: client IP comes from veb's parsed peer address
 	// (never X-Forwarded-For, which is client-controlled and spoofable).
+	// Per-route limits (longest-prefix over the `swelte_route_limits()`
+	// table) override the global env knobs where set (0 = no override).
 	ip := ctx.ip()
-	if app.swelte_rate_limited(ip) {
+	lim := swelte_limits_for(path)
+	rate_limit := if lim.rate > 0 { lim.rate } else { swelte_rate_limit() }
+	rate_window := if lim.rate_window_ms > 0 { i64(lim.rate_window_ms) } else { swelte_rate_window_ms() }
+	body_limit := if lim.body_limit > 0 { lim.body_limit } else { swelte_body_limit() }
+	handler_ms := if lim.timeout_ms > 0 { i64(lim.timeout_ms) } else { swelte_handler_timeout_ms() }
+	mut bucket_hit := false
+	{
+		limit := rate_limit
+		window := rate_window
+		now := time.now().unix_milli()
+		app.mu.lock()
+		for k, v in app.buckets {
+			if now - v.window_start >= 2 * window {
+				app.buckets.delete(k)
+			}
+		}
+		mut b := app.buckets[ip] or { SwelteBucket{window_start: now} }
+		if now - b.window_start >= window {
+			b.window_start = now
+			b.count = 0
+		}
+		b.count += 1
+		app.buckets[ip] = b
+		bucket_hit = b.count > limit
+		app.mu.unlock()
+	}
+	if bucket_hit {
 		ctx.res.set_status(.too_many_requests)
 		return ctx.send_response_to_client('application/json', '{"error":"rate limited"}')
 	}
 	// §11 Hardening: body cap before routing (multipart included —
 	// uploads in §13 live under the same knob).
-	if ctx.req.data.len > swelte_body_limit() {
+	if ctx.req.data.len > body_limit {
 		ctx.res.set_status(.request_entity_too_large)
 		return ctx.send_response_to_client('application/json', '{"error":"body too large"}')
 	}
@@ -408,9 +464,9 @@ fn (mut app App) before_request(mut ctx Ctx) veb.Result {
 	}
 	// (swelte_call_route is sync — veb runs before_request on a worker;
 	// the `spawn select` watchdog keeps the server responsive).
-	out := swelte_call_route(path, dispatch_method, query, headers, cookies, map[string]string{}, ctx.req.data, content_type, qualifier)
+	out := swelte_call_route_timeout(path, dispatch_method, query, headers, cookies, map[string]string{}, ctx.req.data, content_type, qualifier, handler_ms)
 	status := out.res.status
-	body := out.res.body
+	mut body := out.res.body
 	set_cookies := out.res.cookies
 	// Same-origin mutating requests always pass (browser sends Origin on
 	// same-origin POST/fetch). Only cross-origin writes need cors_ok —
@@ -501,10 +557,10 @@ fn (mut app App) before_request(mut ctx Ctx) veb.Result {
 			// Set-Cookie + custom headers + non-200 status (redirect/error
 			// from the load). Plain loads are a 200 default envelope.
 			for k, v in load_res.headers {
-				ctx.res.set_header(k, v) or { continue }
+				ctx.res.header.set_custom(k, v) or { continue }
 			}
 			for c in load_res.cookies {
-				ctx.res.set_cookie(c.to_header()) or { continue }
+				ctx.res.header.add(.set_cookie, c.to_header())
 			}
 			if load_res.status != 200 {
 				err_json := '{"status":' + load_res.status.str() + ',"message":"error"}'
@@ -583,10 +639,12 @@ fn (mut app App) before_request(mut ctx Ctx) veb.Result {
 	}
 	if wants_html && status >= 400 {
 		// no-ssr routes already returned above — this is a real error.
+		// @[error]: sanitize before the message reaches the HTML shell.
 		mut msg := body.all_after('"error":"')
 		if msg != body {
 			msg = msg.all_before('"')
 		}
+		msg = swelte_sanitize_error(msg, status)
 		ctx.res.set_status(http.status_from_int(status))
 		return ctx.send_response_to_client('text/html; charset=utf-8', '<!doctype html><html><body><main><p>' + swelte_html_escape(msg) + '</p><p><a href="' + path + '">back</a></p></main></body></html>')
 	}
@@ -618,6 +676,7 @@ fn (mut app App) before_request(mut ctx Ctx) veb.Result {
 	// veb calls (set_status, custom headers, cookies already set above).
 	// Binary (is_bytes) sends raw bytes with the handler's Content-Type;
 	// text/JSON sends the body with Content-Type (default application/json).
+	// @[error]: sanitize the JSON error message before it leaves the server.
 	mut resp_ct := out.res.headers['Content-Type'] or { out.res.headers['content-type'] or { '' } }
 	if resp_ct == '' {
 		resp_ct = if out.res.is_bytes { 'application/octet-stream' } else { 'application/json' }
@@ -629,6 +688,10 @@ fn (mut app App) before_request(mut ctx Ctx) veb.Result {
 	}
 	if out.res.is_bytes {
 		return ctx.send_response_to_client(resp_ct, out.res.body_bytes.bytestr())
+	}
+	if status >= 400 && body.contains('"error":"') {
+		msg := swelte_sanitize_error(body.all_after('"error":"').all_before('"'), status)
+		body = body.all_before('"error":"') + '"error":"' + msg + '"' + body.all_after('"error":"').all_after('"')
 	}
 	return ctx.send_response_to_client(resp_ct, body)
 }

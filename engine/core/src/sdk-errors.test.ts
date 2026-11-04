@@ -6,6 +6,10 @@ import {
 	applyAction,
 	checkUpdated,
 	clearFetchHooks,
+	captureSnapshot,
+	restoreSnapshot,
+	__swelteCaptureSnapshot,
+	__swelteRestoreSnapshot,
 	enhance,
 	handleFetch,
 	isFail,
@@ -441,5 +445,25 @@ describe('SDK error contract', () => {
 			if (prevDoc === undefined) delete g.document
 			else g.document = prevDoc
 		}
+	})
+
+	it('P1 item 8: capture/restore snapshot round-trips per-key merged state', () => {
+		const seen: Record<string, unknown>[] = []
+		const offA = captureSnapshot(() => ({ scroll: 100 }))
+		const offB = captureSnapshot(() => {
+			throw new Error('never breaks navigation')
+		})
+		const offC = captureSnapshot(() => ({ tab: 'a' }))
+		restoreSnapshot((s) => {
+			seen.push(s)
+		})
+		const snap = __swelteCaptureSnapshot()
+		assert.deepEqual(snap, { scroll: 100, tab: 'a' })
+		__swelteRestoreSnapshot({ scroll: 5 })
+		assert.deepEqual(seen, [{ scroll: 5 }])
+		offA()
+		offB()
+		offC()
+		assert.deepEqual(__swelteCaptureSnapshot(), {})
 	})
 })

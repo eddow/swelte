@@ -23,7 +23,7 @@ dist/server         — single self-contained prod binary + dist/ static
 ## Commands
 
 ```sh
-npx swelte init myapp && cd myapp
+npx @swelte/core init myapp && cd myapp
 npm install
 npx swelte dev      # Vite :5174 + V backend :8131, one command
 npx swelte build    # typecheck + dist/server + vite build + smoke probe
