@@ -7,8 +7,8 @@
 
 <h1 class="text-4xl font-bold mt-2">Versus</h1>
 <p class="py-4 opacity-80">
-	Positioning: <strong>“Agents in, binaries out.”</strong> Systems-level performance without the
-	cognitive friction — flat project structure, explicit types, predictable semantics.
+	Positioning: <strong>“Agents in, binaries out.”</strong> Systems-level performance without the cognitive
+	friction — flat project structure, explicit types, predictable semantics.
 </p>
 
 <div class="grid lg:grid-cols-2 gap-4">
@@ -18,7 +18,12 @@
 			<ul class="text-sm opacity-80 list-disc list-inside space-y-1">
 				<li>Native machine code vs JIT'd JS; near-zero baseline memory</li>
 				<li>Single self-contained binary — no <code>node_modules</code>, no process managers</li>
-				<li>Physical secret boundaries (server drivers can't target browser WASM)</li>
+				<li>Zero GC overhead: deterministic memory with no V8 "stop-the-world" latency spikes</li>
+				<li>
+					True parallel multi-tasking: native concurrency without V8 single-thread event loop
+					bottlenecks
+				</li>
+				<li>Instant peak performance: zero JIT compilation phase or warm-up time needed</li>
 			</ul>
 		</div>
 	</div>
@@ -55,7 +60,7 @@
 <div class="alert mt-6">
 	<span
 		>Choose <strong>.NET</strong> for regulated enterprise (SAP/Oracle bindings, EF Core, Orleans,
-		FIPS/LTS). Choose <strong>Swelte</strong> for raw speed, single-binary simplicity, zero-ops,
-		agent maintenance.</span
+		FIPS/LTS). Choose <strong>Swelte</strong> for raw speed, single-binary simplicity, zero-ops, agent
+		maintenance.</span
 	>
 </div>

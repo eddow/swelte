@@ -70,42 +70,50 @@ import { codeHtml } from '#lib/snippets.gen.js'
 
 <h2 class="text-2xl font-bold mt-8">Skills</h2>
 <p class="opacity-80 mt-2 text-sm">
-	Six playbooks in <code>.agents/skills/</code> — a skill tells the agent <em>how</em> to do the
-	work, the MCP tool gives it the live project facts. Prefer MCP tools over grepping
-	<code>src/routes/</code>
-	by hand.
+	Six playbooks ship inside the npm packages — extracted automatically on
+	<code>npm install</code> into <code>.agents/skills/</code> (scaffolded projects carry
+	the <code>postinstall</code> hook). A skill tells the agent <em>how</em> to do
+	the work, the MCP tool gives it the live project facts. Prefer MCP tools over grepping
+	<code>src/routes/</code> by hand.
 </p>
 <div class="overflow-x-auto mt-2">
 	<table class="table table-zebra table-sm">
 		<thead>
 			<tr>
 				<th>Skill</th>
+				<th>Ships in</th>
 				<th>Use when</th>
 			</tr>
 		</thead>
 		<tbody>
 			<tr>
 				<td><code>swelte-overview</code></td>
+				<td><code>@swelte/core</code></td>
 				<td>scaffolding, explaining, navigating (layout, CLI, <code>.swelte/</code>)</td>
 			</tr>
 			<tr>
 				<td><code>swelte-mcp</code></td>
+				<td><code>@swelte/mcp</code></td>
 				<td>querying via the MCP server (routes, contracts, diagnostics)</td>
 			</tr>
 			<tr>
 				<td><code>swelte-ssr-load</code></td>
+				<td><code>@swelte/ssr-qjs</code></td>
 				<td>adding <code>@&#91;load]</code> data, debugging SSR output</td>
 			</tr>
 			<tr>
 				<td><code>swelte-svelte5</code></td>
+				<td><code>@swelte/core</code></td>
 				<td>creating/fixing <code>.svelte</code> files (runes only)</td>
 			</tr>
 			<tr>
 				<td><code>swelte-sveltekit-delta</code></td>
+				<td><code>@swelte/core</code></td>
 				<td>porting SvelteKit apps, checking parity</td>
 			</tr>
 			<tr>
 				<td><code>swelte-v-routes</code></td>
+				<td><code>@swelte/core</code></td>
 				<td>creating/fixing <code>.v</code> files (attrs, request shape, types)</td>
 			</tr>
 		</tbody>
@@ -114,9 +122,8 @@ import { codeHtml } from '#lib/snippets.gen.js'
 
 <h2 class="text-2xl font-bold mt-8">Installing skills</h2>
 <p class="opacity-80 mt-2 text-sm">
-	No installer — copy the directories. A fresh clone already carries them under
-	<code>.agents/skills/</code>.
+	Automatic — the scaffold template carries a <code>postinstall</code> hook
+	(<code>npm-skills extract --skip-production --override</code>), so
+	<code>npm install</code> drops each dependency's <code>skills/</code> into
+	<code>.agents/skills/</code>. Versioned with the packages, no manual copy step.
 </p>
-<div class="mt-2">
-	<Code snippet={codeHtml['skills-install']} dense title="terminal" />
-</div>

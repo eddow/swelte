@@ -4,12 +4,19 @@
 //   - explicit version: sets root + engine/*/package.json to it
 //   - patch|minor|major: bumps root version accordingly
 //   - no arg: syncs engine/* to current root version
-// Syncs: engine/*/package.json#version + all @swelte/* ^ranges in engine/*.
-// Never touches: root private flag, examples/*, templates/* (user app versions).
+// Syncs: engine/*/package.json#version + all @swelte/* ^ranges in engine/*,
+// plus examples/*/package.json#version + @swelte/* ^ranges + shared pins
+// (svelte/vite/vite-plugin-svelte/typescript/@types/node aligned on core).
+// Never touches: root private flag, templates/* placeholders
+// (__NAME__, __SWELTE_VERSION__ stay literal) — only their shared pins.
 import { readFileSync, writeFileSync } from 'node:fs'
 
 const ROOT = 'package.json'
 const PACKAGES = ['engine/core', 'engine/vvm', 'engine/ssr-qjs', 'engine/mcp', 'engine/plus']
+const EXAMPLES = ['examples/tests', 'examples/something', 'examples/docs-site']
+const TEMPLATE = 'engine/core/templates/base'
+// Shared pins aligned on core (single truth for the whole repo).
+const PIN_KEYS = ['svelte', 'vite', '@sveltejs/vite-plugin-svelte', 'typescript', '@types/node']
 
 function bump(v, kind) {
 	const [maj, min, pat] = v.split('.').map(Number)
@@ -44,4 +51,41 @@ for (const p of PACKAGES) {
 	}
 	writeFileSync(f, JSON.stringify(pj, null, 2) + '\n')
 	console.log(`${p}: ${next}`)
+}
+
+// Shared pins: read the truth off @swelte/core once engines are synced.
+const core = JSON.parse(readFileSync('engine/core/package.json', 'utf8'))
+const pins = {}
+for (const k of ['dependencies', 'peerDependencies', 'devDependencies']) {
+	for (const d in core[k] ?? {}) {
+		if (PIN_KEYS.includes(d)) pins[d] ??= core[k][d]
+	}
+}
+
+for (const p of EXAMPLES) {
+	const f = `${p}/package.json`
+	const pj = JSON.parse(readFileSync(f, 'utf8'))
+	if (pj.private) pj.version = next
+	for (const k of ['dependencies', 'peerDependencies', 'devDependencies']) {
+		for (const d in pj[k] ?? {}) {
+			if (d.startsWith('@swelte/')) pj[k][d] = `^${next}`
+			else if (d in pins) pj[k][d] = pins[d]
+		}
+	}
+	writeFileSync(f, JSON.stringify(pj, null, 2) + '\n')
+	console.log(`${p}: ${next}`)
+}
+
+// Scaffold template: placeholders stay literal, shared pins still align.
+{
+	const f = `${TEMPLATE}/package.json`
+	const pj = JSON.parse(readFileSync(f, 'utf8'))
+	for (const k of ['dependencies', 'peerDependencies', 'devDependencies']) {
+		for (const d in pj[k] ?? {}) {
+			if (d.startsWith('@swelte/')) continue // ^__SWELTE_VERSION__ (init replaces)
+			if (d in pins) pj[k][d] = pins[d]
+		}
+	}
+	writeFileSync(f, JSON.stringify(pj, null, 2) + '\n')
+	console.log(`${TEMPLATE}: pins`)
 }

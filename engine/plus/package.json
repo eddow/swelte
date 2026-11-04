@@ -1,7 +1,7 @@
 {
   "name": "@swelte/plus",
-  "version": "0.1.1",
-  "description": "Swelte beyond-SvelteKit plugins \u2014 jobs (cron) (V+TS).",
+  "version": "0.1.2",
+  "description": "Swelte beyond-SvelteKit plugins — jobs (cron) (V+TS).",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -23,7 +23,7 @@
     "prepublishOnly": "npm run build"
   },
   "dependencies": {
-    "@swelte/core": "^0.1.1"
+    "@swelte/core": "^0.1.2"
   },
   "peerDependencies": {
     "svelte": "^5.0.0",
@@ -35,7 +35,7 @@
   },
   "license": "MIT",
   "author": {
-    "name": "Fran\u00e7ois Marie De Mey",
+    "name": "François Marie De Mey",
     "email": "fmdm@emedware.dev",
     "url": "https://github.com/eddow"
   },

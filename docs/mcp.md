@@ -59,18 +59,18 @@ not line-level.
 
 ## Skills
 
-Six playbooks live in `.agents/skills/` (readable in this repo; copy them
-into the agent's skills dir to install — see below). Each has a
-`name` + `description` frontmatter header so the agent loads it on demand.
+Six playbooks ship inside the npm packages (extracted automatically on
+`npm install` — see below). Each has a `name` + `description`
+frontmatter header so the agent loads it on demand.
 
-| Skill | Use when |
-|-------|----------|
-| `swelte-overview` | Scaffolding, explaining, or navigating a project (routes vs lib layout, CLI commands, `.swelte/` output) |
-| `swelte-mcp` | Querying a project via the MCP server (route tree, contracts, diagnostics, scaffolding) |
-| `swelte-ssr-load` | Adding `@[load]` page data, debugging SSR output, working on server rendering |
-| `swelte-svelte5` | Creating/fixing `.svelte` files (runes only, `#routes`/`#lib` imports) |
-| `swelte-sveltekit-delta` | Porting a SvelteKit app, checking parity, planning migration |
-| `swelte-v-routes` | Creating/fixing `.v` route files (attrs, `SwelteRequest` shape, V→TS types) |
+| Skill | Ships in | Use when |
+|-------|----------|----------|
+| `swelte-overview` | `@swelte/core` | Scaffolding, explaining, or navigating a project (routes vs lib layout, CLI commands, `.swelte/` output) |
+| `swelte-mcp` | `@swelte/mcp` | Querying a project via the MCP server (route tree, contracts, diagnostics, scaffolding) |
+| `swelte-ssr-load` | `@swelte/ssr-qjs` | Adding `@[load]` page data, debugging SSR output, working on server rendering |
+| `swelte-svelte5` | `@swelte/core` | Creating/fixing `.svelte` files (runes only, `#routes`/`#lib` imports) |
+| `swelte-sveltekit-delta` | `@swelte/core` | Porting a SvelteKit app, checking parity, planning migration |
+| `swelte-v-routes` | `@swelte/core` | Creating/fixing `.v` route files (attrs, `SwelteRequest` shape, V→TS types) |
 
 Skills complement the MCP tools: a skill tells the agent *how* to do the
 work, the MCP tool gives it the live project facts to work on. Prefer MCP
@@ -79,16 +79,19 @@ before wiring a new `@[load]` to a component.
 
 ## Installing skills
 
-There is no `swelte skills` installer — copy the directories:
+Automatic. Scaffolded projects (`swelte init`) carry a `postinstall` hook:
 
-```sh
-# Claude Code (user scope)
-cp -r .agents/skills/* ~/.claude/skills/
-# Codex (user scope)
-cp -r .agents/skills/* ~/.codex/skills/
-# Repo-local (any agent that reads .agents/)
-cp -r .agents/skills <your-project>/.agents/
+```json
+{
+  "devDependencies": {
+    "npm-skills": "^0.5.1"
+  },
+  "scripts": {
+    "postinstall": "npm-skills extract --skip-production --override"
+  }
+}
 ```
 
-Skills are plain markdown (`SKILL.md` + frontmatter), so a fresh clone of
-this repo already carries them under `.agents/skills/`.
+`npm install` extracts each dependency's `skills/` into the project's
+`.agents/skills/`. Skills are plain markdown (`SKILL.md` + frontmatter),
+versioned with the packages that ship them — no manual copy step.
