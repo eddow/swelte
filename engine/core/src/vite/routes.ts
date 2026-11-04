@@ -124,6 +124,83 @@ export function assertChunkHint(file: string, src: string): 'eager' | 'lazy' | '
 	return hint
 }
 
+/** Per-route prerender flag: `export const prerender = true | false | 'auto'`
+ * in the sibling `.ts` (leaf like `about.ts` or wrapper like `+route.ts`).
+ * Absent/no match = `'inherit'` (follow the global `prerender.entries`).
+ * Sibling `.ts` is the only knob carrier — `.v`-only routes use the global
+ * mode. Boolean `false` excludes the route from the crawl even when the
+ * global mode covers it; `true` includes it even under `entries: 'off'`;
+ * `'auto'` = include + keep dynamic dispatch (manifest keeps all routes,
+ * so `auto` === `true` for the crawl — resolved by callers). */
+export function readPrerenderHint(
+	src: string
+): 'prerender-true' | 'prerender-false' | 'prerender-auto' | 'inherit' | string {
+	if (/export\s+const\s+prerender\s*=\s*true\b/.test(src)) return 'prerender-true'
+	if (/export\s+const\s+prerender\s*=\s*false\b/.test(src)) return 'prerender-false'
+	const m = /export\s+const\s+prerender\s*=\s*['"]([^'"]+)['"]/.exec(src)
+	if (!m) return 'inherit'
+	return `prerender-${m[1]}`
+}
+
+/** Validate a prerender hint at the call site (file+line build error). */
+export function assertPrerenderHint(
+	file: string,
+	src: string
+): 'prerender-true' | 'prerender-false' | 'prerender-auto' | 'inherit' {
+	const hint = readPrerenderHint(src)
+	if (
+		hint !== 'prerender-true' &&
+		hint !== 'prerender-false' &&
+		hint !== 'prerender-auto' &&
+		hint !== 'inherit'
+	) {
+		throw new Error(
+			`[swelte] ${file}: bad prerender hint '${hint.replace(/^prerender-/, '')}' (want true | false | 'auto')`
+		)
+	}
+	return hint
+}
+
+/** Read a sibling `.ts`/`.js` file, return null on miss. */
+export function siblingSrc(tsAbs: string): { src: string; file: string } | null {
+	const found = siblingLoadSource(tsAbs)
+	if (!found) return null
+	try {
+		return { src: readFileSync(found, 'utf8'), file: found }
+	} catch {
+		return { src: '', file: found }
+	}
+}
+
+/** Per-route SSR flag from a sibling source: `export const ssr = false` opts out. */
+export function readSsrFlag(src: string): boolean {
+	return !/export\s+const\s+ssr\s*=\s*false/.test(src)
+}
+
+/** Partition a crawl pattern list by per-page flags: `false` always drops
+ * (even under global cover); `true`/`'auto'` includes even under 'off';
+ * `inherit` follows the global mode. `flags` maps pattern → explicit flag
+ * (leaf > wrapper already resolved); dropped dynamics never expand. */
+export function partitionPrerender(
+	patterns: string[],
+	flags: Map<string, 'prerender-true' | 'prerender-false' | 'prerender-auto'>,
+	mode: 'off' | 'static' | 'all'
+): { routes: string[]; dynamics: string[] } {
+	const routes: string[] = []
+	const dynamics: string[] = []
+	for (const p of patterns) {
+		const flag = flags.get(p)
+		if (flag === 'prerender-false') continue
+		if (flag === 'prerender-true' || flag === 'prerender-auto') {
+			;(isStaticRoute(p) ? routes : dynamics).push(p)
+			continue
+		}
+		if (mode === 'off') continue
+		;(isStaticRoute(p) ? routes : dynamics).push(p)
+	}
+	return { routes, dynamics }
+}
+
 /** Collect `.svelte` siblings under routesAbs into a URL manifest.
  * Dynamic segments pass through verbatim ([id]/[...rest]). */
 export function collectSvelteManifest(
@@ -160,36 +237,24 @@ export function collectSvelteManifest(
 				hasUniversalLoad: false,
 				ssr: true,
 				chunk: 'inherit',
+				prerender: 'inherit',
 			})
 			continue
 		}
 		if (kind === 'wrapper') {
-			const chunkSibling = siblingLoadSource(f.replace(/\.svelte$/, '.ts'))
-			let chunkSrc = ''
-			if (chunkSibling) {
-				try {
-					chunkSrc = readFileSync(chunkSibling, 'utf8')
-				} catch {
-					chunkSrc = ''
-				}
-			}
+			const sib = siblingSrc(f.replace(/\.svelte$/, '.ts'))
 			entries.push({
 				route: svelteRouteFor(mod) ?? `/${mod}`,
 				svelte: rel,
 				kind: 'wrapper',
 				hasData: vMods.has(mod),
 				hasUniversalLoad: universalLoadKind(f.replace(/\.svelte$/, '.ts')),
-				ssr: (() => {
-					const found = siblingLoadSource(f.replace(/\.svelte$/, '.ts'))
-					if (!found) return true
-					try {
-						return !/export\s+const\s+ssr\s*=\s*false/.test(readFileSync(found, 'utf8'))
-					} catch {
-						return true
-					}
-				})(),
-				chunk: chunkSibling
-					? assertChunkHint(`${routesDir}/${relPosixTop(routesAbs, chunkSibling)}`, chunkSrc)
+				ssr: sib ? readSsrFlag(sib.src) : true,
+				chunk: sib
+					? assertChunkHint(`${routesDir}/${relPosixTop(routesAbs, sib.file)}`, sib.src)
+					: 'inherit',
+				prerender: sib
+					? assertPrerenderHint(`${routesDir}/${relPosixTop(routesAbs, sib.file)}`, sib.src)
 					: 'inherit',
 			})
 			continue
@@ -219,24 +284,18 @@ export function collectSvelteManifest(
 			hasData: vMods.has(mod),
 			hasUniversalLoad: universalLoadKind(f.replace(/\.svelte$/, '.ts')),
 			ssr: (() => {
-				const found = siblingLoadSource(f.replace(/\.svelte$/, '.ts'))
-				if (!found) return true
-				try {
-					return !/export\s+const\s+ssr\s*=\s*false/.test(readFileSync(found, 'utf8'))
-				} catch {
-					return true
-				}
+				const sib = siblingSrc(f.replace(/\.svelte$/, '.ts'))
+				return sib ? readSsrFlag(sib.src) : true
 			})(),
 			chunk: (() => {
-				const sib = siblingLoadSource(f.replace(/\.svelte$/, '.ts'))
+				const sib = siblingSrc(f.replace(/\.svelte$/, '.ts'))
 				if (!sib) return 'inherit' as const
-				let src = ''
-				try {
-					src = readFileSync(sib, 'utf8')
-				} catch {
-					return 'inherit' as const
-				}
-				return assertChunkHint(`${routesDir}/${relPosixTop(routesAbs, sib)}`, src)
+				return assertChunkHint(`${routesDir}/${relPosixTop(routesAbs, sib.file)}`, sib.src)
+			})(),
+			prerender: (() => {
+				const sib = siblingSrc(f.replace(/\.svelte$/, '.ts'))
+				if (!sib) return 'inherit' as const
+				return assertPrerenderHint(`${routesDir}/${relPosixTop(routesAbs, sib.file)}`, sib.src)
 			})(),
 		})
 	}
@@ -270,6 +329,7 @@ export async function collectPrerenderEntries(
 ): Promise<PrerenderCrawl> {
 	const routesAbs = join(resolve(root), routesDir)
 	let patterns: string[] = []
+	const flags = new Map<string, 'prerender-true' | 'prerender-false' | 'prerender-auto'>()
 	try {
 		const mods = new Set<string>()
 		for (const f of listVFiles(routesAbs)) {
@@ -277,12 +337,35 @@ export async function collectPrerenderEntries(
 			mods.add(rel)
 		}
 		const { entries } = collectSvelteManifest(routesAbs, routesDir, mods)
+		const byRoute = new Map(entries.map((e) => [e.route, e]))
+		const wrappers = entries.filter((e) => e.kind === 'wrapper')
+		// Explicit per-page flag for a svelte pattern: leaf wins, else the
+		// nearest ancestor `+route.ts` with an explicit flag, else inherit.
+		const flagForSvelte = (
+			route: string
+		): 'prerender-true' | 'prerender-false' | 'prerender-auto' | null => {
+			const leaf = byRoute.get(route)
+			if (leaf && leaf.prerender !== 'inherit') return leaf.prerender
+			const segs = route.split('/').filter(Boolean)
+			for (let i = segs.length; i >= 0; i--) {
+				const prefix = `/${segs.slice(0, i).join('/')}`
+				const norm = prefix === '/' ? '/' : prefix
+				for (const w of wrappers) {
+					const wDir = w.svelte.replace(/\/\+route\.svelte$/, '').replace(/^\+route\.svelte$/, '')
+					const wRoute = wDir === '' ? '/' : `/${wDir}`
+					if (wRoute === norm && w.prerender !== 'inherit') return w.prerender
+				}
+			}
+			return null
+		}
 		const seen = new Set<string>()
 		for (const e of entries) {
 			if (e.kind === 'wrapper' || e.kind === 'error') continue
 			if (!seen.has(e.route)) {
 				seen.add(e.route)
 				patterns.push(e.route)
+				const flag = flagForSvelte(e.route)
+				if (flag) flags.set(e.route, flag)
 			}
 		}
 		// V-only routes (no .svelte): routeFor leaf/dir rules (abs path form).
@@ -300,14 +383,13 @@ export async function collectPrerenderEntries(
 		throw e
 	}
 	patterns.sort()
-	const routes = patterns.filter(isStaticRoute)
-	const dynamics = patterns.filter((p) => !isStaticRoute(p))
-	const out: PrerenderCrawl = { mode, routes, dynamics, expanded: [] }
+	const part = partitionPrerender(patterns, flags, mode)
+	const out: PrerenderCrawl = { mode, routes: part.routes, dynamics: part.dynamics, expanded: [] }
 	if (mode !== 'all') return out
 	// Dynamic expansion: sibling `entries.ts` next to the dynamic leaf.
 	// Accepted shapes: `string[]`, `{ slug: string }[]`-ish rows, or
 	// `{ params: Record<string,string> }[]`. Anything else = build error.
-	for (const pattern of dynamics) {
+	for (const pattern of part.dynamics) {
 		const sibling = dynamicEntriesSibling(routesAbs, pattern)
 		if (!sibling) continue
 		let mod: Record<string, unknown>

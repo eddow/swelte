@@ -346,4 +346,116 @@ describe('route helpers', () => {
 			await plug.buildStart?.()
 		}, /claims the same URL/)
 	})
+
+	it('P0 item 1: readPrerenderHint parses true/false/auto/inherit; bad value throws', async () => {
+		const { readPrerenderHint, assertPrerenderHint } = await import('./vite.js')
+		assert.equal(readPrerenderHint('export const prerender = true'), 'prerender-true')
+		assert.equal(readPrerenderHint('export const prerender = false'), 'prerender-false')
+		assert.equal(readPrerenderHint("export const prerender = 'auto'"), 'prerender-auto')
+		assert.equal(readPrerenderHint('export const x = 1'), 'inherit')
+		assert.equal(
+			assertPrerenderHint('r/+page.ts', 'export const prerender = true'),
+			'prerender-true'
+		)
+		assert.throws(
+			() => assertPrerenderHint('r/+page.ts', "export const prerender = 'sometimes'"),
+			/bad prerender hint 'sometimes'/
+		)
+	})
+
+	it('P0 item 1: partitionPrerender — false drops, true/auto include under off, inherit follows mode', async () => {
+		const { partitionPrerender } = await import('./vite.js')
+		const patterns = ['/', '/about', '/users/[id]']
+		// Explicit flags beat the global mode both ways.
+		const flags = new Map([
+			['/about', 'prerender-false' as const],
+			['/users/[id]', 'prerender-true' as const],
+		])
+		const off = partitionPrerender(patterns, flags, 'off')
+		assert.ok(!off.routes.includes('/about'))
+		assert.ok(!off.routes.includes('/'))
+		assert.ok(off.dynamics.includes('/users/[id]'))
+		const stat = partitionPrerender(patterns, new Map(), 'static')
+		assert.ok(stat.routes.includes('/') && stat.routes.includes('/about'))
+		// Under 'static' the dynamic pattern is listed (expansion to concrete
+		// URLs happens only under 'all'); under 'off' inherit drops it.
+		assert.ok(stat.dynamics.includes('/users/[id]'))
+		const offClean = partitionPrerender(patterns, new Map(), 'off')
+		assert.ok(!offClean.routes.includes('/') && !offClean.dynamics.includes('/users/[id]'))
+	})
+
+	it('P0 item 1: collectPrerenderEntries honors per-page prerender (leaf > global)', async () => {
+		const { mkdtempSync, mkdirSync, writeFileSync } = await import('node:fs')
+		const { tmpdir } = await import('node:os')
+		const root = mkdtempSync(join(tmpdir(), 'swelte-pre-'))
+		mkdirSync(join(root, 'src', 'routes', 'about'), { recursive: true })
+		mkdirSync(join(root, 'src', 'lib'), { recursive: true })
+		writeFileSync(join(root, 'package.json'), '{"name":"t"}')
+		writeFileSync(join(root, 'svelte.config.js'), 'export default {}')
+		writeFileSync(join(root, 'src', 'routes', '+page.svelte'), '<h1>home</h1>')
+		writeFileSync(join(root, 'src', 'routes', 'about', '+page.svelte'), '<h1>about</h1>')
+		// Opt /about OUT even under a global static crawl.
+		writeFileSync(
+			join(root, 'src', 'routes', 'about', '+page.ts'),
+			'export const prerender = false'
+		)
+		const crawl = await collectPrerenderEntries(root, 'src/routes', 'static', new Set(['integer']))
+		assert.ok(crawl.routes.includes('/'), JSON.stringify(crawl))
+		assert.ok(!crawl.routes.includes('/about'), JSON.stringify(crawl))
+		// Opt-in under 'off': a true flag includes the route anyway.
+		writeFileSync(join(root, 'src', 'routes', '+page.ts'), 'export const prerender = true')
+		const crawlOff = await collectPrerenderEntries(root, 'src/routes', 'off', new Set(['integer']))
+		assert.ok(crawlOff.routes.includes('/'), JSON.stringify(crawlOff))
+		assert.ok(!crawlOff.routes.includes('/about'), JSON.stringify(crawlOff))
+	})
+
+	it('P0 item 1: wrapper +route.ts prerender=false excludes the subtree', async () => {
+		const { mkdtempSync, mkdirSync, writeFileSync } = await import('node:fs')
+		const { tmpdir } = await import('node:os')
+		const root = mkdtempSync(join(tmpdir(), 'swelte-prewrap-'))
+		mkdirSync(join(root, 'src', 'routes', 'admin', 'users'), { recursive: true })
+		mkdirSync(join(root, 'src', 'lib'), { recursive: true })
+		writeFileSync(join(root, 'package.json'), '{"name":"t"}')
+		writeFileSync(join(root, 'svelte.config.js'), 'export default {}')
+		writeFileSync(join(root, 'src', 'routes', 'admin', '+route.svelte'), '<slot />')
+		writeFileSync(
+			join(root, 'src', 'routes', 'admin', '+route.ts') as string,
+			'export const prerender = false'
+		)
+		writeFileSync(join(root, 'src', 'routes', 'admin', 'users', '+page.svelte'), '<h1>u</h1>')
+		const crawl = await collectPrerenderEntries(root, 'src/routes', 'static', new Set(['integer']))
+		assert.ok(!crawl.routes.includes('/admin/users'), JSON.stringify(crawl))
+	})
+
+	it('P0 items 2+3: emitLoadCascade wraps plain leaves, passes SwelteLoadResult through', async () => {
+		const { emitLoadCascade } = await import('./vite/server-gen.js')
+		const plain = emitLoadCascade('swelte_x_', [
+			{
+				mod: 'x/+page',
+				file: 'f',
+				name: 'load_x',
+				attr: 'load',
+				params: [],
+				vret: 'X',
+				tsret: 'X',
+				fallible: true,
+			},
+		] as never)
+		assert.ok(plain.includes('!SwelteLoadResult'), plain.slice(0, 400))
+		assert.ok(plain.includes('SwelteLoadResult{ body: json.encode(frag_0) }'))
+		const env = emitLoadCascade('swelte_x_', [
+			{
+				mod: 'x/+page',
+				file: 'f',
+				name: 'load_x',
+				attr: 'load',
+				params: [],
+				vret: 'SwelteLoadResult',
+				tsret: 'unknown',
+				fallible: true,
+			},
+		] as never)
+		assert.ok(env.includes('return frag_0'))
+		assert.ok(!env.includes('json.encode(frag_0)'))
+	})
 })

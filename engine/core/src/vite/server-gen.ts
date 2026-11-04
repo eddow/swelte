@@ -134,6 +134,13 @@ export function validateLoadFn(rel: string, m: RpcFn, parentRet: string | null):
 		throw new Error(
 			`[swelte] ${rel}: @[load] ${m.name} must return a value (the level's page data).`
 		)
+	// P0 item 2: `SwelteLoadResult` opts the load into headers/cookies/status
+	// (SvelteKit `load` setHeaders/cookies lite). The cascade encodes
+	// `body` directly; intermediates thread it as `parent` unchanged.
+	if (m.vret === 'SwelteLoadResult' && !m.fallible)
+		throw new Error(
+			`[swelte] ${rel}: @[load] ${m.name} returns SwelteLoadResult — it must stay fallible (!SwelteLoadResult; throw maps to +error).`
+		)
 	if (parentRet === null) {
 		if (m.attr !== 'load')
 			throw new Error(
@@ -420,6 +427,18 @@ body_bytes []u8
 is_bytes bool
 }
 
+// Page-load result envelope (P0 item 2): value-only loads keep
+// returning the page-data type directly; SwelteLoadResult opts the
+// load into headers/cookies/status (SvelteKit load setHeaders/cookies
+// lite). Throw stays the error path (to +error props with the status).
+pub struct SwelteLoadResult {
+pub mut:
+status int = 200
+headers map[string]string
+cookies []SwelteCookie
+body string
+}
+
 // Constructors (sugar over the struct literal).
 pub fn swelte_text(body string) SwelteResponse {
 return SwelteResponse{ status: 200, body: body }
@@ -431,6 +450,23 @@ return SwelteResponse{ status: 200, headers: {'Content-Type': 'application/json'
 
 pub fn swelte_status(status int, body string) SwelteResponse {
 return SwelteResponse{ status: status, body: body }
+}
+
+// P0 item 3: typed error with status preservation (SvelteKit error()
+// lite). Throw swelte_error(404, 'not found') from a verb or load
+// and the harness maps it to +error props with the status (instead
+// of the old always-400 err.msg() contract). Plain string throws
+// keep the 400 default. Redirects stay SwelteResponse (verbs) or
+// the load envelope status 3xx + Location header.
+pub struct SwelteError {
+pub:
+	status int = 500
+	message string
+}
+
+pub fn swelte_error(status int, message string) SwelteError {
+	st := if status < 400 { 500 } else { status }
+	return SwelteError{ status: st, message: message }
 }
 
 pub fn swelte_bytes(data []u8, content_type string) SwelteResponse {
@@ -688,8 +724,8 @@ pub fn swelte_sse_emit_for(prefix string, qualifier string, req SwelteRequest, e
 		// Loader fan-out: `before_request` resolves the page route to a
 		// dispatch prefix; this maps prefix → per-file `swelte_load`.
 		// Any throw → error (caller maps to +error props). No loads
-		// on the file → its `swelte_load` returns '{}'.
-		`pub fn swelte_load_for(prefix string, req SwelteRequest) !string {`,
+		// on the file → its `swelte_load` returns a default envelope.
+		`pub fn swelte_load_for(prefix string, req SwelteRequest) !SwelteLoadResult {`,
 		...dispatched.map(
 			(d) => `\tif prefix == ${vJsonStr(d.prefix)} { return ${d.prefix}swelte_load(req) }`
 		),
@@ -1001,8 +1037,8 @@ ${arm(emitArms, qualErr)}
 export function emitLoadCascade(prefix: string, loads: LoadFn[]): string {
 	if (loads.length === 0)
 		return `
-pub fn ${prefix}swelte_load(req SwelteRequest) !string {
-\treturn '{}'
+pub fn ${prefix}swelte_load(req SwelteRequest) !SwelteLoadResult {
+\treturn SwelteLoadResult{ body: '{}' }
 }
 `
 	const fnPrefix = (l: LoadFn): string => vPrefix(l.mod)
@@ -1014,10 +1050,17 @@ pub fn ${prefix}swelte_load(req SwelteRequest) !string {
 		)
 		.join('\n')
 	const leaf = loads.length - 1
+	// Envelope-aware leaf (P0 item 2): `SwelteLoadResult` carries pre-encoded
+	// `body` + status/headers/cookies — return it directly. Plain values are
+	// wrapped once at the edge (`json.encode`) with a 200 default envelope.
+	const tail =
+		loads[leaf].vret === 'SwelteLoadResult'
+			? `\treturn frag_${leaf}`
+			: `\treturn SwelteLoadResult{ body: json.encode(frag_${leaf}) }`
 	return `
-pub fn ${prefix}swelte_load(req SwelteRequest) !string {
+pub fn ${prefix}swelte_load(req SwelteRequest) !SwelteLoadResult {
 ${chained}
-\treturn json.encode(frag_${leaf})
+${tail}
 }
 `
 }

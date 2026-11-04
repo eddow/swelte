@@ -135,6 +135,10 @@ src/routes/+page.svelte (+ .v / .ts)                        →  / (root)
   sibling `.ts` opts the route out — `Hand` skips the renderer
   (`swelte_no_ssr()`), serves the SPA shell; async universal `load`
   + client router take over. No `csr=false` islands.
+* Per-page `prerender`: `export const prerender = true | false | 'auto'`
+  in the sibling `.ts` (leaf or `+route.ts` wrapper) — leaf > wrapper >
+  global `prerender.entries`. `false` excludes even under global cover;
+  `true`/`'auto'` includes even under `'off'`. See `config.md`.
 * Service worker: opt-in (`swelte.serviceWorker.enabled` or
   `SWELTE_SW=1`) → additive `dist/sw.js`, auto/manual register —
   see `config.md` §Service worker. Offline fallback page
@@ -158,9 +162,10 @@ src/routes/+page.svelte (+ .v / .ts)                        →  / (root)
 * Aliases are `#routes` / `#lib` (hash, current SvelteKit style), not
   `$lib`. `#app/paths` + `#app/environment` virtual stubs generated
   from config. `$app/stores` + `$app/state` re-export
-  `page`/`navigating`/`updated` from `@swelte/core`;
+  `page`/`navigating`/`updated` from `@swelte/core` (`checkUpdated()`
+  flips `updated` by polling the `X-Swelte-Version` header);
   `$app/navigation` re-exports
-  `goto`/`preloadData`/`pushState`/`beforeNavigate`/`afterNavigate`/`onNavigate`.
+  `goto`/`preloadData`/`pushState`/`beforeNavigate`/`afterNavigate`/`onNavigate`/`handleFetch`/`swelteError`/`isRedirect`.
   No `$app/forms`, no `$env/static|dynamic/*`.
 * Streaming: client bundles compile with
   `compilerOptions.experimental.async` (see `templates/base/vite.config.ts`),
@@ -181,8 +186,11 @@ src/routes/+page.svelte (+ .v / .ts)                        →  / (root)
 * `HEAD` auto-handled on `GET` arms; `OPTIONS` is CORS-preflight-only
   (no `Allow:`-on-405 listing).
 * Errors: `SwelteRpcError` (`status`, `body`, `base`, `fn`) replaces
-  thrown `error()`/`json()` helpers; `loadPage()` maps load-time
-  failures to `+error` props. `locals map[string]string` threaded
-  through dispatch + `swelte_cookie_get/set/delete` helpers.
+  thrown `error()`/`json()` helpers; `swelte_error(status, message)` (V)
+  / `swelteError(status, message)` (TS) throws with status preserved
+  (→ `+error` props); `isRedirect(e)` narrows 3xx. `handleFetch(hook)`
+  intercepts stub fetches (auth headers/retries). `loadPage()` maps
+  load-time failures to `+error` props. `locals map[string]string`
+  threaded through dispatch + `swelte_cookie_get/set/delete` helpers.
 * Single artifact: `dist/server` + `dist/`. No Node at runtime.
 

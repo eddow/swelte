@@ -64,7 +64,7 @@ JSON body. No `?fn=` anywhere (removed with the old model).
 | `#routes/` | `@[post]` / `@[post('q')]` | POST form (multipart / urlencoded) | form fields = args; default, or `?q` present. `File`/`Blob` stub args → multipart, filenames land in `SwelteRequest.files` (bytes discarded); plain values → urlencoded |
 | `#routes/` | `@[put]`/`@[delete]`/`@[patch]` (+`('q')`) | respective method | same per-method rules |
 | `#routes/` | `@[before]` / `@[after]` (only in `+route.v`) | — (subtree middleware; root `+route.v` is the global head, chains into every leaf) | `@[before]`: root→leaf, `SwelteRequest -> !SwelteRequest`; `@[after]`: leaf→root, `(SwelteRequest, SwelteResponse) -> !SwelteResponse`; middleware fns never exported to TS, but the wrapper's `pub struct`s are (+layout-shaped shared types) |
-| `#routes/` leaf + `+route.v` | `@[load]` | — (page data, `Hand` HTML navigations only) | `(SwelteRequest[, parent T]) -> !R`. Zero/one per file, never stacked, no qualifier. Level 0 takes `(req)`; deeper levels take `(req, parent T)` where T is the previous level's return struct (short or prefixed spelling — mismatch is a build error). The cascade threads typed values root-first; the leaf's return is encoded once at the edge → `props_json` for SSR. No JSON in `.v` files. Throw → `+error` props. On-click stubs stay — `load` is initial paint only |
+| `#routes/` leaf + `+route.v` | `@[load]` | — (page data, `Hand` HTML navigations only) | `(SwelteRequest[, parent T]) -> !R` (or `!SwelteLoadResult`). Zero/one per file, never stacked, no qualifier. Level 0 takes `(req)`; deeper levels take `(req, parent T)` where T is the previous level's return struct (short or prefixed spelling — mismatch is a build error). The cascade threads typed values root-first; the leaf's return is encoded once at the edge → `props_json` for SSR. `SwelteLoadResult{ status, headers, cookies, body }` (built with pre-encoded `body = json.encode(props)`) opts the load into status/headers/cookies on the HTML navigation (SvelteKit `load` setHeaders/cookies lite) — plain values wrap in a 200 default envelope. Non-200 envelope status renders `+error` with the status. No JSON in `.v` files (except the envelope `body`). Throw → `+error` props (use `swelte_error(status, msg)` to preserve the status). On-click stubs stay — `load` is initial paint only |
 | `#lib/` | `@[rpc]` | local WASM call | none (direct dispatch) |
 
 - No attribute = internal helper, never exported, never routed.
@@ -129,6 +129,14 @@ injects `emit`, each call flushes one frame NOW. The TS stub is an
 calls). `?T` = `T | null`. `SwelteRequest.params` carries dynamic-segment
 values (`req.params['id']` for `/users/[id]`); client stubs
 interpolate them into the URL and strip them from the payload.
+Typed errors: `swelte_error(status, message)` (V `SwelteError` struct)
+thrown from a verb/`@[load]` preserves the status (→ `+error` props
+with the status); plain string throws keep the 400 default. Client:
+`swelteError(status, message)` builds the same shape, `isRedirect(e)`
+narrows 3xx (+ `Location`). Client fetch interception: `handleFetch(hook)`
+sees/rewrites every stub fetch (`{ base, fn, kind, args, qualifier, init }`
+→ rewritten `RequestInit` or nothing); version polling: `checkUpdated()`
+flips the `updated` store when the `X-Swelte-Version` header changes.
 
 ## Request / Response
 

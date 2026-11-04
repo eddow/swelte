@@ -495,7 +495,32 @@ fn (mut app App) before_request(mut ctx Ctx) veb.Result {
 	// loads + client router take over in the browser.
 	if wants_html && !wants_json && swelte_ssr_enabled() && !routes.swelte_no_ssr(path) {
 		if status == 200 {
-			props_json := swelte_page_props(path, query, headers, cookies, map[string]string{})
+			load_res := swelte_page_props(path, query, headers, cookies, map[string]string{})
+			props_json := load_res.body
+			// P0 item 2: the load envelope lands on the HTML navigation —
+			// Set-Cookie + custom headers + non-200 status (redirect/error
+			// from the load). Plain loads are a 200 default envelope.
+			for k, v in load_res.headers {
+				ctx.res.set_header(k, v) or { continue }
+			}
+			for c in load_res.cookies {
+				ctx.res.set_cookie(c.to_header()) or { continue }
+			}
+			if load_res.status != 200 {
+				err_json := '{"status":' + load_res.status.str() + ',"message":"error"}'
+				joined_err, ok_err := swelte_render_page('/+error', err_json)
+				if ok_err {
+					head := swelte_page_head_split(joined_err)
+					html, _ := swelte_split_head_body(joined_err, true)
+					ctx.res.set_status(http.status_from_int(load_res.status))
+					return ctx.send_response_to_client(
+						'text/html; charset=utf-8',
+						swelte_fill_ssr(swelte_shell_for(dist, path), head, html)
+					)
+				}
+				ctx.res.set_status(http.status_from_int(load_res.status))
+				return ctx.send_response_to_client('text/html; charset=utf-8', props_json)
+			}
 			joined, ok := swelte_render_page(path, props_json)
 			if ok {
 				head := swelte_page_head_split(joined)
@@ -764,19 +789,21 @@ fn swelte_min_shell() string {
 
 // Page-data path: resolve `path` to a routes prefix (same precedence as
 // swelte_route), build a SwelteRequest, run the load cascade.
-// Any throw → '{}' (renderer falls back to +error via its own path);
-// route miss → '{}' (static shell).
+// Any throw → default envelope '{}' (renderer falls back to +error via its
+// own path); route miss → default envelope (static shell). The envelope
+// carries status/headers/cookies for the HTML navigation (P0 item 2);
+// the JSON branch (client router fetch) reads the same fields.
 fn swelte_page_props(
 	path string
 	query map[string]string
 	headers map[string]string
 	cookies map[string]string
 	params_hint map[string]string
-) string {
+) routes.SwelteLoadResult {
 	_ = params_hint
 	prefix, params := routes.swelte_load_route(path)
 	if prefix == '' {
-		return '{}'
+		return routes.SwelteLoadResult{ body: '{}' }
 	}
 	req := routes.SwelteRequest{
 		query: query
@@ -791,7 +818,7 @@ fn swelte_page_props(
 		path: path
 		qualifier: ''
 	}
-	props := routes.swelte_load_for(prefix, req) or { return '{}' }
+	props := routes.swelte_load_for(prefix, req) or { return routes.SwelteLoadResult{ body: '{}' } }
 	return props
 }
 

@@ -466,5 +466,9 @@ export declare function pushState(url: string, state?: unknown): Promise<void>
 export declare function beforeNavigate(fn: unknown): () => void
 export declare function afterNavigate(fn: unknown): () => void
 export declare function onNavigate(fn: unknown): () => void
+export declare function checkUpdated(): Promise<boolean>
+export declare function handleFetch(fn: unknown): () => void
+export declare function swelteError(status: number, message: string): unknown
+export declare function isRedirect(e: unknown): boolean
 `
 }

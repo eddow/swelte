@@ -109,6 +109,11 @@ export interface SvelteRouteEntry {
 	 * into the parent chunk; `'lazy'` forces its own `import()` chunk.
 	 * Default `'inherit'` = follow the global `chunking` mode. */
 	chunk: 'eager' | 'lazy' | 'inherit'
+	/** Per-page prerender flag: `export const prerender = true | false | 'auto'`
+	 * in the sibling `.ts` (leaf or `+route.ts` wrapper). Leaf wins over the
+	 * nearest explicit wrapper; both win over the global `prerender.entries`.
+	 * `'auto'` = include in the crawl + keep dynamic dispatch. */
+	prerender: 'prerender-true' | 'prerender-false' | 'prerender-auto' | 'inherit'
 }
 
 export interface PrerenderCrawl {

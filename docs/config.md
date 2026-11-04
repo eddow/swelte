@@ -77,6 +77,15 @@ and GETs each crawl URL with browser Accept: 200 HTML →
 `dist/index.html` stays the SPA shell). JSON probes and error pages
 skipped, never written. Concurrency = `prerender.concurrency`.
 
+Per-page flag (SvelteKit `prerender` page option): `export const prerender
+= true | false | 'auto'` in the sibling `.ts` (leaf like `about/+page.ts`
+or wrapper like `about/+route.ts`). Leaf wins over the nearest explicit
+wrapper, both win over the global `prerender.entries`: `false` excludes
+the route even under global cover, `true`/`'auto'` includes it even under
+`entries: 'off'` (`'auto'` keeps dynamic dispatch — the manifest already
+keeps all routes). Bad values are file+line build errors. `.v`-only
+routes follow the global mode (no sibling carrier).
+
 `isr: { '/blog': 60 }` freezes to `SWELTE_ISR=/blog=60` for the crawl env
 (`Hand` reads it per request): matching GET HTML 200s stamp
 `Cache-Control: public, max-age=0, s-maxage=N` +

@@ -4,8 +4,12 @@ import {
 	SwelteRpcError,
 	__swelteActionResult,
 	applyAction,
+	checkUpdated,
+	clearFetchHooks,
 	enhance,
+	handleFetch,
 	isFail,
+	isRedirect,
 	loadPage,
 	isPageError,
 	isPageData,
@@ -15,6 +19,8 @@ import {
 	__registerLibFallback,
 	page,
 	navigating,
+	swelteError,
+	updated,
 } from './sdk.js'
 
 describe('SDK error contract', () => {
@@ -347,6 +353,93 @@ describe('SDK error contract', () => {
 			ctl.destroy()
 		} finally {
 			;(globalThis as Record<string, unknown>).FormData = origFD
+		}
+	})
+
+	it('P0 item 3: swelteError builds a status-carrying error; isRedirect narrows 3xx', () => {
+		const e404 = swelteError(404, 'not found')
+		assert.ok(e404 instanceof SwelteRpcError)
+		assert.equal(e404.status, 404)
+		assert.ok(!isRedirect(e404))
+		const e303 = swelteError(303, 'see other')
+		assert.ok(isRedirect(e303))
+		assert.ok(isRedirect({ status: 302 }))
+		assert.ok(!isRedirect({ status: 200 }))
+		assert.ok(!isRedirect(new Error('x')))
+	})
+
+	it('P0 item 5: handleFetch sees and rewrites stub fetches, unregister works', async () => {
+		clearFetchHooks()
+		try {
+			const seen: { fn: string; kind: string }[] = []
+			const off = handleFetch(({ fn, kind, init }) => {
+				seen.push({ fn, kind })
+				const headers = new Headers(init.headers)
+				headers.set('x-test-hook', '1')
+				return { ...init, headers }
+			})
+			let gotHeader = ''
+			globalThis.fetch = (async (_url: unknown, init?: { headers?: Headers }) => {
+				gotHeader = init?.headers instanceof Headers ? (init.headers.get('x-test-hook') ?? '') : ''
+				return new Response(JSON.stringify({ ok: true }), { status: 200 })
+			}) as typeof fetch
+			await __swelteFetch('/b', 'ping', 'rpc', {})
+			assert.deepEqual(seen, [{ fn: 'ping', kind: 'rpc' }])
+			assert.equal(gotHeader, '1')
+			off()
+			seen.length = 0
+			await __swelteFetch('/b', 'ping2', 'rpc', {})
+			assert.deepEqual(seen, [])
+		} finally {
+			clearFetchHooks()
+		}
+	})
+
+	it('P0 item 5: handleFetch throw surfaces as the stub error', async () => {
+		clearFetchHooks()
+		try {
+			handleFetch(() => {
+				throw new Error('hook veto')
+			})
+			await assert.rejects(() => __swelteFetch('/b', 'ping', 'rpc', {}), /hook veto/)
+		} finally {
+			clearFetchHooks()
+		}
+	})
+
+	it('P0 item 4: checkUpdated flips updated when the version header changes', async () => {
+		updated.set(false)
+		let version = 'v1'
+		globalThis.fetch = (async () =>
+			new Response('', { status: 200, headers: { 'x-swelte-version': version } })) as typeof fetch
+		const g = globalThis as Record<string, unknown>
+		const prevDoc = g.document
+		g.document = { querySelector: () => null }
+		try {
+			assert.equal(await checkUpdated(), false)
+			assert.equal(updated.get(), false)
+			version = 'v2'
+			assert.equal(await checkUpdated(), true)
+			assert.equal(updated.get(), true)
+		} finally {
+			if (prevDoc === undefined) delete g.document
+			else g.document = prevDoc
+			updated.set(false)
+		}
+	})
+
+	it('P0 item 4: checkUpdated no-ops when the server omits the version header', async () => {
+		updated.set(false)
+		globalThis.fetch = (async () => new Response('', { status: 200 })) as typeof fetch
+		const g = globalThis as Record<string, unknown>
+		const prevDoc = g.document
+		g.document = { querySelector: () => null }
+		try {
+			assert.equal(await checkUpdated(), false)
+			assert.equal(updated.get(), false)
+		} finally {
+			if (prevDoc === undefined) delete g.document
+			else g.document = prevDoc
 		}
 	})
 })

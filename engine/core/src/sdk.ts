@@ -134,17 +134,63 @@ async function decodeBody<TResult>(base: string, fn: string, res: Response): Pro
 	return (await res.blob()) as unknown as TResult
 }
 
+// P0 item 5: `handleFetch` lite (SvelteKit `handleFetch` client twin).
+// Register interceptors that see/rewrite every stub fetch (`postJson` /
+// `getVerb` / `postForm` / SSE / file uploads). Each hook receives the
+// resolved `{ base, fn, kind, args, qualifier }` + the `RequestInit`
+// about to be sent, and returns a (possibly rewritten) `RequestInit`
+// — or nothing to keep it. Runs registration order; first throw wins
+// (surfaced as the stub error). `clearFetchHooks()` removes all (tests).
+export interface SwelteFetchHookArgs {
+	base: string
+	fn: string
+	kind: 'rpc' | 'get' | 'post' | 'put' | 'delete' | 'patch' | 'sse'
+	args: object
+	qualifier: string
+	init: RequestInit
+}
+export type SwelteFetchHook = (
+	args: SwelteFetchHookArgs
+) => RequestInit | void | Promise<RequestInit | void>
+const swelteFetchHooks: SwelteFetchHook[] = []
+export function handleFetch(hook: SwelteFetchHook): () => void {
+	swelteFetchHooks.push(hook)
+	return () => {
+		const i = swelteFetchHooks.indexOf(hook)
+		if (i >= 0) swelteFetchHooks.splice(i, 1)
+	}
+}
+export function clearFetchHooks(): void {
+	swelteFetchHooks.length = 0
+}
+async function swelteRunFetchHooks(
+	base: string,
+	fn: string,
+	kind: SwelteFetchHookArgs['kind'],
+	args: object,
+	qualifier: string,
+	init: RequestInit
+): Promise<RequestInit> {
+	let cur = init
+	for (const hook of [...swelteFetchHooks]) {
+		const out = await hook({ base, fn, kind, args, qualifier, init: cur })
+		if (out !== undefined && out !== null) cur = out
+	}
+	return cur
+}
+
 async function postJson<TResult>(
 	base: string,
 	fn: string,
 	args: object,
 	envelope = false
 ): Promise<TResult> {
-	const res = await fetch(base, {
+	const init = await swelteRunFetchHooks(base, fn, 'rpc', args, '', {
 		method: 'POST',
 		headers: { 'content-type': 'application/json', accept: 'application/json' },
 		body: JSON.stringify({ fn, args: args ?? {} }),
 	})
+	const res = await fetch(base, init)
 	if (!res.ok) return throwForStatus(base, fn, res)
 	if (envelope) return (await decodeEnvelope(res)) as unknown as TResult
 	return decodeBody<TResult>(base, fn, res)
@@ -159,10 +205,21 @@ async function getVerb<TResult>(
 	envelope = false
 ): Promise<TResult> {
 	const q = qualifier ? `?q=${encodeURIComponent(qualifier)}` : ''
-	const res = await fetch(`${base}${q}${encodeQuery(args ?? {}).replace(/^\?/, q ? '&' : '?')}`, {
-		method,
-		headers: { accept: 'application/json' },
-	})
+	const init = await swelteRunFetchHooks(
+		base,
+		fn,
+		method.toLowerCase() as SwelteFetchHookArgs['kind'],
+		args,
+		qualifier,
+		{
+			method,
+			headers: { accept: 'application/json' },
+		}
+	)
+	const res = await fetch(
+		`${base}${q}${encodeQuery(args ?? {}).replace(/^\?/, q ? '&' : '?')}`,
+		init
+	)
 	if (!res.ok) return throwForStatus(base, fn, res)
 	if (envelope) return (await decodeEnvelope(res)) as unknown as TResult
 	return decodeBody<TResult>(base, fn, res)
@@ -198,11 +255,14 @@ async function postForm<TResult>(
 					v instanceof File || v instanceof Blob ? v : typeof v === 'string' ? v : JSON.stringify(v)
 				)
 		}
-		const res = await fetch(`${base}${q}`, {
-			method,
-			headers: { accept: 'application/json' },
-			body: fd,
-		})
+		const res = await fetch(
+			`${base}${q}`,
+			await swelteRunFetchHooks(base, fn, 'post', args, qualifier, {
+				method,
+				headers: { accept: 'application/json' },
+				body: fd,
+			})
+		)
 		if (!res.ok) return throwForStatus(base, fn, res)
 		if (envelope) return (await decodeEnvelope(res)) as unknown as TResult
 		return res.json()
@@ -212,11 +272,14 @@ async function postForm<TResult>(
 		if (v === undefined || v === null) continue
 		params.set(k, typeof v === 'string' ? v : JSON.stringify(v))
 	}
-	const res = await fetch(`${base}${q}`, {
-		method,
-		headers: { 'content-type': 'application/x-www-form-urlencoded', accept: 'application/json' },
-		body: params.toString(),
-	})
+	const res = await fetch(
+		`${base}${q}`,
+		await swelteRunFetchHooks(base, fn, 'post', args, qualifier, {
+			method,
+			headers: { 'content-type': 'application/x-www-form-urlencoded', accept: 'application/json' },
+			body: params.toString(),
+		})
+	)
 	if (!res.ok) return throwForStatus(base, fn, res)
 	if (envelope) return (await decodeEnvelope(res)) as unknown as TResult
 	return decodeBody<TResult>(base, fn, res)
@@ -263,7 +326,11 @@ export async function* __swelteStream(
 	const url = `${base}${q}${encodeQuery(args ?? {}).replace(/^\?/, q ? '&' : '?')}`
 	const headers: Record<string, string> = { accept: 'text/event-stream' }
 	if (opts.lastEventId) headers['last-event-id'] = opts.lastEventId
-	const res = await fetch(url, { headers, signal: opts.signal })
+	const init = await swelteRunFetchHooks(base, fn, 'sse', args, qualifier, {
+		headers,
+		signal: opts.signal,
+	})
+	const res = await fetch(url, init)
 	if (!res.ok) return throwForStatus(base, fn, res)
 	if (!res.body) return
 	const reader = res.body.getReader()
@@ -568,6 +635,41 @@ export const navigating: SwelteStore<SwelteNavigatingState | null> =
 	swelteStore<SwelteNavigatingState | null>(null)
 
 export const updated: SwelteStore<boolean> = swelteStore<boolean>(false)
+
+// P0 item 4: version polling (SvelteKit `updated` lite). The V binary
+// stamps `X-Swelte-Version` on every response (config `version` or
+// package.json). `checkUpdated()` fetches `/` HEAD (same-origin, no
+// body) and flips `updated` to true when the header differs from the
+// boot-time stamp. Poll manually (`setInterval(checkUpdated, 30_000)`)
+// or call once after navigation. No-ops outside the browser / when
+// the server omits the header (older binaries).
+let swelteBootVersion: string | null | undefined
+async function swelteCurrentVersion(): Promise<string | null> {
+	try {
+		const res = await fetch('/', { method: 'HEAD' })
+		return res.headers.get('x-swelte-version')
+	} catch {
+		return null
+	}
+}
+export async function checkUpdated(): Promise<boolean> {
+	if (typeof fetch === 'undefined') return updated.get()
+	if (swelteBootVersion === undefined) {
+		try {
+			swelteBootVersion =
+				(document.querySelector('meta[name="swelte-version"]') as HTMLMetaElement | null)
+					?.content ?? (await swelteCurrentVersion())
+		} catch {
+			swelteBootVersion = null
+		}
+		if (swelteBootVersion == null) return false
+	}
+	const cur = await swelteCurrentVersion()
+	if (cur === null) return updated.get()
+	const changed = cur !== swelteBootVersion
+	if (changed) updated.set(true)
+	return changed
+}
 
 const beforeNav: SwelteBeforeNavigate[] = []
 const afterNav: SwelteAfterNavigate[] = []
@@ -958,6 +1060,33 @@ export function enhance(
 			node.removeEventListener('submit', onSubmit)
 		},
 	}
+}
+
+// P0 item 3: typed errors with status preservation (SvelteKit `error()`
+// lite). The V side throws `swelte_error(status, message)` (a
+// `SwelteError` struct value); the harness threads it to `+error` props
+// with the status. On the wire it stays `{ error, fn, path, ... }` —
+// this helper builds one from a status + message pair, and `isRedirect`
+// narrows 3xx envelopes (load envelope `status: 3xx` + Location).
+export function swelteError(status: number, message: string): SwelteRpcError {
+	const body: SwelteErrorShape = { error: message, status, location: '' }
+	return new SwelteRpcError('', 'swelte_error', status, body, message)
+}
+
+/** True when the error/response carries a redirect (3xx + Location). */
+export function isRedirect(e: unknown): e is SwelteRpcError {
+	if (e instanceof SwelteRpcError) {
+		if (e.status >= 300 && e.status < 400) return true
+		const loc =
+			(e.body as { location?: unknown } | null)?.location ??
+			(e.body as { headers?: Record<string, unknown> } | null)?.headers?.['location']
+		return typeof loc === 'string' && loc !== ''
+	}
+	if (e !== null && typeof e === 'object') {
+		const s = (e as { status?: unknown }).status
+		return typeof s === 'number' && s >= 300 && s < 400
+	}
+	return false
 }
 
 /** True when a `#lib` rel path is backend-only: a `backend` path segment
