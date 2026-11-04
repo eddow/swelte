@@ -17,6 +17,7 @@ export {
 	assertChunkHint,
 	assertLimitsHint,
 	assertPrerenderHint,
+	assertSerializedHeadersHint,
 	chunkKeyFor,
 	collectPrerenderEntries,
 	collectSvelteManifest,

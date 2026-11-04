@@ -427,6 +427,43 @@ describe('route helpers', () => {
 		assert.ok(!crawl.routes.includes('/admin/users'), JSON.stringify(crawl))
 	})
 
+	it('P2: collectPrerenderEntries awaits async entries() incl. paginated loops', async () => {
+		const { mkdtempSync, mkdirSync, writeFileSync } = await import('node:fs')
+		const { tmpdir } = await import('node:os')
+		const root = mkdtempSync(join(tmpdir(), 'swelte-preasync-'))
+		mkdirSync(join(root, 'src', 'routes', 'posts', '[slug]'), { recursive: true })
+		mkdirSync(join(root, 'src', 'lib'), { recursive: true })
+		writeFileSync(join(root, 'package.json'), '{"name":"t"}')
+		writeFileSync(join(root, 'svelte.config.js'), 'export default {}')
+		writeFileSync(join(root, 'src', 'routes', 'posts', '[slug]', '+page.svelte'), '<h1>p</h1>')
+		// Async entries with a paginated loop inside (SvelteKit `entries` can
+		// be async and typically loops a fetch API; generate awaits it).
+		writeFileSync(
+			join(root, 'src', 'routes', 'posts', '[slug]', 'entries.ts'),
+			`export async function entries() {
+				const pages = [['hello'], ['world']];
+				const out = [];
+				for (const page of pages) {
+					for (const slug of page) out.push({ slug });
+				}
+				return out;
+			}`
+		)
+		const crawl = await collectPrerenderEntries(root, 'src/routes', 'all', new Set(['integer']))
+		assert.ok(crawl.expanded.includes('/posts/hello'), JSON.stringify(crawl))
+		assert.ok(crawl.expanded.includes('/posts/world'), JSON.stringify(crawl))
+		// A Promise returned by mistake without awaiting would fail the old
+		// shape check; a rejected async entries() surfaces file+line.
+		writeFileSync(
+			join(root, 'src', 'routes', 'posts', '[slug]', 'entries.ts'),
+			`export async function entries() { throw new Error('boom'); }`
+		)
+		await assert.rejects(
+			() => collectPrerenderEntries(root, 'src/routes', 'all', new Set(['integer'])),
+			/entries\(\) threw/
+		)
+	})
+
 	it('P0 items 2+3: emitLoadCascade wraps plain leaves, passes SwelteLoadResult through', async () => {
 		const { emitLoadCascade } = await import('./vite/server-gen.js')
 		const plain = emitLoadCascade('swelte_x_', [

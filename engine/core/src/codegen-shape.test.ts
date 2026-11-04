@@ -445,6 +445,35 @@ describe('codegen shape snapshots (fetch/SSE/dispatcher)', () => {
 		assert.ok(!('./+page.svelte' in mf.wrappersByRoute))
 	})
 
+	it('P2 ssr-manifest surfaces serializedHeaders (leaf + inherited wrapper)', async () => {
+		const root = scaffold()
+		// Leaf with its own hint.
+		mkdirSync(join(root, 'src', 'routes', 'shop'), { recursive: true })
+		writeFileSync(join(root, 'src', 'routes', 'shop', '+page.svelte'), '<h1>s</h1>')
+		writeFileSync(
+			join(root, 'src', 'routes', 'shop', '+page.ts'),
+			`export const serializedHeaders = ['x-shop']`
+		)
+		// Wrapper hint inherited by a hint-less leaf in the subtree.
+		mkdirSync(join(root, 'src', 'routes', 'admin', 'users'), { recursive: true })
+		writeFileSync(join(root, 'src', 'routes', 'admin', '+route.svelte'), '<slot />')
+		writeFileSync(
+			join(root, 'src', 'routes', 'admin', '+route.ts'),
+			`export const serializedHeaders = ['x-wrap']`
+		)
+		writeFileSync(join(root, 'src', 'routes', 'admin', 'users', '+page.svelte'), '<h1>u</h1>')
+		// No hint anywhere → null (no filter).
+		mkdirSync(join(root, 'src', 'routes', 'plain'), { recursive: true })
+		writeFileSync(join(root, 'src', 'routes', 'plain', '+page.svelte'), '<h1>p</h1>')
+		await generate(root)
+		const mf = JSON.parse(readFileSync(join(root, '.swelte', 'ssr-manifest.json'), 'utf8'))
+		const by = (route: string) =>
+			(mf.routes as { route: string; serializedHeaders: unknown }[]).find((r) => r.route === route)
+		assert.deepEqual(by('/shop')?.serializedHeaders, ['x-shop'])
+		assert.deepEqual(by('/admin/users')?.serializedHeaders, ['x-wrap'])
+		assert.equal(by('/plain')?.serializedHeaders, null)
+	})
+
 	it('dispatch covers every page route in the manifest (item 15, presence)', async () => {
 		const root = scaffold()
 		mkdirSync(join(root, 'src', 'routes', 'admin'), { recursive: true })

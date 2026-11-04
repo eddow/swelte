@@ -313,7 +313,8 @@ export function emitServerGen(
 	matcherDefs?: Map<string, MatcherDef>,
 	noSsrRoutes: string[] = [],
 	noCsrRoutes: string[] = [],
-	routeLimits: { route: string; limits: RouteLimits }[] = []
+	routeLimits: { route: string; limits: RouteLimits }[] = [],
+	serializedHeaders: { route: string; headers: string[] }[] = []
 ): string {
 	/** Dynamic route arms (section 8): static beats dynamic; among dynamics,
 	 * fewer [segs] first, [...rest] catch-all last (stable sort). */
@@ -787,6 +788,42 @@ pub fn swelte_sse_emit_for(prefix string, qualifier string, req SwelteRequest, e
 		...routeLimits.map(
 			(e) =>
 				`\tout << SwelteRouteLimits{ route: ${vJsonStr(e.route)}, rate: ${e.limits.rate ?? 0}, rate_window_ms: ${e.limits.rateWindowMs ?? 0}, timeout_ms: ${e.limits.timeoutMs ?? 0}, body_limit: ${e.limits.bodyLimit ?? 0} }`
+		),
+		`\treturn out
+}`,
+		// Shared per-route predicate for the limits / serializedHeaders
+		// tables: static rows match exact-or-prefix (`/admin` also covers
+		// `/admin/x`); dynamic rows (`[id]`, `[[slug]]`, `[...rest]`) go
+		// through `swelte_match_route`, so a hint on `/users/[id]` fires
+		// for `/users/42` instead of silently never matching.
+		`pub fn swelte_route_hit(row_route string, path string) bool {
+	norm := swelte_normalize_path(path)
+	if row_route.contains('[') {
+		m, _ := swelte_match_route(row_route, norm)
+		return m
+	}
+	if row_route == '/' {
+		return true
+	}
+	return norm == row_route || norm.starts_with(row_route + '/')
+}`,
+		// Per-route serialized-headers table (P2 lite): the load envelope
+		// (`SwelteLoadResult.headers`) lands on the HTML navigation only for
+		// names listed here (exact match, case-insensitive at runtime; the
+		// V `or {}` probe covers both cases). Empty table = no filter
+		// anywhere (today's behavior preserved); an explicit `[]` row
+		// matches its route and keeps nothing.
+		`pub struct SwelteRouteSerializedHeaders {
+	pub mut:
+		route string
+		names []string
+}`,
+		`pub fn swelte_serialized_headers() []SwelteRouteSerializedHeaders {`,
+		`\tmut out := []SwelteRouteSerializedHeaders{}`,
+		...serializedHeaders.map((e) =>
+			e.headers.length
+				? `\tout << SwelteRouteSerializedHeaders{ route: ${vJsonStr(e.route)}, names: [${e.headers.map((h) => vJsonStr(h)).join(', ')}] }`
+				: `\tout << SwelteRouteSerializedHeaders{ route: ${vJsonStr(e.route)}, names: []string{} }`
 		),
 		`\treturn out
 }`,

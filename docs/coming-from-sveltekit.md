@@ -167,8 +167,15 @@ src/routes/+page.svelte (+ .v / .ts)                        →  / (root)
   `dist/Dockerfile.swelte`, `dist/_headers`). Single artifact holds.
 * `swelte export` snapshots the crawl (`entries.json` + `dist/*.html`
   + contract → `snapshot/`).
-* `entries.ts` sibling (`export function entries()`) expands dynamic
+* `entries.ts` sibling (`export function entries()`, sync or `async` —
+  awaited at generate time, so paginated fetch loops work) expands dynamic
   segments for the crawl when `prerender.entries: 'all'`.
+* Serialized response headers (SvelteKit `filterSerializedResponseHeaders`
+  lite): `export const serializedHeaders = ['x-foo', ...]` in the sibling
+  `.ts` allowlists which load-envelope headers land on the HTML
+  navigation (absent = all pass; `Set-Cookie` untouched and `Location`
+  always passes so load-side redirects keep working). Dynamic routes
+  match by pattern (`/users/[id]` fires for `/users/42`).
 * Per-route `Params` types generated (`RouteId` + `Params` in every
   `types/routes/*.d.ts`) — the `$types`-lite.
 

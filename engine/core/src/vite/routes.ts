@@ -238,6 +238,42 @@ export function assertLimitsHint(file: string, src: string): RouteLimits | null 
 	}
 	return out
 }
+/** Per-route serialized-headers allowlist (SvelteKit
+ *  `filterSerializedResponseHeaders` lite): `export const
+ *  serializedHeaders = ['x-foo', ...]` in the sibling `.ts` (leaf or
+ *  `+route.ts` wrapper). Null = absent (no filter — today's behavior:
+ *  all load-envelope headers land on the HTML navigation). An explicit
+ *  list (incl. `[]`) keeps only those names (exact match,
+ *  case-insensitive at runtime). Bad shape = file+line build error. */
+export function assertSerializedHeadersHint(file: string, src: string): string[] | null {
+	const m = /export\s+const\s+serializedHeaders\s*(?::[^=]*)?=\s*\[([^\]]*)\]/.exec(src)
+	if (!m) {
+		// Declared but unparseable — includes the typed form
+		// (`serializedHeaders: string[] = ...`), so a typed declaration
+		// never silently falls back to "no filter" (fail-open).
+		if (/export\s+const\s+serializedHeaders\s*(?::[^=]*)?=/.test(src)) {
+			const line = lineOf(src, src.search(/export\s+const\s+serializedHeaders\s*(?::[^=]*)?=/))
+			throw new Error(
+				`[swelte] ${file}:${line}: bad serializedHeaders hint — want e.g. export const serializedHeaders = ['x-foo', 'x-bar'] (quoted header names, letters/digits/dashes).`
+			)
+		}
+		return null
+	}
+	const line = lineOf(src, m.index)
+	const out: string[] = []
+	for (const part of m[1].split(',')) {
+		const trim = part.trim()
+		if (trim === '') continue
+		const mm = /^['"]([^'"]+)['"]$/.exec(trim)
+		if (!mm || !/^[A-Za-z0-9-]+$/.test(mm[1])) {
+			throw new Error(
+				`[swelte] ${file}:${line}: bad serializedHeaders hint — want e.g. export const serializedHeaders = ['x-foo', 'x-bar'] (quoted header names, letters/digits/dashes).`
+			)
+		}
+		out.push(mm[1])
+	}
+	return out
+}
 
 /** Partition a crawl pattern list by per-page flags: `false` always drops
  * (even under global cover); `true`/`'auto'` includes even under 'off';
@@ -302,6 +338,7 @@ export function collectSvelteManifest(
 				limits: null,
 				chunk: 'inherit',
 				prerender: 'inherit',
+				serializedHeaders: null,
 			})
 			continue
 		}
@@ -324,6 +361,9 @@ export function collectSvelteManifest(
 				prerender: sib
 					? assertPrerenderHint(`${routesDir}/${relPosixTop(routesAbs, sib.file)}`, sib.src)
 					: 'inherit',
+				serializedHeaders: sib
+					? assertSerializedHeadersHint(`${routesDir}/${relPosixTop(routesAbs, sib.file)}`, sib.src)
+					: null,
 			})
 			continue
 		}
@@ -378,6 +418,33 @@ export function collectSvelteManifest(
 				if (!sib) return 'inherit' as const
 				return assertPrerenderHint(`${routesDir}/${relPosixTop(routesAbs, sib.file)}`, sib.src)
 			})(),
+			serializedHeaders: (() => {
+				const sib = siblingSrc(f.replace(/\.svelte$/, '.ts'))
+				if (sib) {
+					const hint = assertSerializedHeadersHint(
+						`${routesDir}/${relPosixTop(routesAbs, sib.file)}`,
+						sib.src
+					)
+					if (hint) return hint
+				}
+				// Nearest wrapper +route.ts with an explicit hint, starting at
+				// the leaf's OWN dir (same-dir `+route.svelte` wraps it) and
+				// walking up — mirrors `flagForSvelte` in the prerender path.
+				const segs = route === '/' ? [] : route.split('/').filter(Boolean)
+				for (let i = segs.length; i >= 0; i--) {
+					const dir = segs.slice(0, i).join('/')
+					const cand = dir === '' ? `${routesAbs}/+route.ts` : `${routesAbs}/${dir}/+route.ts`
+					const hit = siblingSrc(cand)
+					if (hit) {
+						const hint = assertSerializedHeadersHint(
+							`${routesDir}/${relPosixTop(routesAbs, hit.file)}`,
+							hit.src
+						)
+						if (hint) return hint
+					}
+				}
+				return null
+			})(),
 		})
 	}
 	return { entries, hasError }
@@ -399,9 +466,11 @@ export function isStaticRoute(route: string): boolean {
 
 /** Enumerate the prerender crawl list (docs (built) item 2).
  *  Static routes are always listed. `mode: 'all'` also executes sibling
- *  `entries.ts` exports (`export function entries()` returning string[]
- *  or `{ slug }[]`-ish) for dynamic segments; bad shape = build error
- *  with file+line. No prerender implied - just the route list for crawl. */
+ *  `entries.ts` exports (`export function entries()` — sync or async —
+ *  returning string[] or `{ slug }[]`-ish) for dynamic segments; bad
+ *  shape = build error with file+line. Async (incl. paginated fetch
+ *  loops) is awaited at generate time. No prerender implied - just the
+ *  route list for crawl. */
 export async function collectPrerenderEntries(
 	root: string,
 	routesDir: string,
@@ -500,7 +569,7 @@ export async function collectPrerenderEntries(
 		}
 		if (!Array.isArray(rows)) {
 			throw new Error(
-				`[swelte] ${relative(resolve(root), sibling)}: entries() must return an array (got ${typeof rows}).`
+				`[swelte] ${relative(resolve(root), sibling)}: entries() must return an array (got ${typeof rows}) — sync or async (awaited at generate time).`
 			)
 		}
 		for (const row of rows) {

@@ -910,19 +910,22 @@ ${list(params, (p) => `\t${p.name}${p.optional ? '?' : ''}: ${p.tstype}\n`)}}
 						const noSsrRoutes: string[] = []
 						const noCsrRoutes: string[] = []
 						const routeLimits: { route: string; limits: RouteLimits }[] = []
+						const serializedHeaders: { route: string; headers: string[] }[] = []
 						try {
 							for (const e of collectSvelteManifest(routesAbs, routesDir, vMods).entries) {
 								if (e.kind === 'wrapper' || e.kind === 'error') continue
 								if (e.ssr === false) noSsrRoutes.push(e.route)
 								if (e.csr === false) noCsrRoutes.push(e.route)
 								if (e.limits) routeLimits.push({ route: e.route, limits: e.limits })
+							if (e.serializedHeaders)
+								serializedHeaders.push({ route: e.route, headers: e.serializedHeaders })
 							}
 						} catch {
 							/* no svelte routes */
 						}
 						writeIfChanged(
 							join(routesGenDir, `server_gen.v`),
-							emitServerGen(dispatched, sseMods, matchers, noSsrRoutes, noCsrRoutes, routeLimits)
+							emitServerGen(dispatched, sseMods, matchers, noSsrRoutes, noCsrRoutes, routeLimits, serializedHeaders)
 						)
 					}
 					// Leaf-vs-index clash: foo.v + foo/index.v (or +page.v) both exist.
@@ -1365,6 +1368,7 @@ export declare const dev: boolean
 								ssr: e.ssr,
 								csr: e.csr,
 								limits: e.limits ?? null,
+								serializedHeaders: e.serializedHeaders ?? null,
 								...(e.kind === 'reset' ? { reset: (e as { reset?: string }).reset ?? '' } : {}),
 								chunk: e.chunk ?? 'inherit',
 								prerender: e.prerender ?? 'inherit',

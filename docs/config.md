@@ -66,10 +66,11 @@ unchanged. When `swelte.serviceWorker.enabled` is `true` (or
 Default is runtime-only (no prerendered `.html`); `prerender.entries`
 enables the crawl. `generate()` writes `.swelte/entries.json`
 (`{ version, mode, routes, dynamics, expanded }`): static routes always
-listed, sibling `entries.ts` (`export function entries()` returning
-`string[]` | `{ slug }[]`-ish | `{ params }[]`) expands dynamics only
-when `entries: 'all'`. Bad shape = build error with file+line. No
-prerender implied — just the crawl source.
+listed, sibling `entries.ts` (`export function entries()` — sync or
+`async` — returning `string[]` | `{ slug }[]`-ish | `{ params }[]`)
+expands dynamics only when `entries: 'all'`. `async` (incl. paginated
+fetch loops inside the fn) is awaited at generate time; bad shape =
+build error with file+line. No prerender implied — just the crawl source.
 
 `swelte build` then boots the built `dist/server` on an ephemeral port
 and GETs each crawl URL with browser Accept: 200 HTML →
@@ -103,11 +104,30 @@ Per-route limits (SvelteKit `config` lite, single-binary): `export const
 limits = { rate, rateWindowMs, timeoutMs, bodyLimit }` in the sibling
 `.ts` (leaf wins, else nearest explicit wrapper; absent = global env
 defaults). All fields optional positive ints; bad shape = file+line
-build error. Longest-prefix match in `Hand` overrides `SWELTE_RATE_LIMIT`
-/ `SWELTE_RATE_WINDOW_MS` / `SWELTE_HANDLER_TIMEOUT_MS` /
+build error. Longest-prefix match in `Hand` (dynamic rows go through the
+generated `swelte_route_hit()` predicate → `swelte_match_route`, so
+`/users/[id]` applies to `/users/42`) overrides `SWELTE_RATE_LIMIT` /
+`SWELTE_RATE_WINDOW_MS` / `SWELTE_HANDLER_TIMEOUT_MS` /
 `SWELTE_BODY_LIMIT` on that route (`server_gen.v`
 `swelte_route_limits()` table; `ssr-manifest.json` surfaces `limits`).
 No regions/runtime — one binary, one deploy target.
+
+Per-route serialized headers (SvelteKit
+`filterSerializedResponseHeaders` lite): `export const serializedHeaders
+= ['x-foo', ...]` (a `: string[]` type annotation is tolerated) in the
+sibling `.ts` (leaf wins, else nearest explicit wrapper) names which
+load-envelope (`SwelteLoadResult.headers`) headers land on the HTML
+navigation. Absent = no filter (all pass — today's behavior). An
+explicit list — incl. `[]` (keep nothing) — keeps only those names
+(exact match, case-insensitive at runtime; `Set-Cookie` stays on its own
+path and `Location` always passes so load-side 3xx redirects keep their
+target). Bad shape — incl. a typed declaration that isn't a string
+array — = file+line build error. Longest-prefix match in `Hand`
+(`server_gen.v` `swelte_serialized_headers()` table; dynamic rows match
+via `swelte_route_hit()` → `swelte_match_route`, so `/users/[id]` fires
+for `/users/42`; `ssr-manifest.json` surfaces `serializedHeaders`). No
+`transformPageChunk` callback — `@[after]` already rewrites the whole
+`SwelteResponse` body.
 
 Layout reset (SvelteKit `+page@layout` lite): `admin/login/+page@.svelte`
 (file stem carries the `@`) claims `/admin/login` but renders outside

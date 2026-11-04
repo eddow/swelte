@@ -104,10 +104,38 @@ document the behavior; `ssr-manifest.test.ts` + `sdk-errors.test.ts` +
     overrides the four global hardening knobs per route; no
     regions/runtime (one artifact, one deploy target).
 
-### P2 — polish
-* `entries()` async/paginated (currently static list).
-* `transformPageChunk` = `@[after]` string rewrite exists, but no `filterSerializedResponseHeaders`-style control.
-* Streaming SSR: locked non-goal (QJS sync). Keep.
+### P2 — polish — DONE (verified, 225/225 tests pass)
+
+All three closed. Streaming SSR stays a locked non-goal (QJS sync).
+
+1. **`entries()` async/paginated**: DONE. `collectPrerenderEntries`
+   already `await`s the sibling `entries.ts` export (`await (fn as
+   () => unknown)()`), so sync and `async` both work — including
+   paginated fetch loops inside the fn (runs in Node at generate time).
+   Bad shape (non-array, throw) stays a file+line build error. Pinned by
+   the `P2: collectPrerenderEntries awaits async entries()` test
+   (`route-helpers.test.ts`) + docs in `config.md` /
+   `coming-from-sveltekit.md`.
+2. **`filterSerializedResponseHeaders`-style control**: DONE (lite).
+   `export const serializedHeaders = [...]` in the sibling `.ts` (leaf
+   wins, else the nearest wrapper's `+route.ts` — same dir first, then
+   up; same carrier as `ssr`/`csr`/`limits`; a `: string[]` type
+   annotation is tolerated) allowlists which `SwelteLoadResult.headers`
+   land on the HTML navigation. Absent = no filter (all pass — today's
+   behavior, back-compat); explicit list (incl. `[]` = keep nothing)
+   keeps only those names (exact match, case-insensitive at runtime).
+   `Set-Cookie` stays on its own path and `Location` always passes, so
+   a load-side 3xx redirect keeps its target even when the allowlist
+   omits it. Surfaced in `ssr-manifest.json`; enforced in `Hand` via the
+   generated `swelte_serialized_headers()` longest-prefix table
+   (`assertSerializedHeadersHint` rejects malformed hints — including a
+   typed declaration that isn't a string array — with file+line).
+   Dynamic rows match through the shared `swelte_route_hit()` predicate
+   (`swelte_match_route`), so `/users/[id]` fires for `/users/42`
+   instead of silently never matching; per-route `limits` uses the same
+   predicate. `transformPageChunk`-style body rewrite needs no new
+   knob: `@[after]` already rewrites the whole `SwelteResponse`.
+3. **Streaming SSR**: locked non-goal (QJS sync). Keep.
 
 ## 3. Beyond SvelteKit (where Swelte can win)
 

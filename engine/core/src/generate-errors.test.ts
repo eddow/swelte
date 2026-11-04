@@ -262,5 +262,109 @@ describe('generate() validation errors (tmp scaffold, no V binary)', () => {
 		const empty = emitServerGen([], new Set(), new Map(), [], [], [])
 		assert.ok(empty.includes('pub fn swelte_no_csr(path string) bool {'))
 		assert.ok(empty.includes('mut out := []SwelteRouteLimits{}'))
+		assert.ok(empty.includes('mut out := []SwelteRouteSerializedHeaders{}'))
+	})
+
+	it('P2 serializedHeaders: server_gen emits the allowlist table', async () => {
+		const { emitServerGen } = await import('./vite/server-gen.js')
+		const gen = emitServerGen([], new Set(), new Map(), [], [], [], [
+			{ route: '/shop', headers: ['x-foo', 'X-Bar'] },
+			{ route: '/empty', headers: [] },
+		])
+		assert.ok(gen.includes('pub struct SwelteRouteSerializedHeaders {'))
+		assert.ok(
+			gen.includes('out << SwelteRouteSerializedHeaders{ route: "/shop", names: ["x-foo", "X-Bar"] }')
+		)
+		assert.ok(gen.includes('out << SwelteRouteSerializedHeaders{ route: "/empty", names: []string{} }'))
+		// Shared predicate: dynamic rows route through swelte_match_route so
+		// `/users/[id]` hints fire for `/users/42` (static rows keep
+		// exact-or-prefix). Emitted once, used by both tables.
+		assert.ok(gen.includes('pub fn swelte_route_hit(row_route string, path string) bool {'))
+		assert.ok(gen.includes("if row_route.contains('[') {"))
+		assert.ok(gen.includes('m, _ := swelte_match_route(row_route, norm)'))
+	})
+
+	it('P2 serializedHeaders: hint validation + leaf-over-wrapper precedence', async () => {
+		const { assertSerializedHeadersHint, collectSvelteManifest } = await import('./vite.js')
+		assert.deepEqual(assertSerializedHeadersHint('f', `export const serializedHeaders = ['x-a', "X-B2"]`), [
+			'x-a',
+			'X-B2',
+		])
+		assert.deepEqual(assertSerializedHeadersHint('f', `export const serializedHeaders = []`), [])
+		assert.equal(assertSerializedHeadersHint('f', `export const x = 1`), null)
+		// Typed declarations parse — and a bad typed one still errors instead
+		// of silently failing open (no filter = all headers pass).
+		assert.deepEqual(
+			assertSerializedHeadersHint('f', `export const serializedHeaders: string[] = ['x-typed']`),
+			['x-typed']
+		)
+		assert.throws(
+			() => assertSerializedHeadersHint('f', `export const serializedHeaders: string[] = 'x-a'`),
+			/bad serializedHeaders hint/
+		)
+		assert.throws(
+			() => assertSerializedHeadersHint('f', `export const serializedHeaders = ['x ok']`),
+			/bad serializedHeaders hint/
+		)
+		assert.throws(
+			() => assertSerializedHeadersHint('f', `export const serializedHeaders = 'x-a'`),
+			/bad serializedHeaders hint/
+		)
+		const { mkdtempSync, mkdirSync, writeFileSync } = await import('node:fs')
+		const { tmpdir } = await import('node:os')
+		const root = mkdtempSync(join(tmpdir(), 'swelte-serh-'))
+		mkdirSync(join(root, 'src', 'routes', 'admin', 'users'), { recursive: true })
+		writeFileSync(join(root, 'src', 'routes', 'admin', '+route.svelte'), '<slot />')
+		writeFileSync(
+			join(root, 'src', 'routes', 'admin', '+route.ts'),
+			`export const serializedHeaders = ['x-wrap']`
+		)
+		writeFileSync(join(root, 'src', 'routes', 'admin', 'users', '+page.svelte'), '<h1>u</h1>')
+		writeFileSync(
+			join(root, 'src', 'routes', 'admin', 'users', '+page.ts'),
+			`export const serializedHeaders = ['x-leaf']`
+		)
+		// The manifest resolves leaf hints with fallback to the nearest
+		// ancestor +route.ts; plugin.ts threads them into server_gen.
+		const { entries } = collectSvelteManifest(join(root, 'src', 'routes'), 'src/routes', new Set())
+		const by = (svelte: string) => entries.find((e) => e.svelte === svelte)
+		assert.deepEqual(by('admin/+route.svelte')?.serializedHeaders, ['x-wrap'])
+		assert.deepEqual(by('admin/users/+page.svelte')?.serializedHeaders, ['x-leaf'])
+	})
+
+	it('P2 serializedHeaders: wrapper hint covers hint-less leaves in the subtree', async () => {
+		const { collectSvelteManifest } = await import('./vite.js')
+		const { mkdtempSync, mkdirSync, writeFileSync } = await import('node:fs')
+		const { tmpdir } = await import('node:os')
+		const root = mkdtempSync(join(tmpdir(), 'swelte-serhwrap-'))
+		mkdirSync(join(root, 'src', 'routes', 'admin', 'users'), { recursive: true })
+		writeFileSync(join(root, 'src', 'routes', 'admin', '+route.svelte'), '<slot />')
+		writeFileSync(
+			join(root, 'src', 'routes', 'admin', '+route.ts'),
+			`export const serializedHeaders = ['x-wrap']`
+		)
+		writeFileSync(join(root, 'src', 'routes', 'admin', 'users', '+page.svelte'), '<h1>u</h1>')
+		const { entries } = collectSvelteManifest(join(root, 'src', 'routes'), 'src/routes', new Set())
+		const page = entries.find((e) => e.svelte === 'admin/users/+page.svelte')
+		assert.deepEqual(page?.serializedHeaders, ['x-wrap'])
+	})
+
+	it('P2 serializedHeaders: leaf inherits from its own directory wrapper', async () => {
+		const { collectSvelteManifest } = await import('./vite.js')
+		const { mkdtempSync, mkdirSync, writeFileSync } = await import('node:fs')
+		const { tmpdir } = await import('node:os')
+		const root = mkdtempSync(join(tmpdir(), 'swelte-serhown-'))
+		mkdirSync(join(root, 'src', 'routes', 'admin'), { recursive: true })
+		writeFileSync(join(root, 'src', 'routes', 'admin', '+route.svelte'), '<slot />')
+		writeFileSync(
+			join(root, 'src', 'routes', 'admin', '+route.ts'),
+			`export const serializedHeaders = ['x-own']`
+		)
+		writeFileSync(join(root, 'src', 'routes', 'admin', '+page.svelte'), '<h1>a</h1>')
+		// `admin/+route.svelte` wraps `admin/+page.svelte`, so its hint is
+		// the nearest one — same-dir wrappers count, not just ancestors.
+		const { entries } = collectSvelteManifest(join(root, 'src', 'routes'), 'src/routes', new Set())
+		const page = entries.find((e) => e.svelte === 'admin/+page.svelte')
+		assert.deepEqual(page?.serializedHeaders, ['x-own'])
 	})
 })

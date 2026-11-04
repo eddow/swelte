@@ -185,17 +185,39 @@ fn swelte_sanitize_error(message string, status int) string {
 	return message
 }
 
+// P2 serializedHeaders-lite (SvelteKit `filterSerializedResponseHeaders`
+// lite): longest-prefix match over `routes.swelte_serialized_headers()`
+// via the generated `routes.swelte_route_hit()` predicate (static rows =
+// exact-or-prefix, dynamic rows = `swelte_match_route`). Returns
+// `found` = the route names a list at all (incl. `[]` = keep nothing)
+// plus the names; absent = no filter (today's behavior preserved). One
+// table scan per request.
+fn swelte_serialized_lookup(path string) (bool, []string) {
+	mut best := -1
+	mut found := false
+	mut names := []string{}
+	for row in routes.swelte_serialized_headers() {
+		r := row.route
+		if routes.swelte_route_hit(r, path) && r.len > best {
+			best = r.len
+			found = true
+			names = row.names.clone()
+		}
+	}
+	return found, names
+}
+
 // Per-route limits lookup (P1 item 12 lite): longest-prefix match over
 // `routes.swelte_route_limits()`; 0 fields = no override (fall through
 // to the global env knob). Pure + fast — runs before the rate/body gates.
+// Same `swelte_route_hit` predicate as serializedHeaders, so dynamic
+// rows (`/users/[id]`) override for their concrete paths too.
 fn swelte_limits_for(path string) routes.SwelteRouteLimits {
 	mut best := routes.SwelteRouteLimits{}
 	mut best_len := -1
-	norm := if path.len > 1 && path.ends_with('/') { path[..path.len - 1] } else { path }
 	for lim in routes.swelte_route_limits() {
 		r := lim.route
-		hit := if r == '/' { true } else { norm == r || norm.starts_with(r + '/') }
-		if hit && r.len > best_len {
+		if routes.swelte_route_hit(r, path) && r.len > best_len {
 			best = lim
 			best_len = r.len
 		}
@@ -556,7 +578,27 @@ fn (mut app App) before_request(mut ctx Ctx) veb.Result {
 			// P0 item 2: the load envelope lands on the HTML navigation —
 			// Set-Cookie + custom headers + non-200 status (redirect/error
 			// from the load). Plain loads are a 200 default envelope.
+			// P2 serializedHeaders-lite: when the route names an allowlist
+			// (`export const serializedHeaders = [...]` →
+			// `swelte_serialized_headers()`), only those header names land
+			// here (exact match, case-insensitive); absent = no filter.
+			// `Location` always passes — a load-side 3xx redirect must not
+			// lose its target when the allowlist omits it.
+			filtered, allowed := swelte_serialized_lookup(path)
 			for k, v in load_res.headers {
+				lk := k.to_lower()
+				if filtered && lk != 'location' {
+					mut keep := false
+					for a in allowed {
+						if a.to_lower() == lk {
+							keep = true
+							break
+						}
+					}
+					if !keep {
+						continue
+					}
+				}
 				ctx.res.header.set_custom(k, v) or { continue }
 			}
 			for c in load_res.cookies {

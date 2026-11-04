@@ -136,6 +136,11 @@ export interface SvelteRouteEntry {
 	 * nearest explicit wrapper; both win over the global `prerender.entries`.
 	 * `'auto'` = include in the crawl + keep dynamic dispatch. */
 	prerender: 'prerender-true' | 'prerender-false' | 'prerender-auto' | 'inherit'
+	/** Per-route serialized-headers allowlist (SvelteKit
+	 * `filterSerializedResponseHeaders` lite): `export const
+	 * serializedHeaders = [...]` in the sibling `.ts`. Null = absent
+	 * (no filter). Leaf wins, else nearest explicit wrapper. */
+	serializedHeaders: string[] | null
 }
 
 export interface PrerenderCrawl {
