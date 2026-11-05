@@ -79,7 +79,8 @@ const groups: { title: string; links: { href: string; label: string }[] }[] = [
 		title: 'Plus',
 		links: [
 			{ href: '/plus/jobs', label: 'Jobs' },
-			{ href: '/plus/db', label: 'Db' },
+			{ href: '/plus/db', label: 'Database' },
+			{ href: '/plus/realtime', label: 'Realtime' },
 		],
 	},
 	{

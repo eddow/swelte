@@ -1,6 +1,6 @@
 {
   "name": "@swelte/core",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "description": "Swelte framework core — V + Svelte unified RPC bridge (Vite plugin, SDK generator, CLI)",
   "type": "module",
   "main": "./dist/index.js",
@@ -45,7 +45,7 @@
     "npm-skills": "^0.5.1"
   },
   "dependencies": {
-    "@swelte/vvm": "^0.1.3"
+    "@swelte/vvm": "^0.1.4"
   },
   "typesVersions": {
     "*": {

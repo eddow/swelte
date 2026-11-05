@@ -99,10 +99,17 @@ export const searchIndex: SearchEntry[] = [
 	},
 	{
 		href: '/plus/db',
-		label: 'Db',
+		label: 'Database',
 		group: 'Plus',
 		keywords:
-			'plus db sqlite migrate kv backend exec_none wal swelte_kv migrations _swelte_migrations embedded database rooms broadcast emit subscribe ws websocket socket wssay echo hub ping',
+			'plus db database sqlite migrate kv backend exec_none wal swelte_kv migrations _swelte_migrations embedded database persistence',
+	},
+	{
+		href: '/plus/realtime',
+		label: 'Realtime',
+		group: 'Plus',
+		keywords:
+			'plus realtime rooms broadcast emit subscribe room sse ws websocket socket wssay echo hub ping sub recv live hub fan-out backpressure dbplugin',
 	},
 	{
 		href: '/from-sveltekit',

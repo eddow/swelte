@@ -12,6 +12,13 @@ export default defineConfig({
   // See: node_modules/@sveltejs/vite-plugin-svelte/src/index.js (name) vs
   // ~/.vscode/extensions/svelte.svelte-vscode-*/node_modules/@sveltejs/load-config/dist/src/index.js
   preprocess: vitePreprocess(),
+  // Client <await> (Svelte 5 experimental.async) lives here — NOT only in
+  // vite.config.ts. The VS Code Svelte extension / svelte-language-server
+  // reads svelte.config.js directly and never sees vite.config.ts, so an
+  // await in markup reports `experimental_async_missing` in the editor even
+  // when `vite build` passes. vite.config.ts spreads this file, so the Vite
+  // build picks it up from here too (its own merge is just a fallback).
+  compilerOptions: { experimental: { async: true } },
   // Illustrative only — all defaults. defineConfig() keeps this key
   // non-enumerable: invisible to svelte() (no "invalid plugin options"
   // warning) but still readable by @swelte/core's loadConfig.

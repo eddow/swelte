@@ -196,7 +196,10 @@ src/routes/+page.svelte (+ .v / .ts)                        →  / (root)
   No `$app/forms`, no `$env/static|dynamic/*` (locked non-goals —
   `#app/paths` + `#app/environment` + `SWELTE_*` stay the surface).
 * Streaming: client bundles compile with
-  `compilerOptions.experimental.async` (see `templates/base/vite.config.ts`),
+  `compilerOptions.experimental.async` (lives in `svelte.config.js` — the
+  language server reads that file directly and never sees `vite.config.ts`,
+  so the flag must be there for the editor to accept `<await>`; `vite.config.ts`
+  spreads it through for the build — see `templates/base/svelte.config.js`),
   so `<await>` Suspense resolves in the browser. SSR stays sync
   (ssr-qjs `generate: 'server'`, no async) — the SSR compile pass rejects
   top-level `await`/`fetch` with file+line.

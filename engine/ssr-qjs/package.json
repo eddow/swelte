@@ -1,6 +1,6 @@
 {
   "name": "@swelte/ssr-qjs",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "description": "Swelte SSR adapter: embedded QuickJS engine (default). Re-exports @swelte/core and adds build + runtime SSR.",
   "type": "module",
   "main": "./dist/index.js",
@@ -35,12 +35,12 @@
     "postpack": "npm-skills refs restore"
   },
   "peerDependencies": {
-    "@swelte/core": "^0.1.3",
     "svelte": "^5.0.0",
     "vite": "^6.0.0",
     "rollup": "^4.0.0"
   },
   "dependencies": {
+    "@swelte/core": "^0.1.4",
     "typescript": "^5.0.0"
   },
   "devDependencies": {

@@ -1,7 +1,7 @@
 {
   "name": "tests",
   "private": true,
-  "version": "0.1.3",
+  "version": "0.1.4",
   "type": "module",
   "scripts": {
     "dev": "swelte dev",
@@ -18,15 +18,15 @@
   },
   "dependencies": {
     "svelte": "^5.0.0",
-    "@swelte/core": "^0.1.3",
-    "@swelte/plus": "^0.1.3",
-    "@swelte/ssr-qjs": "^0.1.3"
+    "@swelte/core": "^0.1.4",
+    "@swelte/plus": "^0.1.4",
+    "@swelte/ssr-qjs": "^0.1.4"
   },
   "devDependencies": {
     "@sveltejs/vite-plugin-svelte": "^5.0.0",
     "@types/node": "^26.6.6",
     "typescript": "^5.0.0",
     "vite": "^6.0.0",
-    "@swelte/vvm": "^0.1.3"
+    "@swelte/vvm": "^0.1.4"
   }
 }
