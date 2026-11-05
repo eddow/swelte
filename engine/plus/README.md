@@ -25,6 +25,11 @@ export default defineConfig({
   + `db/migrations/001_swelte_kv.sql`; applies pendings in order,
   tracked in `_swelte_migrations`. Routes `import backend` — core copies
   `vlib/backend/*.v` into `.swelte/` at generate (see `includes`).
+- **rooms** (same package, no new dep) — cross-request SSE broadcast.
+  Any verb/`@[rpc]` calls `backend.emit(room, msg)`; an `@[sse]` fn with
+  a trailing `(sub fn (string) chan string, emit fn (string) bool)` tail
+  subscribes and streams live hub messages. Harness owns the subscription
+  (auto-reap on disconnect); single-instance best-effort like cron.
 
 Full docs: `docs/plus.md`, `docs/cli.md` (`swelte migrate`), `docs/specs/future.md` items 1–2.
 V lesson: DDL/DML need `exec_none` (`!= 101`); `exec()` only steps row queries.

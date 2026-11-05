@@ -148,6 +148,10 @@ if (browser) {
 		</ul>
 	{/if}
 
+	<!-- Query-string note: goto/preloadData accept full URLs with ?q — the
+	     router matches on the path half and keeps the query for history +
+	     the @[load] fetch. Plain <a href="?who="> links work too (click
+	     handler routes through goto with the same stripping). -->
 	<!-- Streaming lives on the ssr=false twin (/router/live): this route is
 	     SSR-on, so sync renderRoute only. See ./live/+page.svelte. -->
 	<p><a href="/router/live">streaming twin → /router/live (ssr=false, async &lt;await&gt;)</a></p>

@@ -1,6 +1,9 @@
 // Session leaf: locals + cookie constructors + redirect.
 // `session/+route.v` stamps locals['uid']; loads/verbs read it.
-// `?go` returns swelte_redirect('/router'); `?bye` deletes the cookie.
+// `?go` (POST) returns swelte_redirect('/router'); `?bye` deletes the cookie.
+// NOTE: the redirect arm is POST-only by design — a GET navigation
+// (`<a href="/session?go">`) has no verb arm to hit and falls through to
+// the dispatch "not found" path, so the page uses a plain POST form.
 module session_page
 
 pub struct SessionProps {
@@ -23,6 +26,12 @@ pub fn who_session(req SwelteRequest) string {
 }
 
 @[get('go')]
+pub fn go_router_redirect_hint(req SwelteRequest) string {
+	_ = req
+	return 'use POST /session?go (GET has no verb arm)'
+}
+
+@[post('go')]
 pub fn go_router(req SwelteRequest) SwelteResponse {
 	_ = req
 	return swelte_redirect('/router', 0)

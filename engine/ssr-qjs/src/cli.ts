@@ -19,7 +19,7 @@ export interface SsrDevRunOptions {
 /** Boot sidecar + Vite + V (core runDev) with SWELTE_SSR_URL wired. */
 export async function runSsrDev(opts: SsrDevRunOptions = {}): Promise<void> {
 	const root = resolve(String(opts.root ?? process.cwd()))
-	const { loadConfig } = await import('@swelte/core/config')
+	const { loadConfig, loadProjectSwelteOptions } = await import('@swelte/core/config')
 	const outDir = String(opts.outDir ?? (await loadConfig(root)).outDir ?? '.swelte')
 	const { startSsrDevServer, renderFileFor } = await import('./dev.js')
 	const { emitRenderJs } = await import('./ssr.js')
@@ -31,7 +31,7 @@ export async function runSsrDev(opts: SsrDevRunOptions = {}): Promise<void> {
 			configResolved?: (c: { root: string }) => void
 		}
 	}
-	const plug = swelte({})
+	const plug = swelte({ ...(await loadProjectSwelteOptions(root)) })
 	plug.configResolved?.({ root })
 	await plug.buildStart?.()
 	const mf = join(root, outDir, 'ssr-manifest.json')

@@ -32,15 +32,18 @@ function listVFiles(dir: string): string[] {
 export async function runTest(ctx: Ctx): Promise<void> {
 	const root = resolve(String(ctx.opts.root ?? process.cwd()))
 	const { resolveV, vVersion, toolchainEnv } = await import('../toolchain.js')
-	const { loadConfig } = await import('../gen/config.js')
+	const { loadConfig, loadProjectSwelteOptions } = await import('../gen/config.js')
 	const v = resolveV(import.meta.url)
 	ctx.log(`V toolchain: ${vVersion(v)} (${v})`)
 	ctx.log(`root ${root}`)
 	const cfg = await loadConfig(root)
+	// Project plugins from vite.config.ts (same as build: the CLI never
+	// loads the Vite config, so recover them for generate()).
+	const projectSwelteOpts = await loadProjectSwelteOptions(root)
 	// 1. generate first (types must be fresh for the contract check).
 	try {
 		const { swelte } = await import('../vite.js')
-		const plug = swelte({}) as unknown as {
+		const plug = swelte({ ...projectSwelteOpts }) as unknown as {
 			buildStart?: () => Promise<void> | void
 			configResolved?: (c: { root: string }) => void
 		}

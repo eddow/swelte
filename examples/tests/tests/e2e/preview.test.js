@@ -3,7 +3,7 @@
 // dist/server; SERVE=preview (default) goes through the preview CLI.
 import { describe, before, after } from 'node:test'
 import { startPreview, stopPreview, root } from './config.preview.js'
-import { defineSharedContract, defineSsrContract, defineParityContract, defineParitySsrContract } from './battery.js'
+import { defineSharedContract, defineSsrContract, defineParityContract, defineParitySsrContract, defineWsContract } from './battery.js'
 
 describe('tests example — e2e preview (SERVE=direct|preview)', () => {
   let s = { runnable: false, mode: process.env.SERVE === 'direct' ? 'direct' : 'preview' }
@@ -17,4 +17,5 @@ describe('tests example — e2e preview (SERVE=direct|preview)', () => {
   defineParityContract(() => ({ base: s.base, runnable: s.runnable, root }), tag())
   // SSR renderer present in the built server (embedded QJS) — full parity.
   defineParitySsrContract(() => ({ base: s.base, runnable: s.runnable }), tag() + ':ssr')
+  defineWsContract(() => ({ base: s.base, runnable: s.runnable }), tag())
 })

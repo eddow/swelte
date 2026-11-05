@@ -51,7 +51,7 @@ only: no async render, no streaming.
   shim header).
 * **Cost: ~1MB on top of the binary, ~ms render budget** — measured: 5.1MB → 6.1MB,
   `renderRoute` ~0.012ms in-process, browser `GET /` ~3–12ms wall,
-  16MB cap ≈ 200× the bundle. Full numbers in [docs/ssr.md](https://github.com/eddow/swelte/blob/main/docs/ssr.md).
+  16MB cap ≈ 200× the bundle. Full numbers in [docs/ssr.md](https://github.com/eddow/swelte/blob/master/docs/ssr.md).
 
 When a guard bites, the failure mode is always the same: SPA shell
 or `+error` HTML with the right status — never blank, never JSON
@@ -59,6 +59,6 @@ for navigations, server stays up.
 
 ## Further reading
 
-* [docs/ssr.md](https://github.com/eddow/swelte/blob/main/docs/ssr.md) — the built record: ownership, request path,
+* [docs/ssr.md](https://github.com/eddow/swelte/blob/master/docs/ssr.md) — the built record: ownership, request path,
   `@[load]` cascade, measured budgets, gate halves.
 * `c/README.md` — vendored QuickJS version, file list, build.

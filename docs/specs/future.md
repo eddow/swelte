@@ -20,12 +20,25 @@ SvelteKit couldn't / didn't:
    applies pendings in order (tracked in `_swelte_migrations`, idempotent).
    V lesson: DDL/DML need `exec_none` (`exec` only steps row queries).
    Next: KV-backed SSE rooms / SWR regen / outbox queue.
-3. **First-class `@[ws]`**: not started. SvelteKit has no WS primitive. V
-   `veb` + Svelte runes = typed socket Rooms/broadcast to pair with
-   existing `@[sse]` list/emit modes.
-4. **SSE broadcast channels**: per-request list/emit lives in core (parity).
-   Cross-request `emit('room', msg)` not started — re-add only with real
-   V emission behind it.
+3. **First-class `@[ws]`**: DONE (`@swelte/plus/db` hub + core
+   `@[ws]`). `validateWsFn` shape + codegen (`swelte_ws_open` /
+   `swelte_ws_route,is,open_for` / `swelte_serve_ws` pump +
+   `__swelteWsUrl` stub) + `ws.v` RFC 6455 frames (accept-key,
+   masked-read/unmasked-write, ping/pong/close/continuation) +
+   `ws-echo` (echo) / `ws-rooms` (room join + `ws_say` emit) fixtures
+   + raw `wsConnect()` helper. SvelteKit has no WS primitive. V `veb`
+   + Svelte runes = typed socket Rooms/broadcast on the same hub as
+   `@[sse]` rooms (`sub` closure + `emit`, auto-reap on disconnect).
+   Proven live: echo round-trip + two-subscriber fan-out (e2e
+   battery `defineWsContract`, dev + preview).
+4. **SSE broadcast channels**: DONE (`@swelte/plus/db` hub + core room-mode
+   `@[sse]`). Cross-request `backend.emit('room', msg)` fans out to every
+   live stream: route fn takes trailing `(sub fn (string) chan string,
+   emit fn (string) bool)`; harness injects the subscribe closure and
+   auto-reaps on disconnect. In-memory, cap-1 per-subscriber buffer
+   (slow subscriber drops, publisher never stalls). Single-instance
+   best-effort (same tier as cron) — SvelteKit has no WS/SSE primitive
+   at all. Next: `@[ws]` rooms on the same hub.
 5. **ISR → SWR background regen**: today headers-only
    (`s-maxage+X-Swelte-Revalidate`) in core (parity). Background regen
    (re-render on timer + atomic `dist/*.html` swap) not started — the `swr`
@@ -37,14 +50,14 @@ SvelteKit couldn't / didn't:
    queue not started — the `outbox` skeleton (key helpers only, no SW
    snippet) was removed; re-add when background-sync + replay land.
 8. **Hardening as config**: DONE — `BODY_LIMIT/RATE_LIMIT/HANDLER_TIMEOUT` global env knobs + per-route `export const limits = {rate, rateWindowMs, timeoutMs, bodyLimit}` (`swelte_route_limits()` table, longest-prefix match, `limited` E2E fixture).
-9. **Agent-native**: `swelte check --format json` + MCP + contract snapshot already ahead. Next: `swelte studio` (route graph UI from `list_routes`) + `explain_bytecode_error` for prod traces.
+9. **Agent-native**: `swelte check --format json` + MCP + contract snapshot already ahead. Next: mcp `list_routes` + `explain_bytecode_error` for prod traces.
 
 ## Suggested order
 
 1. #8 Hardening as config — DONE (global + per-route `limits` shipped, close it).
 2. #2 Embedded SQLite/KV — DONE (unlocks everything below; KV is the primitive).
-3. #4 SSE broadcast (`emit(room, msg)`) — small delta, completes SSE story on #2 pubsub.
-4. #3 First-class `@[ws]` — builds on #4 broadcast infra, SvelteKit has no primitive.
+3. #4 SSE broadcast (`emit(room, msg)`) — DONE (hub + room-mode SSE, proven end-to-end).
+4. #3 First-class `@[ws]` — DONE (rooms/broadcast on the same hub + `ws.v` frames + e2e battery, proven live).
 5. #5 SWR background regen — reuses cron timer + atomic `dist/*.html` swap.
 6. #7 Offline outbox — needs SW + #2 replay queue.
 7. #6 V-native image pipeline — heavy, isolated, late.

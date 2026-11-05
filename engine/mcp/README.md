@@ -62,6 +62,6 @@ not line-level.
 
 ## Design docs
 
-- [MCP](https://github.com/eddow/swelte/blob/main/docs/mcp.md) — MCP server (built)
-- [RPC](https://github.com/eddow/swelte/blob/main/docs/rpc.md) — `.v` imports, attributes, transport (built)
-- [Types](https://github.com/eddow/swelte/blob/main/docs/types.md) — V → TS projection (built)
+- [MCP](https://github.com/eddow/swelte/blob/master/docs/mcp.md) — MCP server (built)
+- [RPC](https://github.com/eddow/swelte/blob/master/docs/rpc.md) — `.v` imports, attributes, transport (built)
+- [Types](https://github.com/eddow/swelte/blob/master/docs/types.md) — V → TS projection (built)

@@ -1,7 +1,7 @@
 import { defineConfig } from 'vite';
 import { svelte } from '@sveltejs/vite-plugin-svelte';
 import { swelte } from '@swelte/ssr-qjs';
-import { jobsPlugin } from '@swelte/plus';
+import { jobsPlugin, dbPlugin } from '@swelte/plus';
 import svelteConfig from './svelte.config.js';
 
 const vBackendUrl =
@@ -24,8 +24,9 @@ export default defineConfig({
     // the unified config for any option not passed here.
     swelte({
       vBackendUrl,
-      // Beyond-parity cron lives in @swelte/plus/jobs (core stays parity-only).
-      plugins: [jobsPlugin],
+      // V+TS plugins (core contract, implemented by @swelte/plus):
+      // jobs owns `@[cron]`; db owns the backend hub (KV + SSE/WS rooms).
+      plugins: [jobsPlugin, dbPlugin],
     }),
   ],
 });

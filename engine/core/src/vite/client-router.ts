@@ -209,7 +209,7 @@ export function emitClientRouter(input: ClientRouterInput): ClientRouterOutput {
 		/* no error page */
 	}
 	o.push(`
-import { mount, hydrate } from 'svelte'
+import { flushSync, mount, hydrate, unmount } from 'svelte'
 
 const __swelteMatcherFns = { ${[...matchers.values()].map((md) => `${md.name}: (s) => { ${md.jsBody} }`).join(', ')} }
 function __swelteSegName(seg) {
@@ -276,23 +276,35 @@ function __swelteResolveRoute(r) {
 	return Promise.all(mods.map((m, i) => (typeof loaders[i] === 'function' ? __swelteResolve(loaders[i], m) : loaders[i]))).then((comps) => ({ page: comps[0], wrappers: comps.slice(1) }))
 }
 function __teardownMounted() {
-	for (const inst of __mountedRoots) { try { unmount(inst) } catch {} }
+	for (const inst of __mountedRoots) { try { flushSync(() => unmount(inst)) } catch {} }
 	__mountedRoots = []
 }
-// Swap without an empty frame: mount the new tree into an off-DOM host,
-// then move it in and drop the old tree in one step — no blank flash.
+// Swap without an empty frame: teardown and mount inside one flushSync so
+// no intermediate commit callbacks run with a null batch — that window is
+// where Svelte's DEV-only await_reactivity_loss tracker fires on an
+// unrelated each block (see /router/live). Mount off-DOM, move the new
+// tree in, then drop the old tree: atomic swap, no blank flash.
 function __swapIn(target, build) {
 	const host = document.createElement('div')
+	const oldRoots = __mountedRoots
+	__mountedRoots = []
 	const inst = build(host)
 	const next = host.firstChild
-	if (!next) { target.innerHTML = ''; __teardownMounted(); if (inst) __mountedRoots = [inst]; return }
-	__teardownMounted()
-	target.insertBefore(next, target.firstChild)
-	while (target.childNodes.length > 1) target.removeChild(target.lastChild)
-	__mountedRoots = inst ? [inst] : []
+	flushSync(() => {
+		if (!next) {
+			target.innerHTML = ''
+		} else {
+			target.insertBefore(next, target.firstChild)
+			while (target.childNodes.length > 1) target.removeChild(target.lastChild)
+		}
+		for (const o of oldRoots) { try { unmount(o) } catch {} }
+	})
+	__mountedRoots = inst ? (Array.isArray(inst) ? inst.flat() : [inst]) : []
 }
 export async function mountSwelteRoute(target, pathname, errorProps = undefined) {
-	const path = pathname !== '/' && pathname.endsWith('/') ? pathname.slice(0, -1) : pathname
+	const noparse = String(pathname ?? '').split('#')[0]
+	const pathonly = noparse.split('?')[0] || '/'
+	const path = pathonly !== '/' && pathonly.endsWith('/') ? pathonly.slice(0, -1) : pathonly
 	for (const r of ROUTES) {
 		const params = matchSegs(r.path, path)
 		if (!params) continue
@@ -324,20 +336,32 @@ export async function mountSwelteRoute(target, pathname, errorProps = undefined)
 	if (target.childNodes.length === 0) {
 		// Cold boot (empty #app): mount directly, no swap needed.
 		const host = document.createElement('div')
-		const insts = build(host)
-		const next = host.firstChild
-		if (next) target.appendChild(next)
+		let insts = null
+		flushSync(() => {
+			insts = build(host)
+			const next = host.firstChild
+			if (next) target.appendChild(next)
+		})
 		__mountedRoots = Array.isArray(insts) ? insts.flat() : [insts]
 	} else {
 		// Client navigation: build off-DOM, then swap atomically.
+		// Teardown the old tree FIRST inside the same flushSync (old
+		// effects destroyed before the new tree mounts), so the old page's
+		// each-block commit callbacks can't fire while the new page's async
+		// boundary tracker is live — that overlap is the /router/live
+		// await_reactivity_loss source (both batches null + stale each read).
 		const host = document.createElement('div')
+		const oldRoots = __mountedRoots
+		__mountedRoots = []
 		const insts = build(host)
 		const next = host.firstChild
-		if (next) {
-			__teardownMounted()
-			target.insertBefore(next, target.firstChild)
-			while (target.childNodes.length > 1) target.removeChild(target.lastChild)
-		}
+		flushSync(() => {
+			for (const o of oldRoots) { try { unmount(o) } catch {} }
+			if (next) {
+				target.insertBefore(next, target.firstChild)
+				while (target.childNodes.length > 1) target.removeChild(target.lastChild)
+			}
+		})
 		__mountedRoots = Array.isArray(insts) ? insts.flat() : [insts]
 	}
 	return { params, path: r.path }
@@ -360,7 +384,9 @@ export async function mountSwelteRoute(target, pathname, errorProps = undefined)
 // leaf page takes over without remount. Falls back to mount on mismatch.
 export async function hydrateSwelteRoute(target, pathname, errorProps = undefined) {
 	try {
-		const path = pathname !== '/' && pathname.endsWith('/') ? pathname.slice(0, -1) : pathname
+		const noparse = String(pathname ?? '').split('#')[0]
+		const pathonly = noparse.split('?')[0] || '/'
+		const path = pathonly !== '/' && pathonly.endsWith('/') ? pathonly.slice(0, -1) : pathonly
 		for (const r of ROUTES) {
 			const params = matchSegs(r.path, path)
 			if (!params) continue
@@ -417,16 +443,29 @@ async function __runGuards(kind, arg) {
 	return false
 }
 function __matchRoute(pathname) {
-	const path = pathname !== '/' && pathname.endsWith('/') ? pathname.slice(0, -1) : pathname
+	const noparse = String(pathname ?? '').split('#')[0]
+	const pathonly = noparse.split('?')[0] || '/'
+	const path = pathonly !== '/' && pathonly.endsWith('/') ? pathonly.slice(0, -1) : pathonly
 	for (const r of ROUTES) {
 		const params = matchSegs(r.path, path)
 		if (params) return { route: r, params }
 	}
 	return null
 }
+function __fullUrl(url, pathname) {
+	// Keep the caller's query/hash for history + data fetch: strings carry
+	// them verbatim, URL objects rebuild from their parts.
+	if (typeof url === 'string') return url
+	try {
+		return pathname + url.search + url.hash
+	} catch {
+		return pathname
+	}
+}
 export async function goto(url, opts) {
 	opts = opts || {}
-	const to = typeof url === 'string' ? url : url.pathname
+	const pathname = typeof url === 'string' ? String(url).split('#')[0].split('?')[0] || '/' : url.pathname
+	const to = __fullUrl(url, pathname)
 	const from = __routerMounted ? __routerMounted.url : null
 	__setNavigating({ from, to })
 	const cancelled = await __runGuards('before', { from: __routerMounted, to })
@@ -443,8 +482,9 @@ if (histState && typeof histState === 'object' && histState['page-state'] && typ
 return fallback
 }
 export async function preloadData(url) {
-	const to = typeof url === 'string' ? url : url.pathname
-	const hit = __matchRoute(to)
+	const pathname = typeof url === 'string' ? String(url).split('#')[0].split('?')[0] || '/' : url.pathname
+	const to = __fullUrl(url, pathname)
+	const hit = __matchRoute(pathname)
 	if (!hit) return null
 	// Static pages (no @[load] anywhere on the chain) carry no page data:
 	// skip the preload fetch entirely — no request, no 404 noise.
@@ -468,8 +508,9 @@ export async function replaceState(url, state) {
 	if (pageState) __setPage({ ...(__routerMounted || {}), state: pageState })
 }
 export async function preloadCode(url) {
-	const to = typeof url === 'string' ? url : url.pathname
-	const hit = __matchRoute(to)
+	const pathname = typeof url === 'string' ? String(url).split('#')[0].split('?')[0] || '/' : url.pathname
+	const to = __fullUrl(url, pathname)
+	const hit = __matchRoute(pathname)
 	if (!hit) return null
 	if (hit.route.chunkMods) { try { await __swelteResolveRoute(hit.route) } catch {} }
 	return { route: hit.route.path, params: hit.params, cached: true }

@@ -308,6 +308,21 @@ export async function __swelteFetch<TResult>(
 }
 
 /**
+ * Internal URL builder for code-generated `@[ws]` stubs (future.md #3).
+ * Same route + query interpolation as fetch stubs, but returns the
+ * `ws(s)://` URL — the browser opens a native WebSocket itself
+ * (`new WebSocket(url)`). Not user API — import the `.v` file instead.
+ */
+export function __swelteWsUrl(base: string, _fn: string, args: object = {}): string {
+	const path = `${base}${encodeQuery(args ?? {})}`
+	if (typeof location !== 'undefined') {
+		const proto = location.protocol === 'https:' ? 'wss:' : 'ws:'
+		return `${proto}//${location.host}${path}`
+	}
+	return path
+}
+
+/**
  * Internal SSE reader for code-generated `@[sse]` stubs (roadmap §14,
  * veb streaming). GETs `base` with `Accept: text/event-stream` and
  * yields each `data:` frame as it arrives (true incremental flush —

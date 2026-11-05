@@ -306,4 +306,28 @@ describe('db plugin (embedded SQLite)', () => {
 	it('dbInitialMigration creates the KV table', () => {
 		assert.ok(dbInitialMigration().includes('create table if not exists swelte_kv'))
 	})
+	it('dbHelperTemplate carries the broadcast hub (emit/subscribe/unsubscribe)', () => {
+		const src = dbHelperTemplate()
+		assert.ok(src.includes('pub fn emit(room string, msg string) int'))
+		assert.ok(src.includes('pub fn hub_subscribe(room string) (chan string, int)'))
+		assert.ok(src.includes('pub fn hub_unsubscribe(room string, id int)'))
+		assert.ok(src.includes('pub fn hub_lock()'))
+		assert.ok(src.includes('pub fn hub_add('))
+		assert.ok(src.includes('pub fn hub_remove('))
+		assert.ok(src.includes('pub fn hub_listeners('))
+	})
+	it('ws frame helpers ship in the backend module (RFC 6455)', async () => {
+		const { readFileSync, existsSync } = await import('node:fs')
+		const { join } = await import('node:path')
+		const ws = join(plusDbVlibDir(), 'ws.v')
+		assert.ok(existsSync(ws), 'vlib/backend/ws.v ships with dbPlugin')
+		const src = readFileSync(ws, 'utf8')
+		assert.ok(src.includes('module backend'))
+		assert.ok(src.includes('pub fn ws_accept_key('), 'RFC 6455 accept key')
+		assert.ok(src.includes('258EAFA5-E914-47DA-95CA-C5AB0DC85B11'), 'websocket GUID')
+		assert.ok(src.includes('pub fn ws_write_text('), 'unmasked server→client frames')
+		assert.ok(src.includes('pub fn ws_read_frame_timeout('), 'timeout-idle framing')
+		// Harness owns the hub channels (db.v); ws.v owns the wire framing.
+		assert.ok(src.includes('net.TcpConn') || src.includes('net.'), 'conn-level framing present')
+	})
 })

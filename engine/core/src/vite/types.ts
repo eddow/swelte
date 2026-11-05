@@ -76,6 +76,7 @@ export interface RpcFn {
 		| 'delete'
 		| 'patch'
 		| 'sse'
+		| 'ws'
 		| 'before'
 		| 'after'
 		| 'load'

@@ -316,6 +316,15 @@ export async function collectDiagnostics(root: string): Promise<Diagnostic[]> {
 				}
 				for (const fn of parseVFile(src)) {
 					for (const p of fn.params) {
+						// Harness-injected tails (room-mode SSE + WS): the
+						// harness supplies them; never user-facing types.
+						if (fn.attr === 'sse' || fn.attr === 'ws') {
+							const tail2 =
+								/^fn\s*\(\s*string\s*\)(\s*bool)?$/.test(p.vtype.trim()) ||
+								/^fn\s*\(\s*string\s*\)\s*chan\s+string$/.test(p.vtype.trim()) ||
+								/^chan\s+string$/.test(p.vtype.trim())
+							if (tail2 && fn.params.indexOf(p) >= fn.params.length - 3) continue
+						}
 						if (p.tstype === 'unknown')
 							warn(
 								`${routesDir}/${rel}`,

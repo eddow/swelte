@@ -7,11 +7,22 @@ artifact: `dist/server` + `dist/`).
 
 ## Layout
 
-```
-src/routes/+page.svelte + +page.v   / (get_greeting GET, save_name POST, save_fail ?save 422 fail-lite, greet_narrow GET narrow-args bool/int/float/?string, Rename @[put], Touch @[patch])
+```text
+src/routes/+page.svelte + +page.v   / (nav hub — one concept per route; hub probe GET only)
+src/routes/rpc/+page.v + +page.svelte   /rpc (get_greeting GET, save_name POST, save_fail ?save 422 fail-lite, greet_narrow GET narrow-args bool/int/float/?string, Rename @[put], Touch @[patch]; api/greet arms: greet_pure @[rpc] → Session, login POST → Session+cookie, slow ?slow, upload ?upload, pdf/created)
+src/routes/stream/+page.v + +page.svelte   /stream (SSE emit tick_stream + list tick_items side-by-side)
+src/routes/chat/+page.v + +page.svelte   /chat (room SSE stream/say via api/rooms + WS echo/rooms via api/ws-echo + api/ws-rooms — one hub, two transports)
+src/routes/api/rooms.v            /api/rooms (say @[rpc] → backend.emit count, stream @[sse] room-mode (sub, emit) + heartbeat)
+src/routes/api/ws-echo.v          /api/ws-echo (@[ws] echo socket — recv → emit round-trip)
+src/routes/api/ws-rooms.v         /api/ws-rooms (@[ws] room socket + ws_say @[rpc] publish — two-socket fan-out)
+src/routes/store/+page.v + +page.svelte   /store (KV kv_read/kv_write/kv_drop + hub_listeners via api/store)
+src/routes/api/store.v            /api/store (kv_read GET, kv_write POST, kv_drop DELETE, hub_count ?listeners — `import backend`)
+src/routes/wasm/+page.v + +page.svelte   /wasm (hash_string @[rpc] → WASM/dev fallback)
+src/routes/types/+page.v + +page.svelte   /types (type_row ?row, calc_probe ?calc narrow-args, blob_bytes []u8, hook_raw ?hook raw_body)
+src/routes/api/blob.v               /api/blob (kept: blob_bytes GET → []u8 octet-stream, hook_raw POST ?hook echoes raw_body length)
+src/routes/api/types.v              /api/types (kept: type_row ?row, calc_probe ?calc)
 src/routes/api/greet.v              /api/greet (get_greeting GET, greet_pure @[rpc] → Session, login POST → Session+cookie, slow ?slow timeout probe, upload ?upload, pdf/created probes)
-src/routes/api/blob.v               /api/blob (blob_bytes GET → []u8 octet-stream, hook_raw POST ?hook echoes raw_body length)
-src/routes/api/types.v              /api/types (type_row GET ?row → TypeRow struct: int/f64/bool/[]string/map/?string/time.Time; calc_probe GET ?calc narrow-args int/float/bool/?string)
+src/routes/api/ticks.v              /api/ticks (tick_items list-mode SSE)
 src/routes/session/+route.v + +page.v + +page.svelte   /session (locals bag: +route @[before] stamps locals['uid'] from sess cookie; @[load] reads it; login POST sets cookie via swelte_cookie_set, logout ?logout deletes it, ?go swelte_redirect 303 → /router)
 src/routes/boom/+page.svelte + +page.v   /boom (throw fixture: @[load] + @[get] both `return error('boom')` — SSR `!T` gate)
 src/routes/users/[id].v             /users/[id] ([id] → req.params['id'])
@@ -28,11 +39,13 @@ src/routes/router/verbs/+page.v + +page.svelte   /router/verbs (HEAD answered by
 src/routes/router/live/+page.ts + +page.svelte        /router/live (§1: ssr=false twin — async universal load + <await> streaming, SPA shell)
 src/routes/router/tags/+page.svelte + +page.v          /router/tags (item 1: depends/invalidate/invalidateAll tag registry — pure client, +page.v is a probe arm)
 src/routes/router/enhance/+page.svelte + +page.v        /router/enhance (item 15a: plain <form method=post use:enhance> → page.form publish + reset, no reload)
-src/lib/crypto/hash.v               isomorphic (hash_string @[rpc] → WASM/dev fallback)
-src/app.v                           user lifecycle — @[startup] boot stamp + @[reroute] /old → /router (item 9; inlined into the harness)
+src/lib/crypto/hash.v               isomorphic (hash_string @[rpc] → WASM/dev fallback; /wasm page)
+src/lib/backend/secrets.v           backend-only (never ships to browser — physical boundary)
+src/app.v                           user lifecycle — @[startup] boot stamp + @[reroute] /old → /router + @[cron('60s')] tick (jobsPlugin)
 .swelte/server.v                    Hand + static + main() — calls generated routes/swelte_route
+.swelte/backend/                    copied from @swelte/plus vlib (db.v hub + ws.v frames) — needs dbPlugin
 routes/                             generated V dispatcher (regenerating, gitignored)
-vite.config.ts                     swelte({ vBackendUrl, routesDir, libDir }) + experimental.async (client <await>; SSR bundle stays sync)
+vite.config.ts                     swelte({ vBackendUrl, plugins: [jobsPlugin, dbPlugin] }) + experimental.async (client <await>; SSR bundle stays sync)
 ```
 
 ## Run
@@ -47,10 +60,10 @@ node engine/core/dist/cli.js dev --port 5174 --backend 8131 --root examples/some
 
 ## Proved
 
-- `/` GET/POST (`get_greeting`/`save_name`), `/api/greet` GET + `greet_pure @[rpc] → Session{id,user,remember,expires_at}` + `login POST → Session+cookie` (verb, HTTP) + `?pdf` (binary) + `?created` (201),
+- `/` is a nav hub (GET probe only); feature probes moved under their pages: `/rpc` GET/POST (`get_greeting`/`save_name`), `/api/greet` GET + `greet_pure @[rpc] → Session{id,user,remember,expires_at}` + `login POST → Session+cookie` (verb, HTTP) + `?pdf` (binary) + `?created` (201),
   empty payload → 400, unknown fn → 404 + available, `vite build` green.
-- Page buttons: Greet / Save / Hash (`#lib` real WASM) / Login / Stream (`@[sse]` `tick_stream` emit mode) / List (`@[sse]` `tick_items` list mode) / Rename (`@[put]`) / Touch (`@[patch]`) / Blob (`[]u8` octet-stream) / Raw (`?hook` raw_body) / Typerow (`?row` TypeRow struct) / Calc (`?calc` narrow-args).
-- SSE proven (true streaming via veb, both shapes): emit mode on `/api/greet` (`data: tick 1` ~0.5s pacing, `?wait_ms=500` proves zero buffering; plain JSON GETs keep hitting `@[get]` on the same URL) + list mode on `/api/ticks` (`[]string` `['a','b','c']` → `data: a/b/c` frames, identical `for await` consumption). Mixed emit+list in one file is unservable (per-file `swelte_sse_is_emit`), hence separate files — item 5 closed.
+- Pages: `/rpc` (Greet / Save / Pure / Login / PDF / Created / Narrow / Rename / Touch / fail-lite / deserialize), `/stream` (SSE emit `tick_stream` + list `tick_items`), `/chat` (room SSE `stream`/`say` + WS echo/rooms — `import { ws_rooms, ws_echo }` URL builders + native `WebSocket`), `/store` (KV read/write/delete + `hub_listeners`), `/wasm` (`hash_string`), `/types` (row/calc/blob/raw).
+- SSE proven (true streaming via veb, both shapes): emit mode on `/api/greet` (`data: tick 1` ~0.5s pacing, `?wait_ms=500` proves zero buffering; plain JSON GETs keep hitting `@[get]` on the same URL) + list mode on `/api/ticks` (`[]string` `['a','b','c']` → `data: a/b/c` frames, identical `for await` consumption). Mixed emit+list in one file is unservable (per-file `swelte_sse_is_emit`), hence separate files — item 5 closed. Room mode (`api/rooms` `stream`/`say`, future.md #4) adds cross-request broadcast on the same hub (`backend.emit` fan-out, `(sub, emit)` tail, `__ping__` heartbeat); WS echo/rooms (future.md #3) ride the same hub over native sockets (`(sub, recv, emit)` tail, `__swelteWsUrl` builder stubs). Requires `dbPlugin` (build error without it names the fix).
 - `hash_string` compiles to real WASM (`v -b wasm -os browser`):
   dev `.swelte/dev/crypto/hash.wasm` + prod `dist/assets/app_lib-*.wasm`.
 - Generated dispatcher proven: `routes/_page.v` + `routes/api_greet.v` + `routes/api_ticks.v` +

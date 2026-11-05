@@ -120,6 +120,44 @@ describe('generate() validation errors (tmp scaffold, no V binary)', () => {
 		await assert.rejects(() => buildStart(root), /only allowed in its own file/)
 	})
 
+	it('@[ws] shape errors (tail/head/return/qualifier)', async () => {
+		// Missing the (sub, recv, emit) tail → build error.
+		let root = scaffold({
+			'+page.v': 'module p\n@[ws] pub fn s(req SwelteRequest) { }',
+		})
+		await assert.rejects(() => buildStart(root), /needs trailing \(sub fn \(string\) chan string, recv chan string, emit fn \(string\) bool\)/)
+		// Emit without bool → SSE emit-tail parse → wrong-attr rejection, not ws.
+		root = scaffold({
+			'+page.v':
+				'module p\n@[ws] pub fn s(req SwelteRequest, sub fn (string) chan string, recv chan string) { }',
+		})
+		await assert.rejects(() => buildStart(root), /needs trailing/)
+		// Non-void return → build error.
+		root = scaffold({
+			'+page.v':
+				'module p\n@[ws] pub fn s(req SwelteRequest, sub fn (string) chan string, recv chan string, emit fn (string) bool) string { return "" }',
+		})
+		await assert.rejects(() => buildStart(root), /must return void/)
+		// Qualifier → build error (one socket per file).
+		root = scaffold({
+			'+page.v':
+				"module p\n@[ws('q')] pub fn s(req SwelteRequest, sub fn (string) chan string, recv chan string, emit fn (string) bool) { }",
+		})
+		await assert.rejects(() => buildStart(root), /takes no qualifier/)
+		// Head must be exactly (SwelteRequest, sub, recv, emit).
+		root = scaffold({
+			'+page.v':
+				'module p\n@[ws] pub fn s(sub fn (string) chan string, recv chan string, emit fn (string) bool) { }',
+		})
+		await assert.rejects(() => buildStart(root), /must take \(SwelteRequest, sub, recv, emit\)/)
+		// Bare closure elsewhere → build error (harness-injected only).
+		root = scaffold({
+			'+page.v':
+				'module p\n@[ws] pub fn s(req SwelteRequest, cb fn (string) bool, sub fn (string) chan string, recv chan string, emit fn (string) bool) { }',
+		})
+		await assert.rejects(() => buildStart(root), /must take \(SwelteRequest, sub, recv, emit\)/)
+	})
+
 	it('server hooks: shape errors + happy-path codegen', async () => {
 		const { readFileSync, writeFileSync, mkdirSync } = await import('node:fs')
 		// Two @[startup] → build error.
@@ -196,14 +234,29 @@ describe('generate() validation errors (tmp scaffold, no V binary)', () => {
 		})
 		writeFileSync(join(root, 'src', 'app.v'), 'module s')
 		await assert.rejects(() => buildStart(root), /only allowed in its own file/)
-		// No hooks → harness byte-identical to the template skeleton.
+		// No hooks → harness has room/WS branches resolved (no backend hub):
+		// no `backend.` references, no anchors left, WS serving stubbed to 404
+		// (dispatch never matches: no @[ws] routes exist).
 		root = scaffold({ '+page.v': 'module p\n@[get] pub fn g() string { return "" }' })
 		await buildStart(root)
-		const { renderHarness, templatesDir } = await import('./gen/config.js')
-		const { readFileSync: rf } = await import('node:fs')
-		const { join: jn } = await import('node:path')
-		const skeleton = rf(jn(templatesDir(import.meta.url), 'harness', 'server.v'), 'utf8')
-		assert.equal(readFileSync(join(root, '.swelte', 'server.v'), 'utf8'), skeleton)
+		const noHookSv = readFileSync(join(root, '.swelte', 'server.v'), 'utf8')
+		assert.ok(!/backend\.(hub_|ws_)/.test(noHookSv), 'no-room harness must not call backend.*')
+		assert.ok(
+			!noHookSv.includes('[swelte] room-mode\n'),
+			'room-mode anchor must be resolved, not left in output'
+		)
+		assert.ok(
+			!noHookSv.includes('[swelte] ws-section\n') && !noHookSv.includes('[swelte] ws-section-end'),
+			'ws-section anchors must be resolved, not left in output'
+		)
+		assert.ok(
+			noHookSv.includes('if routes.swelte_sse_is_emit(job.prefix) {'),
+			'emit arm becomes the first branch without room routes'
+		)
+		assert.ok(
+			noHookSv.includes('ws-section (stripped:'),
+			'WS section is replaced by the 404 stub without the hub'
+		)
 	})
 
 	it('@[error] hook: validation + sanitize-fn codegen', async () => {

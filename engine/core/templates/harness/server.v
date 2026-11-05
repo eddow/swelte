@@ -1,5 +1,6 @@
 module main
 
+import net
 import net.http
 import net.http.mime
 import net.urllib
@@ -455,6 +456,16 @@ fn (mut app App) before_request(mut ctx Ctx) veb.Result {
 				dispatch_method = upper
 			}
 		}
+	}
+	// §WS (future.md #3): WebSocket upgrade. before_request owns `ctx`, so
+	// the Upgrade handshake is intercepted HERE — never reaches dispatch.
+	// On a GET+Upgrade:websocket match on an `@[ws]` file: build the
+	// SwelteRequest, take over the conn, 101 + frame pump. Non-upgrade
+	// GETs on the same path fall through to dispatch (404/405 as usual).
+	ws_prefix := routes.swelte_ws_route(path, dispatch_method, headers)
+	if ws_prefix != '' {
+		mut ws_req := routes.SwelteRequest{ query: query, form: map[string]string{}, files: map[string]string{}, files_bytes: map[string][]u8{}, raw_body: []u8{}, headers: headers, cookies: cookies, params: map[string]string{}, locals: map[string]string{}, method: 'GET', path: path, qualifier: '' }
+		return swelte_serve_ws(mut ctx, ws_prefix, ws_req)
 	}
 	// §14 SSE (true streaming, veb): before_request owns `ctx`, so SSE
 	// intent is intercepted HERE — never reaches dispatch. On a
@@ -970,7 +981,16 @@ fn swelte_page_props(
 }
 
 fn swelte_sse_produce(job SwelteSseJob) {
-	if routes.swelte_sse_is_emit(job.prefix) {
+	// Room mode (future.md #4) is spliced in by renderHarness ONLY when a
+	// room route exists (hooks.roomSse): the harness then imports the
+	// backend hub module. Without room routes this branch would reference
+	// `backend.*` with no import — uncompilable — so the no-room harness
+	// below goes straight to emit/list. The room branch lives behind the
+	// `// [swelte] room-mode` anchor (see renderHarness roomSse splice).
+	// [swelte] room-mode
+	if routes.swelte_sse_is_room(job.prefix) {
+		// (room branch spliced here when hooks.roomSse)
+	} else if routes.swelte_sse_is_emit(job.prefix) {
 		emit := fn [job] (e string) bool {
 			job.pch <- e
 			return true
@@ -1018,6 +1038,132 @@ fn swelte_sse_write(mut ctx Ctx, pch chan string) {
 	sse_conn.send_message(data: 'swelte:close') or {}
 	sse_conn.close()
 }
+
+// §WS (future.md #3): bidirectional socket Rooms over the hub. Upgrade +
+// frame pump. The harness takes over the conn, performs the RFC 6455
+// handshake itself (no veb WS support — raw frames over the hijacked
+// TcpConn), then runs TWO loops: route fn (hub → socket via emit) and
+// reader (socket → route fn via the returned channel). Either side ending
+// tears everything down (harness reaps hub subs on fn return).
+// The whole section below (through swelte_ws_pump) is spliced in by
+// renderHarness ONLY when a room/`@[ws]` route exists (hooks.roomSse) —
+// without the backend hub module it is uncompilable. The no-room harness
+// keeps only the dispatch stub below (ws_prefix never matches: generated
+// swelte_ws_route returns '' with no @[ws] routes).
+// [swelte] ws-section
+struct SwelteWsJob {
+	prefix    string
+	req       routes.SwelteRequest
+	pch       chan string
+	inch      chan string
+	done      chan bool
+}
+
+fn swelte_serve_ws(mut ctx Ctx, prefix string, req routes.SwelteRequest) veb.Result {
+	key := req.headers['Sec-WebSocket-Key'] or { req.headers['sec-websocket-key'] or { '' } }
+	if key == '' {
+		ctx.res.set_status(.bad_request)
+		return ctx.send_response_to_client('application/json', '{"error":"missing Sec-WebSocket-Key"}')
+	}
+	version := req.headers['Sec-WebSocket-Version'] or { req.headers['sec-websocket-version'] or { '' } }
+	// We speak RFC 6455 only (§3 scope control — browsers all send 13).
+	if version != '' && version != '13' {
+		ctx.res.set_status(.bad_request)
+		return ctx.send_response_to_client('application/json', '{"error":"unsupported Sec-WebSocket-Version (want 13)"}')
+	}
+	accept := backend.ws_accept_key(key)
+	handshake := 'HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ${accept}\r\n\r\n'
+	ctx.takeover_conn()
+	mut conn := ctx.conn
+	if conn == unsafe { nil } {
+		return veb.no_result()
+	}
+	conn.write(handshake.bytes()) or { return veb.no_result() }
+	mut pch := chan string{cap: 64}
+	mut inch := chan string{cap: 64}
+	mut done := chan bool{cap: 1}
+	mut job := SwelteWsJob{prefix: prefix, req: req, pch: pch, inch: inch, done: done}
+	spawn swelte_ws_produce(job)
+	spawn swelte_ws_pump(mut conn, pch, inch, done)
+	return veb.no_result()
+}
+
+fn swelte_ws_produce(job SwelteWsJob) {
+	mut subs := map[string]int{}
+	sub := fn [mut subs] (room string) chan string {
+		ch := chan string{cap: 1}
+		backend.hub_lock()
+		id := backend.hub_add(room, ch)
+		backend.hub_unlock()
+		subs[room] = id
+		return ch
+	}
+	emit := fn [job] (e string) bool {
+		// Blocking send preserves echo ordering (a drop here would lose
+		// messages) — same idiom as the proven SSE room path. NO `done`
+		// observation here: `done` is only closed at pump exit (never
+		// sent to), so `<-job.done` would block on EVERY emit while the
+		// pump is alive and freeze the route after its first message —
+		// the second half of the echo-killer. A `select` check can't
+		// observe death either (`select` on a closed chan fires `else`,
+		// probed). Death is observed where it matters: the pump closes
+		// pch at teardown, so a dead pump unblocks this send via the
+		// `or` (fires on close) and produce reaps hub subs; the route's
+		// recv loop sees `inch` close.
+		job.pch <- e or {
+			return false
+		}
+		return true
+	}
+	routes.swelte_ws_open_for(job.prefix, job.req, sub, job.inch, emit) or {}
+	for room, id in subs {
+		backend.hub_lock()
+		backend.hub_remove(room, id)
+		backend.hub_unlock()
+	}
+}
+
+// Single pump task owns the conn for BOTH directions (TcpConn writes
+// must serialize — one writer, no races). Hub → socket: non-blocking
+// `select` on pch (ready = write it, else = fall through to the socket
+// read). Socket → hub: blocking read with a short timeout so hub messages
+// still flush promptly; inbound frames go to inch for the route fn.
+// Disconnect (client close / fatal framing) or produce-return ends the
+// loop: done is closed (broadcast — receivers with `or` unblock), inch is
+// closed (route's `select` recv arm dies), produce reaps hub subs.
+// NOTE: V `select` on a closed chan fires `else`, NOT the arm (verified
+// in probes) — so `done` is NEVER closed while receivers still `select`
+// on it; the pump closes it exactly once at the end, and receivers use
+// the `or` form (`<-done or {}`) which DOES fire on close.
+fn swelte_ws_pump(mut conn net.TcpConn, pch chan string, inch chan string, done chan bool) {
+	conn.set_read_timeout(100 * time.millisecond)
+	for {
+		select {
+			e := <-pch {
+				backend.ws_write_text(mut conn, e) or { break }
+				continue
+			}
+			else {}
+		}
+		msg, alive := backend.ws_read_frame_timeout(mut conn) or { '', false }
+		if !alive {
+			break
+		}
+		if msg != '' {
+			inch <- msg or { break }
+		}
+	}
+	done.close()
+	inch.close()
+	// Unblock a route stuck in `emit`'s pch send: a send's `or` fires on
+	// close, so closing pch here lets produce return + reap hub subs.
+	// Sole closer is the pump (produce never closes pch). The emit path
+	// never observes `done` before sending, so there is no send-vs-close
+	// race on pch from the harness side.
+	pch.close()
+}
+
+// [swelte] ws-section-end
 
 @[get; post; put; patch; delete; options; head]
 @['/:path...']

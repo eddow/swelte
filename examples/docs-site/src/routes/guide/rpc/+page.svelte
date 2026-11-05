@@ -88,6 +88,11 @@
 				<td>list mode <code>[]string</code> or emit mode; client is <code>AsyncGenerator</code></td>
 			</tr>
 			<tr>
+				<td><code>@&#91;ws]</code> <span class="badge badge-sm">needs <code>@swelte/plus/db</code></span></td>
+				<td>GET + <code>Upgrade: websocket</code></td>
+				<td>one socket per file, no qualifier, never stacked; <code>(req, sub, recv, emit)</code> → void — hub messages out via <code>emit</code>, client frames back via <code>recv</code>; TS stub is a URL builder (browser opens native <code>WebSocket</code>)</td>
+			</tr>
+			<tr>
 				<td><code>@&#91;load]</code></td>
 				<td>— (page data)</td>
 				<td>zero/one per file, never stacked; <code>(req[, parent]) → !R</code></td>

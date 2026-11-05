@@ -35,7 +35,7 @@ export const searchIndex: SearchEntry[] = [
 		label: 'RPC & routes',
 		group: 'Guide',
 		keywords:
-			'rpc routes .v attributes get post rpc sse load swelteloadresult before after route groups dynamics matchers wrappers +route swelteerror isredirect handlefetch checkupdated updated',
+			'rpc routes .v attributes get post rpc sse ws websocket socket rooms broadcast sub recv emit url builder native load swelteloadresult before after route groups dynamics matchers wrappers +route swelteerror isredirect handlefetch checkupdated updated',
 	},
 	{
 		href: '/guide/types',
@@ -102,7 +102,7 @@ export const searchIndex: SearchEntry[] = [
 		label: 'Db',
 		group: 'Plus',
 		keywords:
-			'plus db sqlite migrate kv backend exec_none wal swelte_kv migrations _swelte_migrations embedded database',
+			'plus db sqlite migrate kv backend exec_none wal swelte_kv migrations _swelte_migrations embedded database rooms broadcast emit subscribe ws websocket socket wssay echo hub ping',
 	},
 	{
 		href: '/from-sveltekit',

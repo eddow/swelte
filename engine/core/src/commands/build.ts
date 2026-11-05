@@ -97,7 +97,7 @@ export async function runBuild(ctx: Ctx): Promise<void> {
 		needsGlobals,
 		hasRealBridge,
 	} = await import('../toolchain.js')
-	const { loadConfig } = await import('../gen/config.js')
+	const { loadConfig, loadProjectSwelteOptions } = await import('../gen/config.js')
 	const v = resolveV(import.meta.url)
 	ctx.log(`V toolchain: ${vVersion(v)} (${v})`)
 	ctx.log(`root ${root}`)
@@ -163,6 +163,10 @@ export async function runBuild(ctx: Ctx): Promise<void> {
 		process.env.SWELTE_ISR = Object.entries(cfg.isr)
 			.map(([k, v]) => `${k}=${v}`)
 			.join(',')
+	// Project plugins (e.g. @swelte/plus db/jobs) live in vite.config.ts,
+	// which the CLI never loads — recover them so generate() sees the
+	// same options as `vite build` (else backend-hub build errors).
+	const projectSwelteOpts = await loadProjectSwelteOptions(root)
 	// 1. generate into .swelte/ (routes/*.v + server_gen.v + .swelte/server.v harness).
 	try {
 		const mod = (await import('../vite.js')) as unknown as {
@@ -171,7 +175,7 @@ export async function runBuild(ctx: Ctx): Promise<void> {
 		}
 		const swelte = mod.default ?? mod.swelte
 		if (typeof swelte !== 'function') throw new Error('vite.js has no swelte export')
-		const plug = swelte({}) as unknown as {
+		const plug = swelte({ ...projectSwelteOpts }) as unknown as {
 			buildStart?: () => Promise<void> | void
 			configResolved?: (c: { root: string }) => void
 		}
@@ -226,7 +230,7 @@ export async function runBuild(ctx: Ctx): Promise<void> {
 		}
 		const swelte = mod.default ?? mod.swelte
 		if (typeof swelte !== 'function') throw new Error('vite.js has no swelte export')
-		const plug = swelte({}) as unknown as {
+		const plug = swelte({ ...projectSwelteOpts }) as unknown as {
 			buildStart?: () => Promise<void> | void
 			configResolved?: (c: { root: string }) => void
 		}

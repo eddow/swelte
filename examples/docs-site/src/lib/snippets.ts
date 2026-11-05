@@ -184,6 +184,34 @@ pub fn kv_set(key string, value string) ! { ... } // exec_none (101)
 pub fn kv_get(key string) !string { ... }         // exec + get_string
 pub fn kv_del(key string) ! { ... }`,
 	},
+	'plus-rooms': {
+		lang: 'v',
+		code: `// cross-request broadcast: any RPC publishes, room SSE streams
+@[rpc]
+pub fn say(args SayIn) int {
+\treturn backend.emit(args.room, args.msg) // delivered count
+}
+
+@[sse]
+pub fn stream(req SwelteRequest, sub fn (string) chan string, emit fn (string) bool) {
+\troom := req.query['room'] or { 'lobby' }
+\tch := sub(room) // harness owns it; reaped when this fn returns
+\tfor {
+\t\tselect {
+\t\t\tm := <-ch {
+\t\t\t\tif !emit(m) {
+\t\t\t\t\treturn
+\t\t\t\t}
+\t\t\t}
+\t\t\t30 * time.second {
+\t\t\t\tif !emit('__ping__') {
+\t\t\t\t\treturn
+\t\t\t\t} // idle heartbeat, client ignores
+\t\t\t}
+\t\t}
+\t}
+}`,
+	},
 	'plus-migrate': {
 		lang: 'bash',
 		code: `SWELTE_PLUGINS=@swelte/plus/db swelte migrate
@@ -191,5 +219,84 @@ pub fn kv_del(key string) ! { ... }`,
 # created db/migrations/001_swelte_kv.sql
 # migrated: 001_swelte_kv.sql
 # migrate: applied 1 migration(s)`,
+	},
+	'plus-sockets-echo': {
+		lang: 'v',
+		code: `// echo socket: whatever the client sends, the server sends back
+@[ws]
+pub fn ws_echo(req SwelteRequest, sub fn (string) chan string, recv chan string, emit fn (string) bool) {
+\t_ = req
+\t_ = sub
+\tfor {
+\t\tmsg := <-recv or { return } // client gone → leave
+\t\tif !emit(msg) {
+\t\t\treturn
+\t\t}
+\t}
+}`,
+	},
+	'plus-sockets-rooms': {
+		lang: 'v',
+		code: `// room socket: joins ?room= (default lobby); hub messages stream out
+import backend
+import time
+
+pub struct WsSayIn {
+pub:
+\troom string
+\tmsg  string
+}
+
+@[rpc]
+pub fn ws_say(args WsSayIn) int {
+\treturn backend.emit(args.room, args.msg) // delivered count
+}
+
+@[ws]
+pub fn ws_rooms(req SwelteRequest, sub fn (string) chan string, recv chan string, emit fn (string) bool) {
+\troom := req.query['room'] or { 'lobby' }
+\tch := sub(room) // harness owns it; reaped when this fn returns
+\tfor {
+\t\tselect {
+\t\t\tm := <-ch {
+\t\t\t\tif !emit(m) {
+\t\t\t\t\treturn
+\t\t\t\t}
+\t\t\t}
+\t\t\tn := <-recv {
+\t\t\t\t_ = n // drained; echo variant sends it back
+\t\t\t}
+\t\t\t30 * time.second {
+\t\t\t\tif !emit('__ping__') {
+\t\t\t\t\treturn
+\t\t\t\t} // idle heartbeat, client ignores
+\t\t\t}
+\t\t}
+\t}
+}`,
+	},
+	'plus-sockets-client': {
+		lang: 'svelte',
+		code: `<script lang="ts">
+\timport { ws_echo, ws_rooms } from '#routes/api/ws-echo.v'
+\timport { onMount } from 'svelte'
+
+\t// TS stubs are URL builders (same route + query as fetch stubs).
+\t// The browser opens a native WebSocket itself.
+\tlet log = $state<string[]>([])
+\tonMount(() => {
+\t\tconst echo = new WebSocket(ws_echo())
+\t\techo.onmessage = (e) => log.push('echo: ' + e.data)
+\t\techo.onopen = () => echo.send('hello')
+\t\tconst rooms = new WebSocket(ws_rooms({ room: 'lobby' }))
+\t\trooms.onmessage = (e) => {
+\t\t\tif (e.data !== '__ping__') log.push('room: ' + e.data)
+\t\t}
+\t\treturn () => {
+\t\t\techo.close()
+\t\t\trooms.close()
+\t\t}
+\t})
+<\/script>`,
 	},
 }

@@ -192,7 +192,7 @@ export function cronHarness(crons: JobsCronDef[]): { main: string; mainInner: st
 	mut next := [${inits}]
 	for {
 		mut now := time.now().unix()
-		wait := next[0] - now
+		mut wait := next[0] - now
 		for d in next {
 			if d - now < wait { wait = d - now }
 		}

@@ -4,6 +4,7 @@
   "description": "V Version Manager — installs and manages V toolchains inside node_modules (nvm for V)",
   "type": "module",
   "bin": {
+    "@swelte/vvm": "./bin/vvm.js",
     "vvm": "./bin/vvm.js",
     "v": "./bin/v-shim.js"
   },

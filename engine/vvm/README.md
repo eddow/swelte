@@ -26,12 +26,14 @@ versions/
 
 ## Commands
 
+Once installed in a package, one can simply run `npx vvm ...`
+
 ```sh
-npx -p @swelte/vvm vvm install 0.5.2   # fetch toolchain into versions/
-npx -p @swelte/vvm vvm use 0.5.2       # mark active (.active-version, gitignored)
-npx -p @swelte/vvm vvm which           # print active `v` binary path
-npx -p @swelte/vvm vvm list            # installed versions
-npx -p @swelte/vvm vvm prepare --target-os linux --target-arch amd64  # zig + zig-cc wrapper (no flags = derive from $SWELTE_TARGET_OS/ARCH or package.json swelte key)
+npx @swelte/vvm install 0.5.2   # fetch toolchain into versions/
+npx @swelte/vvm use 0.5.2       # mark active (.active-version, gitignored)
+npx @swelte/vvm which           # print active `v` binary path
+npx @swelte/vvm list            # installed versions
+npx @swelte/vvm prepare --target-os linux --target-arch amd64  # zig + zig-cc wrapper (no flags = derive from $SWELTE_TARGET_OS/ARCH or package.json swelte key)
 ```
 
 `@swelte/core`'s `toolchain.ts` prefers a system `v` on PATH, then falls

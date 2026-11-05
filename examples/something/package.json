@@ -9,15 +9,15 @@
     "preview": "swelte preview"
   },
   "dependencies": {
-    "svelte": "^5.0.0",
     "@swelte/core": "^0.1.3",
     "@swelte/plus": "^0.1.3",
-    "@swelte/ssr-qjs": "^0.1.3"
+    "@swelte/ssr-qjs": "^0.1.3",
+    "svelte": "^5.0.0"
   },
   "devDependencies": {
     "@sveltejs/vite-plugin-svelte": "^5.0.0",
+    "@swelte/vvm": "^0.1.3",
     "typescript": "^5.0.0",
-    "vite": "^6.0.0",
-    "@swelte/vvm": "^0.1.3"
+    "vite": "^6.0.0"
   }
 }

@@ -826,6 +826,58 @@ export async function composeRenderJs(
 	const libDir = opts.libDir ?? 'src/lib'
 	const modules = new Map<string, string>()
 
+	// ssr=false-lite subtree skip: a page whose sibling opts out of sync
+	// renderRoute is client-only — and so is every .svelte it pulls in
+	// relatively (e.g. /router/live's ./Streamed.svelte, whose client
+	// <await> is legal in the browser bundle but fails the sync QJS
+	// guards). Pre-scan the import graph from source text (no compile)
+	// and skip the whole subtree, else one async child fails the build.
+	const clientOnlyRels = new Set<string>()
+	{
+		const { readFileSync: readSkip } = await import('node:fs')
+		// Sibling ssr flag per .svelte rel (same resolve as compileFile).
+		const siblingSsrOff = (rel: string): boolean => {
+			for (const ext of ['.ts', '.js']) {
+				const cand = join(root, routesDir, rel.replace(/\.svelte$/, ext))
+				try {
+					if (!existsSync(cand)) continue
+					if (!readUniversalSsrFlag(readSkip(cand, 'utf8'))) return true
+				} catch {
+					/* ignore */
+				}
+			}
+			return false
+		}
+		// Relative .svelte imports in source text.
+		const relSvelteImports = (rel: string): string[] => {
+			const abs = join(root, routesDir, rel)
+			let src = ''
+			try {
+				src = readSkip(abs, 'utf8')
+			} catch {
+				return []
+			}
+			const out: string[] = []
+			for (const m of src.matchAll(/(?:from\s*|import\s*)['"](\.[^'"]*\.svelte)['"]/g)) {
+				const norm = posixNormalize(rel, m[1]).replace(/^\.\//, '')
+				if (norm && !out.includes(norm)) out.push(norm)
+			}
+			return out
+		}
+		const queue: string[] = []
+		for (const r of manifest.routes) {
+			if (r.ssr === false || siblingSsrOff(r.svelte)) queue.push(r.svelte)
+		}
+		for (let i = 0; i < queue.length; i++) {
+			const rel = queue[i]
+			if (clientOnlyRels.has(rel)) continue
+			clientOnlyRels.add(rel)
+			for (const child of relSvelteImports(rel)) {
+				if (!clientOnlyRels.has(child)) queue.push(child)
+			}
+		}
+	}
+
 	const compileFile = async (rel: string, routeSsr = true): Promise<string> => {
 		const abs = join(root, routesDir, rel)
 		// Module keys are `./`-prefixed posix paths (`./+error.svelte`):
@@ -921,10 +973,15 @@ export async function composeRenderJs(
 
 	// Error page + wrappers first: pages import them relatively (`../+error`),
 	// so their keys must exist before page sources are normalized above.
-	// ssr=false routes skip the sync compile (SPA shell only — see above).
+	// ssr=false routes skip the sync compile (SPA shell only — see above),
+	// and so does their relative-import subtree (clientOnlyRels: e.g.
+	// /router/live's ./Streamed.svelte — client <await>, never QJS).
 	if (manifest.error) await compileFile(manifest.error)
 	for (const w of manifest.wrappers) await compileFile(w)
-	for (const r of manifest.routes) await compileFile(r.svelte, r.ssr !== false)
+	for (const r of manifest.routes) {
+		if (clientOnlyRels.has(r.svelte)) continue
+		await compileFile(r.svelte, r.ssr !== false)
+	}
 
 	// Universal-load modules: one compiled module per route whose manifest
 	// entry flags `hasUniversalLoad` (sibling `<basename>.ts`/`.js`).

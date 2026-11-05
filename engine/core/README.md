@@ -70,6 +70,6 @@ Set `SWELTE_V_VERSION=<ver>` to pin a different V version at install time
 
 ## Design docs
 
-- [RPC](https://github.com/eddow/swelte/blob/main/docs/rpc.md) — `.v` imports, attributes, transport (built)
-- [Types](https://github.com/eddow/swelte/blob/main/docs/types.md) — V → TS projection (built)
-- [Errors](https://github.com/eddow/swelte/blob/main/docs/errors.md) — envelope, SPA-first rule (built).
+- [RPC](https://github.com/eddow/swelte/blob/master/docs/rpc.md) — `.v` imports, attributes, transport (built)
+- [Types](https://github.com/eddow/swelte/blob/master/docs/types.md) — V → TS projection (built)
+- [Errors](https://github.com/eddow/swelte/blob/master/docs/errors.md) — envelope, SPA-first rule (built).

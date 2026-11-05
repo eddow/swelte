@@ -12,5 +12,7 @@ let { user = 'guest', via = 'locals' }: { user?: string; via?: string } = $props
 	<form method="post" action="/session?logout">
 		<button type="submit">Logout (deletes sess)</button>
 	</form>
-	<p><a href="/session?go">go (?go 303 to /router)</a></p>
+	<form method="post" action="/session?go">
+		<button type="submit">go (?go 303 to /router — POST redirect, GET has no verb arm)</button>
+	</form>
 </main>

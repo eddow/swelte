@@ -1,6 +1,8 @@
 // Service worker (docs (built) slice, additive + opt-in).
 import { describe as describeSw, it as itSw } from 'node:test'
 import assertSw from 'node:assert/strict'
+import { createRequire as createSwelteRequire } from 'node:module'
+const require = createSwelteRequire(import.meta.url)
 import {
 	renderServiceWorker as renderSw,
 	renderServiceWorkerRegister as renderSwRegister,
@@ -147,6 +149,12 @@ describeGoldens('item 4 — literal golden strings for jsFetchFor/jsWasmFor', ()
 	itGolden(
 		'jsFetchFor dyn route keeps generator byte-shape: url helper + strip + qualifier',
 		() => {
+			const { writeFileSync: writeStubProbe, unlinkSync: rmStubProbe } = require('node:fs')
+			const { tmpdir: stubTmpdir } = require('node:os')
+			const { join: joinStubPath } = require('node:path')
+			const { execFileSync: checkStubProbe } = require('node:child_process')
+			const probeFile = joinStubPath(stubTmpdir(), `swelte-stub-probe-${Date.now()}.mjs`)
+			try {
 			const got = jsFetchForGolden('/users/[id]', [
 				goldenFn({ name: 'g', qualifier: 'q' }),
 				goldenFn({ name: 'tick', attr: 'sse' }),
@@ -161,9 +169,34 @@ describeGoldens('item 4 — literal golden strings for jsFetchFor/jsWasmFor', ()
 				got.includes('yield* __swelteStream(__swelteUrl(args), "tick", __swelteArgs, "")')
 			)
 			assertGolden.ok(got.includes('async function * tick'))
+			// The dynamic stub must be parseable JS: the __swelteUrl regex
+			// and the throw lines both broke byte-escaping before (Vite
+			// import-analysis 500'd the page on `import ... from '#routes/…[id].v'`).
+			// node --check pins the whole emit, no Vite needed.
+			writeStubProbe(probeFile, got)
+			checkStubProbe(process.execPath, ['--check', probeFile])
+			// Matcher + catch-all + optional shapes share the same template.
+			for (const r of ['/posts/[slug=slug]', '/files/[...rest]', '/docs/[[slug]]']) {
+				const other = jsFetchForGolden(r, [goldenFn({ name: 'g' })])
+				assertGolden.ok(
+					other.includes('new RegExp('),
+					`${r} stub must build its matcher regex via new RegExp (slash-safe)`
+				)
+				assertGolden.ok(!other.includes('matchAll(/'), `${r} stub must not inline a /…/ literal`)
+				writeStubProbe(probeFile, other)
+				checkStubProbe(process.execPath, ['--check', probeFile])
+			}
+			} finally {
+				try { rmStubProbe(probeFile) } catch {}
+			}
+			{
+			const got2 = jsFetchForGolden('/users/[id]', [
+				goldenFn({ name: 'g', qualifier: 'q' }),
+				goldenFn({ name: 'tick', attr: 'sse' }),
+			])
 			// literal pin on the two export tails (dyn head is covered by includes above)
 			assertGolden.ok(
-				got.endsWith(
+				got2.endsWith(
 					[
 						'void __swelteRest',
 						'  return __swelteFetch(__swelteUrl(args), "g", "get", __swelteArgs, "q")',
@@ -178,8 +211,9 @@ describeGoldens('item 4 — literal golden strings for jsFetchFor/jsWasmFor', ()
 					goldenFn({ name: 'g', qualifier: 'q' }),
 					goldenFn({ name: 'tick', attr: 'sse' }),
 				]),
-				got
+				got2
 			)
+			}
 		}
 	)
 
@@ -747,6 +781,28 @@ describe('item 11 — codegen golden project (sample-overlay variant + routes.js
 			// 4. Old tree is unmounted on swap (no leak across navigations).
 			assert.ok(js.includes('unmount('), 'mount swap must unmount the previous tree')
 			assert.ok(js.includes('__mountedRoots'), 'router must track mounted roots for teardown')
+			// 4b. Teardown is atomic: unmount is imported (bare `unmount(`
+			// call used to ReferenceError — teardown silently no-op'd, leaking
+			// the old tree), runs inside flushSync, and the OLD tree is torn
+			// down BEFORE the new tree swaps in. Mount-after-teardown overlap
+			// is the /router/live await_reactivity_loss `{#each ...}` source:
+			// the old page's each-block commit fired while the new page's
+			// async boundary tracker was live (both batches null).
+			assert.ok(
+				js.includes("import { flushSync, mount, hydrate, unmount } from 'svelte'"),
+				'router must import unmount + flushSync (teardown is real, not a silent no-op)'
+			)
+			assert.ok(
+				js.includes('flushSync(() => unmount(inst))'),
+				'teardown must run inside flushSync (no batch-null commit window)'
+			)
+			const navSwap = js.slice(js.indexOf('// Client navigation: build off-DOM'))
+			const teardownIdx = navSwap.indexOf('for (const o of oldRoots)')
+			const insertIdx = navSwap.indexOf('target.insertBefore(next, target.firstChild)')
+			assert.ok(
+				teardownIdx >= 0 && insertIdx >= 0 && teardownIdx < insertIdx,
+				'navigation swap must tear down the old tree BEFORE inserting the new one'
+			)
 			// 5. Click interception skips non-SPA triggers.
 			assert.ok(js.includes('download'), 'router must skip download links')
 			assert.ok(js.includes('data-swelte-reload'), 'router must honor the full-reload escape hatch')
@@ -973,6 +1029,37 @@ describe('item 11 — codegen golden project (sample-overlay variant + routes.js
 		const kept = readFileSync(join(root, '.swelte', 'routes', 'swelte_qjs_bridge.v'), 'utf8')
 		assert.ok(kept.includes('__global'), 'real bridge preserved')
 	})
+	it('bridge stub: emitted even when the route loop throws (dev pre-generate)', async () => {
+		// `swelte dev` pre-generates with swelte({}) — no dbPlugin — while
+		// routes need the hub. The throw must not leave an uncompilable
+		// .swelte/ behind: the hoisted prelude writes the stub first.
+		const root = scaffold()
+		writeFileSync(
+			join(root, 'src', 'routes', 'api', 'sock.v'),
+			`module api_sock\n@[ws]\npub fn sock(req SwelteRequest, sub fn (string) chan string, recv chan string, emit fn (string) bool) {\n}`
+		)
+		await assert.rejects(() => generate(root), /needs the backend hub/)
+		const stub = readFileSync(join(root, '.swelte', 'routes', 'swelte_qjs_bridge.v'), 'utf8')
+		assert.ok(stub.includes('pub fn swelte_qjs_render_page('), 'stub has the symbol despite the throw')
+		assert.ok(!stub.includes('__global'), 'stub carries no globals')
+	})
+
+	it('bridge prelude: plugin-less throw never clobbers plugin_modules.json', async () => {
+		// Dev's pre-generate (swelte({}), no plugins) runs against routes
+		// that need the hub; the hoisted prelude must leave the existing
+		// marker alone so the -enable-globals detector still fires.
+		const root = scaffold()
+		mkdirSync(join(root, '.swelte'), { recursive: true })
+		writeFileSync(join(root, '.swelte', 'plugin_modules.json'), '["backend"]')
+		writeFileSync(
+			join(root, 'src', 'routes', 'api', 'sock.v'),
+			`module api_sock\n@[ws]\npub fn sock(req SwelteRequest, sub fn (string) chan string, recv chan string, emit fn (string) bool) {\n}`
+		)
+		await assert.rejects(() => generate(root), /needs the backend hub/)
+		assert.equal(readFileSync(join(root, '.swelte', 'plugin_modules.json'), 'utf8'), '["backend"]')
+	})
+
+
 
 	it('toolchain: bridge helpers (real vs stub vs dangling)', async () => {
 		const { mkdtempSync, mkdirSync, writeFileSync, rmSync } = await import('node:fs')
@@ -1015,5 +1102,88 @@ describe('item 11 — codegen golden project (sample-overlay variant + routes.js
 		rmSync(join(gen, 'routes', 'swelte_qjs_bridge.v'))
 		writeFileSync(join(gen, 'plugin_modules.json'), '["backend"]')
 		assert.equal(needsGlobals(gen), true)
+	})
+
+	it('room-mode SSE: (sub, emit) tail routes to sse_room + harness import', async () => {
+		const root = scaffold()
+		writeFileSync(
+			join(root, 'src', 'routes', 'api', 'rooms.v'),
+			`module api_rooms\nimport backend\npub struct RoomSendIn {\npub:\n\troom string\n\tmsg string\n}\n@[rpc]\npub fn send(args RoomSendIn) int {\n\treturn backend.emit(args.room, args.msg)\n}\n@[sse]\npub fn stream(req SwelteRequest, sub fn (string) chan string, emit fn (string) bool) {\n\t_ = req\n\t_ = sub\n\t_ = emit\n}`
+		)
+		// No backend include → build error naming the fix.
+		await assert.rejects(() => generate(root), /needs the backend hub/)
+		// With the db include → room accessors + harness import backend.
+		const incDir = join(root, 'fake-inc', 'backend')
+		mkdirSync(incDir, { recursive: true })
+		writeFileSync(join(incDir, 'db.v'), 'module backend\npub fn emit(room string, msg string) int {\n\t_ = room\n\t_ = msg\n\treturn 0\n}\n')
+		await generate(root, {
+			plugins: [{ name: 'fake-db', attrs: [], includes: () => [{ module: 'backend', absDir: incDir }] }],
+		})
+		const leaf = readFileSync(join(root, '.swelte', 'routes', 'api_rooms.v'), 'utf8')
+		assert.ok(leaf.includes('pub fn swelte_api_rooms_sse_is_room() bool'))
+		assert.ok(leaf.includes('sub, emit'), 'room fn gets sub+emit')
+		const disp = readFileSync(join(root, '.swelte', 'routes', 'server_gen.v'), 'utf8')
+		assert.ok(disp.includes('pub fn swelte_sse_is_room(prefix string) bool'))
+		assert.ok(disp.includes('pub fn swelte_sse_room_for('))
+		const srv = readFileSync(join(root, '.swelte', 'server.v'), 'utf8')
+		assert.ok(srv.includes('import backend'), 'harness imports the hub module')
+		assert.ok(srv.includes('swelte_sse_room_for'), 'produce drives room mode')
+		// Client stub is unchanged (AsyncGenerator over query args).
+		const stub = readFileSync(join(root, '.swelte', 'generated', 'routes', 'api', 'rooms.js'), 'utf8')
+		assert.ok(stub.includes('export async function * stream('))
+	})
+
+	it('classic emit SSE unchanged (room tables present but empty without room fns)', async () => {
+		const root = scaffold()
+		await generate(root)
+		const leaf = readFileSync(join(root, '.swelte', 'routes', 'api_greet.v'), 'utf8')
+		assert.ok(leaf.includes('pub fn swelte_api_greet_sse_is_room() bool'))
+		assert.ok(leaf.includes('return false'), 'no room fns → is_room false')
+		const disp = readFileSync(join(root, '.swelte', 'routes', 'server_gen.v'), 'utf8')
+		assert.ok(disp.includes('pub fn swelte_sse_is_room(prefix string) bool'))
+		const srv = readFileSync(join(root, '.swelte', 'server.v'), 'utf8')
+		assert.ok(!srv.includes('import backend'), 'no hub import without room fns')
+	})
+
+	it('@[ws]: (sub, recv, emit) tail routes to ws_open + harness import', async () => {
+		const root = scaffold()
+		writeFileSync(
+			join(root, 'src', 'routes', 'api', 'sock.v'),
+			`module api_sock\nimport backend\n@[ws]\npub fn sock(req SwelteRequest, sub fn (string) chan string, recv chan string, emit fn (string) bool) {\n\t_ = req\n\t_ = sub\n\t_ = recv\n\t_ = emit\n}`
+		)
+		// No backend include → build error naming the fix.
+		await assert.rejects(() => generate(root), /needs the backend hub/)
+		// With the db include → ws accessors + harness upgrade path.
+		const incDir = join(root, 'fake-inc', 'backend')
+		mkdirSync(incDir, { recursive: true })
+		writeFileSync(join(incDir, 'db.v'), 'module backend\npub fn emit(room string, msg string) int {\n\t_ = room\n\t_ = msg\n\treturn 0\n}\n')
+		await generate(root, {
+			plugins: [{ name: 'fake-db', attrs: [], includes: () => [{ module: 'backend', absDir: incDir }] }],
+		})
+		const leaf = readFileSync(join(root, '.swelte', 'routes', 'api_sock.v'), 'utf8')
+		assert.ok(leaf.includes('_swelte_ws_is() bool'))
+		assert.ok(leaf.includes('return true'), 'ws file reports is=true')
+		assert.ok(leaf.includes('req, sub, recv, emit'), 'open passes sub+recv+emit')
+		const disp = readFileSync(join(root, '.swelte', 'routes', 'server_gen.v'), 'utf8')
+		assert.ok(disp.includes('pub fn swelte_ws_route('))
+		assert.ok(disp.includes('pub fn swelte_ws_is(prefix string) bool'))
+		assert.ok(disp.includes('pub fn swelte_ws_open_for('))
+		const srv = readFileSync(join(root, '.swelte', 'server.v'), 'utf8')
+		assert.ok(srv.includes('import backend'), 'harness imports the hub module')
+		assert.ok(srv.includes('swelte_serve_ws'), 'upgrade handshake present')
+		assert.ok(srv.includes('swelte_ws_open_for'), 'produce drives ws open')
+		// Client stub is a URL builder (browser opens a native WebSocket).
+		const stub = readFileSync(join(root, '.swelte', 'generated', 'routes', 'api', 'sock.js'), 'utf8')
+		assert.ok(stub.includes('__swelteWsUrl'))
+		assert.ok(stub.includes('export function sock('))
+	})
+
+	it('@[ws] without db include stays a build error when backend missing', async () => {
+		const root = scaffold()
+		writeFileSync(
+			join(root, 'src', 'routes', 'api', 'sock.v'),
+			`module api_sock\n@[ws]\npub fn sock(req SwelteRequest, sub fn (string) chan string, recv chan string, emit fn (string) bool) {\n}`
+		)
+		await assert.rejects(() => generate(root), /needs the backend hub/)
 	})
 })

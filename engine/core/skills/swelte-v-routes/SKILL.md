@@ -1,6 +1,6 @@
 ---
 name: swelte-v-routes
-description: Write Swelte V backend route handlers — @[rpc]/@[get]/@[post]/@[sse]/@[load]/@[before]/@[after] attributes, SwelteRequest shape, V-to-TS types. Use when creating or fixing .v route files, RPC endpoints, forms, or uploads.
+description: Write Swelte V backend route handlers — @[rpc]/@[get]/@[post]/@[sse]/@[ws]/@[load]/@[before]/@[after] attributes, SwelteRequest shape, V-to-TS types. Use when creating or fixing .v route files, RPC endpoints, forms, or uploads.
 ---
 
 # Swelte V Routes
@@ -13,7 +13,8 @@ Every `.v` file is an ES module. Every `pub fn` with an attribute is a named exp
 |---|---|---|---|
 | `#routes/` | `@[rpc]` | POST JSON `Accept: application/json` | body `{ "fn", "args" }`; unlimited per file |
 | `#routes/` | `@[get]` / `@[get('q')]` | GET `Accept: application/json` | query = args; default, or `?q` present |
-| `#routes/` | `@[sse]` / `@[sse('q')]` | GET `Accept: text/event-stream` | two shapes (below); same default/qualifier rules as verbs |
+| `#routes/` | `@[sse]` / `@[sse('q')]` | GET `Accept: text/event-stream` | three shapes (below); same default/qualifier rules as verbs |
+| `#routes/` | `@[ws]` (needs `@swelte/plus/db`) | GET + `Upgrade: websocket` | one socket per file, no qualifier, never stacked; `(req, sub, recv, emit)` → void; TS stub is a URL builder (browser opens native `WebSocket`) |
 | `#routes/` | `@[post]` / `@[put]` / `@[delete]` / `@[patch]` (+`('q')`) | respective method | form fields = args; default, or `?q` qualifier |
 | `#routes/` leaf + `+route.v` | `@[load]` | page data, `Hand` HTML navigations only | `(SwelteRequest[, parent T]) -> !R`; zero/one per file, never stacked, no qualifier |
 | `+route.v` only | `@[before]` / `@[after]` | subtree middleware; root `+route.v` = global head | `SwelteRequest -> !SwelteRequest` / observe-or-replace response; never exported to TS |
@@ -22,7 +23,7 @@ Every `.v` file is an ES module. Every `pub fn` with an attribute is a named exp
 | `src/app.v` | `@[startup]` | once before `veb.run` | `() void|!void`, zero/one fn, no qualifier, no params; throw aborts boot |
 | `src/app.v` | `@[reroute]` | host/path rewrite pre-dispatch | `(host string, path string) string`, `''` = no-op; zero/one fn, no qualifier |
 
-Rules: verbs stack (`@[get; post]`), one default per verb per file, qualifiers unique per verb per file. Never stack `@[sse]` with a verb/rpc on one fn. `@[load]` never stacked, no qualifier. Dynamic segments: `[id]` any segment, `[id=matcher]` constrained (`integer` builtin = digits, `Params: number`; custom `@[matcher]` fns in `src/matchers.v`, `Params: string`), `[[slug]]` last-segment optional, `[...rest]` catch-all last. `src/matchers.v` / `src/app.v` are never routed and never importable from browser code; `@[matcher]`/`@[startup]`/`@[reroute]` in `src/routes/*` is a build error.
+Rules: verbs stack (`@[get; post]`), one default per verb per file, qualifiers unique per verb per file. Never stack `@[sse]`/`@[ws]` with a verb/rpc/sse/ws on one fn (one transport per fn). `@[ws]` never stacks and takes no qualifier (one socket per file). `@[load]` never stacked, no qualifier. Dynamic segments: `[id]` any segment, `[id=matcher]` constrained (`integer` builtin = digits, `Params: number`; custom `@[matcher]` fns in `src/matchers.v`, `Params: string`), `[[slug]]` last-segment optional, `[...rest]` catch-all last. `src/matchers.v` / `src/app.v` are never routed and never importable from browser code; `@[matcher]`/`@[startup]`/`@[reroute]` in `src/routes/*` is a build error.
 
 ## Handler shapes
 
@@ -67,7 +68,8 @@ pub fn delete_account(req SwelteRequest) !string {
 - `!T` = may reject with `SwelteRpcError`. `?T` = `T | null`.
 - `Request.params` carries dynamic segments (`req.params['id]` for `/users/[id]`); client stubs interpolate them into the URL.
 - `files: Record<string,string>` holds uploaded **filenames** only — bytes are parsed then discarded (never persisted, never projected).
-- `@[sse]` list mode returns `[]string` (harness streams each); emit mode takes trailing `emit fn (string) bool` + returns void — each `emit(e)` flushes one frame NOW (`if !emit(e) { return }` on disconnect). TS stub is `AsyncGenerator<string>`.
+- `@[sse]` list mode returns `[]string` (harness streams each); emit mode takes trailing `emit fn (string) bool` + returns void — each `emit(e)` flushes one frame NOW (`if !emit(e) { return }` on disconnect). Room mode (needs `@swelte/plus/db`) takes trailing `sub fn (string) chan string` + `emit fn (string) bool` — harness injects a room-subscribe closure; `backend.emit(room, msg)` fans out cross-request. TS stub is `AsyncGenerator<string>` in all shapes.
+- `@[ws]` (needs `@swelte/plus/db`) takes `(req SwelteRequest, sub fn (string) chan string, recv chan string, emit fn (string) bool)` + returns void — hub messages stream out via `emit`, client frames stream back via `recv`. TS stub is a URL builder (`__swelteWsUrl`) — the browser opens a native `WebSocket` itself.
 
 ## Type table (V → TS)
 

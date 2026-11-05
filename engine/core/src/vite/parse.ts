@@ -28,6 +28,7 @@ export const CORE_ATTRS = [
 	'delete',
 	'patch',
 	'sse',
+	'ws',
 	'before',
 	'after',
 	'load',
@@ -210,9 +211,12 @@ export function tsTypeFor(vType: string): string {
 	const t = vType.trim()
 	if (t === 'SwelteRequest') return 'SwelteRequest'
 	if (t === 'SwelteResponse') return 'SwelteResponse'
-	// SSE emit callback (harness-injected, never projected as a client arg):
-	// `emit fn (string) bool` is structural, not an unknown V type.
+	// SSE emit callback + WS harness tails (harness-injected, never projected
+	// as client args): `emit fn (string) bool` is structural, `sub` is the
+	// room-subscribe closure, `recv` is the inbound channel.
 	if (/^fn\s*\(\s*string\s*\)(\s*bool)?$/.test(t)) return '(event: string) => boolean'
+	if (/^fn\s*\(\s*string\s*\)\s*chan\s+string$/.test(t)) return '(room: string) => unknown'
+	if (/^chan\s+string$/.test(t)) return 'unknown'
 	if (/^string$/.test(t)) return 'string'
 	if (/^(bool)$/.test(t)) return 'boolean'
 	if (

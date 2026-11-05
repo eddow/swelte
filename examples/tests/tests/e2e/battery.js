@@ -7,7 +7,7 @@
 // time (node:test registers `it` sync, `before()` fills state later).
 import { it } from 'node:test'
 import assert from 'node:assert/strict'
-import { get, headRaw } from './helpers.js'
+import { get, headRaw, wsConnect } from './helpers.js'
 
 /** Parity battery (docs/specs/future.md §2): every shipped P0/P1/P2 item
  * with an HTTP-observable surface. Runs against build outputs (preview:
@@ -272,6 +272,54 @@ export function defineSharedContract(getState, label = 'shared') {
     assert.equal(again.status, 200)
   })
 }
+/** WS contract (future.md #3): echo round-trip + room fan-out over the hub.
+ * getState() -> { base, runnable }. `base` is the built server in preview
+ * and the V backend in dev (same WS upgrade path in both). Uses the raw
+ * wsConnect() helper (masked client frames, __ping__ skip). */
+export function defineWsContract(getState, label = 'ws') {
+  it(`${label}: /api/ws-echo round-trips one text frame`, async () => {
+    const { base, runnable } = getState()
+    if (!runnable) return
+    const url = base.replace(/^http/, 'ws') + '/api/ws-echo'
+    const c = await wsConnect(url)
+    try {
+      const probe = `echo-${Date.now()}`
+      c.send(probe)
+      assert.equal(await c.nextMessage(), probe)
+    } finally {
+      await c.close()
+    }
+    // Non-upgrade GET on the socket path falls through to dispatch (not 101).
+    const plain = await get(base + '/api/ws-echo', { accept: 'application/json' })
+    assert.ok([404, 405].includes(plain.status), `want 404/405, got ${plain.status}`)
+  })
+
+  it(`${label}: /api/ws-rooms fans out to both subscribers`, async () => {
+    const { base, runnable } = getState()
+    if (!runnable) return
+    const room = `room-${Date.now()}`
+    const url = base.replace(/^http/, 'ws') + '/api/ws-rooms?room=' + encodeURIComponent(room)
+    const a = await wsConnect(url)
+    const b = await wsConnect(url)
+    try {
+      const msg = `hello-${Date.now()}`
+      // Publish cross-request via the rpc arm on the same file.
+      const r = await fetch(base + '/api/ws-rooms', {
+        method: 'POST',
+        headers: { accept: 'application/json', 'content-type': 'application/json' },
+        body: JSON.stringify({ fn: 'ws_say', args: { room, msg } }),
+      })
+      assert.ok(r.ok, `ws_say publish failed: ${r.status}`)
+      assert.equal(await a.nextMessage(), msg)
+      assert.equal(await b.nextMessage(), msg)
+    } finally {
+      await a.close()
+      await b.close()
+    }
+  })
+}
+
+
 
 /** SSR-only: `/` must be server-rendered HTML with hydration marker and no
  * unfilled placeholder. Runs ONLY on build outputs — never on Vite dev. */

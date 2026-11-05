@@ -55,7 +55,7 @@ export {
 	vFileSafe,
 	vPrefix,
 } from './vite/routes.js'
-export { emitServerGen, validateLoadFn, validateMiddlewareFn } from './vite/server-gen.js'
+export { emitServerGen, validateLoadFn, validateMiddlewareFn, validateSseFn, validateWsFn } from './vite/server-gen.js'
 export {
 	renderServiceWorker,
 	renderServiceWorkerRegister,

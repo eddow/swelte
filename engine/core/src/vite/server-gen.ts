@@ -3,7 +3,7 @@ import { join } from 'node:path'
 import { list } from './fs.js'
 import { narrowCall, parseStructs } from './parse.js'
 import { vPrefix } from './routes.js'
-import type { LoadFn, MatcherDef, RouteLimits, RpcFn, WrapperMw } from './types.js'
+import type { LoadFn, MatcherDef, RouteLimits, RpcFn, RpcParam, WrapperMw } from './types.js'
 
 export function doubleClaimCheck(
 	routesAbs: string,
@@ -115,6 +115,81 @@ export function validateVerbFn(rel: string, m: RpcFn): void {
 		throw new Error(
 			`[swelte] ${rel}: @[${m.attr}] ${m.name} returns ${m.vret || '(none)'} — verbs are HTTP (string/struct/[]u8/(int,string)/SwelteResponse); use @[rpc] for typed calls.`
 		)
+}
+
+export function validateSseFn(rel: string, m: RpcFn): void {
+	const ps = m.params
+	const last = ps.length > 0 ? ps[ps.length - 1] : null
+	const isEmitTail = last !== null && /^fn\s*\(\s*string\s*\)(\s*bool)?$/.test(last.vtype.trim())
+	const second = ps.length >= 2 ? ps[ps.length - 2] : null
+	const isRoomTail =
+		isEmitTail &&
+		second !== null &&
+		/^fn\s*\(\s*string\s*\)\s*chan\s+string$/.test(second.vtype.trim())
+	if (!isEmitTail) {
+		if (m.vret !== '[]string') {
+			throw new Error(
+				`[swelte] ${rel}: @[sse] ${m.name} must return []string (event list) or take a trailing emit fn (string) bool param (got ${m.vret || '(none)'}).`
+			)
+		}
+		return
+	}
+	if (m.vret !== 'void') {
+		throw new Error(
+			`[swelte] ${rel}: @[sse] ${m.name} with emit param must return void (emit flushes per-event; got ${m.vret || '(none)'}).`
+		)
+	}
+	const userParams = ps.slice(0, isRoomTail ? -2 : -1)
+	for (const p of userParams) {
+		if (/^fn\s*\(/.test(p.vtype.trim())) {
+			throw new Error(
+				`[swelte] ${rel}: @[sse] ${m.name} param ${p.name} is a closure (${p.vtype}) — only the trailing sub/emit closures are harness-injected.`
+			)
+		}
+	}
+}
+
+/** WS shape (future.md #3): bidirectional socket Rooms over the hub.
+ *  `@[ws] name(req SwelteRequest, sub fn (string) chan string, recv chan string, emit fn (string) bool)`
+ *  — the harness injects the room-subscribe closure, the inbound frame
+ *  channel, and the frame emitter. Hub messages stream out via emit;
+ *  client frames stream back via recv. Returns void/`!void`. No qualifier
+ *  stacking with verbs/rpc (own transport, GET-upgrade-gated). */
+export function validateWsFn(rel: string, m: RpcFn): void {
+	const ps = m.params
+	const last = ps.length > 0 ? ps[ps.length - 1] : null
+	const isEmitTail = last !== null && /^fn\s*\(\s*string\s*\)(\s*bool)?$/.test(last.vtype.trim())
+	const second = ps.length >= 2 ? ps[ps.length - 2] : null
+	const isRecvTail =
+		isEmitTail &&
+		second !== null &&
+		/^chan\s+string$/.test(second.vtype.trim())
+	const third = ps.length >= 3 ? ps[ps.length - 3] : null
+	const isSubTail =
+		isRecvTail &&
+		third !== null &&
+		/^fn\s*\(\s*string\s*\)\s*chan\s+string$/.test(third.vtype.trim())
+	if (!isEmitTail || !isRecvTail || !isSubTail) {
+		throw new Error(
+			`[swelte] ${rel}: @[ws] ${m.name} needs trailing (sub fn (string) chan string, recv chan string, emit fn (string) bool) — the harness injects the room-subscribe closure, inbound channel, and frame emitter.`
+		)
+	}
+	if (m.vret !== 'void') {
+		throw new Error(
+			`[swelte] ${rel}: @[ws] ${m.name} must return void (frames stream both ways; got ${m.vret || '(none)'}).`
+		)
+	}
+	if (m.qualifier) {
+		throw new Error(
+			`[swelte] ${rel}: @[ws] ${m.name} takes no qualifier (one socket per file — the route joins rooms inside).`
+		)
+	}
+	const userParams = ps.slice(0, -3)
+	if (userParams.length !== 1 || userParams[0].vtype !== 'SwelteRequest') {
+		throw new Error(
+			`[swelte] ${rel}: @[ws] ${m.name} must take (SwelteRequest, sub, recv, emit) (got (${ps.map((p) => p.vtype).join(', ')})).`
+		)
+	}
 }
 
 /** Loader shape: `@[load] name(req SwelteRequest[, parent T]) !R`.
@@ -314,7 +389,8 @@ export function emitServerGen(
 	noSsrRoutes: string[] = [],
 	noCsrRoutes: string[] = [],
 	routeLimits: { route: string; limits: RouteLimits }[] = [],
-	serializedHeaders: { route: string; headers: string[] }[] = []
+	serializedHeaders: { route: string; headers: string[] }[] = [],
+	wsMods: Set<string> = new Set()
 ): string {
 	/** Dynamic route arms (section 8): static beats dynamic; among dynamics,
 	 * fewer [segs] first, [...rest] catch-all last (stable sort). */
@@ -751,7 +827,59 @@ pub fn swelte_sse_emit_for(prefix string, qualifier string, req SwelteRequest, e
 			),
 		`\treturn error('no sse route for prefix: ' + prefix)
 }
+
+pub fn swelte_sse_is_room(prefix string) bool {`,
+		...dispatched
+			.filter((d) => sseMods.has(d.mod))
+			.map((d) => `\tif prefix == ${vJsonStr(d.prefix)} { return ${d.prefix}sse_is_room() }`),
+		`\treturn false
+}
+
+pub fn swelte_sse_room_for(prefix string, qualifier string, req SwelteRequest, sub fn (string) chan string, emit fn (string) bool) ! {`,
+		...dispatched
+			.filter((d) => sseMods.has(d.mod))
+			.map(
+				(d) =>
+					`\tif prefix == ${vJsonStr(d.prefix)} { ${d.prefix}sse_room(qualifier, req, sub, emit) or { return err } return }`
+			),
+		`\treturn error('no sse room route for prefix: ' + prefix)
+}
 `,
+		// WS route predicate + fan-out tables (future.md #3). `swelte_ws_route`
+		// answers: upgrade request on a `@[ws]` file? Returns the dispatch
+		// prefix or '' (GET + Upgrade: websocket on an @[ws] file). The
+		// `is` / `open` tables route prefix → per-file accessors (same shape
+		// as the SSE tables).
+		`pub fn swelte_ws_route(path string, method string, headers map[string]string) string {`,
+		`	if method != 'GET' { return '' }`,
+		`	if (headers['Upgrade'] or { headers['upgrade'] or { '' } }).to_lower() != 'websocket' { return '' }`,
+		// No @[ws] routes: skip the normalize (unused var warning) — the
+		// table below is empty and the fn always returns ''.
+		...([...wsMods].length > 0
+			? [`	norm_path := swelte_normalize_path(path)`]
+			: [`	_ = path`]),
+		...dispatched
+			.filter((d) => wsMods.has(d.mod))
+			.map((d) => `	if swelte_route_hit(${vJsonStr(d.route)}, norm_path) { return ${vJsonStr(d.prefix)} }`),
+		`	return ''`,
+		`}`,
+		``,
+		`pub fn swelte_ws_is(prefix string) bool {`,
+		...[...wsMods].map(
+			(mod) =>
+				`	if prefix == ${vJsonStr(dispatched.find((d) => d.mod === mod)?.prefix ?? mod)} { return ${vPrefix(mod)}swelte_ws_is() }`,
+		),
+		`	return false`,
+		`}`,
+		``,
+		`pub fn swelte_ws_open_for(prefix string, req SwelteRequest, sub fn (string) chan string, recv chan string, emit fn (string) bool) ! {`,
+		...[...wsMods].map(
+			(mod) =>
+				`	if prefix == ${vJsonStr(dispatched.find((d) => d.mod === mod)?.prefix ?? mod)} { ${vPrefix(mod)}swelte_ws_open('', req, sub, recv, emit) or { return err } return }`,
+		),
+		`	return error('no ws route for prefix: ' + prefix)`,
+		`}`,
+		``,
 		// Loader fan-out: `before_request` resolves the page route to a
 		// dispatch prefix; this maps prefix → per-file `swelte_load`.
 		// Any throw → error (caller maps to +error props). No loads
@@ -1004,6 +1132,7 @@ module routes
 			dispatchBody(prefix, mod, fns, null),
 			'',
 			emitSseEvents(prefix, mod, fns),
+			emitWsEvents(prefix, mod, fns),
 			emitLoadCascade(prefix, loads),
 		].join('\n')
 	}
@@ -1056,6 +1185,7 @@ _ = qualifier
 mut req := swelte_req`,
 		dispatchBody(prefix, mod, fns, 'swelte_req'),
 		emitSseEvents(prefix, mod, fns),
+		emitWsEvents(prefix, mod, fns),
 		emitLoadCascade(prefix, loads),
 	].join('\n')
 }
@@ -1070,9 +1200,19 @@ export function emitSseEvents(prefix: string, _mod: string, fns: RpcFn[]): strin
 	if (!sseFns.length) return ''
 	const quals = sseFns.filter((h) => h.qualifier).map((h) => vJsonStr(h.qualifier as string))
 	const qualErr = `\treturn error('unknown qualifier: ' + qualifier + ' (available: [${quals.join(', ')}])')`
-	const isEmitFn = (h: RpcFn): boolean => {
-		const emitP = h.params.length > 0 ? h.params[h.params.length - 1] : null
-		return emitP !== null && /^fn\s*\(\s*string\s*\)(\s*bool)?$/.test(emitP.vtype.trim())
+	const EMIT_RE = /^fn\s*\(\s*string\s*\)(\s*bool)?$/
+	const SUB_RE = /^fn\s*\(\s*string\s*\)\s*chan\s+string$/
+	// Emit shapes: trailing `emit fn (string) bool` (classic), or
+	// `emit fn (string) bool` + `sub fn (string)` (room mode — the harness
+	// injects a room-subscribe closure; the fn drives the stream from it).
+	const emitTail = (h: RpcFn): { kind: 'emit' | 'room' | null; narrow: RpcParam[] } => {
+		const ps = h.params
+		if (!ps.length) return { kind: null, narrow: ps }
+		const last = ps[ps.length - 1]
+		if (!EMIT_RE.test(last.vtype.trim())) return { kind: null, narrow: ps }
+		if (ps.length >= 2 && SUB_RE.test(ps[ps.length - 2].vtype.trim()))
+			return { kind: 'room', narrow: ps.slice(0, -2) }
+		return { kind: 'emit', narrow: ps.slice(0, -1) }
 	}
 	const condFor = (h: RpcFn): string =>
 		h.qualifier ? `qualifier == ${vJsonStr(h.qualifier)}` : `qualifier == ''`
@@ -1084,7 +1224,7 @@ export function emitSseEvents(prefix: string, _mod: string, fns: RpcFn[]): strin
 	}
 	const arm = (body: string, tail: string): string => (body ? `${body}\n${tail}` : tail)
 	const eventsArms = list(
-		sseFns.filter((h) => !isEmitFn(h)),
+		sseFns.filter((h) => emitTail(h).kind === null),
 		(h) => {
 			const vc = verbCall(h)
 			const pre = vc.pre.map((st) => `\t\t${st}`).join('\n')
@@ -1093,10 +1233,30 @@ export function emitSseEvents(prefix: string, _mod: string, fns: RpcFn[]): strin
 		}
 	)
 	const checkArms = list(sseFns, (h) => `\tif ${condFor(h)} { return }`)
-	const emitArms = list(
-		sseFns.filter((h) => isEmitFn(h)),
+	const roomArms = list(
+		sseFns.filter((h) => emitTail(h).kind === 'room'),
 		(h) => {
-			const narrow = h.params.slice(0, -1)
+			const tail = emitTail(h)
+			const narrow = tail.narrow
+			const isReq = narrow.length === 1 && narrow[0].vtype === 'SwelteRequest'
+			const built = isReq ? null : narrowCall(`${prefix}${h.name}`, narrow)
+			const callArgs = isReq
+				? `req, sub, emit`
+				: narrow.length
+					? `${built!.call}, sub, emit`
+					: `sub, emit`
+			const pre =
+				built && built.stmts.length ? `${built.stmts.map((st) => `\t\t${st}`).join('\n')}\n` : ''
+			const run = h.fallible
+				? `\t\t${prefix}${h.name}(${callArgs}) or { return err }`
+				: `\t\t${prefix}${h.name}(${callArgs})`
+			return `\tif ${condFor(h)} {\n${pre}${run}\n\t\treturn\n\t}`
+		}
+	)
+	const emitArms = list(
+		sseFns.filter((h) => emitTail(h).kind === 'emit'),
+		(h) => {
+			const narrow = emitTail(h).narrow
 			const isReq = narrow.length === 1 && narrow[0].vtype === 'SwelteRequest'
 			const built = isReq ? null : narrowCall(`${prefix}${h.name}`, narrow)
 			const callArgs = isReq ? `req, emit` : narrow.length ? `${built!.call}, emit` : `emit`
@@ -1114,7 +1274,11 @@ ${arm(eventsArms, qualErr)}
 }
 
 pub fn ${prefix}sse_is_emit() bool {
-\treturn ${sseFns.some((h) => isEmitFn(h))}
+\treturn ${sseFns.some((h) => emitTail(h).kind !== null)}
+}
+
+pub fn ${prefix}sse_is_room() bool {
+\treturn ${sseFns.some((h) => emitTail(h).kind === 'room')}
 }
 
 pub fn ${prefix}sse_check_qual(qualifier string) ! {
@@ -1123,6 +1287,45 @@ ${arm(checkArms, qualErr)}
 
 pub fn ${prefix}sse_emit(qualifier string, req SwelteRequest, emit fn (string) bool) ! {
 ${arm(emitArms, qualErr)}
+}
+
+pub fn ${prefix}sse_room(qualifier string, req SwelteRequest, sub fn (string) chan string, emit fn (string) bool) ! {
+${arm(roomArms, qualErr)}
+}
+`
+}
+
+/** WS accessor (future.md #3): bidirectional socket Rooms over the hub.
+ * Per file with `@[ws]` fns: `swelte_ws_is` (file has a socket fn),
+ * `swelte_ws_open(qualifier, req, sub, emit)` — the harness injects the
+ * same room-subscribe closure + frame emitter as room-mode SSE; the route
+ * fn drives the socket. Qualifiers rejected (one socket per file). */
+export function emitWsEvents(prefix: string, _mod: string, fns: RpcFn[]): string {
+	const arm = (body: string, tail: string): string => (body ? `${body}\n${tail}` : tail)
+	const wsFns = fns.filter((f) => f.attr === 'ws')
+	if (!wsFns.length) return ''
+	const openArm = list(
+		wsFns,
+		(h) => {
+			const narrow = h.params.slice(0, -3)
+			const isReq = narrow.length === 1 && narrow[0].vtype === 'SwelteRequest'
+			const built = isReq ? null : narrowCall(`${prefix}${h.name}`, narrow)
+			const callArgs = isReq ? `req, sub, recv, emit` : narrow.length ? `${built!.call}, sub, recv, emit` : `sub, recv, emit`
+			const pre =
+				built && built.stmts.length ? `${built.stmts.map((st) => `\t\t${st}`).join('\n')}\n` : ''
+			const run = h.fallible
+				? `\t\t${prefix}${h.name}(${callArgs}) or { return err }`
+				: `\t\t${prefix}${h.name}(${callArgs})`
+			return `\tif qualifier == '' {\n${pre}${run}\n\t\treturn\n\t}`
+		},
+	)
+	return `
+pub fn ${prefix}swelte_ws_is() bool {
+	return true
+}
+
+pub fn ${prefix}swelte_ws_open(qualifier string, req SwelteRequest, sub fn (string) chan string, recv chan string, emit fn (string) bool) ! {
+${arm(openArm, `\treturn error('unknown qualifier for ws: ' + qualifier)`)}
 }
 `
 }
@@ -1252,6 +1455,15 @@ ${body}
 		sseFns.length === 0
 			? ''
 			: `	if method == 'GET' && headers['Accept'] or { headers['accept'] or { '' } }.contains('text/event-stream') {\n${sseCheck}\n\t\treturn swelte_err_bad(path, '', 'sse handled in before_request')\n\t}`
+	// WS (future.md #3): upgrade-gated. The dispatch WS arm never serves a
+	// body — `before_request` intercepts the Upgrade handshake FIRST (it
+	// owns `ctx`), takes over the conn, and frames. This arm only rejects
+	// direct dispatch calls so the JSON watchdog path stays typed.
+	const wsFns = fns.filter((f) => f.attr === 'ws')
+	const wsArm =
+		wsFns.length === 0
+			? ''
+			: `	if method == 'GET' && (headers['Upgrade'] or { headers['upgrade'] or { '' } }).to_lower() == 'websocket' {\n\t\treturn swelte_err_bad(path, '', 'ws handled in before_request')\n\t}`
 	// §13: with @[before] wrappers the request already exists
 	// (pre-filtered `swelte_req`, parsed once in dispatch) — reuse
 	// it directly, no second multipart parse. Unchained leaves
@@ -1311,7 +1523,7 @@ ${tupleStat('res')}`
 		sharedReq == null && fns.some((f) => f.attr === 'get')
 			? `\treturn swelte_method_not_allowed()`
 			: `\treturn ${methodGate}`
-	return [rpcBlock, sseArm, ...['get', 'post', 'put', 'delete', 'patch'].map(verbArm), tail, `}\n`]
+	return [rpcBlock, sseArm, wsArm, ...['get', 'post', 'put', 'delete', 'patch'].map(verbArm), tail, `}\n`]
 		.filter((s) => s !== '')
 		.join('\n')
 }
