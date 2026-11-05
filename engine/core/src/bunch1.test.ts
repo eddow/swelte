@@ -104,7 +104,7 @@ describe('Bunch1', () => {
 		const root = mkdtempSync(join(tmpdir(), 'swelte-entry-'))
 		mkdirSync(join(root, 'src', 'routes'), { recursive: true })
 		mkdirSync(join(root, 'src', 'lib'), { recursive: true })
-		writeFileSync(join(root, 'package.json'), '{"name":"t"}')
+		writeFileSync(join(root, 'package.json'), '{"name":"t","type":"module"}')
 		writeFileSync(join(root, 'svelte.config.js'), 'export default {}')
 		writeFileSync(
 			join(root, 'src', 'routes', '+page.v'),

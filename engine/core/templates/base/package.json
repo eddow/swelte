@@ -20,5 +20,16 @@
     "vite": "^6.0.0",
     "@swelte/vvm": "^__SWELTE_VERSION__",
     "npm-skills": "^0.5.1"
+  },
+  "allowScripts": {
+    "@swelte/vvm": true,
+    "esbuild": true
+  },
+  "npmSkills": {
+    "consume": {
+      "only": [
+        "@swelte/*"
+      ]
+    }
   }
 }

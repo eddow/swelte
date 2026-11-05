@@ -265,7 +265,7 @@ function scaffold(): string {
 	mkdirSync(join(root, 'src', 'routes', 'api'), { recursive: true })
 	mkdirSync(join(root, 'src', 'routes', 'admin'), { recursive: true })
 	mkdirSync(join(root, 'src', 'lib'), { recursive: true })
-	writeFileSync(join(root, 'package.json'), '{"name":"t"}')
+	writeFileSync(join(root, 'package.json'), '{"name":"t","type":"module"}')
 	writeFileSync(join(root, 'svelte.config.js'), 'export default {}')
 	writeFileSync(
 		join(root, 'src', 'routes', 'api', 'greet.v'),
@@ -555,7 +555,7 @@ describe('item 11 — codegen golden project (sample-overlay variant + routes.js
 		mkdirSync(join(root, 'src'), { recursive: true })
 		cpSync(tpl, join(root, 'src'), { recursive: true })
 		// base skeleton bits generate() needs: config + error page
-		writeFileSync(join(root, 'package.json'), '{"name":"t"}')
+		writeFileSync(join(root, 'package.json'), '{"name":"t","type":"module"}')
 		writeFileSync(join(root, 'svelte.config.js'), 'export default {}')
 		writeFileSync(join(root, 'src', 'routes', '+error.svelte'), '<p>{msg}</p>')
 	}

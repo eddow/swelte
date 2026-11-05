@@ -101,11 +101,17 @@ build` first).
 generate-time warns (`gen/diagnostics.ts`), file+line entries for
 humans and `--format json` for agents.
 
-## `swelte init [<dir>] [--sample | --empty] [--template empty|sample] [--root dir] [--dir name]`
+## `swelte init [<dir>] [--sample | --empty] [--template empty|sample] [--ssr] [--root dir] [--dir name]`
 
 Scaffold a project. `--sample` (default): the `something` example
 shape. `src/app.ts` is the optional user-owned setup hook (plus
 `src/app.css` when present) — both auto-imported by the generated
 `.swelte/entry-main.ts`; routers are
 NEVER scaffolded — `dev`/`build` derive them into `.swelte/`.
+
+SSR is opt-in (default: SPA-only): `--ssr` adds `@swelte/ssr-qjs`
+(SSR via embedded QuickJS) and swaps the `swelte` import in
+`vite.config.ts` from `@swelte/core/vite` to `@swelte/ssr-qjs`.
+Interactive `init` asks (default No — SPA unless you say yes; add it
+later any time with `npm install @swelte/ssr-qjs` + the import swap).
 

@@ -88,10 +88,15 @@ Automatic. Scaffolded projects (`swelte init`) carry a `postinstall` hook:
   },
   "scripts": {
     "postinstall": "npm-skills extract --skip-production --override"
+  },
+  "npmSkills": {
+    "consume": {
+      "only": ["@swelte/*"]
+    }
   }
 }
 ```
 
-`npm install` extracts each dependency's `skills/` into the project's
+`npm install` extracts each `@swelte/*` dependency's `skills/` into the project's
 `.agents/skills/`. Skills are plain markdown (`SKILL.md` + frontmatter),
 versioned with the packages that ship them — no manual copy step.

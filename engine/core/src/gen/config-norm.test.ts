@@ -5,9 +5,18 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { defineConfig, loadConfig, renderClientEntry } from './config.js'
 
+// Bare `svelte.config.js` (ESM `export default`) imported without a
+// `"type": "module"` package.json triggers Node's MODULE_TYPELESS warning
+// (reparse overhead). Every tmp root gets the marker.
+function tmpCfgRoot(): string {
+	const root = mkdtempSync(join(tmpdir(), 'swelte-cfg-'))
+	writeFileSync(join(root, 'package.json'), '{"name":"t","type":"module"}')
+	return root
+}
+
 describe('config normalization (tmp roots)', () => {
 	it('missing file -> defaults', async () => {
-		const root = mkdtempSync(join(tmpdir(), 'swelte-cfg-'))
+		const root = tmpCfgRoot()
 		const cfg = await loadConfig(root)
 		assert.equal(cfg.routesDir, 'src/routes')
 		assert.equal(cfg.libDir, 'src/lib')
@@ -16,7 +25,7 @@ describe('config normalization (tmp roots)', () => {
 	})
 
 	it('swelte key read (defineConfig non-enumerable)', async () => {
-		const root = mkdtempSync(join(tmpdir(), 'swelte-cfg-'))
+		const root = tmpCfgRoot()
 		const cfg0 = defineConfig({ swelte: { port: 9999 } })
 		assert.ok(!Object.keys(cfg0).includes('swelte'))
 		assert.equal((cfg0 as unknown as { swelte?: { port?: number } }).swelte?.port, 9999)
@@ -26,14 +35,14 @@ describe('config normalization (tmp roots)', () => {
 	})
 
 	it('legacy top-level swelte.config.ts read', async () => {
-		const root = mkdtempSync(join(tmpdir(), 'swelte-cfg-'))
-		writeFileSync(join(root, 'swelte.config.ts'), `export default { port: 5555 }`)
+		const root = tmpCfgRoot()
+		writeFileSync(join(root, 'swelte.config.mts'), `export default { port: 5555 }`)
 		const cfg = await loadConfig(root)
 		assert.equal(cfg.port, 5555)
 	})
 
 	it('broken config warns and falls back', async () => {
-		const root = mkdtempSync(join(tmpdir(), 'swelte-cfg-'))
+		const root = tmpCfgRoot()
 		writeFileSync(join(root, 'svelte.config.js'), `this is not js (((`)
 		const warns: string[] = []
 		const orig = console.warn
@@ -50,7 +59,7 @@ describe('config normalization (tmp roots)', () => {
 	})
 
 	it('sveltekit knobs normalize (trailingSlash/base/csp/csrf/methodOverride/version)', async () => {
-		const root = mkdtempSync(join(tmpdir(), 'swelte-cfg-'))
+		const root = tmpCfgRoot()
 		writeFileSync(
 			join(root, 'svelte.config.js'),
 			`export default { swelte: { trailingSlash: 'always', base: '/app', csp: "default-src 'self'", csrf: 'enforce', methodOverride: true, version: '1.2.3' } }`
@@ -66,7 +75,7 @@ describe('config normalization (tmp roots)', () => {
 	})
 
 	it('serviceWorker defaults off, normalizes manual/auto', async () => {
-		const root = mkdtempSync(join(tmpdir(), 'swelte-cfg-'))
+		const root = tmpCfgRoot()
 		const off = await loadConfig(root)
 		assert.equal(off.serviceWorker.enabled, false)
 		assert.equal(off.serviceWorker.register, 'auto')
@@ -80,7 +89,7 @@ describe('config normalization (tmp roots)', () => {
 	})
 
 	it('bad trailingSlash falls back to ignore', async () => {
-		const root = mkdtempSync(join(tmpdir(), 'swelte-cfg-'))
+		const root = tmpCfgRoot()
 		writeFileSync(
 			join(root, 'svelte.config.js'),
 			`export default { swelte: { trailingSlash: 'sometimes' } }`
@@ -89,7 +98,7 @@ describe('config normalization (tmp roots)', () => {
 		assert.equal(cfg.trailingSlash, 'ignore')
 	})
 	it('sveltekit remainder knobs normalize (prerender/isr/target/offline)', async () => {
-		const root = mkdtempSync(join(tmpdir(), 'swelte-cfg-'))
+		const root = tmpCfgRoot()
 		const off = await loadConfig(root)
 		assert.equal(off.prerender.entries, 'off')
 		assert.equal(off.prerender.concurrency, 4)
@@ -113,10 +122,10 @@ describe('config normalization (tmp roots)', () => {
 	})
 
 	it('package.json swelte key is the config fallback (deploy target)', async () => {
-		const root = mkdtempSync(join(tmpdir(), 'swelte-cfg-'))
+		const root = tmpCfgRoot()
 		writeFileSync(
 			join(root, 'package.json'),
-			JSON.stringify({ name: 'x', swelte: { targetOs: 'linux', targetArch: 'arm64' } })
+			JSON.stringify({ name: 'x', type: 'module', swelte: { targetOs: 'linux', targetArch: 'arm64' } })
 		)
 		// No svelte.config at all → package.json wins.
 		const cfg = await loadConfig(root)
@@ -133,7 +142,7 @@ describe('config normalization (tmp roots)', () => {
 	})
 
 	it('cross-build targetOs/targetArch normalize (case-insensitive, aliases, bad -> host)', async () => {
-		const root = mkdtempSync(join(tmpdir(), 'swelte-cfg-'))
+		const root = tmpCfgRoot()
 		writeFileSync(
 			join(root, 'svelte.config.js'),
 			`export default { swelte: { targetOs: 'Windows', targetArch: 'X86_64' } }`
@@ -141,7 +150,7 @@ describe('config normalization (tmp roots)', () => {
 		const cfg = await loadConfig(root)
 		assert.equal(cfg.targetOs, 'windows')
 		assert.equal(cfg.targetArch, 'amd64')
-		const root2 = mkdtempSync(join(tmpdir(), 'swelte-cfg-'))
+		const root2 = tmpCfgRoot()
 		writeFileSync(
 			join(root2, 'svelte.config.js'),
 			`export default { swelte: { targetOs: 'plan9', targetArch: 'riscv' } }`
@@ -152,7 +161,7 @@ describe('config normalization (tmp roots)', () => {
 	})
 
 	it('bad prerender/target/offline fall back to defaults', async () => {
-		const root = mkdtempSync(join(tmpdir(), 'swelte-cfg-'))
+		const root = tmpCfgRoot()
 		writeFileSync(
 			join(root, 'svelte.config.js'),
 			`export default { swelte: { prerender: { entries: 'sometimes', concurrency: 0 }, target: 'vercel', offline: { fallback: 42 } } }`
@@ -165,19 +174,19 @@ describe('config normalization (tmp roots)', () => {
 	})
 
 	it('chunking defaults to layout; env wins over config', async () => {
-		const root = mkdtempSync(join(tmpdir(), 'swelte-cfg-'))
+		const root = tmpCfgRoot()
 		const off = await loadConfig(root)
 		assert.equal(off.chunking, 'layout')
 		// One root per case: loadConfig cache-busts by ms timestamp, so two
 		// writes in the same millisecond would read the first module.
-		const root2 = mkdtempSync(join(tmpdir(), 'swelte-cfg-'))
+		const root2 = tmpCfgRoot()
 		writeFileSync(
 			join(root2, 'svelte.config.js'),
 			`export default { swelte: { chunking: 'route' } }`
 		)
 		const on = await loadConfig(root2)
 		assert.equal(on.chunking, 'route')
-		const root3 = mkdtempSync(join(tmpdir(), 'swelte-cfg-'))
+		const root3 = tmpCfgRoot()
 		writeFileSync(
 			join(root3, 'svelte.config.js'),
 			`export default { swelte: { chunking: 'sometimes' } }`
@@ -197,7 +206,7 @@ describe('config normalization (tmp roots)', () => {
 		const { templatesDir } = await import('./config.js')
 		const fromUrl = import.meta.url
 		void templatesDir
-		const root = mkdtempSync(join(tmpdir(), 'swelte-cfg-'))
+		const root = tmpCfgRoot()
 		mkdirSync(join(root, 'src'), { recursive: true })
 		const none = renderClientEntry(root, fromUrl)
 		assert.ok(none.includes('Optional user hook'))
@@ -213,7 +222,7 @@ describe('config normalization (tmp roots)', () => {
 		const { templatesDir } = await import('./config.js')
 		const fromUrl = import.meta.url
 		void templatesDir
-		const root = mkdtempSync(join(tmpdir(), 'swelte-cfg-'))
+		const root = tmpCfgRoot()
 		mkdirSync(join(root, 'src'), { recursive: true })
 		writeFileSync(join(root, 'src', 'client.ts'), 'export {}')
 		const hook = renderClientEntry(root, fromUrl)

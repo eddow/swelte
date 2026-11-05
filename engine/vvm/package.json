@@ -1,6 +1,6 @@
 {
   "name": "@swelte/vvm",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "V Version Manager — installs and manages V toolchains inside node_modules (nvm for V)",
   "type": "module",
   "bin": {

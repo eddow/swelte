@@ -259,12 +259,14 @@ function normalizeServiceWorker(
  *  missing file/key falls back to `<root>/package.json`'s `swelte` key
  *  (deploy-target declaration lives with the package, e.g. docs-site's
  *  targetOs/targetArch that `npm i` uses to prep zig), then to defaults.
- *  Also honors a legacy `<root>/swelte.config.ts` default export. */
+ *  Also honors legacy `<root>/swelte.config.mts` / `.ts` default exports. */
 export async function loadConfig(root: string): Promise<ResolvedSwelteOptions> {
 	const dir = resolve(root)
 	const files = [
 		join(dir, 'svelte.config.js'),
+		join(dir, 'svelte.config.mts'),
 		join(dir, 'svelte.config.ts'),
+		join(dir, 'swelte.config.mts'),
 		join(dir, 'swelte.config.ts'),
 	]
 	for (const file of files) {

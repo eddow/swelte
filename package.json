@@ -2,7 +2,7 @@
   "name": "swelte-monorepo",
   "private": true,
   "type": "module",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "workspaces": [
     "engine/*",
     "examples/*"
@@ -11,7 +11,10 @@
     "dev": "npm run dev --workspace=examples/something",
     "build": "npm run build --workspace=examples/something",
     "build:engine": "npm run build --workspace=@swelte/core",
-    "version:sync": "node scripts/sync-version.mjs",
+    "test": "npm run test:unit && npm run test:install && npm run test:examples",
+    "test:unit": "npm run test --workspace=@swelte/core",
+    "test:examples": "npm run test:full --workspace=examples/tests",
+    "test:install": "node scripts/test-install.mjs",
     "version:patch": "node scripts/sync-version.mjs patch",
     "version:minor": "node scripts/sync-version.mjs minor",
     "version:major": "node scripts/sync-version.mjs major",

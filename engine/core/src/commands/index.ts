@@ -72,7 +72,7 @@ const previewCmd: Command = {
 const initCmd: Command = {
 	name: 'init',
 	summary:
-		'Scaffold a new Swelte project in <dir> (default my-swelte-app). Empty skeleton unless --sample.',
+		'Scaffold a new Swelte project in <dir> (default my-swelte-app). Empty skeleton unless --sample; SPA-only unless --ssr.',
 	args: [
 		{ name: 'root', help: 'Parent dir for the scaffold', value: 'string' },
 		{ name: 'dir', help: 'Target directory name', value: 'string' },
@@ -83,6 +83,11 @@ const initCmd: Command = {
 		},
 		{ name: 'empty', help: 'Empty skeleton only (no prompt)', value: 'boolean' },
 		{ name: 'template', help: 'Template to use: empty | sample', value: 'string' },
+		{
+			name: 'ssr',
+			help: 'Include SSR via @swelte/ssr-qjs (else SPA-only; no prompt)',
+			value: 'boolean',
+		},
 	],
 	async run(ctx: Ctx) {
 		await runInit(ctx)

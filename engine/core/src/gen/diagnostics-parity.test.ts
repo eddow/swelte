@@ -9,7 +9,7 @@ function rootWith(files: Record<string, string>): string {
 	const root = mkdtempSync(join(tmpdir(), 'swelte-diag-'))
 	mkdirSync(join(root, 'src', 'routes'), { recursive: true })
 	mkdirSync(join(root, 'src', 'lib'), { recursive: true })
-	writeFileSync(join(root, 'package.json'), '{"name":"t"}')
+	writeFileSync(join(root, 'package.json'), '{"name":"t","type":"module"}')
 	writeFileSync(join(root, 'svelte.config.js'), 'export default {}')
 	for (const [rel, src] of Object.entries(files)) {
 		const abs = join(root, rel)

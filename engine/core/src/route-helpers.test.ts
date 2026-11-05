@@ -231,7 +231,7 @@ describe('route helpers', () => {
 		const root = mkdtempSync(join(tmpdir(), 'swelte-params-'))
 		mkdirSync(join(root, 'src', 'routes', 'users'), { recursive: true })
 		mkdirSync(join(root, 'src', 'lib'), { recursive: true })
-		writeFileSync(join(root, 'package.json'), '{"name":"t"}')
+		writeFileSync(join(root, 'package.json'), '{"name":"t","type":"module"}')
 		writeFileSync(join(root, 'svelte.config.js'), 'export default {}')
 		writeFileSync(
 			join(root, 'src', 'routes', 'users', '[id].v'),
@@ -256,7 +256,7 @@ describe('route helpers', () => {
 		const root = mkdtempSync(join(tmpdir(), 'swelte-head-'))
 		mkdirSync(join(root, 'src', 'routes'), { recursive: true })
 		mkdirSync(join(root, 'src', 'lib'), { recursive: true })
-		writeFileSync(join(root, 'package.json'), '{"name":"t"}')
+		writeFileSync(join(root, 'package.json'), '{"name":"t","type":"module"}')
 		writeFileSync(join(root, 'svelte.config.js'), 'export default {}')
 		writeFileSync(
 			join(root, 'src', 'routes', '+page.v'),
@@ -279,7 +279,7 @@ describe('route helpers', () => {
 		const root = mkdtempSync(join(tmpdir(), 'swelte-catch-'))
 		mkdirSync(join(root, 'src', 'routes', 'files'), { recursive: true })
 		mkdirSync(join(root, 'src', 'lib'), { recursive: true })
-		writeFileSync(join(root, 'package.json'), '{"name":"t"}')
+		writeFileSync(join(root, 'package.json'), '{"name":"t","type":"module"}')
 		writeFileSync(join(root, 'svelte.config.js'), 'export default {}')
 		writeFileSync(
 			join(root, 'src', 'routes', 'files', '[...a].v'),
@@ -306,7 +306,7 @@ describe('route helpers', () => {
 		const root = mkdtempSync(join(tmpdir(), 'swelte-rootwrap-'))
 		mkdirSync(join(root, 'src', 'routes', 'admin'), { recursive: true })
 		mkdirSync(join(root, 'src', 'lib'), { recursive: true })
-		writeFileSync(join(root, 'package.json'), '{"name":"t"}')
+		writeFileSync(join(root, 'package.json'), '{"name":"t","type":"module"}')
 		writeFileSync(join(root, 'svelte.config.js'), 'export default {}')
 		writeFileSync(
 			join(root, 'src', 'routes', '+route.v'),
@@ -334,7 +334,7 @@ describe('route helpers', () => {
 		const root = mkdtempSync(join(tmpdir(), 'swelte-claim-'))
 		mkdirSync(join(root, 'src', 'routes', 'foo'), { recursive: true })
 		mkdirSync(join(root, 'src', 'lib'), { recursive: true })
-		writeFileSync(join(root, 'package.json'), '{"name":"t"}')
+		writeFileSync(join(root, 'package.json'), '{"name":"t","type":"module"}')
 		writeFileSync(join(root, 'svelte.config.js'), 'export default {}')
 		writeFileSync(
 			join(root, 'src', 'routes', 'foo.v'),
@@ -395,7 +395,7 @@ describe('route helpers', () => {
 		const root = mkdtempSync(join(tmpdir(), 'swelte-pre-'))
 		mkdirSync(join(root, 'src', 'routes', 'about'), { recursive: true })
 		mkdirSync(join(root, 'src', 'lib'), { recursive: true })
-		writeFileSync(join(root, 'package.json'), '{"name":"t"}')
+		writeFileSync(join(root, 'package.json'), '{"name":"t","type":"module"}')
 		writeFileSync(join(root, 'svelte.config.js'), 'export default {}')
 		writeFileSync(join(root, 'src', 'routes', '+page.svelte'), '<h1>home</h1>')
 		writeFileSync(join(root, 'src', 'routes', 'about', '+page.svelte'), '<h1>about</h1>')
@@ -420,7 +420,7 @@ describe('route helpers', () => {
 		const root = mkdtempSync(join(tmpdir(), 'swelte-prewrap-'))
 		mkdirSync(join(root, 'src', 'routes', 'admin', 'users'), { recursive: true })
 		mkdirSync(join(root, 'src', 'lib'), { recursive: true })
-		writeFileSync(join(root, 'package.json'), '{"name":"t"}')
+		writeFileSync(join(root, 'package.json'), '{"name":"t","type":"module"}')
 		writeFileSync(join(root, 'svelte.config.js'), 'export default {}')
 		writeFileSync(join(root, 'src', 'routes', 'admin', '+route.svelte'), '<slot />')
 		writeFileSync(
@@ -438,7 +438,7 @@ describe('route helpers', () => {
 		const root = mkdtempSync(join(tmpdir(), 'swelte-preasync-'))
 		mkdirSync(join(root, 'src', 'routes', 'posts', '[slug]'), { recursive: true })
 		mkdirSync(join(root, 'src', 'lib'), { recursive: true })
-		writeFileSync(join(root, 'package.json'), '{"name":"t"}')
+		writeFileSync(join(root, 'package.json'), '{"name":"t","type":"module"}')
 		writeFileSync(join(root, 'svelte.config.js'), 'export default {}')
 		writeFileSync(join(root, 'src', 'routes', 'posts', '[slug]', '+page.svelte'), '<h1>p</h1>')
 		// Async entries with a paginated loop inside (SvelteKit `entries` can
