@@ -19,7 +19,7 @@ Published on npm under the [`@swelte` scope](https://www.npmjs.com/org/swelte):
 | `@swelte/ssr-qjs` | [![npm version](https://img.shields.io/npm/v/@swelte/ssr-qjs.svg)](https://www.npmjs.com/package/@swelte/ssr-qjs) | SSR adapter — embedded QuickJS engine (default) |
 | `@swelte/mcp` | [![npm version](https://img.shields.io/npm/v/@swelte/mcp.svg)](https://www.npmjs.com/package/@swelte/mcp) | MCP server — route tree, type contracts, diagnostics for IDE agents (`swelte-mcp`) |
 | `@swelte/vvm` | [![npm version](https://img.shields.io/npm/v/@swelte/vvm.svg)](https://www.npmjs.com/package/@swelte/vvm) | V Version Manager — installs and manages V toolchains (`vvm`, `v` shim) |
-| `@swelte/plus` | [![npm version](https://img.shields.io/npm/v/@swelte/plus.svg)](https://www.npmjs.com/package/@swelte/plus) | Beyond-SvelteKit plugins — scheduled jobs (`@[cron]` ticks: retry, dead-letter, tick log) |
+| `@swelte/plus` | [![npm version](https://img.shields.io/npm/v/@swelte/plus.svg)](https://www.npmjs.com/package/@swelte/plus) | Beyond-SvelteKit plugins — scheduled jobs (`@[cron]` ticks: retry, dead-letter, tick log) + embedded SQLite/KV (`swelte migrate`, `src/lib/backend/db.v`) |
 
 ```sh
 npm install @swelte/core

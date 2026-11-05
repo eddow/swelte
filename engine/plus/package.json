@@ -1,17 +1,19 @@
 {
   "name": "@swelte/plus",
   "version": "0.1.3",
-  "description": "Swelte beyond-SvelteKit plugins — jobs (cron) (V+TS).",
+  "description": "Swelte beyond-SvelteKit plugins — jobs (cron) + db (embedded SQLite) (V+TS).",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
     ".": "./dist/index.js",
-    "./jobs": "./dist/jobs.js"
+    "./jobs": "./dist/jobs.js",
+    "./db": "./dist/db.js"
   },
   "files": [
     "README.md",
     "dist",
+    "vlib",
     "LICENSE-MIT",
     "package.json"
   ],

@@ -98,6 +98,13 @@ export const searchIndex: SearchEntry[] = [
 			'plus jobs cron scheduler retry dead-letter tick log scheduled tasks app.v jobsplugin backoff blocking catchup',
 	},
 	{
+		href: '/plus/db',
+		label: 'Db',
+		group: 'Plus',
+		keywords:
+			'plus db sqlite migrate kv backend exec_none wal swelte_kv migrations _swelte_migrations embedded database',
+	},
+	{
 		href: '/from-sveltekit',
 		label: 'From SvelteKit',
 		group: 'Migrate',

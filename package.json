@@ -15,6 +15,7 @@
     "test:unit": "npm run test --workspace=@swelte/core",
     "test:examples": "npm run test:full --workspace=examples/tests",
     "test:install": "node scripts/test-install.mjs",
+    "version:sync": "node scripts/sync-version.mjs",
     "version:patch": "node scripts/sync-version.mjs patch",
     "version:minor": "node scripts/sync-version.mjs minor",
     "version:major": "node scripts/sync-version.mjs major",

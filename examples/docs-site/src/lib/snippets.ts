@@ -173,4 +173,23 @@ pub fn sweep() !void {
 [swelte:cron] tick=sweep status=ok attempt=2       # recovered
 [swelte:cron] tick=sweep status=dead attempt=3 err=<msg>  # exhausted`,
 	},
+	'plus-db': {
+		lang: 'v',
+		code: `// src/lib/backend/db.v (scaffolded by swelte migrate)
+module backend
+import db.sqlite
+__global swelte_db = sqlite.DB{}
+pub fn db() !sqlite.DB { ... }                    // WAL, shared conn
+pub fn kv_set(key string, value string) ! { ... } // exec_none (101)
+pub fn kv_get(key string) !string { ... }         // exec + get_string
+pub fn kv_del(key string) ! { ... }`,
+	},
+	'plus-migrate': {
+		lang: 'bash',
+		code: `SWELTE_PLUGINS=@swelte/plus/db swelte migrate
+# created src/lib/backend/db.v (backend-only helper)
+# created db/migrations/001_swelte_kv.sql
+# migrated: 001_swelte_kv.sql
+# migrate: applied 1 migration(s)`,
+	},
 }

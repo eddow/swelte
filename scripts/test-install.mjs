@@ -1,16 +1,19 @@
 #!/usr/bin/env node
 // test-install.mjs — smoke-test the published init path in an isolated tmp dir.
-// Packs engine/* to real tarballs, scaffolds via `swelte init` + file: dep
-// swap (same bytes a user gets: template + replace __SWELTE_VERSION__ with
-// the packed version), then `npm install` twice (SPA + SSR) with warnings and
-// errors promoted to failures.
+// Packs engine/* to real tarballs, scaffolds via `swelte init` with deps
+// rewritten to file: tarballs (same template bytes, local resolution, no
+// registry, no publish needed), then `npm install` twice (SPA + SSR) with
+// warnings and errors promoted to failures.
 //
-// Usage: node scripts/test-install.mjs [--keep]   (keeps tmpdir on failure always)
+// Usage: node scripts/test-install.mjs [--keep]   (keeps tmpdir for debugging)
 //
-// Cross-platform (Windows-safe): pure node, no bash. Child processes run
-// with NODE_OPTIONS scrubbed of --inspect* so an attached IDE debugger does
-// not make every `node`/`npm` child block on "Waiting for the debugger…".
-import { execFileSync, execSync } from 'node:child_process'
+// Cross-platform (Windows-safe): pure node, no bash.
+//
+// Debugger safety: when run under an IDE inspector (VS Code auto-attach,
+// NODE_OPTIONS=--inspect), the script respawns itself detached with the
+// inspect flags stripped. Otherwise every child — and process.exit itself —
+// blocks on "Waiting for the debugger to disconnect…".
+import { spawnSync, execFileSync, execSync } from 'node:child_process'
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
@@ -21,6 +24,24 @@ if (process.argv.includes('--help') || process.argv.includes('-h')) {
 	console.log('Usage: node scripts/test-install.mjs [--keep]\n\nSmoke-test the published init path: packs engine/*, scaffolds SPA + SSR\ncases into a tmp dir, runs npm install with warnings promoted to failures.\n--keep preserves the tmp dir for debugging.')
 	process.exit(0)
 }
+
+// --- debugger guard: respawn clean -----------------------------------------
+function hasInspector() {
+	const opts = process.env.NODE_OPTIONS ?? ''
+	if (/(^|\s)--inspect(-brk)?(=\S*)?(\s|$)/.test(opts)) return true
+	if (process.env.VSCODE_INSPECTOR_OPTIONS) return true
+	return !!process.execArgv.some((a) => a.startsWith('--inspect'))
+}
+if (hasInspector() && !process.env.SWELTE_INSTALL_TEST_RESPAWNED) {
+	const env = { ...process.env, SWELTE_INSTALL_TEST_RESPAWNED: '1' }
+	delete env.NODE_OPTIONS
+	delete env.VSCODE_INSPECTOR_OPTIONS
+	const args = process.argv.slice(1)
+	const child = spawnSync(process.execPath, args, { cwd: ROOT, env, stdio: 'inherit' })
+	process.exit(child.status ?? 1)
+}
+// From here on the process is inspector-free (either it never had one,
+// or this is the clean respawn).
 const KEEP = process.argv.includes('--keep')
 
 const TMP = mkdtempSync(join(tmpdir(), 'swelte-install-'))
@@ -34,23 +55,8 @@ function fail(msg) {
 	process.exit(1)
 }
 
-// An IDE debugger (VS Code auto-attach, --inspect in NODE_OPTIONS) makes
-// every spawned `node`/`npm` child open a debug port and block. Scrub it:
-// children don't need the parent's inspector.
-function cleanEnv() {
-	const env = { ...process.env }
-	for (const k of ['NODE_OPTIONS']) {
-		if (typeof env[k] === 'string') {
-			env[k] = env[k].replace(/--inspect(-brk)?(=[^\s]*)?/g, '').trim()
-			if (!env[k]) delete env[k]
-		}
-	}
-	// VS Code terminal auto-attach shims re-inject the inspector otherwise.
-	delete env.VSCODE_INSPECTOR_OPTIONS
-	delete env.VSCODE_CLI
-	return env
-}
-const ENV = cleanEnv()
+// Children inherit this process's (now inspector-free) env directly.
+const ENV = { ...process.env }
 
 function run(cmd, args, opts = {}) {
 	// Windows: npm is npm.cmd — execFile needs the shell to resolve it.
@@ -98,19 +104,16 @@ async function installCase(name, initArgs) {
 	} catch {
 		fail(`init ${name}`)
 	}
-	// Point the scaffold at the packed tarballs (file: deps) instead of the
-	// registry — same template bytes, local resolution, no publish needed.
-	try {
-		run('npm', ['install', '--no-save', '--no-audit', '--no-fund', tgz('core'), tgz('vvm')], { cwd: dir })
-	} catch {
-		fail(`pack wiring ${name}`)
-	}
-	for (const dep of ['core', 'vvm', 'ssr-qjs']) {
+	// Rewrite every @swelte/* dep to its packed tarball BEFORE the first
+	// install — a scaffolded `^0.2.0` range may not exist on the registry
+	// yet (unpublished bump), and npm would fail resolving it. Same template
+	// bytes, local resolution, no publish needed.
+	for (const dep of ['core', 'vvm', 'ssr-qjs', 'mcp', 'plus']) {
 		if (!existsSync(tgz(dep))) continue
 		const pjFile = join(dir, 'package.json')
 		const pj = JSON.parse(readFileSync(pjFile, 'utf8'))
 		let touched = false
-		for (const s of ['dependencies', 'devDependencies']) {
+		for (const s of ['dependencies', 'devDependencies', 'peerDependencies', 'optionalDependencies']) {
 			if (pj[s]?.[`@swelte/${dep}`]) {
 				pj[s][`@swelte/${dep}`] = `file:${tgz(dep)}`
 				touched = true

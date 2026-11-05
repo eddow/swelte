@@ -77,7 +77,10 @@ const groups: { title: string; links: { href: string; label: string }[] }[] = [
 	},
 	{
 		title: 'Plus',
-		links: [{ href: '/plus/jobs', label: 'Jobs' }],
+		links: [
+			{ href: '/plus/jobs', label: 'Jobs' },
+			{ href: '/plus/db', label: 'Db' },
+		],
 	},
 	{
 		title: 'Migrate',

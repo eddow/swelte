@@ -291,7 +291,7 @@ export async function runSsrCheck(
 		try {
 			const { spawn } = await import('node:child_process')
 			const { createServer } = await import('node:net')
-			const { existsSync: existsSyncV } = await import('node:fs')
+			const { existsSync: existsSyncV, readFileSync: readFileSyncV } = await import('node:fs')
 			const genRoutes = join(root, outDir, 'routes', 'server_gen.v')
 			if (existsSyncV(genRoutes)) {
 				const freePort = await new Promise<number>((resPort, rejPort) => {
@@ -315,11 +315,29 @@ export async function runSsrCheck(
 				}
 				if (toolchain.resolveV && toolchain.toolchainEnv) {
 					const vBin = toolchain.resolveV(import.meta.url)
-					const hasBridge = existsSyncV(join(root, outDir, 'routes', 'swelte_qjs_bridge.v'))
+					// Real bridge → embed flags; plugins → globals only; stub
+					// bridge / neither → plain run (symbol always resolves).
+					let hasBridge = false
+					let hasPlugins = false
+					try {
+						const bridge = readFileSyncV(join(root, outDir, 'routes', 'swelte_qjs_bridge.v'), 'utf8')
+						hasBridge = bridge.includes('__global')
+					} catch {
+						/* no bridge */
+					}
+					try {
+						const raw = readFileSyncV(join(root, outDir, 'plugin_modules.json'), 'utf8')
+						const mods = JSON.parse(raw) as unknown
+						hasPlugins = Array.isArray(mods) && mods.length > 0
+					} catch {
+						/* no marker */
+					}
 					const cc = typeof toolchain.resolveCC === 'function' ? toolchain.resolveCC() : 'gcc'
 					const vArgs = hasBridge
 						? ['-enable-globals', '-cc', cc, 'run', join(root, outDir, 'server.v')]
-						: ['run', join(root, outDir, 'server.v')]
+						: hasPlugins
+							? ['-enable-globals', 'run', join(root, outDir, 'server.v')]
+							: ['run', join(root, outDir, 'server.v')]
 					const backend = spawn(vBin, vArgs, {
 						cwd: root,
 						env: toolchain.toolchainEnv({

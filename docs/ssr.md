@@ -73,9 +73,13 @@ bare `curl` probes see static/SPA + JSON, never SSR (build asserts artifacts onl
 * `swelte preview` auto-sets `SWELTE_SSR=1` when the QJS bridge
 artifact exists (detection only — core never starts an engine).
 Explicit `SWELTE_SSR` / `SWELTE_SSR_URL` in the env still win.
-* `swelte dev` is bridge-aware: with the bridge present, `v run` gets
-the same `-enable-globals -cc <abs-gcc>` flags as the build (flags
+* `swelte dev` is bridge-aware: with the real bridge present, `v run`
+gets the same `-enable-globals -cc <abs-gcc>` flags as the build (flags
 go **before** `run`; after it V treats them as program argv).
+Core-only projects compile against generate()'s no-op bridge stub (same
+symbol, returns not-ok — SSR falls through to the sidecar proxy); plugin
+V modules (e.g. `@swelte/plus/db`'s `backend/`) add `-enable-globals`
+via the `.swelte/plugin_modules.json` marker generate() writes.
 Conda-safe: absolute cc + conda-free PATH (conda's `ld` shadows
 the system linker).
 

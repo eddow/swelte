@@ -12,3 +12,8 @@ export function isBackendMod(mod: string): boolean {
 	const stem = parts.pop() ?? ''
 	return stem.endsWith('_backend')
 }
+
+/** Engine-owned `.swelte/` top-level dirs (never plugin modules, never
+ * pruned as stale includes). Shared by generate()'s prune and the
+ * build/dev `-enable-globals` detector. */
+export const SWELTE_GEN_CORE_DIRS = ['routes', 'generated', 'types', 'app', 'dev']

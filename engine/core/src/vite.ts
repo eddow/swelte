@@ -75,6 +75,7 @@ export type {
 	SvelteRouteEntry,
 	SweltePlugin,
 	SweltePluginHarness,
+	SweltePluginInclude,
 	SweltePluginOptions,
 	SweltePluginRouteCtx,
 	VStruct,

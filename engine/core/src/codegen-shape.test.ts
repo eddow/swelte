@@ -908,4 +908,112 @@ describe('item 11 — codegen golden project (sample-overlay variant + routes.js
 		assert.equal(leaf?.hasData, true)
 		assert.equal(leaf?.layout, false)
 	})
+
+	it('plugin includes: V module dirs copied into .swelte/, stale pruned', async () => {
+		const root = scaffold()
+		// Fake plugin include dir (no real package needed).
+		const incDir = join(root, 'fake-inc', 'backend')
+		mkdirSync(incDir, { recursive: true })
+		writeFileSync(join(incDir, 'db.v'), 'module backend\npub fn kv_get(key string) !string {\n\treturn key\n}\n')
+		await generate(root, {
+			plugins: [{ name: 'fake-db', attrs: [], includes: () => [{ module: 'backend', absDir: incDir }] }],
+		})
+		const copied = readFileSync(join(root, '.swelte', 'backend', 'db.v'), 'utf8')
+		assert.ok(copied.includes('module backend'))
+		assert.ok(copied.includes('pub fn kv_get'))
+		// Plugin marker lists the copied module (build/dev read it).
+		const marker = JSON.parse(readFileSync(join(root, '.swelte', 'plugin_modules.json'), 'utf8'))
+		assert.deepEqual(marker, ['backend'])
+		// Stale module dirs pruned on the next generate without the plugin.
+		await generate(root)
+		assert.equal(
+			(() => {
+				try {
+					readdirSync(join(root, '.swelte', 'backend'))
+					return true
+				} catch {
+					return false
+				}
+			})(),
+			false,
+			'stale backend/ pruned'
+		)
+	})
+
+	it('plugin includes: reserved/bad module names skipped with a warning', async () => {
+		const root = scaffold()
+		const incDir = join(root, 'fake-inc')
+		mkdirSync(incDir, { recursive: true })
+		writeFileSync(join(incDir, 'x.v'), 'module routes\n')
+		// Reserved 'routes' is skipped, not copied over the dispatcher.
+		await generate(root, {
+			plugins: [{ name: 'fake', attrs: [], includes: () => [{ module: 'routes', absDir: incDir }] }],
+		})
+		const disp = readFileSync(join(root, '.swelte', 'routes', 'server_gen.v'), 'utf8')
+		assert.ok(disp.includes('pub fn swelte_route('), 'dispatcher intact')
+	})
+
+	it('bridge stub: swelte_qjs_bridge.v emitted when absent, never clobbers the real bridge', async () => {
+		const root = scaffold()
+		await generate(root)
+		const stub = readFileSync(join(root, '.swelte', 'routes', 'swelte_qjs_bridge.v'), 'utf8')
+		assert.ok(stub.includes('module routes'))
+		assert.ok(stub.includes('pub fn swelte_qjs_render_page('))
+		assert.ok(!stub.includes('__global'), 'stub carries no globals')
+		assert.ok(stub.includes("return '', false"), 'stub returns not-ok')
+		assert.ok(!stub.includes('\\t'), 'stub uses real tabs (valid V)')
+		assert.ok(stub.includes('\n\t_ = route'), 'stub body indented')
+		// Adapter overwrites with the real bridge; the next generate must
+		// not clobber it back to the stub.
+		writeFileSync(
+			join(root, '.swelte', 'routes', 'swelte_qjs_bridge.v'),
+			'module routes\n__global swelte_qjs_cache int\npub fn swelte_qjs_render_page(route string, props_json string) (string, bool) {\n\treturn route + props_json, true\n}\n'
+		)
+		await generate(root)
+		const kept = readFileSync(join(root, '.swelte', 'routes', 'swelte_qjs_bridge.v'), 'utf8')
+		assert.ok(kept.includes('__global'), 'real bridge preserved')
+	})
+
+	it('toolchain: bridge helpers (real vs stub vs dangling)', async () => {
+		const { mkdtempSync, mkdirSync, writeFileSync, rmSync } = await import('node:fs')
+		const { tmpdir } = await import('node:os')
+		const { hasRealBridge, bridgeLinkedArchives, healDanglingBridge, needsGlobals } =
+			await import('./toolchain.js')
+		const gen = mkdtempSync(join(tmpdir(), 'swelte-bridge-'))
+		mkdirSync(join(gen, 'routes'), { recursive: true })
+		// No bridge → nothing real, nothing to heal, no globals.
+		assert.equal(hasRealBridge(gen), false)
+		assert.deepEqual(bridgeLinkedArchives(gen), [])
+		assert.equal(healDanglingBridge(gen), false)
+		assert.equal(needsGlobals(gen), false)
+		// Stub → not real, nothing dangling, no globals.
+		writeFileSync(join(gen, 'routes', 'swelte_qjs_bridge.v'), 'module routes\npub fn x() {}\n')
+		assert.equal(hasRealBridge(gen), false)
+		assert.deepEqual(bridgeLinkedArchives(gen), [])
+		assert.equal(healDanglingBridge(gen), false)
+		assert.equal(needsGlobals(gen), false)
+		// Dangling real bridge (archive missing) → heal deletes it.
+		writeFileSync(
+			join(gen, 'routes', 'swelte_qjs_bridge.v'),
+			'module routes\n__global c int\n#flag /nonexistent/libqjs.a@START_LIBS\npub fn x() {}\n'
+		)
+		assert.equal(hasRealBridge(gen), true)
+		assert.deepEqual(bridgeLinkedArchives(gen), ['/nonexistent/libqjs.a'])
+		assert.equal(healDanglingBridge(gen), true)
+		assert.equal(hasRealBridge(gen), false)
+		// Healthy real bridge (archive present) → kept.
+		mkdirSync(join(gen, 'qjs'), { recursive: true })
+		writeFileSync(join(gen, 'qjs', 'libqjs.a'), 'fake')
+		writeFileSync(
+			join(gen, 'routes', 'swelte_qjs_bridge.v'),
+			`module routes\n__global c int\n#flag ${join(gen, 'qjs', 'libqjs.a')}@START_LIBS\npub fn x() {}\n`
+		)
+		assert.equal(hasRealBridge(gen), true)
+		assert.equal(healDanglingBridge(gen), false)
+		assert.equal(needsGlobals(gen), true)
+		// Plugin marker alone (no bridge) → globals needed.
+		rmSync(join(gen, 'routes', 'swelte_qjs_bridge.v'))
+		writeFileSync(join(gen, 'plugin_modules.json'), '["backend"]')
+		assert.equal(needsGlobals(gen), true)
+	})
 })

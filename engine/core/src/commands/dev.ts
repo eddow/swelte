@@ -230,7 +230,8 @@ export async function runDev(ctx: Ctx): Promise<void> {
 	const root = resolve(String(ctx.opts.root ?? process.cwd()))
 	const port = takePort(ctx.opts.port, 5174)
 	const backend = takePort(ctx.opts.backend, 8131)
-	const { resolveV, vVersion, toolchainEnv, resolveHostCC } = await import('../toolchain.js')
+	const { resolveV, vVersion, toolchainEnv, resolveHostCC, needsGlobals, hasRealBridge } =
+		await import('../toolchain.js')
 	const { loadConfig } = await import('../gen/config.js')
 	const v = resolveV(import.meta.url)
 	ctx.log(`V toolchain: ${vVersion(v)} (${v})`)
@@ -293,13 +294,18 @@ export async function runDev(ctx: Ctx): Promise<void> {
 		// `routes/` relative to it (dir target fails on dotted dirs).
 		// Compiler flags go BEFORE `run` (after it they reach the program
 		// as argv — hence `v expects that -enable-globals exists`).
-		// Bridge pass: the QJS bridge uses __global, so dev needs the same
+		// Bridge pass: the real QJS bridge uses __global, so dev needs the
 		// `-enable-globals -cc <abs>` pair the build uses when it exists.
-		// Host cc prefers the system compiler, falls back to the
-		// vvm-managed host zig-cc wrapper (stock Windows/macOS: no gcc).
+		// Plugin V modules (db backend) need `-enable-globals` too (marker).
+		// Stub bridge / neither: plain `v run` (symbol always resolves).
+		// (Dangling bridges are healed once at startup, before pre-generate.)
+		// Host cc prefers the system compiler, falls back to the vvm-managed
+		// host zig-cc wrapper (stock Windows/macOS: no gcc).
 		let vArgs: string[] = ['run', join(genAbs, 'server.v')]
 		try {
-			if (existsSync(join(genAbs, 'routes', 'swelte_qjs_bridge.v'))) {
+			const withGlobals = needsGlobals(genAbs)
+			const hasBridge = hasRealBridge(genAbs)
+			if (hasBridge) {
 				const cc = resolveHostCC(import.meta.url)
 				if (!cc) {
 					throw new Error(
@@ -308,6 +314,9 @@ export async function runDev(ctx: Ctx): Promise<void> {
 				}
 				vArgs = ['-enable-globals', '-cc', cc, 'run', join(genAbs, 'server.v')]
 				ctx.log(`QJS embed: -enable-globals -cc ${vArgs[2]} (bridge present)`)
+			} else if (withGlobals) {
+				vArgs = ['-enable-globals', 'run', join(genAbs, 'server.v')]
+				ctx.log('plugin V modules: -enable-globals (__global in includes)')
 			}
 		} catch (e) {
 			if ((e as Error).message?.includes('no C compiler')) throw e
@@ -347,7 +356,19 @@ export async function runDev(ctx: Ctx): Promise<void> {
 		})
 	}
 	// `generate()` runs in Vite's configResolved — but `swelte dev` starts
-	// the V backend *before* Vite. Run it once here so `.swelte/` exists.
+	// the V backend *before* Vite. Heal a dangling bridge FIRST (real
+	// bridge, missing libqjs.a) so the pre-generate below writes the stub
+	// and the backend boots; run it once here so `.swelte/` exists.
+	try {
+		const { healDanglingBridge: heal } = await import('../toolchain.js')
+		if (heal(genAbs)) {
+			ctx.log(
+				'dangling QJS bridge (missing libqjs.a) removed — dev uses sidecar SSR until the next `swelte build`'
+			)
+		}
+	} catch {
+		/* ignore */
+	}
 	try {
 		const { swelte } = await import('../vite.js')
 		const plug = swelte({}) as unknown as {

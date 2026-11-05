@@ -190,6 +190,16 @@ export interface WrapperMw {
 	mws: { name: string; attr: 'before' | 'after' }[]
 }
 
+/** One V module dir contributed by a plugin: copied into the `.swelte/`
+ *  compilation unit so routes/harness can `import <module>`. The plugin
+ *  resolves its own package root (via createRequire self-reference) and
+ *  returns ABSOLUTE dirs; core copies `*.v` at generate(). Missing dirs
+ *  are skipped (plugin ships TS-only in that install). */
+export interface SweltePluginInclude {
+	module: string
+	absDir: string
+}
+
 /** V+TS plugin contract (consumed by core, implemented by plugin packages).
  * Core stays standalone: an app using only parity features (verbs/rpc/sse
  * per-request, serviceWorker/prerender/isr/offline literal)
@@ -218,6 +228,13 @@ export interface SweltePlugin {
 	/** Attrs this plugin claims (e.g. `['cron']`). */
 	attrs: string[]
 	configKey?: string
+	/** V module dirs contributed to the `.swelte/` compilation unit
+	 *  (e.g. db → `[{ module: 'backend', absDir: '<pkg>/vlib/backend' }]`).
+	 *  Core copies each dir's `*.v` into `.swelte/<module>/` at generate();
+	 *  routes/harness then `import <module>`. Missing dirs are skipped.
+	 *  Zero-arg: the plugin resolves its own package root internally
+	 *  (createRequire self-reference works from src and dist). */
+	includes?: () => SweltePluginInclude[]
 	validate?: (rel: string, fn: { name: string; attr: string; qualifier?: string }) => void
 	/** V fragment appended to the route leaf file. */
 	emitRoute?: (ctx: SweltePluginRouteCtx, fns: { name: string; attr: string }[]) => string

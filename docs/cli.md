@@ -3,7 +3,9 @@
 Built behavior. Every command resolves the V toolchain itself
 (system `v`, else `@swelte/vvm` — no manual install). Subcommand list
 is closed: `dev` / `build` / `preview` / `test` / `check` / `init` /
-`export` (+ `--help` / `--version`). No aliases — the documented
+`export` (+ `--help` / `--version`). Plugins extend it via `SWELTE_PLUGINS`
+(comma/space-separated specifiers — e.g. `SWELTE_PLUGINS=@swelte/plus/db`
+adds `swelte migrate`). No aliases — the documented
 `--target` is the deploy-target shim; `--target-os` is the cross-build
 OS (build-only, see below).
 
@@ -34,7 +36,10 @@ so idle `dev` stays quiet (no phantom HMR), and the watcher ignores
    Rebuild `libqjs.a` host-native, or `libqjs-<os>-<arch>.a` when cross
    (mtime-guarded, compiled under the zig-cc wrapper).
 4. `v -o dist/server .swelte/server.v` (single artifact; QJS projects
-   add `-enable-globals -cc <cc>`).
+   add `-enable-globals -cc <cc>`). Core-only builds link natively —
+   generate() emits a no-op bridge stub (same symbol, returns not-ok,
+   `SWELTE_SSR=1` falls through to the proxy at runtime); projects with
+   plugin V modules (db backend) add `-enable-globals`.
    Cross-build: `--target-os <os> --target-arch <arch>` (CLI wins,
    `SWELTE_TARGET_OS`/`SWELTE_TARGET_ARCH` env middle,
    `swelte.targetOs`/`swelte.targetArch` config last — config also reads
@@ -114,4 +119,13 @@ SSR is opt-in (default: SPA-only): `--ssr` adds `@swelte/ssr-qjs`
 `vite.config.ts` from `@swelte/core/vite` to `@swelte/ssr-qjs`.
 Interactive `init` asks (default No — SPA unless you say yes; add it
 later any time with `npm install @swelte/ssr-qjs` + the import swap).
+
+## `swelte migrate [--root dir] [--db path]` (plugin: `@swelte/plus/db`)
+
+Apply `db/migrations/*.sql` to the embedded SQLite file (`SWELTE_DB_PATH`
+env, `--db` flag, else `data/app.db`). First run scaffolds
+`src/lib/backend/db.v` (shared conn + KV helpers) +
+`db/migrations/001_swelte_kv.sql`. Idempotent — re-runs apply only new
+files (tracked in `_swelte_migrations`). Requires
+`SWELTE_PLUGINS=@swelte/plus/db` (core stays dependency-free).
 

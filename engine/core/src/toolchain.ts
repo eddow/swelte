@@ -1,6 +1,6 @@
 // Shared toolchain resolution (V binary via PATH or @swelte/vvm).
 import { execFileSync, execSync } from 'node:child_process'
-import { existsSync } from 'node:fs'
+import { existsSync, readFileSync, rmSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -31,6 +31,70 @@ export function sanitizedPath(input?: string): string {
 /** Env for spawning V / gcc / ar / vite: same process env but conda-free PATH. */
 export function toolchainEnv(extra?: Record<string, string>): NodeJS.ProcessEnv {
 	return { ...process.env, PATH: sanitizedPath(), ...extra }
+}
+
+/** Whether the V compile needs `-enable-globals`: the QJS bridge uses
+ *  `__global`, and so do plugin V modules (e.g. `@swelte/plus/db`'s shared
+ *  connection). Detected from the generate() outputs: a real bridge file
+ *  (core's no-op stub does not count), or the plugin-modules marker.
+ *  Missing marker (old generate) = bridge rule. `genAbs` is `.swelte/`. */
+export function needsGlobals(genAbs: string): boolean {
+	if (hasRealBridge(genAbs)) return true
+	try {
+		const raw = readFileSync(join(genAbs, 'plugin_modules.json'), 'utf8')
+		const mods = JSON.parse(raw) as unknown
+		if (Array.isArray(mods) && mods.length > 0) return true
+	} catch {
+		/* no marker — bridge rule above stands */
+	}
+	return false
+}
+
+/** Whether `.swelte/` holds the REAL QJS bridge (adapter-emitted, contains
+ *  `__global`) as opposed to core's no-op stub or nothing. Decides the
+ *  `-cc` override (only quickjs.c needs a real C compiler). */
+export function hasRealBridge(genAbs: string): boolean {
+	try {
+		const bridge = join(genAbs, 'routes', 'swelte_qjs_bridge.v')
+		return existsSync(bridge) && readFileSync(bridge, 'utf8').includes('__global')
+	} catch {
+		return false
+	}
+}
+
+/** Absolute `#flag`-linked archive paths a real bridge needs to link.
+ *  Parsed from the bridge's `#flag <abs>@START_LIBS` lines. Empty for the
+ *  stub (no C deps) or when unreadable. Used to detect DANGLING bridges
+ *  (real bridge, missing archive — e.g. `.swelte/qjs/` cleaned without a
+ *  rebuild) so dev/build can self-heal instead of dying in the linker. */
+export function bridgeLinkedArchives(genAbs: string): string[] {
+	try {
+		const bridge = readFileSync(join(genAbs, 'routes', 'swelte_qjs_bridge.v'), 'utf8')
+		if (!bridge.includes('__global')) return []
+		const out: string[] = []
+		for (const line of bridge.split('\n')) {
+			const m = /#flag\s+(\S+)@START_LIBS/.exec(line)
+			if (m) out.push(m[1])
+		}
+		return out
+	} catch {
+		return []
+	}
+}
+
+/** Delete a dangling bridge (real bridge whose linked archives are missing)
+ *  so generate() rewrites the no-op stub. Returns true when a heal happened.
+ *  Never touches a healthy bridge or the stub. Dev calls this before spawn;
+ *  build is left strict (a missing archive there is a real build bug). */
+export function healDanglingBridge(genAbs: string): boolean {
+	try {
+		const missing = bridgeLinkedArchives(genAbs).filter((a) => !existsSync(a))
+		if (missing.length === 0) return false
+		rmSync(join(genAbs, 'routes', 'swelte_qjs_bridge.v'))
+		return true
+	} catch {
+		return false
+	}
 }
 
 /** Absolute system C compiler, preferring /usr/bin/* so PATH shadowing can't win. */

@@ -2,7 +2,8 @@
 
 Optional package. Core stays parity-only (byte-identical output without
 plugins); plus owns attrs core never names. Today: `jobs` (scheduled
-`@[cron]` ticks — [future.md](specs/future.md) item 1).
+`@[cron]` ticks — [future.md](specs/future.md) item 1) + `db` (embedded
+SQLite/KV — [future.md](specs/future.md) item 2).
 
 ```sh
 npm install @swelte/plus
@@ -11,16 +12,20 @@ npm install @swelte/plus
 ```ts
 // vite.config.ts
 import { swelte } from '@swelte/ssr-qjs';
-import { jobsPlugin } from '@swelte/plus/jobs'; // or '@swelte/plus'
+import { jobsPlugin, dbPlugin } from '@swelte/plus'; // or '@swelte/plus/jobs', '@swelte/plus/db'
 
 export default defineConfig({
-  plugins: [svelte(svelteConfig), swelte({ vBackendUrl, plugins: [jobsPlugin] })],
+  plugins: [svelte(svelteConfig), swelte({ vBackendUrl, plugins: [jobsPlugin, dbPlugin] })],
 });
 ```
 
-Without the plugin, `@[cron]` is an unknown-attr build error. With it,
-`src/app.v` may hold one-or-more tick fns; core ignores them everywhere
-else (no CLI, no SSH — ticks start at boot in the container).
+Without a plugin, its surface is a build error (`@[cron]` unknown attr;
+`import backend` unresolvable in generated routes). With it, `src/app.v`
+may hold one-or-more tick fns and `#routes/*.v` may `import backend`.
+`db` additionally contributes its V module dir to the `.swelte/`
+compilation unit (see `includes` below), so no manual wiring is needed.
+No CLI from jobs (ticks start at boot in the container); `db` adds
+`swelte migrate` (see `cli`).
 
 ## `@[cron]` ticks
 
@@ -110,3 +115,58 @@ import { plusCronSeconds, plusCronParse, PLUS_CRON_MAX_RETRY, PLUS_CRON_RETRY_ST
 plusCronSeconds('5m'); // 300
 plusCronParse('5m,retry=3'); // { seconds: 300, retry: 3 }
 ```
+
+## `db` — embedded SQLite/KV
+
+```v
+module app
+
+// src/lib/backend/db.v (scaffolded by `swelte migrate`, backend-only)
+import backend
+
+@[get]
+pub fn visits(req SwelteRequest) string {
+	backend.kv_set('visits', 'seen')!
+	return backend.kv_get('visits')!
+}
+```
+
+Single SQLite file (WAL mode, `SWELTE_DB_PATH` env else `data/app.db`).
+`swelte migrate` (via `SWELTE_PLUGINS=@swelte/plus/db`) scaffolds
+`src/lib/backend/db.v` + `db/migrations/001_swelte_kv.sql` on first run,
+then applies `db/migrations/*.sql` in filename order (tracked in
+`_swelte_migrations`, idempotent re-runs). Migrations are raw SQL;
+app tables are yours. The `swelte_kv` table doubles as the primitive for
+SSE rooms / SWR regen state / offline outbox (future items 4/5/7).
+
+Rules:
+
+- **Location:** `src/lib/backend/db.v` (or `*_backend.v`) — backend-only,
+  importable from `#routes/*.v` at codegen time, never from the browser.
+- **DDL/DML use `exec_none`** (`!= 101` is failure): V's `db.sqlite`
+  `exec()` only steps row queries — INSERT/CREATE silently no-op through
+  it. SELECTs use `exec()` + `Row.get_string/get_int`.
+- **Helpers:** `plusDbPath(root, env?)`, `plusPendingMigrations(root,
+  applied)` — pure-TS, pinned by plus unit tests.
+- **`includes` (plugin → `.swelte/` wiring):** `dbPlugin.includes()`
+  contributes `[{ module: 'backend', absDir: '<pkg>/vlib/backend' }]`.
+  Core's `generate()` copies each include's `*.v` into
+  `.swelte/<module>/`, so generated routes resolve `import backend`
+  with no manual wiring. Missing dirs are skipped (TS-only install);
+  stale module dirs are pruned; `routes`/`main` names are reserved.
+  The copy (and `.swelte/plugin_modules.json` marker) is pinned by
+  core's `codegen-shape` tests.
+
+## Bridge stub + dangling-bridge heal (core)
+
+`swelte dev` compiles `.swelte/` directly, so the harness must resolve
+`routes.swelte_qjs_render_page` even with no adapter. Core's
+`generate()` writes a no-op stub (`routes/swelte_qjs_bridge.v`, returns
+not-ok → Hand falls back to the sidecar proxy / SPA shell) when no
+bridge exists; the adapter overwrites it with the real bridge during
+`swelte build` (generateBundle), and core never clobbers a real bridge.
+`dev` also self-heals a DANGLE bridge — real bridge whose `#flag`ed
+`libqjs.a` is missing (e.g. `.swelte/qjs/` cleaned without a rebuild):
+it deletes the bridge so the next generate writes the stub, and logs
+that dev uses sidecar SSR until the next `swelte build`. `build` stays
+strict (a missing archive there is a real build bug).

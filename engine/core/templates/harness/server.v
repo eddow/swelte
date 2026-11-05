@@ -813,9 +813,9 @@ fn swelte_ssr_enabled() bool {
 
 fn swelte_render_page(route string, props_json string) (string, bool) {
 	// Embedded QJS first (prod): the adapter's bridge (routes module)
-	// compiles in only when `swelte build` ran with @swelte/ssr-qjs.
-	// SWELTE_SSR=1 without an adapter build fails the V compile (missing
-	// symbol) — CORRECT: loud config error, not a silent SPA fallback.
+	// compiles in when `swelte build` ran with @swelte/ssr-qjs; core-only
+	// builds compile against generate()'s stub (same symbol, returns
+	// not-ok — SWELTE_SSR=1 without a bridge falls through to the proxy).
 	// So: SWELTE_SSR=1 → embedded; else URL proxy; else not-ok.
 	// The embedded bridge returns head+BODY joined by the
 	// `<!--ssr-head-body-->` marker (or body alone when no <svelte:head>);

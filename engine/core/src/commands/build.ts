@@ -94,6 +94,8 @@ export async function runBuild(ctx: Ctx): Promise<void> {
 		vArchArgs,
 		zigCcWrapper,
 		resolveHostCC,
+		needsGlobals,
+		hasRealBridge,
 	} = await import('../toolchain.js')
 	const { loadConfig } = await import('../gen/config.js')
 	const v = resolveV(import.meta.url)
@@ -242,9 +244,14 @@ export async function runBuild(ctx: Ctx): Promise<void> {
 	// so stock Windows/macOS build with no gcc installed).
 	// Conda-safe: absolute cc path + conda-free PATH (conda's ld shadows
 	// the system linker and breaks every V C-link step).
-	// Detect: bridge file present → QJS flags.
-	const coreOnly = !existsSync(join(genAbs, 'routes', 'swelte_qjs_bridge.v'))
-	if (coreOnly && !cross) ctx.log('core-only project: no QJS embed, links natively')
+	// Detect: real bridge file → QJS flags (`-enable-globals -cc`, quickjs.c
+	// needs a real C compiler). Plugin V modules (e.g. db's `backend/`) need
+	// `-enable-globals` too (their `__global`); the marker generate() writes
+	// says whether any were copied (tcc links those fine, no cc override).
+	// Core-only projects (stub bridge, no plugins) link natively, no flags.
+	const coreOnly = !hasRealBridge(genAbs)
+	const withGlobals = needsGlobals(genAbs)
+	if (coreOnly && !cross && !withGlobals) ctx.log('core-only project: no QJS embed, links natively')
 	if (coreOnly && cross) ctx.log('core-only project: no QJS embed, cross needs only zig-cc')
 	// Native cc: system first, host-pair zig wrapper fallback ('' when
 	// neither exists — the guards below fail with the prepare hint).
@@ -281,6 +288,24 @@ export async function runBuild(ctx: Ctx): Promise<void> {
 		ctx.log(
 			`QJS embed: -enable-globals -cc ${cross ? zigCc : nativeCc}${cross ? ' -d use_bundled_libgc' : ''} (bridge present)`
 		)
+	} else if (withGlobals) {
+		// Plugin V modules with `__global` (db backend), no bridge: globals
+		// flag only, no cc override (tcc links fine without quickjs.c).
+		if (!cross && !nativeCc) {
+			throw new Error(
+				'no C compiler: install gcc/clang or run `npx vvm prepare` (writes the host zig-cc wrapper)'
+			)
+		}
+		vExtra.push('-enable-globals')
+		if (cross) {
+			if (!zigCc) {
+				throw new Error(
+					`cross-build ${effOs}-${effArch}: no zig-cc wrapper (run: npx vvm prepare --target-os ${effOs} --target-arch ${effArch})`
+				)
+			}
+			vExtra.push('-cc', zigCc)
+		}
+		ctx.log('plugin V modules: -enable-globals (__global in includes)')
 	} else if (cross) {
 		// Core-only cross still needs the wrapper as the C compiler.
 		if (!zigCc) {
