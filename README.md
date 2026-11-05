@@ -19,7 +19,7 @@ Published on npm under the [`@swelte` scope](https://www.npmjs.com/org/swelte):
 | `@swelte/ssr-qjs` | [![npm version](https://img.shields.io/npm/v/@swelte/ssr-qjs.svg)](https://www.npmjs.com/package/@swelte/ssr-qjs) | SSR adapter — embedded QuickJS engine (default) |
 | `@swelte/mcp` | [![npm version](https://img.shields.io/npm/v/@swelte/mcp.svg)](https://www.npmjs.com/package/@swelte/mcp) | MCP server — route tree, type contracts, diagnostics for IDE agents (`swelte-mcp`) |
 | `@swelte/vvm` | [![npm version](https://img.shields.io/npm/v/@swelte/vvm.svg)](https://www.npmjs.com/package/@swelte/vvm) | V Version Manager — installs and manages V toolchains (`vvm`, `v` shim) |
-| `@swelte/plus` | [![npm version](https://img.shields.io/npm/v/@swelte/plus.svg)](https://www.npmjs.com/package/@swelte/plus) | Beyond-SvelteKit plugins — scheduled jobs (`@[cron]` ticks: retry, dead-letter, tick log) + embedded SQLite/KV (`swelte migrate`, `src/lib/backend/db.v`) |
+| `@swelte/plus` | [![npm version](https://img.shields.io/npm/v/@swelte/plus.svg)](https://www.npmjs.com/package/@swelte/plus) | Beyond-SvelteKit plugins — scheduled jobs (`@[cron]` ticks: retry, dead-letter, tick log) + embedded SQLite/KV (`swelte migrate`, `src/lib/backend/db.v`) + cross-request SSE rooms (`emit(room, msg)`) |
 
 ```sh
 npm install @swelte/core
@@ -63,15 +63,15 @@ toolchain — no manual install). `swelte build` typechecks, compiles
 
 Built behavior, user-facing only:
 
-- [SSR](https://github.com/eddow/swelte/blob/main/docs/ssr.md) — ownership, request path, `@[load]`
+- [SSR](https://github.com/eddow/swelte/blob/master/docs/ssr.md) — ownership, request path, `@[load]`
   cascade, `+error` contract, measured budgets, gate
-- [RPC](https://github.com/eddow/swelte/blob/main/docs/rpc.md) — `.v` imports, attributes, transport
-- [Types](https://github.com/eddow/swelte/blob/main/docs/types.md) — V → TS projection, codegen
-- [Errors](https://github.com/eddow/swelte/blob/main/docs/errors.md) — error envelope, `SwelteRpcError`, SPA-first rule
-- [Config](https://github.com/eddow/swelte/blob/main/docs/config.md) — `svelte.config.js` (`swelte` key) + `SWELTE_*` env knobs, routing, per-route types
-- [Forms](https://github.com/eddow/swelte/blob/main/docs/forms.md) — verbs + `?q`, no-JS 303, `fail`-lite, `deserialize`
-- [CLI](https://github.com/eddow/swelte/blob/main/docs/cli.md) — `dev`/`build`/`preview`/`test`/`check`/`init`
-- [Example](https://github.com/eddow/swelte/blob/main/docs/example.md) — the `something` example
-- [Versus](https://github.com/eddow/swelte/blob/main/docs/versus.md) — Swelte vs. other full-stack paradigms (positioning)
-- [Coming from SvelteKit](https://github.com/eddow/swelte/blob/main/docs/coming-from-sveltekit.md) — migration map
-- [Plus](https://github.com/eddow/swelte/blob/main/docs/plus.md) — `@swelte/plus` beyond-SvelteKit plugins: scheduled jobs (`@[cron]` ticks, retry, console log)
+- [RPC](https://github.com/eddow/swelte/blob/master/docs/rpc.md) — `.v` imports, attributes, transport
+- [Types](https://github.com/eddow/swelte/blob/master/docs/types.md) — V → TS projection, codegen
+- [Errors](https://github.com/eddow/swelte/blob/master/docs/errors.md) — error envelope, `SwelteRpcError`, SPA-first rule
+- [Config](https://github.com/eddow/swelte/blob/master/docs/config.md) — `svelte.config.js` (`swelte` key) + `SWELTE_*` env knobs, routing, per-route types
+- [Forms](https://github.com/eddow/swelte/blob/master/docs/forms.md) — verbs + `?q`, no-JS 303, `fail`-lite, `deserialize`
+- [CLI](https://github.com/eddow/swelte/blob/master/docs/cli.md) — `dev`/`build`/`preview`/`test`/`check`/`init`
+- [Example](https://github.com/eddow/swelte/blob/master/docs/example.md) — the `something` example
+- [Versus](https://github.com/eddow/swelte/blob/master/docs/versus.md) — Swelte vs. other full-stack paradigms (positioning)
+- [Coming from SvelteKit](https://github.com/eddow/swelte/blob/master/docs/coming-from-sveltekit.md) — migration map
+- [Plus](https://github.com/eddow/swelte/blob/master/docs/plus.md) — `@swelte/plus` beyond-SvelteKit plugins: scheduled jobs (`@[cron]` ticks, retry, console log)
