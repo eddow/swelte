@@ -138,4 +138,39 @@ import { hash_string } from '#lib/crypto/hash.v'   // → local WASM
 greeting = get_greeting({ payload: name })  // Promise
 hashed = hash_string({ input: name })  // Promise`,
 	},
+	'plus-install': {
+		lang: 'bash',
+		code: `npm install @swelte/plus`,
+	},
+	'plus-vite-config': {
+		lang: 'ts',
+		code: `import { swelte } from '@swelte/ssr-qjs';
+import { jobsPlugin } from '@swelte/plus/jobs'; // or '@swelte/plus'
+
+export default defineConfig({
+  plugins: [svelte(svelteConfig), swelte({ vBackendUrl, plugins: [jobsPlugin] })],
+});`,
+	},
+	'plus-cron': {
+		lang: 'v',
+		code: `module app
+
+@[cron('60s')]
+pub fn tick() {
+	println('every minute')
+}
+
+@[cron('5m,retry=3')]
+pub fn sweep() !void {
+	// fallible: may throw, retried 3x with 5s-linear backoff
+}`,
+	},
+	'plus-console': {
+		lang: 'bash',
+		code: `[swelte:cron] tick=tick status=catchup lag=130s   # wake-up behind >= 2 intervals, fires once
+[swelte:cron] tick=sweep status=retry attempt=0 err=<msg>
+[swelte:cron] tick=sweep status=retry attempt=1 err=<msg>
+[swelte:cron] tick=sweep status=ok attempt=2       # recovered
+[swelte:cron] tick=sweep status=dead attempt=3 err=<msg>  # exhausted`,
+	},
 }

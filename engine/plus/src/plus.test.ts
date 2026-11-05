@@ -2,7 +2,7 @@
 // Run via `npm test --workspace=@swelte/plus` (tsconfig.test.json → dist-test).
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { jobsPlugin, plusCronSeconds } from './index.js'
+import { jobsPlugin, plusCronParse, plusCronSeconds } from './index.js'
 
 describe('plus contracts', () => {
 	it('jobs plugin claims cron (moved out of core)', () => {
@@ -21,6 +21,19 @@ describe('plus contracts', () => {
 		assert.equal(plusCronSeconds('5m'), 300)
 		assert.equal(plusCronSeconds('1h'), 3600)
 		assert.equal(plusCronSeconds('daily'), 0)
+	})
+
+	it('plusCronParse parses the qualifier DSL (duration + optional retry)', () => {
+		assert.deepEqual(plusCronParse('60s'), { seconds: 60, retry: 0 })
+		assert.deepEqual(plusCronParse('5m,retry=3'), { seconds: 300, retry: 3 })
+		assert.deepEqual(plusCronParse('1h, retry=2'), { seconds: 3600, retry: 2 })
+		assert.deepEqual(plusCronParse('10s,retry=5'), { seconds: 10, retry: 5 })
+		assert.equal(plusCronParse('daily'), null)
+		assert.equal(plusCronParse('60s,retry=0'), null)
+		assert.equal(plusCronParse('60s,retry=6'), null)
+		assert.equal(plusCronParse('60s,retry=x'), null)
+		assert.equal(plusCronParse('60s,backoff=3'), null)
+		assert.equal(plusCronParse('60s,retry=2,extra=1'), null)
 	})
 })
 
@@ -64,13 +77,84 @@ describe('jobs cron (moved from core generate-errors.test.ts)', () => {
 				}),
 			/must return void/
 		)
+		// Qualifier DSL: retry suffix accepted on fallible fns only.
+		validateCronFn('src/app.v', {
+			name: 'tick',
+			attr: 'cron',
+			qualifier: '60s,retry=3',
+			vret: 'void',
+			fallible: true,
+			params: [],
+		})
+		assert.throws(
+			() =>
+				validateCronFn('src/app.v', {
+					name: 'tick',
+					attr: 'cron',
+					qualifier: '60s,retry=3',
+					vret: 'void',
+					fallible: false,
+					params: [],
+				}),
+			/needs a fallible fn/
+		)
+		assert.throws(
+			() =>
+				validateCronFn('src/app.v', {
+					name: 'tick',
+					attr: 'cron',
+					qualifier: '60s,retry=0',
+					vret: 'void',
+					fallible: true,
+					params: [],
+				}),
+			/bad retry suffix/
+		)
+		assert.throws(
+			() =>
+				validateCronFn('src/app.v', {
+					name: 'tick',
+					attr: 'cron',
+					qualifier: '60s,retry=9',
+					vret: 'void',
+					fallible: true,
+					params: [],
+				}),
+			/bad retry suffix/
+		)
+		assert.throws(
+			() =>
+				validateCronFn('src/app.v', {
+					name: 'tick',
+					attr: 'cron',
+					qualifier: '60s,backoff=3',
+					vret: 'void',
+					fallible: true,
+					params: [],
+				}),
+			/bad retry suffix/
+		)
 	})
 
 	it('cronHarness emits ONE scheduler thread (no per-tick loops)', async () => {
 		const { cronHarness } = await import('./jobs.js')
 		const { main, mainInner } = cronHarness([
-			{ name: 'tick', every: '60s', seconds: 60, body: "\n\tprintln('tick')\n", fallible: false },
-			{ name: 'sweep', every: '5m', seconds: 300, body: "\n\tprintln('sweep')\n", fallible: true },
+			{
+				name: 'tick',
+				every: '60s',
+				seconds: 60,
+				retry: 0,
+				body: "\n\tprintln('tick')\n",
+				fallible: false,
+			},
+			{
+				name: 'sweep',
+				every: '5m',
+				seconds: 300,
+				retry: 0,
+				body: "\n\tprintln('sweep')\n",
+				fallible: true,
+			},
 		])
 		// Top-level user fns (fallible-safe), no per-tick loop fns.
 		assert.ok(main.includes('fn swelte_cron_1() {'))
@@ -80,15 +164,49 @@ describe('jobs cron (moved from core generate-errors.test.ts)', () => {
 		assert.ok(main.includes('fn swelte_cron_run() {'))
 		assert.ok(main.includes('mut next := [time.now().unix() + 60, time.now().unix() + 300]'))
 		assert.ok(main.includes('if wait > 0 { time.sleep(wait * time.second) }'))
-		assert.ok(main.includes('next[0] = now + 60'))
-		assert.ok(main.includes('next[1] = now + 300'))
-		assert.ok(main.includes("eprintln('[swelte:cron] ' + err.msg())"))
+		assert.ok(main.includes('next[0] = time.now().unix() + 60'))
+		assert.ok(main.includes('next[1] = time.now().unix() + 300'))
+		// Fallible without retry logs status=error; plain fns stay silent.
+		assert.ok(main.includes("eprintln('[swelte:cron] tick=sweep status=error err=' + err.msg())"))
+		assert.ok(!main.includes('tick=tick status=error'), 'first-try success stays silent')
+		assert.ok(!main.includes('tick=tick status=retry'), 'plain tick has no retry loop')
+		assert.ok(!main.includes('tick=tick status=dead'), 'plain tick has no dead-letter')
+		// Catchup notice on lag >= 2 intervals (coalesce stays, now observable).
+		assert.ok(main.includes('status=catchup lag='))
+		assert.ok(main.includes('>= 120'))
 		// Inside-main fragment: header + single spawn only.
 		assert.deepEqual(mainInner.match(/spawn swelte_cron_run\(\)/g)?.length, 1)
 		assert.ok(!mainInner.includes('swelte_cron_loop'), 'no per-tick spawns')
 		assert.ok(mainInner.includes('// @[cron] (src/app.v)'))
 		// Zero ticks → empty (byte-identical harness when absent).
 		assert.deepEqual(cronHarness([]), { main: '', mainInner: '' })
+	})
+
+	it('cronHarness emits blocking retry loop + dead-letter for retry ticks', async () => {
+		const { cronHarness } = await import('./jobs.js')
+		const { main, mainInner } = cronHarness([
+			{
+				name: 'flaky',
+				every: '60s,retry=3',
+				seconds: 60,
+				retry: 3,
+				body: "\n\tprintln('flaky')\n",
+				fallible: true,
+			},
+		])
+		assert.ok(main.includes('fn swelte_cron_1() !void {'))
+		// Retry loop scaffolding (tick-scoped vars, bound 3).
+		assert.ok(main.includes('mut __a_1 := 0'))
+		assert.ok(main.includes('for __a_1 <= 3 {'))
+		// 5s linear backoff: attempt k sleeps (k+1)*5s.
+		assert.ok(main.includes('time.sleep((__a_1 + 1) * 5 * time.second)'))
+		// Console outcomes: retry notices, dead-letter, recovery ok.
+		assert.ok(main.includes('tick=flaky status=retry attempt='))
+		assert.ok(main.includes('tick=flaky status=dead attempt=3 err='))
+		assert.ok(main.includes('tick=flaky status=ok attempt='))
+		// Deadline advance uses parsed seconds, scheduler preserved.
+		assert.ok(main.includes('next[0] = time.now().unix() + 60'))
+		assert.deepEqual(mainInner.match(/spawn swelte_cron_run\(\)/g)?.length, 1)
 	})
 
 	it('loadAppHooks collects src/app.v crons; errors surface as errors[]', async () => {

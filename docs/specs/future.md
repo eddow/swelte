@@ -3,12 +3,16 @@
 
 SvelteKit couldn't / didn't:
 
-1. **Cron → jobs**: DONE (extracted to `@swelte/plus/jobs`, single scheduler
+1. **Cron → jobs**: DONE + hardened (`@swelte/plus/jobs`, single scheduler
    thread — one `spawn swelte_cron_run()`, sleeps to the nearest deadline
-   (idle = zero CPU), missed ticks coalesce, no CLI/no SSH, starts at boot
-   in the container. `jobsPlugin` claims `attrs: ['cron']`; core stays
-   plugin-agnostic via `extraAttrs`). Next: persistent tick log, missed-tick
-   catchup, `retry(n)` + dead-letter.
+   (idle = zero CPU), missed ticks coalesce (with a `status=catchup` console
+   notice when lag >= 2 intervals), no CLI/no SSH, starts at boot in the
+   container. `jobsPlugin` claims `attrs: ['cron']`; core stays
+   plugin-agnostic via `extraAttrs`). Retry: `@[cron('5m,retry=3')]`
+   (`retry=1..5`, fallible `!void` only, blocking 5s-linear backoff in the
+   tick's arm); outcomes to the console (`[swelte:cron] tick=<name>
+   status=retry|dead|ok|error|catchup`). Next: persistent tick log,
+   cross-restart catchup.
 2. **Embedded SQLite/KV**: not started. `src/lib/backend/db.v` helper +
    `swelte migrate` > SvelteKit needing Neon/PlanetScale.
 3. **First-class `@[ws]`**: not started. SvelteKit has no WS primitive. V

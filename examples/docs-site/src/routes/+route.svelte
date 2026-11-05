@@ -76,6 +76,10 @@ const groups: { title: string; links: { href: string; label: string }[] }[] = [
 		],
 	},
 	{
+		title: 'Plus',
+		links: [{ href: '/plus/jobs', label: 'Jobs' }],
+	},
+	{
 		title: 'Migrate',
 		links: [
 			{ href: '/from-sveltekit', label: 'From SvelteKit' },

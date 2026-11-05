@@ -71,10 +71,12 @@ import { codeHtml } from '#lib/snippets.gen.js'
 <h2 class="text-2xl font-bold mt-8">Skills</h2>
 <p class="opacity-80 mt-2 text-sm">
 	Six playbooks ship inside the npm packages — extracted automatically on
-	<code>npm install</code> into <code>.agents/skills/</code> (scaffolded projects carry
-	the <code>postinstall</code> hook). A skill tells the agent <em>how</em> to do
-	the work, the MCP tool gives it the live project facts. Prefer MCP tools over grepping
-	<code>src/routes/</code> by hand.
+	<code>npm install</code>
+	into <code>.agents/skills/</code> (scaffolded projects carry the <code>postinstall</code> hook). A
+	skill tells the agent <em>how</em> to do the work, the MCP tool gives it the live project facts.
+	Prefer MCP tools over grepping
+	<code>src/routes/</code>
+	by hand.
 </p>
 <div class="overflow-x-auto mt-2">
 	<table class="table table-zebra table-sm">
@@ -122,8 +124,10 @@ import { codeHtml } from '#lib/snippets.gen.js'
 
 <h2 class="text-2xl font-bold mt-8">Installing skills</h2>
 <p class="opacity-80 mt-2 text-sm">
-	Automatic — the scaffold template carries a <code>postinstall</code> hook
-	(<code>npm-skills extract --skip-production --override</code>), so
-	<code>npm install</code> drops each dependency's <code>skills/</code> into
+	Automatic — the scaffold template carries a <code>postinstall</code> hook (<code
+		>npm-skills extract --skip-production --override</code
+	>), so
+	<code>npm install</code>
+	drops each dependency's <code>skills/</code> into
 	<code>.agents/skills/</code>. Versioned with the packages, no manual copy step.
 </p>

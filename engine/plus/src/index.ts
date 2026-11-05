@@ -2,7 +2,13 @@
 // Depends on `@swelte/core` (core stays standalone — apps not using cron
 // never install this package). Core owns the `SweltePlugin` contract
 // (`@swelte/core/vite`); plus implements it.
-export { jobsPlugin, plusCronSeconds } from './jobs.js'
+export {
+	jobsPlugin,
+	plusCronParse,
+	plusCronSeconds,
+	PLUS_CRON_MAX_RETRY,
+	PLUS_CRON_RETRY_STEP_S,
+} from './jobs.js'
 export type { JobsCronDef } from './jobs.js'
 export { defineSweltePlugin } from '@swelte/core/vite'
 export type { SweltePlugin, SweltePluginHarness, SweltePluginRouteCtx } from '@swelte/core/vite'

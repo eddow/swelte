@@ -91,6 +91,13 @@ export const searchIndex: SearchEntry[] = [
 			'agents mcp skills install model context protocol tools agent ide diagnostics wasm maps overview ssr svelte5 sveltekit delta routes',
 	},
 	{
+		href: '/plus/jobs',
+		label: 'Jobs',
+		group: 'Plus',
+		keywords:
+			'plus jobs cron scheduler retry dead-letter tick log scheduled tasks app.v jobsplugin backoff blocking catchup',
+	},
+	{
 		href: '/from-sveltekit',
 		label: 'From SvelteKit',
 		group: 'Migrate',

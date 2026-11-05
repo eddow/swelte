@@ -260,9 +260,20 @@ export const chunk = 'eager' | 'lazy' // default: 'inherit' (follow global mode)
   runs first in `before_request` — before `trailingSlash`
   normalization, CSRF/CORS/static/dispatch
   (`''` = no-op). Scheduled ticks (`@[cron]`) are NOT core — they live in
-  `@swelte/plus/jobs` (see `specs/future.md` item 1; dedicated plus pages
-  to come). Without a plugin that claims an attr, it is an unknown-attr
-  build error.
+  `@swelte/plus/jobs` (see [`plus.md`](plus.md), `specs/future.md` item 1).
+  Without a plugin that claims an attr, it is an unknown-attr
+  build error. With the plugin (`plugins: [jobsPlugin]`), the qualifier is
+  the duration literal plus an optional `,retry=n` suffix: `@[cron('60s')]`,
+  `@[cron('5m,retry=3')]` (`retry=1..5`, fallible `!void` fns only — `void`
+  + retry is a file+line build error). One scheduler thread runs all ticks
+  (sleeps to the nearest deadline, idle = zero CPU; missed ticks coalesce,
+  no pile-up, with a `status=catchup` console notice when lag >= 2
+  intervals). Retries run a blocking linear-backoff loop inside the tick's
+  arm (`(attempt+1) * 5s`, may briefly delay other ticks); outcomes log to
+  the console (`eprintln('[swelte:cron] tick=<name>
+  status=retry|dead|ok|error|catchup ...')`) — no log file. First-try
+  success stays silent. Single-instance best-effort, no watchdog,
+  idempotent bodies.
 * **`+route.svelte` nesting** (Svelte 5 `children` Snippet, not slots):
   every wrapper must declare `children` via `$props()` + `{@render
   children?.()}` (missing = SSR build error). SPA mount nests

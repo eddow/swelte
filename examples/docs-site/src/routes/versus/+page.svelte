@@ -7,8 +7,8 @@
 
 <h1 class="text-4xl font-bold mt-2">Versus</h1>
 <p class="py-4 opacity-80">
-	Positioning: <strong>“Agents in, binaries out.”</strong> Systems-level performance without the cognitive
-	friction — flat project structure, explicit types, predictable semantics.
+	Positioning: <strong>“Agents in, binaries out.”</strong> Systems-level performance without the
+	cognitive friction — flat project structure, explicit types, predictable semantics.
 </p>
 
 <div class="grid lg:grid-cols-2 gap-4">
@@ -60,7 +60,7 @@
 <div class="alert mt-6">
 	<span
 		>Choose <strong>.NET</strong> for regulated enterprise (SAP/Oracle bindings, EF Core, Orleans,
-		FIPS/LTS). Choose <strong>Swelte</strong> for raw speed, single-binary simplicity, zero-ops, agent
-		maintenance.</span
+		FIPS/LTS). Choose <strong>Swelte</strong> for raw speed, single-binary simplicity, zero-ops,
+		agent maintenance.</span
 	>
 </div>

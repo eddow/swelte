@@ -15,6 +15,7 @@ Documentation for users of Swelte (all describe built behavior):
 - `cli.md` — `dev`/`build`/`preview`/`test`/`check`/`init`/`export`, `--target`, contract snapshot (implemented)
 - `ssr.md` — SSR, built (ownership, request path, `@[load]` cascade, `+error` contract, measured budgets, gate)
 - `mcp.md` — Agents: MCP server + skills install (implemented)
+- `plus.md` — `@swelte/plus`: beyond-SvelteKit plugins, `jobs` (`@[cron]` ticks: wiring, retry, console log)
 - `example.md` — the `something` example (implemented; browseable twin: `examples/docs-site/`)
 - `versus.md` — Swelte vs. other full-stack paradigms (positioning)
 - `coming-from-sveltekit.md` — SvelteKit → Swelte migration map (built behavior)

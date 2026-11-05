@@ -19,11 +19,12 @@ Published on npm under the [`@swelte` scope](https://www.npmjs.com/org/swelte):
 | `@swelte/ssr-qjs` | [![npm version](https://img.shields.io/npm/v/@swelte/ssr-qjs.svg)](https://www.npmjs.com/package/@swelte/ssr-qjs) | SSR adapter — embedded QuickJS engine (default) |
 | `@swelte/mcp` | [![npm version](https://img.shields.io/npm/v/@swelte/mcp.svg)](https://www.npmjs.com/package/@swelte/mcp) | MCP server — route tree, type contracts, diagnostics for IDE agents (`swelte-mcp`) |
 | `@swelte/vvm` | [![npm version](https://img.shields.io/npm/v/@swelte/vvm.svg)](https://www.npmjs.com/package/@swelte/vvm) | V Version Manager — installs and manages V toolchains (`vvm`, `v` shim) |
+| `@swelte/plus` | [![npm version](https://img.shields.io/npm/v/@swelte/plus.svg)](https://www.npmjs.com/package/@swelte/plus) | Beyond-SvelteKit plugins — scheduled jobs (`@[cron]` ticks: retry, dead-letter, tick log) |
 
 ```sh
 npm install @swelte/core
-# SSR (default engine), MCP server, V toolchain come along as needed:
-npm install @swelte/ssr-qjs @swelte/mcp @swelte/vvm
+# SSR (default engine), MCP server, V toolchain, plus plugins come along as needed:
+npm install @swelte/ssr-qjs @swelte/mcp @swelte/vvm @swelte/plus
 ```
 
 - `src/routes/` — server RPC (`.v` = route handler, `#routes/...` import → fetch)
@@ -73,3 +74,4 @@ Built behavior, user-facing only:
 - [Example](https://github.com/eddow/swelte/blob/main/docs/example.md) — the `something` example
 - [Versus](https://github.com/eddow/swelte/blob/main/docs/versus.md) — Swelte vs. other full-stack paradigms (positioning)
 - [Coming from SvelteKit](https://github.com/eddow/swelte/blob/main/docs/coming-from-sveltekit.md) — migration map
+- [Plus](https://github.com/eddow/swelte/blob/main/docs/plus.md) — `@swelte/plus` beyond-SvelteKit plugins: scheduled jobs (`@[cron]` ticks, retry, console log)
