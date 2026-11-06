@@ -1,17 +1,20 @@
 // `@swelte/plus` — unit tests: jobs/cron (the only beyond-parity extraction).
 // Run via `npm test --workspace=@swelte/plus` (tsconfig.test.json → dist-test).
-import { describe, it } from 'node:test'
+
 import assert from 'node:assert/strict'
-import { jobsPlugin, plusCronParse, plusCronSeconds } from './index.js'
+import { describe, it } from 'node:test'
 import {
 	dbHelperTemplate,
 	dbInitialMigration,
 	dbPlugin,
+	jobsPlugin,
+	PLUS_DB_DEFAULT_PATH,
+	PLUS_DB_MIGRATIONS_TABLE,
+	plusCronParse,
+	plusCronSeconds,
 	plusDbPath,
 	plusDbVlibDir,
 	plusPendingMigrations,
-	PLUS_DB_DEFAULT_PATH,
-	PLUS_DB_MIGRATIONS_TABLE,
 } from './index.js'
 
 describe('plus contracts', () => {

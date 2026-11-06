@@ -5,6 +5,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSy
 import { join, relative, resolve, sep } from 'node:path'
 import { loadConfig } from '@swelte/core/config'
 import { collectDiagnostics } from '@swelte/core/diagnostics'
+import type { RpcFn } from '@swelte/core/vite'
 import {
 	loadMatchers,
 	modulePath,
@@ -16,7 +17,6 @@ import {
 	svelteModKind,
 	svelteRouteFor,
 } from '@swelte/core/vite'
-import type { RpcFn } from '@swelte/core/vite'
 import { VERSION } from './version.js'
 
 export interface ToolDef {

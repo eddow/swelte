@@ -1,21 +1,21 @@
 <script lang="ts">
-import { onMount } from 'svelte'
 import {
-	goto,
-	preloadData,
-	pushState,
-	beforeNavigate,
 	afterNavigate,
+	beforeNavigate,
+	goto,
+	navigating,
 	onNavigate,
 	page,
-	navigating,
+	preloadData,
+	pushState,
 	updated,
 } from '@swelte/core'
-import { page as appPage, updated as appUpdated } from '$app/stores'
-import { page as statePage } from '$app/state'
-import { goto as navGoto, onNavigate as navOnNavigate } from '$app/navigation'
-import { base, assets } from '#app/paths'
+import { onMount } from 'svelte'
 import { browser, dev, version } from '#app/environment'
+import { assets, base } from '#app/paths'
+import { goto as navGoto, onNavigate as navOnNavigate } from '$app/navigation'
+import { page as statePage } from '$app/state'
+import { page as appPage, updated as appUpdated } from '$app/stores'
 
 // §1 props contract: `leafProps = { params, ...data }` — server @[load]
 // (RouterProps: greeting/ts, incl.iblingRows from swelte_fetch) merged with

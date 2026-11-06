@@ -1,11 +1,11 @@
-import type { ArgDef, Command, Ctx } from './types.js'
-import { runDev } from './dev.js'
-import { runBuild } from './build.js'
-import { runPreview } from './preview.js'
-import { runInit } from './init.js'
-import { runTest } from './test.js'
-import { runExport } from './export.js'
 import { VERSION } from '../version.js'
+import { runBuild } from './build.js'
+import { runDev } from './dev.js'
+import { runExport } from './export.js'
+import { runInit } from './init.js'
+import { runPreview } from './preview.js'
+import { runTest } from './test.js'
+import type { ArgDef, Command, Ctx } from './types.js'
 
 export { VERSION }
 
@@ -108,13 +108,13 @@ const checkCmd: Command = {
 		const diags = await collectDiagnostics(root)
 		const fmt = String(ctx.opts.format ?? 'text')
 		if (fmt !== 'text' && fmt !== 'json')
-			throw new Error('--format must be text or json (got ' + fmt + ')')
+			throw new Error(`--format must be text or json (got ${fmt})`)
 		if (fmt === 'json') {
 			console.log(JSON.stringify(diags, null, 2))
 		} else if (diags.length === 0) {
 			ctx.log('check: no warnings')
 		} else {
-			for (const d of diags) ctx.log(d.file + ':' + d.line + ' [' + d.kind + '] ' + d.message)
+			for (const d of diags) ctx.log(`${d.file}:${d.line} [${d.kind}] ${d.message}`)
 		}
 	},
 }

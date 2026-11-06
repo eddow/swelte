@@ -1,6 +1,6 @@
-import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { stripForScan, assertQjsCompatible, assertNoNodeExternals } from './ssr.js'
+import { describe, it } from 'node:test'
+import { assertNoNodeExternals, assertQjsCompatible, stripForScan } from './ssr.js'
 
 describe('item 16 — stripForScan (comments/strings/out-map)', () => {
 	it('line comment hides fetch( but line numbers survive', () => {

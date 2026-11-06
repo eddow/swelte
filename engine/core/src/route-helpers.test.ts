@@ -1,22 +1,22 @@
-import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { join } from 'node:path'
+import { describe, it } from 'node:test'
 import {
+	collectPrerenderEntries,
+	dynSegMatcher,
+	dynSegName,
+	jsFetchFor,
 	loadMatchers,
 	modulePath,
 	routeFor,
+	routeParams,
+	routeParamTs,
+	stripRouteGroups,
+	svelteModKind,
+	svelteRouteFor,
 	transpileMatcherBody,
 	vFileSafe,
 	vPrefix,
-	svelteModKind,
-	svelteRouteFor,
-	stripRouteGroups,
-	routeParams,
-	routeParamTs,
-	dynSegName,
-	dynSegMatcher,
-	jsFetchFor,
-	collectPrerenderEntries,
 } from './vite.js'
 
 const R = (f: string) => join('/tmp/rr', 'src', 'routes', f)
@@ -150,11 +150,11 @@ describe('route helpers', () => {
 		assert.ok(js.includes('charCodeAt(0)'), js)
 		// Unsupported statement → build error naming the construct.
 		assert.throws(
-			() => transpileMatcherBody('bad', '\ts := s + \"x\"\n\treturn true\n'),
+			() => transpileMatcherBody('bad', '\ts := s + "x"\n\treturn true\n'),
 			/unsupported statement/
 		)
 		assert.throws(
-			() => transpileMatcherBody('bad', '\treturn s.contains(\"x\")\n'),
+			() => transpileMatcherBody('bad', '\treturn s.contains("x")\n'),
 			/unsupported statement/
 		)
 		// loadMatchers: shape errors.
@@ -314,7 +314,7 @@ describe('route helpers', () => {
 		)
 		writeFileSync(
 			join(root, 'src', 'routes', 'admin', '+page.v'),
-			'module ap\n\n@[get]\npub fn g(req SwelteRequest) string {\n\treturn \"x\"\n}\n'
+			'module ap\n\n@[get]\npub fn g(req SwelteRequest) string {\n\treturn "x"\n}\n'
 		)
 		const { swelte } = await import('./vite.js')
 		const plug = swelte({}) as unknown as {

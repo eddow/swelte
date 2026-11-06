@@ -1,5 +1,5 @@
 <script lang="ts">
-import { verbs_probe, verbs_echo } from '#routes/router/verbs/+page.v'
+import { verbs_echo, verbs_probe } from '#routes/router/verbs/+page.v'
 
 let note = $state('')
 

@@ -33,7 +33,8 @@ async function probe(label: string, path: string) {
 			<li>
 				<a href="/router">router</a>
 				— load + client router + <a href="/router/live">live</a> + <a href="/router/tags">tags</a> +
-				<a href="/router/verbs">verbs</a> + <a href="/router/enhance">enhance</a>
+				<a href="/router/verbs">verbs</a>
+				+ <a href="/router/enhance">enhance</a>
 			</li>
 			<!-- Headless API demos (no +page.svelte — fetch probes, not links:
 			     navigating to these shows the SPA 404 by design, no request) -->

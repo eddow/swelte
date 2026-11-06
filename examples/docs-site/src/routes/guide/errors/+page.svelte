@@ -82,4 +82,7 @@ import { codeHtml } from '#lib/snippets.gen.js'
 	Only JSON Accept, JSON bodies, and form bodies proxy to V. Exact <code>dist/</code> files win over
 	both.
 </p>
-<DocsNav next={{ href: '/guide/config', label: 'Config' }} related={[{ href: '/guide/forms', label: 'Forms' }]} />
+<DocsNav
+	next={{ href: '/guide/config', label: 'Config' }}
+	related={[{ href: '/guide/forms', label: 'Forms' }]}
+/>

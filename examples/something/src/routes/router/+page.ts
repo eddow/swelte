@@ -17,7 +17,7 @@ export function load({
 	url: string
 }) {
 	return {
-		viewModel: 'universal:' + String((props as { greeting?: string }).greeting ?? 'none'),
+		viewModel: `universal:${String((props as { greeting?: string }).greeting ?? 'none')}`,
 		paramsEcho: JSON.stringify(params),
 		urlEcho: url,
 	}

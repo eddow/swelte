@@ -1,7 +1,6 @@
 <script lang="ts">
-	import DocsNav from '#lib/DocsNav.svelte'
+import DocsNav from '#lib/DocsNav.svelte'
 </script>
-
 
 <div class="breadcrumbs text-sm">
 	<ul>
@@ -84,4 +83,7 @@
 		agent maintenance.</span
 	>
 </div>
-<DocsNav next={{ href: '/example', label: 'Example app' }} related={[{ href: '/from-sveltekit', label: 'From SvelteKit' }]} />
+<DocsNav
+	next={{ href: '/example', label: 'Example app' }}
+	related={[{ href: '/from-sveltekit', label: 'From SvelteKit' }]}
+/>

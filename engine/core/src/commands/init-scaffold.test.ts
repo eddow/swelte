@@ -1,8 +1,8 @@
-import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, mkdirSync, writeFileSync, existsSync, readFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { describe, it } from 'node:test'
 import { runInit } from './init.js'
 
 function ctxFor(dir: string, opts: Record<string, unknown>, rest: string[] = []) {

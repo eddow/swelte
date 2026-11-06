@@ -139,7 +139,7 @@ async function assertSsrHtml(base: string, label: string, throwRoute?: string): 
 		['<!--ssr-body-->', '<!--swelte:ssr:']
 	)
 	await probeSsr(base, label, '/nope', html, 404, ['data-swelte-ssr="1"'])
-	const res = await fetch(base + '/', { headers: { accept: 'application/json' } })
+	const res = await fetch(`${base}/`, { headers: { accept: 'application/json' } })
 	const body = await res.text()
 	if (res.status !== 200 || body.includes('data-swelte-ssr="1"')) {
 		throw new Error(`${label} / JSON bypass broken: ${res.status} ${body.slice(0, 120)}`)
@@ -248,7 +248,7 @@ export async function runSsrCheck(
 	const sidecar = await startSsrDevServer({ root, renderFile, port: opts.port ?? 8133 })
 	try {
 		const post = async (payload: unknown): Promise<{ status: number; body: string }> => {
-			const res = await fetch(sidecar.url + '/', {
+			const res = await fetch(`${sidecar.url}/`, {
 				method: 'POST',
 				headers: { 'content-type': 'application/json' },
 				body: JSON.stringify(payload),
@@ -414,7 +414,7 @@ export async function runSsrCheck(
 					const times: number[] = []
 					for (let i = 0; i < 20; i++) {
 						const t0 = Date.now()
-						const res = await fetch(base + '/', {
+						const res = await fetch(`${base}/`, {
 							headers: { accept: 'text/html,application/xhtml+xml' },
 						})
 						const body = await res.text()

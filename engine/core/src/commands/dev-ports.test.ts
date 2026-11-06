@@ -1,6 +1,6 @@
-import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { takePort, portFree, projectKillPattern, onSpawnError } from './dev.js'
+import { describe, it } from 'node:test'
+import { onSpawnError, portFree, projectKillPattern, takePort } from './dev.js'
 
 describe('dev port helpers (no real binds except port 0)', () => {
 	it('takePort fallbacks/NaN/negative', () => {

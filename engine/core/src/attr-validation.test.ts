@@ -1,5 +1,5 @@
-import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
+import { describe, it } from 'node:test'
 import { parseVFile } from './vite.js'
 
 describe('attr fan-out + validation errors (parse level)', () => {

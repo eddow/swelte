@@ -17,8 +17,8 @@ export function transpileMatcherBody(name: string, vBody: string): string {
 	const out: string[] = []
 	const paramRe = /^[A-Za-z_][A-Za-z0-9_]*$/
 	void paramRe
-	for (let raw of lines) {
-		let line = raw.trim()
+	for (const raw of lines) {
+		const line = raw.trim()
 		if (line === '' || line.startsWith('//')) continue
 		// for c in s.bytes() {  →  for (const c of s) {
 		// V iterates bytes; JS for..of over a string iterates UTF-16 units —

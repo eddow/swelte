@@ -11,8 +11,8 @@
 // reads it at runtime — same choice as WASM app_lib, keep consistent).
 import { execFileSync, execSync } from 'node:child_process'
 import { existsSync, mkdirSync, readdirSync, statSync, writeFileSync } from 'node:fs'
-import { dirname, join, resolve } from 'node:path'
 import { createRequire } from 'node:module'
+import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 /** Conda-free PATH: conda ships its own `ld` that shadows the system linker

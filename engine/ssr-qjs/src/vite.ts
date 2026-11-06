@@ -5,9 +5,9 @@
 //
 // Core remains completely clean — this module owns the dynamic imports
 // and build augmentation.
-import type { Plugin } from 'vite'
+
 import { swelte as coreSwelte } from '@swelte/core/vite'
-import { composeRenderJs } from './ssr.js'
+import type { Plugin } from 'vite'
 
 export interface SsrQjsOptions {
 	vBackendUrl?: string

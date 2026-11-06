@@ -1,11 +1,11 @@
 <script lang="ts">
-	let {
-		next,
-		related = []
-	}: {
-		next?: { href: string; label: string };
-		related?: { href: string; label: string }[];
-	} = $props();
+let {
+	next,
+	related = [],
+}: {
+	next?: { href: string; label: string }
+	related?: { href: string; label: string }[]
+} = $props()
 </script>
 
 {#if next || related.length > 0}

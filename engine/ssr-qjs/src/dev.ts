@@ -5,8 +5,9 @@
 // not the QJS engine (bytecode/embed/caps are prod-only).
 // HMR: watches the render.js file (mtime); re-imports on change, no
 // V restart. Timeout on any render -> caller falls back to SPA shell.
-import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
+
 import { existsSync, statSync, watch } from 'node:fs'
+import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
 import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
@@ -36,7 +37,7 @@ export async function startSsrDevServer(opts: SsrDevOptions) {
 			const st = statSync(renderFile)
 			if (st.mtimeMs <= mtime && mod) return
 			mtime = st.mtimeMs
-			const url = pathToFileURL(renderFile).href + `?t=${mtime}`
+			const url = `${pathToFileURL(renderFile).href}?t=${mtime}`
 			mod = (await import(url)) as typeof mod
 		} catch {
 			mod = null

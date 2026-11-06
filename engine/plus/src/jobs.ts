@@ -107,7 +107,7 @@ export function validateCronFn(rel: string, fn: CronFnShape): void {
 function indent(body: string): string {
 	return body
 		.split('\n')
-		.map((l) => (l.trim() === '' ? '' : '\t' + l))
+		.map((l) => (l.trim() === '' ? '' : `\t${l}`))
 		.join('\n')
 }
 

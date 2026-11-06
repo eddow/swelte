@@ -4,7 +4,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http'
 import { join, resolve, sep } from 'node:path'
 import type { Plugin } from 'vite'
 import { loadConfig, renderAppDts, renderClientEntry, renderHarness } from '../gen/config.js'
-import { SWELTE_GEN_CORE_DIRS, isBackendMod } from '../gen/paths.js'
+import { isBackendMod, SWELTE_GEN_CORE_DIRS } from '../gen/paths.js'
 import { resolveV } from '../toolchain.js'
 import { emitClientRouter } from './client-router.js'
 import { list, writeIfChanged } from './fs.js'
@@ -18,14 +18,11 @@ import {
 	listVFiles,
 	modulePath,
 	relPosix,
-	relPosixTop,
 	routeFor,
 	routeParams,
 	routeParamTs,
-	siblingLoadSource,
 	stripRouteGroups,
 	svelteModKind,
-	svelteRouteFor,
 	vFileSafe,
 	vPrefix,
 } from './routes.js'
@@ -54,7 +51,6 @@ import type {
 	MatcherDef,
 	RouteLimits,
 	RpcFn,
-	RpcParam,
 	SweltePluginOptions,
 	VStruct,
 	WrapperMw,
@@ -74,10 +70,8 @@ export function swelte(options: SweltePluginOptions = {}): Plugin {
 	let appBase = String(options.base ?? '')
 	let appAssets = String(options.assets ?? options.base ?? '')
 	let appCsp = String(options.csp ?? '')
-	let csrfMode: 'ignore' | 'enforce' = options.csrf === 'enforce' ? 'enforce' : 'ignore'
-	let methodOverride = options.methodOverride === true
 	let appVersion = String(options.version ?? '')
-	let appSw: { enabled?: boolean; register?: 'auto' | 'manual' } = {
+	const appSw: { enabled?: boolean; register?: 'auto' | 'manual' } = {
 		enabled: options.serviceWorker?.enabled === true,
 		register: options.serviceWorker?.register === 'manual' ? 'manual' : 'auto',
 	}
@@ -93,8 +87,6 @@ export function swelte(options: SweltePluginOptions = {}): Plugin {
 				? Math.floor(options.prerender.concurrency)
 				: 4,
 	}
-	let appIsr: Record<string, number> =
-		options.isr && typeof options.isr === 'object' ? { ...options.isr } : {}
 	let appOffline: { fallback: string } = {
 		fallback:
 			options.offline?.fallback === true
@@ -103,10 +95,6 @@ export function swelte(options: SweltePluginOptions = {}): Plugin {
 					? options.offline.fallback
 					: 'off',
 	}
-	let appTarget: 'auto' | 'static' | 'node' | 'edge' =
-		options.target === 'static' || options.target === 'node' || options.target === 'edge'
-			? options.target
-			: 'auto'
 	let appChunking: 'single' | 'layout' | 'route' =
 		options.chunking === 'single' || options.chunking === 'layout' || options.chunking === 'route'
 			? options.chunking
@@ -241,8 +229,6 @@ export function swelte(options: SweltePluginOptions = {}): Plugin {
 					if (options.assets === undefined && (cfg.assets !== '' || cfg.base !== ''))
 						appAssets = cfg.assets
 					if (options.csp === undefined && cfg.csp !== '') appCsp = cfg.csp
-					if (options.csrf === undefined && cfg.csrf === 'enforce') csrfMode = 'enforce'
-					if (options.methodOverride === undefined && cfg.methodOverride) methodOverride = true
 					if (options.version === undefined && cfg.version !== '') appVersion = cfg.version
 					// SW gate: config can only turn ON (never force off) — the
 					// live SWELTE_SW=1 env read in config() must survive this
@@ -258,10 +244,8 @@ export function swelte(options: SweltePluginOptions = {}): Plugin {
 							concurrency: cfg.prerender.concurrency,
 						}
 					}
-					if (options.isr === undefined && Object.keys(cfg.isr).length > 0) appIsr = { ...cfg.isr }
 					if (options.offline === undefined && cfg.offline.fallback !== 'off')
 						appOffline = { fallback: cfg.offline.fallback }
-					if (options.target === undefined && cfg.target !== 'auto') appTarget = cfg.target
 					if (options.chunking === undefined && cfg.chunking !== 'layout')
 						appChunking = cfg.chunking
 					if (
@@ -364,11 +348,7 @@ export function swelte(options: SweltePluginOptions = {}): Plugin {
 				// Custom param matchers (`src/matchers.v`, `@[matcher]`).
 				// Builtin fallback when absent: `{ integer }`.
 				let matchers: Map<string, MatcherDef>
-				try {
-					matchers = loadMatchers(root)
-				} catch (e) {
-					throw e
-				}
+				matchers = loadMatchers(root)
 				const knownMatchers = new Set(matchers.keys())
 				// Lifecycle hooks (`src/app.v`, core attrs `@[startup]`/`@[reroute]`/`@[error]`).
 				// Missing file → no-op hooks (harness byte-identical). Plugins own
@@ -381,10 +361,6 @@ export function swelte(options: SweltePluginOptions = {}): Plugin {
 					const got = plug.loadAppHooks(root)
 					if (got.errors?.length) throw new Error(got.errors[0])
 					if (got.fragment) appHookFragments.push(got.fragment)
-				}
-
-				function vSafe(mod: string): string {
-					return vFileSafe(mod)
 				}
 
 				function emitTypes(
@@ -457,37 +433,6 @@ ${list(st.fields, (fld) => `\t${fld.name}${fld.optional ? '?' : ''}: ${fld.tstyp
 `
 					}
 					for (const st of parseStructs(src)) out.push(structBlock(st))
-					const resAlias = (fn: RpcFn): string => {
-						const Res = `${pascal(fn.name)}Result`
-						const fallible = fn.fallible ? ' // !T: may reject with SwelteRpcError' : ''
-						const ret = fn.tsret === 'void' ? 'void' : fn.tsret
-						if (fn.tsret === 'unknown' && fn.vret !== 'unknown')
-							warnings.push(
-								`${sub}/${mod}.${fn.name} return: unknown V type '${fn.vret}' → unknown`
-							)
-						if (/^[A-Z][A-Za-z0-9_]*$/.test(fn.vret))
-							return `export type ${Res} = ${fn.vret}${fallible}`
-						if (
-							/^[a-z][A-Za-z0-9_]*$/.test(fn.vret) &&
-							fn.vret !== 'void' &&
-							fn.vret !== 'string' &&
-							fn.vret !== 'number' &&
-							fn.vret !== 'boolean'
-						)
-							return `// ${fn.name} returns V builtin ${fn.vret} (see above).\nexport type ${Res} = unknown`
-						return `export type ${Res} = ${ret}${fallible}`
-					}
-					const argsBlock = (fn: RpcFn, params: RpcParam[], Arg: string): string => {
-						for (const p of params) {
-							if (p.tstype === 'unknown')
-								warnings.push(
-									`${sub}/${mod}.${fn.name} param ${p.name}: unknown V type '${p.vtype}' → unknown`
-								)
-						}
-						return `export interface ${Arg} {
-${list(params, (p) => `\t${p.name}${p.optional ? '?' : ''}: ${p.tstype}\n`)}}
-`
-					}
 					for (const fn of fns) {
 						const isVerb = fn.attr !== 'rpc' && fn.attr !== 'ws'
 						// WS fns (future.md #3): no fetch stub — the browser
@@ -554,7 +499,6 @@ ${list(params, (p) => `\t${p.name}${p.optional ? '?' : ''}: ${p.tstype}\n`)}}
 									ps.length >= 2 &&
 									/^fn\s*\(\s*string\s*\)\s*chan\s+string$/.test(ps[ps.length - 2].vtype.trim())
 								const clientParams = lastIsEmit ? ps.slice(0, secondLastIsSub ? -2 : -1) : ps
-								const isEmit = lastIsEmit
 								const clientIsReq =
 									(clientParams.length === 1 && clientParams[0].vtype === 'SwelteRequest') ||
 									(clientParams.length === 1 && clientParams[0].name === 'req')
@@ -788,9 +732,9 @@ ${list(params, (p) => `\t${p.name}${p.optional ? '?' : ''}: ${p.tstype}\n`)}}
 						doubleClaimCheck(routesAbs, routesDir, mod, rel)
 						// Orphan/leaf-index checks (spec §2): warn, don't fail.
 						if (mod !== 'index' && mod !== '+page' && !mod.startsWith('api/')) {
-							const sveltePartner = join(routesAbs, `${mod}.svelte`)
-							const svelteIndex = join(routesAbs, mod, 'index.svelte')
-							const sveltePage = join(routesAbs, mod, '+page.svelte')
+							const _sveltePartner = join(routesAbs, `${mod}.svelte`)
+							const _svelteIndex = join(routesAbs, mod, 'index.svelte')
+							const _sveltePage = join(routesAbs, mod, '+page.svelte')
 							/* Really noisy and useless warning
 					if (!existsSync(sveltePartner) && !existsSync(svelteIndex) && !existsSync(sveltePage)) {
 						warnings.push(
@@ -1527,103 +1471,88 @@ export declare const dev: boolean
 				} catch (e) {
 					console.warn(`[swelte] routes.js emit failed: ${(e as Error).message}`)
 				}
-				// SSR manifest: engine-agnostic JSON for adapters.
-				// [{ route, svelte, kind, hasData }] + hasError flag. Core emits it;
-				// ssr-qjs composes render.js from it. Never import engine deps.
-				try {
-					const { entries: svelteEntries, hasError } = collectSvelteManifest(
-						routesAbs,
-						routesDir,
-						vMods
-					)
-					// Wrapper chain per page svelte path (root-first), same
-					// candidate rule as routes.js (nearest +route.svelte per
-					// ancestor dir). Keyed by manifest svelte path.
-					const wrapperSet = new Set(
-						svelteEntries.filter((e) => e.kind === 'wrapper').map((e) => e.svelte)
-					)
-					// Layout composition (`export const layout` in the sibling
-					// `.ts`, resolved per leaf at manifest time — mirrors
-					// routes.js cutWrappers).
-					const chainFor = (pageSvelte: string): string[] => {
-						const mod = pageSvelte.replace(/\.svelte$/, '')
-						const dir = mod.includes('/') ? mod.slice(0, mod.lastIndexOf('/')) : ''
-						const cut = svelteEntries.find((e) => e.svelte === pageSvelte)?.layout ?? null
-						const dirOfW = (w: string): string =>
-							w.endsWith('/+route.svelte')
-								? w.slice(0, -'/+route.svelte'.length)
-								: w === '+route.svelte'
-									? ''
-									: w
-						const chain: string[] = []
-						let cur = dir
-						for (;;) {
-							const cand = `${cur === '' ? '+route' : `${cur}/+route`}.svelte`
-							if (wrapperSet.has(cand)) chain.unshift(cand)
-							if (cur === '') break
-							cur = cur.includes('/') ? cur.slice(0, cur.lastIndexOf('/')) : ''
-						}
-						if (cut === false) return []
-						if (cut === null || cut === true) return chain
-						const idx = chain.findIndex((w) => dirOfW(w) === cut)
-						// resolveLayoutHint already rejected non-ancestor dirs, so a
-						// miss here can only mean the wrapper set changed under us.
-						if (idx < 0) return []
-						return chain.slice(0, idx + 1)
+				const { entries: svelteEntries, hasError } = collectSvelteManifest(
+					routesAbs,
+					routesDir,
+					vMods
+				)
+				// Wrapper chain per page svelte path (root-first), same
+				// candidate rule as routes.js (nearest +route.svelte per
+				// ancestor dir). Keyed by manifest svelte path.
+				const wrapperSet = new Set(
+					svelteEntries.filter((e) => e.kind === 'wrapper').map((e) => e.svelte)
+				)
+				// Layout composition (`export const layout` in the sibling
+				// `.ts`, resolved per leaf at manifest time — mirrors
+				// routes.js cutWrappers).
+				const chainFor = (pageSvelte: string): string[] => {
+					const mod = pageSvelte.replace(/\.svelte$/, '')
+					const dir = mod.includes('/') ? mod.slice(0, mod.lastIndexOf('/')) : ''
+					const cut = svelteEntries.find((e) => e.svelte === pageSvelte)?.layout ?? null
+					const dirOfW = (w: string): string =>
+						w.endsWith('/+route.svelte')
+							? w.slice(0, -'/+route.svelte'.length)
+							: w === '+route.svelte'
+								? ''
+								: w
+					const chain: string[] = []
+					let cur = dir
+					for (;;) {
+						const cand = `${cur === '' ? '+route' : `${cur}/+route`}.svelte`
+						if (wrapperSet.has(cand)) chain.unshift(cand)
+						if (cur === '') break
+						cur = cur.includes('/') ? cur.slice(0, cur.lastIndexOf('/')) : ''
 					}
-					const wrappersByRoute: Record<string, string[]> = {}
-					for (const e of svelteEntries) {
-						if (e.kind === 'wrapper' || e.kind === 'error') continue
-						const chain = chainFor(e.svelte)
-						if (chain.length) wrappersByRoute[`./${e.svelte}`] = chain.map((w) => `./${w}`)
-					}
-					const manifest = {
-						hasError,
-						routes: svelteEntries
-							.filter((e) => e.kind !== 'wrapper' && e.kind !== 'error')
-							.map((e) => ({
-								route: e.route,
-								svelte: e.svelte,
-								kind: e.kind,
-								hasData: e.hasData,
-								hasUniversalLoad: e.hasUniversalLoad,
-								ssr: e.ssr,
-								csr: e.csr,
-								limits: e.limits ?? null,
-								serializedHeaders: e.serializedHeaders ?? null,
-								layout: e.layout ?? null,
-								chunk: e.chunk ?? 'inherit',
-								prerender: e.prerender ?? 'inherit',
-							}))
-							.sort((a, b) => a.route.localeCompare(b.route)),
-						error: svelteEntries.some((e) => e.kind === 'error')
-							? (svelteEntries.find((e) => e.kind === 'error')?.svelte ?? null)
-							: null,
-						wrappers: svelteEntries
-							.filter((e) => e.kind === 'wrapper')
-							.map((e) => e.svelte)
-							.sort(),
-						wrappersByRoute,
-					}
-					writeIfChanged(join(genDir, 'ssr-manifest.json'), JSON.stringify(manifest, null, 2))
-					// Prerender/entries crawl list (docs (built) item 2):
-					// static routes always enumerated; `entries: 'all'` also
-					// executes sibling `entries.ts` exports for dynamics.
-					// No prerender implied - just the crawl source.
-					try {
-						const crawl = await collectPrerenderEntries(
-							root,
-							routesDir,
-							appPrerender.entries,
-							knownMatchers
-						)
-						writeIfChanged(join(genDir, 'entries.json'), JSON.stringify(crawl, null, 2))
-					} catch (e) {
-						throw e
-					}
-				} catch (e) {
-					throw e
+					if (cut === false) return []
+					if (cut === null || cut === true) return chain
+					const idx = chain.findIndex((w) => dirOfW(w) === cut)
+					// resolveLayoutHint already rejected non-ancestor dirs, so a
+					// miss here can only mean the wrapper set changed under us.
+					if (idx < 0) return []
+					return chain.slice(0, idx + 1)
 				}
+				const wrappersByRoute: Record<string, string[]> = {}
+				for (const e of svelteEntries) {
+					if (e.kind === 'wrapper' || e.kind === 'error') continue
+					const chain = chainFor(e.svelte)
+					if (chain.length) wrappersByRoute[`./${e.svelte}`] = chain.map((w) => `./${w}`)
+				}
+				const manifest = {
+					hasError,
+					routes: svelteEntries
+						.filter((e) => e.kind !== 'wrapper' && e.kind !== 'error')
+						.map((e) => ({
+							route: e.route,
+							svelte: e.svelte,
+							kind: e.kind,
+							hasData: e.hasData,
+							hasUniversalLoad: e.hasUniversalLoad,
+							ssr: e.ssr,
+							csr: e.csr,
+							limits: e.limits ?? null,
+							serializedHeaders: e.serializedHeaders ?? null,
+							layout: e.layout ?? null,
+							chunk: e.chunk ?? 'inherit',
+							prerender: e.prerender ?? 'inherit',
+						}))
+						.sort((a, b) => a.route.localeCompare(b.route)),
+					error: svelteEntries.some((e) => e.kind === 'error')
+						? (svelteEntries.find((e) => e.kind === 'error')?.svelte ?? null)
+						: null,
+					wrappers: svelteEntries
+						.filter((e) => e.kind === 'wrapper')
+						.map((e) => e.svelte)
+						.sort(),
+					wrappersByRoute,
+				}
+				writeIfChanged(join(genDir, 'ssr-manifest.json'), JSON.stringify(manifest, null, 2))
+				const crawl = await collectPrerenderEntries(
+					root,
+					routesDir,
+					appPrerender.entries,
+					knownMatchers
+				)
+				writeIfChanged(join(genDir, 'entries.json'), JSON.stringify(crawl, null, 2))
 				writeIfChanged(join(genDir, 'sdk.ts'), '// Auto-generated by swelte. Do not edit.\n')
 				// Plugin V module dirs (e.g. `@swelte/plus/db` → `backend/`):
 				// copied into the `.swelte/` compilation unit so generated

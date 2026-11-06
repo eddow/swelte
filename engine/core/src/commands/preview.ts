@@ -1,10 +1,10 @@
 // `swelte preview`: run the built V binary only (vite-less prod run).
 // Serves dist/ + API on one port. No Vite involved.
-import { spawn, type ChildProcess } from 'node:child_process'
+import { type ChildProcess, spawn } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { join, resolve } from 'node:path'
-import type { Ctx } from './types.js'
 import { freePortUnix, killPort, onSpawnError, takePort, waitPort } from './dev.js'
+import type { Ctx } from './types.js'
 
 export async function runPreview(ctx: Ctx): Promise<void> {
 	const root = resolve(String(ctx.opts.root ?? process.cwd()))

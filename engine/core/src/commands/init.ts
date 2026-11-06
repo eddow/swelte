@@ -11,8 +11,8 @@
 // plugin's transformIndexHtml points the script tag at .swelte/entry-main.ts.
 import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
-import { fileURLToPath } from 'node:url'
 import * as readline from 'node:readline'
+import { fileURLToPath } from 'node:url'
 import { VERSION } from '../version.js'
 import type { Ctx } from './types.js'
 

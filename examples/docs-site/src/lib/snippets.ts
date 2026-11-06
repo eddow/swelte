@@ -297,6 +297,6 @@ pub fn ws_rooms(req SwelteRequest, sub fn (string) chan string, recv chan string
 \t\t\trooms.close()
 \t\t}
 \t})
-<\/script>`,
+</script>`,
 	},
 }

@@ -1,17 +1,17 @@
 <script lang="ts">
+import { SwelteRpcError } from '@swelte/core'
 import { tick } from 'svelte'
-import { get_greeting, save_name, greet_narrow } from '#routes/+page.v'
+import type { HashStringResult } from '#lib/crypto/hash.v'
+import { hash_string } from '#lib/crypto/hash.v'
 import type {
 	GetGreetingResult,
-	SaveNameResult,
 	GreetNarrowResult,
+	SaveNameResult,
 	SwelteRequest,
 } from '#routes/+page.v'
-import { login, greet_pure, serve_pdf, make_created, tick_stream } from '#routes/api/greet.v'
+import { get_greeting, greet_narrow, save_name } from '#routes/+page.v'
 import type { Session, SwelteResponse } from '#routes/api/greet.v'
-import { hash_string } from '#lib/crypto/hash.v'
-import type { HashStringResult } from '#lib/crypto/hash.v'
-import { SwelteRpcError } from '@swelte/core'
+import { greet_pure, login, make_created, serve_pdf, tick_stream } from '#routes/api/greet.v'
 
 let name = $state('world')
 let greeting: GetGreetingResult = $state('')

@@ -32,4 +32,7 @@ import { codeHtml } from '#lib/snippets.gen.js'
 	<Code snippet={codeHtml['quickstart-shape']} dense />
 </div>
 
-<DocsNav next={{ href: '/guide/rpc', label: 'RPC & routes' }} related={[{ href: '/guide/forms', label: 'Forms' }]} />
+<DocsNav
+	next={{ href: '/guide/rpc', label: 'RPC & routes' }}
+	related={[{ href: '/guide/forms', label: 'Forms' }]}
+/>

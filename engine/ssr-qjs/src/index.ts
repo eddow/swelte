@@ -7,29 +7,29 @@
 // (svelte/compiler for generate:'server', qjs at runtime). Core never
 // imports svelte/compiler, quickjs, or a JS runtime.
 export * from '@swelte/core'
-export { swelte } from './vite.js'
+export type { SsrDevRunOptions } from './cli.js'
+export { runSsrCheck, runSsrDev } from './cli.js'
+export type { SsrDevOptions } from './dev.js'
+export { defaultSsrDevPort, renderFileFor, startSsrDevServer } from './dev.js'
+export {
+	buildQjsProd,
+	type QjsProdOut,
+	qjsCDir,
+	whichCC,
+} from './qjs.js'
 export {
 	assertNoNodeExternals,
 	assertNoSdkTopLevelCalls,
 	assertNoTopLevelStubCalls,
 	assertQjsCompatible,
 	assertUniversalLoadSync,
-	readUniversalSsrFlag,
-	transpileSiblingLoad,
 	bundleSsr,
 	compileSsrComponent,
 	composeRenderJs,
 	emitRenderJs,
+	readUniversalSsrFlag,
 	type SsrComposeOptions,
 	type SsrManifest,
+	transpileSiblingLoad,
 } from './ssr.js'
-export { defaultSsrDevPort, renderFileFor, startSsrDevServer } from './dev.js'
-export type { SsrDevOptions } from './dev.js'
-export { runSsrCheck, runSsrDev } from './cli.js'
-export type { SsrDevRunOptions } from './cli.js'
-export {
-	buildQjsProd,
-	qjsCDir,
-	whichCC,
-	type QjsProdOut,
-} from './qjs.js'
+export { swelte } from './vite.js'

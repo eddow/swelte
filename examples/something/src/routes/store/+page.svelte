@@ -1,6 +1,6 @@
 <script lang="ts">
-import { kv_read, kv_write, kv_drop, hub_count } from '#routes/api/store.v'
 import { SwelteRpcError } from '@swelte/core'
+import { hub_count, kv_drop, kv_read, kv_write } from '#routes/api/store.v'
 
 let key = $state('demo-key')
 let value = $state('demo-value')
@@ -42,7 +42,7 @@ async function drop() {
 async function listeners() {
 	out = ''
 	try {
-		out = `listeners(${room}): ` + (await hub_count({ room }))
+		out = `listeners(${room}): ${await hub_count({ room })}`
 	} catch (e) {
 		showError(e)
 	}

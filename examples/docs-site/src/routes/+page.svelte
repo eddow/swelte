@@ -72,6 +72,7 @@ import { codeHtml } from '#lib/snippets.gen.js'
 		viewBox="0 0 24 24"
 		class="stroke-current shrink-0 w-6 h-6"
 	>
+		<title>Information</title>
 		<path
 			stroke-linecap="round"
 			stroke-linejoin="round"
@@ -81,4 +82,7 @@ import { codeHtml } from '#lib/snippets.gen.js'
 	</svg>
 	<span>Docs live in <code>docs/*.md</code> — these pages render the same content.</span>
 </div>
-<DocsNav next={{ href: '/install', label: 'Installation' }} related={[{ href: '/quickstart', label: 'Quickstart' }]} />
+<DocsNav
+	next={{ href: '/install', label: 'Installation' }}
+	related={[{ href: '/quickstart', label: 'Quickstart' }]}
+/>

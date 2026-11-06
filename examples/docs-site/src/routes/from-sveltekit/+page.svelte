@@ -1,7 +1,6 @@
 <script lang="ts">
-	import DocsNav from '#lib/DocsNav.svelte'
+import DocsNav from '#lib/DocsNav.svelte'
 </script>
-
 
 <div class="breadcrumbs text-sm">
 	<ul>
@@ -242,4 +241,7 @@
 	</li>
 	<li>Single artifact: <code>dist/server</code> + <code>dist/</code>. No Node at runtime.</li>
 </ul>
-<DocsNav next={{ href: '/versus', label: 'Versus' }} related={[{ href: '/guide/rpc', label: 'RPC & routes' }]} />
+<DocsNav
+	next={{ href: '/versus', label: 'Versus' }}
+	related={[{ href: '/guide/rpc', label: 'RPC & routes' }]}
+/>

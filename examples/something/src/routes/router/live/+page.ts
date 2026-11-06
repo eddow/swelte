@@ -11,7 +11,7 @@ export const ssr = false
 export async function load({ params }: { params: Record<string, string> }) {
 	const tick = await Promise.resolve('live')
 	return {
-		liveTag: 'async:' + tick,
+		liveTag: `async:${tick}`,
 		paramsEcho: JSON.stringify(params),
 	}
 }

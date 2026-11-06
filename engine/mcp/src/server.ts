@@ -1,8 +1,9 @@
 // MCP server entry: stdio JSON-RPC loop + MCP handshake methods.
 // Methods: initialize, tools/list, tools/call (+ ping, notifications/initialized).
-import { HANDLERS, TOOLS, serverInfo } from './tools.js'
-import { createLineSplitter, dispatch, err, ok, parseLine } from './protocol.js'
+
 import type { Handler, JsonRpcRequest } from './protocol.js'
+import { createLineSplitter, dispatch, err, parseLine } from './protocol.js'
+import { HANDLERS, serverInfo, TOOLS } from './tools.js'
 import { VERSION } from './version.js'
 
 const MCP_METHODS = new Map<string, Handler>([
@@ -45,11 +46,11 @@ export async function handleRequest(req: JsonRpcRequest): Promise<ReturnType<typ
 export async function serveLine(line: string, write: (s: string) => void): Promise<void> {
 	const parsed = parseLine(line)
 	if ('res' in parsed) {
-		write(JSON.stringify(parsed.res) + '\n')
+		write(`${JSON.stringify(parsed.res)}\n`)
 		return
 	}
 	const res = await dispatch(parsed.req, MCP_METHODS)
-	if (res !== null) write(JSON.stringify(res) + '\n')
+	if (res !== null) write(`${JSON.stringify(res)}\n`)
 }
 
 export async function serveStdio(
@@ -59,7 +60,7 @@ export async function serveStdio(
 	input.setEncoding('utf8')
 	const push = createLineSplitter((line) => {
 		void serveLine(line, (s) => output.write(s)).catch((e: Error) => {
-			output.write(JSON.stringify(err(null, -32603, e.message)) + '\n')
+			output.write(`${JSON.stringify(err(null, -32603, e.message))}\n`)
 		})
 	})
 	for await (const chunk of input) push(chunk as string)

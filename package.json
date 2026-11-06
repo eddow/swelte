@@ -19,9 +19,9 @@
     "version:patch": "node scripts/sync-version.mjs patch",
     "version:minor": "node scripts/sync-version.mjs minor",
     "version:major": "node scripts/sync-version.mjs major",
-    "biome:check": "biome format .",
-    "biome:format": "biome format --write .",
-    "biome:format:unsafe": "biome format --write . --unsafe"
+    "biome:check": "biome check .",
+    "biome": "biome check --write .",
+    "biome:unsafe": "biome check --write . --unsafe"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.6.4",

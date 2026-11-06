@@ -72,4 +72,7 @@ import { codeHtml } from '#lib/snippets.gen.js'
 		runs Vite + V backend in one command.</span
 	>
 </div>
-<DocsNav next={{ href: '/quickstart', label: 'Quickstart' }} related={[{ href: '/guide/rpc', label: 'RPC & routes' }]} />
+<DocsNav
+	next={{ href: '/quickstart', label: 'Quickstart' }}
+	related={[{ href: '/guide/rpc', label: 'RPC & routes' }]}
+/>

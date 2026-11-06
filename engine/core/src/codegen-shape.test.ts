@@ -1,14 +1,17 @@
 // Service worker (docs (built) slice, additive + opt-in).
-import { describe as describeSw, it as itSw } from 'node:test'
+
 import assertSw from 'node:assert/strict'
 import { createRequire as createSwelteRequire } from 'node:module'
+import { describe as describeSw, it as itSw } from 'node:test'
+
 const require = createSwelteRequire(import.meta.url)
+
 import {
 	renderServiceWorker as renderSw,
 	renderServiceWorkerRegister as renderSwRegister,
 	serviceWorkerEnabled as swEnabled,
-	serviceWorkerPrecache as swPrecache,
 	serviceWorkerRegisterMode as swMode,
+	serviceWorkerPrecache as swPrecache,
 } from './vite.js'
 
 describeSw('service worker (opt-in, additive)', () => {
@@ -68,10 +71,11 @@ describeSw('service worker (opt-in, additive)', () => {
 		assertSw.ok(!got.includes('/index.html'))
 	})
 })
-import { describe as describeGoldens, it as itGolden } from 'node:test'
+
 import assertGolden from 'node:assert/strict'
-import { jsFetchFor as jsFetchForGolden, jsWasmFor as jsWasmForGolden } from './vite.js'
+import { describe as describeGoldens, it as itGolden } from 'node:test'
 import type { RpcFn as RpcFnGolden } from './vite.js'
+import { jsFetchFor as jsFetchForGolden, jsWasmFor as jsWasmForGolden } from './vite.js'
 
 function goldenFn(over: Partial<RpcFnGolden> = {}): RpcFnGolden {
 	return {
@@ -282,19 +286,19 @@ describeGoldens('item 4 — literal golden strings for jsFetchFor/jsWasmFor', ()
 	})
 })
 
-import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import {
-	mkdtempSync,
-	mkdirSync,
-	writeFileSync,
-	readFileSync,
-	readdirSync,
-	statSync,
 	cpSync,
+	mkdirSync,
+	mkdtempSync,
+	readdirSync,
+	readFileSync,
+	statSync,
+	writeFileSync,
 } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { describe, it } from 'node:test'
 
 function scaffold(): string {
 	const root = mkdtempSync(join(tmpdir(), 'swelte-golden-'))
@@ -348,7 +352,7 @@ function tree(root: string, dir: string): string[] {
 	const walk = (d: string, rel: string) => {
 		for (const e of readdirSync(d).sort()) {
 			const p = join(d, e)
-			if (statSync(p).isDirectory()) walk(p, rel + e + '/')
+			if (statSync(p).isDirectory()) walk(p, `${rel + e}/`)
 			else out.push(rel + e)
 		}
 	}
@@ -417,7 +421,7 @@ describe('codegen shape snapshots (fetch/SSE/dispatcher)', () => {
 				// Item 9: version.js embeds buildTime (ISO wall clock) — it
 				// changes every run by design. Compare it separately below.
 				.filter((f) => f !== 'version.js')
-				.map((f) => f + '\n' + readFileSync(join(root, '.swelte', f), 'utf8'))
+				.map((f) => `${f}\n${readFileSync(join(root, '.swelte', f), 'utf8')}`)
 				.join('\n====\n')
 		const snap1 = snapTree()
 		await generate(root)

@@ -1,8 +1,8 @@
 <script lang="ts">
+import { SwelteRpcError } from '@swelte/core'
 import { tick } from 'svelte'
 import { tick_stream } from '#routes/api/greet.v'
 import { tick_items } from '#routes/api/ticks.v'
-import { SwelteRpcError } from '@swelte/core'
 
 let ticks: string[] = $state([])
 let listed: string[] = $state([])

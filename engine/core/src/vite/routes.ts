@@ -2,8 +2,7 @@ import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
 import { join, relative, resolve, sep } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { dynSegPattern } from './matchers.js'
-import type { SvelteRouteEntry } from './types.js'
-import type { RouteLimits } from './types.js'
+import type { RouteLimits, SvelteRouteEntry } from './types.js'
 
 export function listFilesWithExt(dir: string, ext: string, base?: string): string[] {
 	if (!existsSync(dir)) return []
@@ -594,59 +593,55 @@ export async function collectPrerenderEntries(
 	knownMatchers?: Set<string>
 ): Promise<PrerenderCrawl> {
 	const routesAbs = join(resolve(root), routesDir)
-	let patterns: string[] = []
+	const patterns: string[] = []
 	const flags = new Map<string, 'prerender-true' | 'prerender-false' | 'prerender-auto'>()
-	try {
-		const mods = new Set<string>()
-		for (const f of listVFiles(routesAbs)) {
-			const rel = relPosixTop(routesAbs, f).replace(/\.v$/, '')
-			mods.add(rel)
-		}
-		const { entries } = collectSvelteManifest(routesAbs, routesDir, mods)
-		const byRoute = new Map(entries.map((e) => [e.route, e]))
-		const wrappers = entries.filter((e) => e.kind === 'wrapper')
-		// Explicit per-page flag for a svelte pattern: leaf wins, else the
-		// nearest ancestor `+route.ts` with an explicit flag, else inherit.
-		const flagForSvelte = (
-			route: string
-		): 'prerender-true' | 'prerender-false' | 'prerender-auto' | null => {
-			const leaf = byRoute.get(route)
-			if (leaf && leaf.prerender !== 'inherit') return leaf.prerender
-			const segs = route.split('/').filter(Boolean)
-			for (let i = segs.length; i >= 0; i--) {
-				const prefix = `/${segs.slice(0, i).join('/')}`
-				const norm = prefix === '/' ? '/' : prefix
-				for (const w of wrappers) {
-					const wDir = w.svelte.replace(/\/\+route\.svelte$/, '').replace(/^\+route\.svelte$/, '')
-					const wRoute = wDir === '' ? '/' : `/${wDir}`
-					if (wRoute === norm && w.prerender !== 'inherit') return w.prerender
-				}
-			}
-			return null
-		}
-		const seen = new Set<string>()
-		for (const e of entries) {
-			if (e.kind === 'wrapper' || e.kind === 'error') continue
-			if (!seen.has(e.route)) {
-				seen.add(e.route)
-				patterns.push(e.route)
-				const flag = flagForSvelte(e.route)
-				if (flag) flags.set(e.route, flag)
+	const mods = new Set<string>()
+	for (const f of listVFiles(routesAbs)) {
+		const rel = relPosixTop(routesAbs, f).replace(/\.v$/, '')
+		mods.add(rel)
+	}
+	const { entries } = collectSvelteManifest(routesAbs, routesDir, mods)
+	const byRoute = new Map(entries.map((e) => [e.route, e]))
+	const wrappers = entries.filter((e) => e.kind === 'wrapper')
+	// Explicit per-page flag for a svelte pattern: leaf wins, else the
+	// nearest ancestor `+route.ts` with an explicit flag, else inherit.
+	const flagForSvelte = (
+		route: string
+	): 'prerender-true' | 'prerender-false' | 'prerender-auto' | null => {
+		const leaf = byRoute.get(route)
+		if (leaf && leaf.prerender !== 'inherit') return leaf.prerender
+		const segs = route.split('/').filter(Boolean)
+		for (let i = segs.length; i >= 0; i--) {
+			const prefix = `/${segs.slice(0, i).join('/')}`
+			const norm = prefix === '/' ? '/' : prefix
+			for (const w of wrappers) {
+				const wDir = w.svelte.replace(/\/\+route\.svelte$/, '').replace(/^\+route\.svelte$/, '')
+				const wRoute = wDir === '' ? '/' : `/${wDir}`
+				if (wRoute === norm && w.prerender !== 'inherit') return w.prerender
 			}
 		}
-		// V-only routes (no .svelte): routeFor leaf/dir rules (abs path form).
-		// §7: pass the custom matcher set — bare `routeFor` without it treats
-		// every `[x=y]` as `unknown matcher` (only `integer` builtin known).
-		// Injected by the plugin (already loaded); absent = builtin only.
-		for (const f of listVFiles(routesAbs)) {
-			const r = routeFor(routesDir, routesAbs, f, knownMatchers)
-			if (r && !seen.has(r)) {
-				seen.add(r)
-				patterns.push(r)
-			}
+		return null
+	}
+	const seen = new Set<string>()
+	for (const e of entries) {
+		if (e.kind === 'wrapper' || e.kind === 'error') continue
+		if (!seen.has(e.route)) {
+			seen.add(e.route)
+			patterns.push(e.route)
+			const flag = flagForSvelte(e.route)
+			if (flag) flags.set(e.route, flag)
 		}
-	} catch (e) {
-		throw e
+	}
+	// V-only routes (no .svelte): routeFor leaf/dir rules (abs path form).
+	// §7: pass the custom matcher set — bare `routeFor` without it treats
+	// every `[x=y]` as `unknown matcher` (only `integer` builtin known).
+	// Injected by the plugin (already loaded); absent = builtin only.
+	for (const f of listVFiles(routesAbs)) {
+		const r = routeFor(routesDir, routesAbs, f, knownMatchers)
+		if (r && !seen.has(r)) {
+			seen.add(r)
+			patterns.push(r)
+		}
 	}
 	patterns.sort()
 	const part = partitionPrerender(patterns, flags, mode)

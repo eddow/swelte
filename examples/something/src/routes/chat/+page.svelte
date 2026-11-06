@@ -1,10 +1,10 @@
 <script lang="ts">
-import { tick } from 'svelte'
-import { say, stream } from '#routes/api/rooms.v'
-import { ws_say, ws_rooms } from '#routes/api/ws-rooms.v'
-import { ws_echo as wsEchoUrl } from '#routes/api/ws-echo.v'
 import { SwelteRpcError } from '@swelte/core'
+import { tick } from 'svelte'
 import { browser, dev } from '#app/environment'
+import { say, stream } from '#routes/api/rooms.v'
+import { ws_echo as wsEchoUrl } from '#routes/api/ws-echo.v'
+import { ws_rooms, ws_say } from '#routes/api/ws-rooms.v'
 
 let room = $state('lobby')
 let msg = $state('hello rooms')

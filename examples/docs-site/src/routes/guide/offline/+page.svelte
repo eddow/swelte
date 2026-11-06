@@ -1,7 +1,6 @@
 <script lang="ts">
-	import DocsNav from '#lib/DocsNav.svelte'
+import DocsNav from '#lib/DocsNav.svelte'
 </script>
-
 
 <div class="breadcrumbs text-sm">
 	<ul>
@@ -64,4 +63,7 @@
 	</li>
 </ul>
 
-<DocsNav next={{ href: '/guide/ssr', label: 'SSR' }} related={[{ href: '/guide/config', label: 'Config' }]} />
+<DocsNav
+	next={{ href: '/guide/ssr', label: 'SSR' }}
+	related={[{ href: '/guide/config', label: 'Config' }]}
+/>

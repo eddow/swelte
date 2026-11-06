@@ -15,9 +15,11 @@ import { codeHtml } from '#lib/snippets.gen.js'
 <h1 class="text-4xl font-bold mt-2">Realtime (<code class="text-2xl">@swelte/plus</code>)</h1>
 <p class="py-4 opacity-80">
 	Rooms + sockets on one hub — beyond-SvelteKit, optional package. Ships inside
-	<code>@swelte/plus/db</code> (same install, same <code>dbPlugin</code>): the hub is the reason
-	sockets live here and not in core. Core stays parity-only; plus owns the
-	<code>backend.emit</code> hub <code>@[sse]</code> and <code>@[ws]</code> ride.
+	<code>@swelte/plus/db</code>
+	(same install, same <code>dbPlugin</code>): the hub is the reason sockets live here and not in
+	core. Core stays parity-only; plus owns the
+	<code>backend.emit</code>
+	hub <code>@[sse]</code> and <code>@[ws]</code> ride.
 </p>
 
 <div class="mt-2">
@@ -59,4 +61,7 @@ import { codeHtml } from '#lib/snippets.gen.js'
 	<Code snippet={codeHtml['plus-sockets-client']} dense title="browser: new WebSocket(url)" />
 </div>
 
-<DocsNav next={{ href: '/from-sveltekit', label: 'From SvelteKit' }} related={[{ href: '/plus/db', label: 'Database' }]} />
+<DocsNav
+	next={{ href: '/from-sveltekit', label: 'From SvelteKit' }}
+	related={[{ href: '/plus/db', label: 'Database' }]}
+/>

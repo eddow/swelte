@@ -1,6 +1,6 @@
 <script lang="ts">
+import { isPageData, isPageError, loadPage, type SwelteLoadResult } from '@swelte/core'
 import { admin_whoami } from '#routes/admin/+page.v'
-import { loadPage, isPageError, isPageData, type SwelteLoadResult } from '@swelte/core'
 import ErrorPage from '../+error.svelte'
 
 let result: SwelteLoadResult<string> | null = $state(null)

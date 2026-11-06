@@ -1,8 +1,8 @@
-import { describe, it, before, after } from 'node:test'
 import assert from 'node:assert/strict'
 import { mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { after, before, describe, it } from 'node:test'
 import { startSsrDevServer } from './dev.js'
 
 async function freePort(): Promise<number> {

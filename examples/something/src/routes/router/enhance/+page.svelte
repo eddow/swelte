@@ -1,6 +1,5 @@
 <script lang="ts">
-import { enhance } from '@swelte/core'
-import { page } from '@swelte/core'
+import { enhance, page } from '@swelte/core'
 
 // Item 15a: plain <form method=post use:enhance> — no reload, page.form
 // publishes the JSON payload, form resets.

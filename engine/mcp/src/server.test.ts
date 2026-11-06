@@ -1,8 +1,8 @@
-import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, existsSync, mkdirSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { describe, it } from 'node:test'
 import { createLineSplitter, dispatch, err, ok, parseLine } from './protocol.js'
 
 describe('protocol', () => {

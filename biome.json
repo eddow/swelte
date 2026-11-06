@@ -7,8 +7,9 @@
 			"**/src/**/*.svelte",
 			"**/src/**/*.js",
 			"**/src/**/*.css",
+			"engine/vvm/bin/*.js",
 			"!**/src/lib/snippets.gen.ts",
-			"!**/coverage/**"
+			"!**/coverage"
 		],
 		"ignoreUnknown": true
 	},
@@ -62,8 +63,8 @@
 				"noParameterAssign": "off",
 				"useImportType": { "level": "warn", "fix": "safe" },
 				"useConst": {
-					"level": "info",
-					"fix": "none"
+					"level": "on",
+					"fix": "safe"
 				}
 			},
 			"suspicious": {
@@ -76,7 +77,8 @@
 				"noImplicitAnyLet": "off",
 				"useIterableCallbackReturn": "off",
 				"noRedeclare": "off",
-				"noShadowRestrictedNames": "off"
+				"noShadowRestrictedNames": "off",
+				"noTemplateCurlyInString": "off"
 			},
 			"performance": {
 				"noAccumulatingSpread": "off"
@@ -90,7 +92,7 @@
 			"security": {},
 			"correctness": {
 				"noUnusedImports": {
-					"level": "info",
+					"level": "error",
 					"fix": "safe"
 				},
 				"noUnusedFunctionParameters": {
@@ -117,13 +119,20 @@
 	"assist": {
 		"actions": {
 			"source": {
-				"organizeImports": "on"
+				"organizeImports": { "level": "on", "options": {} }
 			}
 		}
 	},
 	"overrides": [
 		{
 			"includes": ["**/*.svelte"],
+			"assist": {
+				"actions": {
+					"source": {
+						"organizeImports": "off"
+					}
+				}
+			},
 			"linter": {
 				"rules": {
 					"complexity": { "noUselessLoneBlockStatements": "off" },

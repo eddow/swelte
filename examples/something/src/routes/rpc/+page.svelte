@@ -1,16 +1,16 @@
 <script lang="ts">
+import { deserialize, isFail, SwelteRpcError } from '@swelte/core'
+import type { Session, SwelteResponse } from '#routes/api/greet.v'
+import { greet_pure, login, make_created, serve_pdf } from '#routes/api/greet.v'
+import type { GetGreetingResult, GreetNarrowResult, SaveNameResult } from '#routes/rpc/+page.v'
 import {
 	get_greeting,
-	save_name,
-	save_fail,
 	greet_narrow,
 	rename_greeting,
+	save_fail,
+	save_name,
 	touch_greeting,
 } from '#routes/rpc/+page.v'
-import type { GetGreetingResult, SaveNameResult, GreetNarrowResult } from '#routes/rpc/+page.v'
-import { login, greet_pure, serve_pdf, make_created } from '#routes/api/greet.v'
-import type { Session, SwelteResponse } from '#routes/api/greet.v'
-import { SwelteRpcError, isFail, deserialize } from '@swelte/core'
 
 let name = $state('world')
 let greeting: GetGreetingResult = $state('')

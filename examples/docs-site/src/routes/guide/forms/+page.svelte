@@ -53,4 +53,7 @@ import { codeHtml } from '#lib/snippets.gen.js'
 	stays inline, never <code>page.error</code>). <code>applyAction(result)</code> is also usable
 	standalone.
 </p>
-<DocsNav next={{ href: '/guide/errors', label: 'Errors' }} related={[{ href: '/guide/rpc', label: 'RPC & routes' }]} />
+<DocsNav
+	next={{ href: '/guide/errors', label: 'Errors' }}
+	related={[{ href: '/guide/rpc', label: 'RPC & routes' }]}
+/>

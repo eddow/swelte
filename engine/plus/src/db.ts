@@ -1,11 +1,12 @@
 // `@swelte/plus/db` — embedded SQLite/KV (future.md #2, foundation tier).
+
+import { execFileSync } from 'node:child_process'
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
-import { execFileSync } from 'node:child_process'
-import { defineSweltePlugin, type SweltePlugin } from '@swelte/core/vite'
 import { resolveV } from '@swelte/core/toolchain'
+import { defineSweltePlugin, type SweltePlugin } from '@swelte/core/vite'
 
 /** Default SQLite path when SWELTE_DB_PATH is unset. */
 export const PLUS_DB_DEFAULT_PATH = 'data/app.db'

@@ -1,11 +1,11 @@
-import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, mkdirSync, writeFileSync, existsSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { posixNormalize, withDot } from './ssr.js'
+import { describe, it } from 'node:test'
 import { defaultSsrDevPort, renderFileFor } from './dev.js'
 import { bridgeSrc } from './qjs.js'
+import { posixNormalize, withDot } from './ssr.js'
 
 describe('item 19 — path keys (posixNormalize/withDot)', () => {
 	it('../+error.svelte from ./admin/+page.svelte → ./+error.svelte', () => {

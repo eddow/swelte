@@ -1,9 +1,9 @@
 <script lang="ts">
+import { goto } from '@swelte/core'
 import type { Snippet } from 'svelte'
 import { onMount } from 'svelte'
 import { searchDocs } from '#lib/search.js'
 import { applyTheme, preferredTheme, setTheme, type Theme } from '#lib/theme.js'
-import { goto } from '@swelte/core'
 
 let { children }: { children?: Snippet } = $props()
 
@@ -53,7 +53,13 @@ onMount(() => {
 		const a = (e.target as HTMLElement | null)?.closest?.('a[href]')
 		if (!a) return
 		const href = a.getAttribute('href')
-		if (!href || href.startsWith('#') || href.includes(':') || (a as HTMLAnchorElement).target === '_blank') return
+		if (
+			!href ||
+			href.startsWith('#') ||
+			href.includes(':') ||
+			(a as HTMLAnchorElement).target === '_blank'
+		)
+			return
 		if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return
 		// Same-document link: the client router swaps content without a
 		// reload — defer the sync so the router's pushState lands first.
@@ -138,6 +144,7 @@ const groups: { title: string; links: { href: string; label: string }[] }[] = [
 						viewBox="0 0 24 24"
 						class="inline-block h-5 w-5 stroke-current"
 					>
+						<title>Open menu</title>
 						<path
 							stroke-linecap="round"
 							stroke-linejoin="round"
@@ -240,6 +247,7 @@ const groups: { title: string; links: { href: string; label: string }[] }[] = [
 						xmlns="http://www.w3.org/2000/svg"
 						viewBox="0 0 24 24"
 					>
+						<title>Light mode</title>
 						<path
 							d="M5.64,17l-.71.71a1,1,0,0,0,0,1.41,1,1,0,0,0,1.41,0l.71-.71A1,1,0,0,0,5.64,17ZM5,12a1,1,0,0,0-1-1H3a1,1,0,0,0,0,2H4A1,1,0,0,0,5,12Zm7-7A1,1,0,0,0,12,4V3a1,1,0,0,0-2,0V4A1,1,0,0,0,12,5ZM5.64,7.05l.71-.71A1,1,0,0,0,7.76,7.76l-.71.71a1,1,0,0,0,0,1.41,1,1,0,0,0,1.41,0A1,1,0,0,0,5.64,7.05ZM18.36,17A1,1,0,0,0,17,18.36l.71.71a1,1,0,0,0,1.41,0,1,1,0,0,0,0-1.41ZM12,6.5A5.5,5.5,0,1,0,17.5,12,5.51,5.51,0,0,0,12,6.5Zm0,9A3.5,3.5,0,1,1,15.5,12,3.5,3.5,0,0,1,12,15.5Z"
 						/>
@@ -249,6 +257,7 @@ const groups: { title: string; links: { href: string; label: string }[] }[] = [
 						xmlns="http://www.w3.org/2000/svg"
 						viewBox="0 0 24 24"
 					>
+						<title>Dark mode</title>
 						<path
 							d="M21.64,13a1,1,0,0,0-1.05-.14,8.05,8.05,0,0,1-3.37.73A8.15,8.15,0,0,1,9.08,5.49a8.59,8.59,0,0,1,.25-2A1,1,0,0,0,8,2.36,10.14,10.14,0,1,0,22,14.05,1,1,0,0,0,21.64,13Zm-9.5,6.69A8.14,8.14,0,0,1,7.08,5.22v.27A10.15,10.15,0,0,0,17.22,15.63a9.79,9.79,0,0,0,2.1-.22A8.11,8.11,0,0,1,12.14,19.73Z"
 						/>
@@ -277,7 +286,14 @@ const groups: { title: string; links: { href: string; label: string }[] }[] = [
 				<ul>
 					{#each group.links as link}
 						{@const isActive = link.href !== '' && currentPath === link.href}
-						<li><a href={link.href} class={isActive ? 'menu-active' : ''} aria-current={isActive ? 'page' : undefined}>{link.label}</a></li>
+						<li>
+							<a
+								href={link.href}
+								class={isActive ? 'menu-active' : ''}
+								aria-current={isActive ? 'page' : undefined}
+								>{link.label}</a
+							>
+						</li>
 					{/each}
 				</ul>
 			{/each}

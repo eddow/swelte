@@ -1,8 +1,8 @@
-import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { parseArgs } from './types.js'
-import { COMMANDS, commandHelp, findCommand, helpText } from './index.js'
+import { describe, it } from 'node:test'
 import { main } from '../cli.js'
+import { COMMANDS, commandHelp, findCommand, helpText } from './index.js'
+import { parseArgs } from './types.js'
 
 describe('CLI parsing', () => {
 	it('unknown command -> exit 1 + help', async () => {

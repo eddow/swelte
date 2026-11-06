@@ -127,7 +127,7 @@ function encodeQuery(args: object): string {
 	return s ? `?${s}` : ''
 }
 
-async function decodeBody<TResult>(base: string, fn: string, res: Response): Promise<TResult> {
+async function decodeBody<TResult>(_base: string, _fn: string, res: Response): Promise<TResult> {
 	const ct = (res.headers.get('content-type') ?? '').toLowerCase()
 	if (ct.includes('application/json') || ct === '') return res.json()
 	if (ct.startsWith('text/') || ct.includes('json')) return (await res.text()) as unknown as TResult
@@ -1121,9 +1121,9 @@ export function enhance(
 					input.cancelled = true
 				},
 			}
-			let onResult: SwelteEnhanceResultHandler | void = undefined
+			let onResult: SwelteEnhanceResultHandler | null = null
 			try {
-				if (current) onResult = await current(input)
+				if (current) onResult = (await current(input)) ?? null
 			} catch {
 				return
 			}

@@ -12,8 +12,7 @@
 // - top-level `fetch(` / top-level `await` in component sources
 //   (QJS-compat: pure-sync renderer; fetch inside handlers is fine)
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
-import { dirname, join, resolve, sep } from 'node:path'
-import { posix } from 'node:path'
+import { dirname, join, posix, resolve, sep } from 'node:path'
 
 /** posix-normalize a relative import against a `./`-relative module key. */
 export function posixNormalize(fromKey: string, id: string): string {
@@ -22,7 +21,7 @@ export function posixNormalize(fromKey: string, id: string): string {
 
 /** Re-prefix a normalized key with `./` (`+error.svelte` → `./+error.svelte`). */
 export function withDot(p: string): string {
-	return p.startsWith('./') || p.startsWith('/') ? p : './' + p
+	return p.startsWith('./') || p.startsWith('/') ? p : `./${p}`
 }
 
 export interface SsrComposeOptions {
@@ -402,7 +401,7 @@ export function stubSdkImports(code: string, relFile: string): string {
 	// start for `//` outside string literals; URLs inside literals
 	// (`'https://…'`) never count as comment starts.
 	const isCommentedOut = (idx: number): boolean => {
-		let ls = code.lastIndexOf('\n', idx - 1) + 1
+		const ls = code.lastIndexOf('\n', idx - 1) + 1
 		let quote: string | null = null
 		for (let j = ls; j < idx; j++) {
 			const ch = code[j]
@@ -491,7 +490,7 @@ export function stubSdkImports(code: string, relFile: string): string {
  * Same brace-walk as isTopLevelCall, but tracks imported local names
  * (incl. `as` aliases) instead of a fixed `fetch(` spelling. */
 export async function assertNoSdkTopLevelCalls(
-	absFile: string,
+	_absFile: string,
 	relFile: string,
 	src: string
 ): Promise<void> {
@@ -566,7 +565,6 @@ export async function registerLibModule(
 	id: string
 ): Promise<string | null> {
 	const sub = id === '#lib' ? '' : id.slice('#lib/'.length)
-	const libBase = join(resolve(root), libDir, sub)
 	const { readFileSync: rd, statSync: st } = await import('node:fs')
 	// Requested sub may already carry an extension (`search.js`) while the
 	// file on disk is extensionless-adjacent (`search.ts`): also try the
@@ -597,7 +595,7 @@ export async function registerLibModule(
 			// matches exact keys first, then stem variants.
 			const ext = cand.endsWith('.svelte') ? '.svelte' : cand.endsWith('.ts') ? '.ts' : '.js'
 			const diskStem = stem === '' ? 'index' : stem.replace(/\.(js|ts|svelte)$/, '')
-			const rel = './__lib__/' + diskStem + ext
+			const rel = `./__lib__/${diskStem}${ext}`
 			if (!modules.has(rel)) {
 				let src = rd(cand, 'utf8')
 				if (cand.endsWith('.svelte')) {
@@ -658,7 +656,7 @@ export async function bundleSsr(
 			if (id.startsWith('$app/') || id.startsWith('#app/')) {
 				const src = resolveSdkShim(id, importer ?? '')
 				if (src !== null) {
-					const key = '\0swelte-sdk-shim:' + id
+					const key = `\0swelte-sdk-shim:${id}`
 					if (!modules.has(key)) modules.set(key, src)
 					return key
 				}
@@ -673,7 +671,7 @@ export async function bundleSsr(
 					posixNormalize(importer, id)
 				)
 				if (ex2(cand) && !cand.includes('\0')) {
-					const key2 = './' + posixNormalize(importer, id)
+					const key2 = `./${posixNormalize(importer, id)}`
 					if (!modules.has(key2)) modules.set(key2, rd2(cand, 'utf8'))
 					return key2
 				}
@@ -883,7 +881,7 @@ export async function composeRenderJs(
 		// Module keys are `./`-prefixed posix paths (`./+error.svelte`):
 		// posixNormalize('./admin/+page.svelte', '../+error.svelte')
 		// yields `+error.svelte` (no `./`), so re-prefix here.
-		const key = './' + rel.split(sep).join('/').replace(/^\.\//, '')
+		const key = `./${rel.split(sep).join('/').replace(/^\.\//, '')}`
 		if (modules.has(key)) return key
 		// Normalize nested relative imports to module keys at compile time:
 		// `import ErrorPage from '../+error.svelte'` inside
@@ -928,30 +926,33 @@ export async function composeRenderJs(
 		// resolve against the importer key; plain `#lib/*` source imports
 		// resolve to their `./__lib__/*` registration keys (NOT stubs).
 		// Both `from '#lib/x'` and bare `import '#lib/x'` forms.
-		code = code.replace(/(?:from\s*|import\s*)(['"])([^'"]+)\1/g, (full, q: string, id: string) => {
-			if (id === '#lib' || id.startsWith('#lib/')) {
-				const sub = id === '#lib' ? 'index' : id.slice('#lib/'.length)
-				// Direct key first (exact id), then disk-stem variants (id
-				// carried `.js` but disk holds `.ts`: key is `./__lib__/search.ts`).
-				const stems = [sub]
-				for (const e of ['.js', '.ts', '.svelte']) {
-					const stem = sub !== '' && sub.endsWith(e) ? sub.slice(0, -e.length) : null
-					if (stem && !stems.includes(stem)) stems.push(stem)
-				}
-				for (const stem of stems) {
-					const base = stem === '' ? 'index' : stem.replace(/\.(js|ts|svelte)$/, '')
-					for (const ext of ['.js', '.ts', '.svelte']) {
-						const cand = `./__lib__/${base}${ext}`
-						if (modules.has(cand)) return full.replace(id, cand)
+		code = code.replace(
+			/(?:from\s*|import\s*)(['"])([^'"]+)\1/g,
+			(full, _q: string, id: string) => {
+				if (id === '#lib' || id.startsWith('#lib/')) {
+					const sub = id === '#lib' ? 'index' : id.slice('#lib/'.length)
+					// Direct key first (exact id), then disk-stem variants (id
+					// carried `.js` but disk holds `.ts`: key is `./__lib__/search.ts`).
+					const stems = [sub]
+					for (const e of ['.js', '.ts', '.svelte']) {
+						const stem = sub !== '' && sub.endsWith(e) ? sub.slice(0, -e.length) : null
+						if (stem && !stems.includes(stem)) stems.push(stem)
 					}
+					for (const stem of stems) {
+						const base = stem === '' ? 'index' : stem.replace(/\.(js|ts|svelte)$/, '')
+						for (const ext of ['.js', '.ts', '.svelte']) {
+							const cand = `./__lib__/${base}${ext}`
+							if (modules.has(cand)) return full.replace(id, cand)
+						}
+					}
+					return full
 				}
+				if (!id.startsWith('.')) return full
+				const norm = withDot(posixNormalize(key, id))
+				if (modules.has(norm) || norm.endsWith('.svelte')) return full.replace(id, norm)
 				return full
 			}
-			if (!id.startsWith('.')) return full
-			const norm = withDot(posixNormalize(key, id))
-			if (modules.has(norm) || norm.endsWith('.svelte')) return full.replace(id, norm)
-			return full
-		})
+		)
 		modules.set(key, code)
 		// Sibling universal load (`<basename>.ts` preferred, `.js` accepted,
 		// e.g. `admin.ts` for `admin.svelte` / `+page.js` for `+page.svelte`):
@@ -1002,7 +1003,7 @@ export async function composeRenderJs(
 		// Mirror the `.svelte` preprocessing step: strip TS types so the
 		// raw sibling source parses as JS in the rollup/QJS bundle.
 		// Guard already ran on the TS source above (line numbers intact).
-		const key = './' + tsRel.split(sep).join('/').replace(/^\.\//, '')
+		const key = `./${tsRel.split(sep).join('/').replace(/^\.\//, '')}`
 		if (!modules.has(key)) modules.set(key, await transpileSiblingLoad(tsRel, tsSrc))
 	}
 

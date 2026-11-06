@@ -1,6 +1,6 @@
 <script lang="ts">
-import { type_row, calc_probe, blob_bytes, hook_raw } from '#routes/types/+page.v'
 import { SwelteRpcError } from '@swelte/core'
+import { blob_bytes, calc_probe, hook_raw, type_row } from '#routes/types/+page.v'
 
 let rowInfo = $state('')
 let calcInfo = $state('')

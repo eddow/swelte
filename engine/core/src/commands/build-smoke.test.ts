@@ -1,13 +1,13 @@
-import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { spawn, type ChildProcess } from 'node:child_process'
-import { probeSmoke, portFree } from './dev.js'
+import { type ChildProcess, spawn } from 'node:child_process'
+import { describe, it } from 'node:test'
+import { probeSmoke } from './dev.js'
 
 /** Boot a `node -e` stub "binary" the way runBuild boots the V binary:
  * argv on PORT, SWELTE_DIST in env, then probeSmoke against it. */
 async function withStub(
 	stubSrc: string,
-	hasGreetRoute: boolean,
+	_hasGreetRoute: boolean,
 	check: (port: number) => Promise<void>
 ): Promise<string[]> {
 	const logs: string[] = []
@@ -127,7 +127,7 @@ describe('item 14 — build smoke matrix (mocked binary / node -e stub)', () => 
 		})
 		await assert.rejects(() => probeSmoke(dead, false), /did not listen/)
 		// Wrong API body: page 200 but greet says goodbye → smoke fails.
-		await withStub(pageStub(`if (false) {}`), true, async (port) => {
+		await withStub(pageStub(`if (false) {}`), true, async (_port) => {
 			// Sanity: stub above always says Hello; craft a lying variant.
 		})
 		const lying = pageStub().replace('Hello w', 'Goodbye w')

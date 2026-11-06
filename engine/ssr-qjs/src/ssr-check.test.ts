@@ -1,10 +1,10 @@
-import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { startSsrDevServer } from './dev.js'
+import { describe, it } from 'node:test'
 import { runSsrCheck } from './cli.js'
+import { startSsrDevServer } from './dev.js'
 
 async function freePort(): Promise<number> {
 	const { createServer } = await import('node:net')
@@ -63,7 +63,7 @@ describe('item 24 — runSsrCheck halves (CI promotion)', () => {
 			port,
 		})
 		try {
-			const res = await fetch(server.url + '/', {
+			const res = await fetch(`${server.url}/`, {
 				method: 'POST',
 				headers: { 'content-type': 'application/json' },
 				body: JSON.stringify({ route: '/+error', props: { status: 500, message: 'boom' } }),
@@ -95,7 +95,7 @@ describe('item 24 — runSsrCheck halves (CI promotion)', () => {
 			port,
 		})
 		try {
-			const res = await fetch(server.url + '/', {
+			const res = await fetch(`${server.url}/`, {
 				method: 'POST',
 				headers: { 'content-type': 'application/json', accept: 'application/json' },
 				body: JSON.stringify({ route: '/', props: {} }),

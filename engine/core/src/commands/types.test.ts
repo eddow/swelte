@@ -1,7 +1,7 @@
-import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { parseBoolFlag, parseArgs } from './types.js'
+import { describe, it } from 'node:test'
 import type { Command } from './types.js'
+import { parseArgs, parseBoolFlag } from './types.js'
 
 const cmd: Command = {
 	name: 'x',

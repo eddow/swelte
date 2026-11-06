@@ -1,8 +1,8 @@
-import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { describe, it } from 'node:test'
 
 function vRoot(): string {
 	const root = mkdtempSync(join(tmpdir(), 'swelte-snap-'))
@@ -42,7 +42,7 @@ async function generateAndTest(root: string, updateSnapshot: boolean): Promise<s
 			const fp = pjoin(dir, e)
 			try {
 				if (statSync(fp).isDirectory()) {
-					walkSnap(fp, rel + e + '/')
+					walkSnap(fp, `${rel + e}/`)
 					continue
 				}
 			} catch {

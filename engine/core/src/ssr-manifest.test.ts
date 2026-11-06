@@ -1,21 +1,21 @@
-import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { describe, it } from 'node:test'
+import type { SvelteRouteEntry } from './vite.js'
 import {
-	collectSvelteManifest,
-	svelteRouteFor,
-	siblingLoadSource,
-	universalLoadKind,
-	chunkKeyFor,
-	readCsrFlag,
 	assertLayoutHint,
+	assertLimitsHint,
+	chunkKeyFor,
+	collectSvelteManifest,
+	readCsrFlag,
 	readLayoutHint,
 	resolveLayoutHint,
-	assertLimitsHint,
+	siblingLoadSource,
+	svelteRouteFor,
+	universalLoadKind,
 } from './vite.js'
-import type { SvelteRouteEntry } from './vite.js'
 
 function tmpRoutes(files: Record<string, string>): string {
 	const root = mkdtempSync(join(tmpdir(), 'swelte-mani-'))

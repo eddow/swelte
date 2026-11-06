@@ -10,7 +10,7 @@
 // public, max-age=0, s-maxage=N` + `X-Swelte-Revalidate: <seconds>` into
 // the in-memory header table — headers only, no background revalidation,
 // runtime default unchanged.
-import { spawn, type ChildProcess } from 'node:child_process'
+import { type ChildProcess, spawn } from 'node:child_process'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { freePortUnix, killPort, takePort, waitPort } from './dev.js'

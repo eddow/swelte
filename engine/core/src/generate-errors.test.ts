@@ -1,8 +1,8 @@
-import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { describe, it } from 'node:test'
 
 function scaffold(files: Record<string, string>): string {
 	const root = mkdtempSync(join(tmpdir(), 'swelte-gen-'))
@@ -162,7 +162,7 @@ describe('generate() validation errors (tmp scaffold, no V binary)', () => {
 	})
 
 	it('server hooks: shape errors + happy-path codegen', async () => {
-		const { readFileSync, writeFileSync, mkdirSync } = await import('node:fs')
+		const { readFileSync, writeFileSync } = await import('node:fs')
 		// Two @[startup] → build error.
 		let root = scaffold({ '+page.v': 'module p\n@[get] pub fn g() string { return "" }' })
 		writeFileSync(

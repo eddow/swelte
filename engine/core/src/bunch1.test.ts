@@ -1,18 +1,18 @@
-import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
+import { describe, it } from 'node:test'
+import { stubSdkImports } from '../../ssr-qjs/dist/ssr.js'
+import { deserialize, isFail, isPageData, isPageError, loadPage, SwelteRpcError } from './sdk.js'
 import {
+	loadServerHooks,
 	parseVFile,
+	renderServiceWorker,
 	routeFor,
 	routeParamTs,
-	svelteRouteFor,
-	stripRouteGroups,
-	transpileMatcherBody,
-	loadServerHooks,
-	renderServiceWorker,
 	serviceWorkerPrecache,
+	stripRouteGroups,
+	svelteRouteFor,
+	transpileMatcherBody,
 } from './vite.js'
-import { SwelteRpcError, isFail, deserialize, loadPage, isPageError, isPageData } from './sdk.js'
-import { stubSdkImports } from '../../ssr-qjs/dist/ssr.js'
 
 /** Diverse tests in bunch. */
 describe('Bunch1', () => {

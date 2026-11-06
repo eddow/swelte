@@ -105,7 +105,7 @@ export async function runTest(ctx: Ctx): Promise<void> {
 			const gp = join(gDir, e.replace(/\.d\.ts$/, '.js'))
 			try {
 				if (readdirSync(tp, { withFileTypes: true })[0] && statSync(tp).isDirectory()) {
-					walkBoth(tp, join(gDir, e), rel + e + '/')
+					walkBoth(tp, join(gDir, e), `${rel + e}/`)
 					continue
 				}
 			} catch {
@@ -161,7 +161,7 @@ export async function runTest(ctx: Ctx): Promise<void> {
 			const fp = join(dir, e)
 			try {
 				if (statSync(fp).isDirectory()) {
-					walkSnap(fp, rel + e + '/')
+					walkSnap(fp, `${rel + e}/`)
 					continue
 				}
 			} catch {

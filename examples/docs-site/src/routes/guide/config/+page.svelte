@@ -181,4 +181,7 @@ import { codeHtml } from '#lib/snippets.gen.js'
 		</tbody>
 	</table>
 </div>
-<DocsNav next={{ href: '/guide/offline', label: 'Offline' }} related={[{ href: '/guide/ssr', label: 'SSR' }]} />
+<DocsNav
+	next={{ href: '/guide/offline', label: 'Offline' }}
+	related={[{ href: '/guide/ssr', label: 'SSR' }]}
+/>

@@ -1,20 +1,20 @@
-import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import {
-	assertQjsCompatible,
-	assertNoNodeExternals,
-	assertNoSdkTopLevelCalls,
-	assertNoTopLevelStubCalls,
-	assertUniversalLoadSync,
-	readUniversalSsrFlag,
-	transpileSiblingLoad,
-	stubSdkImports,
-	compileSsrComponent,
-	composeRenderJs,
-} from './ssr.js'
 import { mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { describe, it } from 'node:test'
+import {
+	assertNoNodeExternals,
+	assertNoSdkTopLevelCalls,
+	assertNoTopLevelStubCalls,
+	assertQjsCompatible,
+	assertUniversalLoadSync,
+	compileSsrComponent,
+	composeRenderJs,
+	readUniversalSsrFlag,
+	stubSdkImports,
+	transpileSiblingLoad,
+} from './ssr.js'
 
 describe('item 17 — QJS-compat guards (file+line)', () => {
 	it('top-level fetch( rejected with file:line; handler fetch allowed', () => {
@@ -467,7 +467,7 @@ describe('universal load — sync subset (§1.1)', () => {
 			{ root: dir }
 		)
 		assert.ok(!code.includes('#lib/'), 'no #lib specifier may survive into render.js')
-		assert.ok(code.includes('found:'), 'lib source must be bundled, got: ' + code.slice(0, 200))
+		assert.ok(code.includes('found:'), `lib source must be bundled, got: ${code.slice(0, 200)}`)
 		const { pathToFileURL } = await import('node:url')
 		const probeFile = join(dir, 'render.check.mjs')
 		writeFileSync(probeFile, code)

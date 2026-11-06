@@ -1,10 +1,10 @@
-import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, mkdirSync, writeFileSync, existsSync, readFileSync, rmSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { runExport } from './export.js'
+import { describe, it } from 'node:test'
 import { writeTargetShim } from './build.js'
+import { runExport } from './export.js'
 
 describe('sveltekit remainder: export snapshot + target shims', () => {
 	it('export reuses entries.json + dist html + contract', async () => {

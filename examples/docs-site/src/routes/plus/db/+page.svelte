@@ -49,8 +49,12 @@ import { codeHtml } from '#lib/snippets.gen.js'
 <p class="py-2 opacity-80 text-sm">
 	V's <code>db.sqlite</code> <code>exec()</code> only steps row-returning queries — DDL/DML
 	(CREATE/INSERT/UPDATE/DELETE) silently no-op through it. Use <code>exec_none()</code> and expect
-	<code>101</code> (SQLITE_DONE). SELECTs keep <code>exec()</code> +
+	<code>101</code>
+	(SQLITE_DONE). SELECTs keep <code>exec()</code> +
 	<code>Row.get_string/get_int</code>.
 </p>
 
-<DocsNav next={{ href: '/plus/realtime', label: 'Realtime' }} related={[{ href: '/plus/jobs', label: 'Jobs' }]} />
+<DocsNav
+	next={{ href: '/plus/realtime', label: 'Realtime' }}
+	related={[{ href: '/plus/jobs', label: 'Jobs' }]}
+/>

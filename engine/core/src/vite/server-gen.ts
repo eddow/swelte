@@ -284,10 +284,10 @@ export function inlineWrapperFns(src: string, wmod: string, structNames: Set<str
 	const flush = () => {
 		if (keep && buf.length > 0) {
 			const hi = buf.findIndex((b) => /^(\s*)pub\s+fn\s+([A-Za-z_][A-Za-z0-9_]*)/.test(b))
-			const fm = /^(\s*)pub\s+fn\s+([A-Za-z_][A-Za-z0-9_]*)/.exec(buf[hi < 0 ? 0 : hi] ?? '')
+			const fm = /^(\s*)pub\s+fn\s+([A-Za-z_][A-Za-z0-9_]*)/.exec(buf[Math.max(hi, 0)] ?? '')
 			if (fm) {
-				buf[hi < 0 ? 0 : hi] =
-					`${fm[1]}pub fn ${wprefix}${fm[2]}${(buf[hi < 0 ? 0 : hi]).slice(fm[0].length)}`
+				buf[Math.max(hi, 0)] =
+					`${fm[1]}pub fn ${wprefix}${fm[2]}${(buf[Math.max(hi, 0)]).slice(fm[0].length)}`
 				for (let i = 0; i < buf.length; i++) {
 					if (i === 0) {
 						const t0 = buf[0].trim()

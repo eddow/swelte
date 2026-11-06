@@ -1,7 +1,7 @@
 // `swelte` CLI entry. Dispatches to src/commands/*; bin/swelte.js is a
 // ~5-line shim importing this module's main() (npm needs a runnable file
 // before tsc runs — the shim is that file, nothing more).
-import { COMMANDS, VERSION, commandHelp, findCommand, helpText } from './commands/index.js'
+import { COMMANDS, commandHelp, VERSION } from './commands/index.js'
 import type { Command } from './commands/types.js'
 import { parseArgs } from './commands/types.js'
 

@@ -1,5 +1,6 @@
 <script lang="ts">
 import { get_greeting, save_name } from '#routes/+page.v'
+
 let { greeting = 'none' }: { greeting?: string } = $props()
 let name = $state('world')
 let echo = $state('')

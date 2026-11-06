@@ -1,20 +1,20 @@
-import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
+import { describe, it } from 'node:test'
 import {
-	assertTargetOs,
 	assertTargetArch,
-	hostTargetOs,
+	assertTargetOs,
 	hostTargetArch,
-	normalizeTargetOs,
+	hostTargetOs,
 	normalizeTargetArch,
-	resolveTargetOs,
-	resolveTargetArch,
-	resolveHostCC,
+	normalizeTargetOs,
 	resolveCC,
+	resolveHostCC,
+	resolveTargetArch,
+	resolveTargetOs,
 	sanitizedPath,
 	toolchainEnv,
-	vOsArgs,
 	vArchArgs,
+	vOsArgs,
 	zigTargetTriple,
 } from './toolchain.js'
 

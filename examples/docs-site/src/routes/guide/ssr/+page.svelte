@@ -83,4 +83,7 @@ import { codeHtml } from '#lib/snippets.gen.js'
 	QuickJS is pure-sync; <code>load()</code> stays in V. Known SDK imports become render-time
 	throw-stubs.
 </p>
-<DocsNav next={{ href: '/guide/cli', label: 'CLI' }} related={[{ href: '/guide/config', label: 'Config' }]} />
+<DocsNav
+	next={{ href: '/guide/cli', label: 'CLI' }}
+	related={[{ href: '/guide/config', label: 'Config' }]}
+/>

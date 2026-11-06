@@ -1,5 +1,6 @@
 <script lang="ts">
 import Streamed from './Streamed.svelte'
+
 // §1 ssr=false twin: SSR stays sync (renderRoute rejects async), the client
 // compiles with experimental.async (vite.config.ts) so <await> inside
 // <svelte:boundary> resolves in the browser. Hand serves the SPA shell

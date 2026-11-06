@@ -1,7 +1,7 @@
 <script lang="ts">
-import { hash_string } from '#lib/crypto/hash.v'
-import type { HashStringResult } from '#lib/crypto/hash.v'
 import { SwelteRpcError } from '@swelte/core'
+import type { HashStringResult } from '#lib/crypto/hash.v'
+import { hash_string } from '#lib/crypto/hash.v'
 
 let name = $state('world')
 let hashed: HashStringResult = $state('')

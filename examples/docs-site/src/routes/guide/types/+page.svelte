@@ -86,4 +86,7 @@ import { codeHtml } from '#lib/snippets.gen.js'
 		+ warning.</span
 	>
 </div>
-<DocsNav next={{ href: '/guide/forms', label: 'Forms' }} related={[{ href: '/guide/rpc', label: 'RPC & routes' }]} />
+<DocsNav
+	next={{ href: '/guide/forms', label: 'Forms' }}
+	related={[{ href: '/guide/rpc', label: 'RPC & routes' }]}
+/>

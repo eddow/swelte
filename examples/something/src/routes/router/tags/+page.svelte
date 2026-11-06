@@ -1,9 +1,9 @@
 <script lang="ts">
-import { onMount } from 'svelte'
 // Item 1 proof: tag registry in the SDK — `depends(...tags)` inside a
 // load registers tags; `invalidate(...tags)` clears matching load keys,
 // `invalidateAll()` clears all (client-side). Pure-TS, no V side.
-import { depends, invalidate, invalidateAll, __swelteTrackLoad } from '@swelte/core'
+import { __swelteTrackLoad, depends, invalidate, invalidateAll } from '@swelte/core'
+import { onMount } from 'svelte'
 import { browser } from '#app/environment'
 
 let userN = $state(0)

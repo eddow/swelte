@@ -2,9 +2,9 @@
 // `vBackendUrl`, restart V on `.v` change, kill both on Ctrl-C.
 // Portable: no curl/ss/fuser/pkill required — best-effort Unix cleanup
 // only (guarded try/catch), child handles + fetch probes otherwise.
-import { spawn, type ChildProcess } from 'node:child_process'
+import { type ChildProcess, spawn } from 'node:child_process'
+import { existsSync, readdirSync, readFileSync, statSync, watch } from 'node:fs'
 import { createServer, type Server } from 'node:net'
-import { existsSync, readFileSync, readdirSync, statSync, watch } from 'node:fs'
 import { basename, join, resolve } from 'node:path'
 import type { Ctx } from './types.js'
 

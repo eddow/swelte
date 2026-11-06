@@ -3,8 +3,7 @@
 // + our `swelte` key); everything under `.swelte/` is derived.
 import { existsSync, readFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
-import { fileURLToPath } from 'node:url'
-import { pathToFileURL } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import type { SvelteConfig as SvelteBaseConfig } from '@sveltejs/vite-plugin-svelte'
 
 export interface SwelteOptions {
@@ -272,7 +271,7 @@ export async function loadConfig(root: string): Promise<ResolvedSwelteOptions> {
 	for (const file of files) {
 		if (!existsSync(file)) continue
 		try {
-			const mod = (await import(pathToFileURL(file).href + `?t=${Date.now()}`)) as {
+			const mod = (await import(`${pathToFileURL(file).href}?t=${Date.now()}`)) as {
 				default?: SwelteConfig | SwelteOptions
 			}
 			const d = mod.default as SwelteConfig | SwelteOptions | undefined
@@ -321,7 +320,7 @@ export async function loadProjectSwelteOptions(root: string): Promise<Record<str
 			}
 		}
 		if (!configFile) return {}
-		const mod = (await import(pathToFileURL(configFile).href + `?t=${Date.now()}`)) as {
+		const mod = (await import(`${pathToFileURL(configFile).href}?t=${Date.now()}`)) as {
 			default?: unknown
 		}
 		let exported = mod.default
@@ -453,60 +452,57 @@ export function renderHarness(
 			'\t\t\tbackend.hub_unlock()',
 			'\t\t}',
 		].join('\n')
-		if (src.includes(anchor)) src = src.replace(anchor, branch + '\n')
+		if (src.includes(anchor)) src = src.replace(anchor, `${branch}\n`)
 		else src += '\n// [swelte] room-mode anchor missing — harness template changed.\n'
 	}
-	{
-		// WS section: verify anchors when room/WS present (stays verbatim,
-		// backend hub is imported), strip to a 404 stub when absent.
-		if (hooks?.roomSse) {
-			const wsStart = src.indexOf('// [swelte] ws-section\n')
-			const wsEnd = src.indexOf('// [swelte] ws-section-end')
-			if (wsStart < 0 || wsEnd < 0 || wsEnd < wsStart)
-				src += '\n// [swelte] ws-section anchors missing — harness template changed.\n'
-			// Present: nothing to do (import + branches already in place).
+	// WS section: verify anchors when room/WS present (stays verbatim,
+	// backend hub is imported), strip to a 404 stub when absent.
+	if (hooks?.roomSse) {
+		const wsStart = src.indexOf('// [swelte] ws-section\n')
+		const wsEnd = src.indexOf('// [swelte] ws-section-end')
+		if (wsStart < 0 || wsEnd < 0 || wsEnd < wsStart)
+			src += '\n// [swelte] ws-section anchors missing — harness template changed.\n'
+		// Present: nothing to do (import + branches already in place).
+	} else {
+		// No room routes: drop the room branch head so the harness never
+		// references `backend.*` (no import without the hub). The emit arm
+		// becomes the first branch — byte-identical shape otherwise.
+		const anchor =
+			'\t// [swelte] room-mode\n\tif routes.swelte_sse_is_room(job.prefix) {\n\t\t// (room branch spliced here when hooks.roomSse)\n\t} else if routes.swelte_sse_is_emit(job.prefix) {'
+		const emitHead = '\tif routes.swelte_sse_is_emit(job.prefix) {'
+		if (src.includes(anchor)) src = src.replace(anchor, emitHead)
+		else src += '\n// [swelte] room-mode anchor missing — harness template changed.\n'
+		// No room/WS routes: drop the whole WS section (handshake + pump
+		// reference backend.* with no import). Dispatch is unaffected:
+		// generated swelte_ws_route returns '' with no @[ws] routes.
+		const wsStart = src.indexOf('// [swelte] ws-section\n')
+		const wsEnd = src.indexOf('// [swelte] ws-section-end')
+		if (wsStart >= 0 && wsEnd > wsStart) {
+			const wsStub = [
+				'// [swelte] ws-section (stripped: no room/@[ws] routes, no backend hub)',
+				'struct SwelteWsJob {',
+				'\tprefix    string',
+				'\treq       routes.SwelteRequest',
+				'\tpch       chan string',
+				'\tinch      chan string',
+				'\tdone      chan bool',
+				'}',
+				'',
+				'fn swelte_serve_ws(mut ctx Ctx, _prefix string, _req routes.SwelteRequest) veb.Result {',
+				'\tctx.res.set_status(.not_found)',
+				'\treturn ctx.send_response_to_client(\'application/json\', \'{"error":"not found"}\')',
+				'}',
+				'',
+			].join('\n')
+			src = src.slice(0, wsStart) + wsStub + src.slice(wsEnd + '// [swelte] ws-section-end'.length)
 		} else {
-			// No room routes: drop the room branch head so the harness never
-			// references `backend.*` (no import without the hub). The emit arm
-			// becomes the first branch — byte-identical shape otherwise.
-			const anchor =
-				'\t// [swelte] room-mode\n\tif routes.swelte_sse_is_room(job.prefix) {\n\t\t// (room branch spliced here when hooks.roomSse)\n\t} else if routes.swelte_sse_is_emit(job.prefix) {'
-			const emitHead = '\tif routes.swelte_sse_is_emit(job.prefix) {'
-			if (src.includes(anchor)) src = src.replace(anchor, emitHead)
-			else src += '\n// [swelte] room-mode anchor missing — harness template changed.\n'
-			// No room/WS routes: drop the whole WS section (handshake + pump
-			// reference backend.* with no import). Dispatch is unaffected:
-			// generated swelte_ws_route returns '' with no @[ws] routes.
-			const wsStart = src.indexOf('// [swelte] ws-section\n')
-			const wsEnd = src.indexOf('// [swelte] ws-section-end')
-			if (wsStart >= 0 && wsEnd > wsStart) {
-				const wsStub = [
-					'// [swelte] ws-section (stripped: no room/@[ws] routes, no backend hub)',
-					'struct SwelteWsJob {',
-					'\tprefix    string',
-					'\treq       routes.SwelteRequest',
-					'\tpch       chan string',
-					'\tinch      chan string',
-					'\tdone      chan bool',
-					'}',
-					'',
-					'fn swelte_serve_ws(mut ctx Ctx, _prefix string, _req routes.SwelteRequest) veb.Result {',
-					'\tctx.res.set_status(.not_found)',
-					'\treturn ctx.send_response_to_client(\'application/json\', \'{"error":"not found"}\')',
-					'}',
-					'',
-				].join('\n')
-				src =
-					src.slice(0, wsStart) + wsStub + src.slice(wsEnd + '// [swelte] ws-section-end'.length)
-			} else {
-				src += '\n// [swelte] ws-section anchors missing — harness template changed.\n'
-			}
+			src += '\n// [swelte] ws-section anchors missing — harness template changed.\n'
 		}
 	}
 	const indent = (body: string): string =>
 		body
 			.split('\n')
-			.map((l) => (l.trim() === '' ? '' : '\t' + l))
+			.map((l) => (l.trim() === '' ? '' : `\t${l}`))
 			.join('\n')
 	if (hooks?.startupBody !== undefined) {
 		const anchor = '\tmut app := &App{}'
@@ -610,7 +606,7 @@ export function renderClientEntry(root: string, fromUrl: string): string {
 		lines.push(`import '../src/client.js'`)
 	else lines.push(`// Optional user hook: create src/app.ts for app-level setup.`)
 	if (existsSync(join(resolve(root), 'src', 'app.css'))) lines.push(`import '../src/app.css'`)
-	return lines.join('\n') + '\n' + src
+	return `${lines.join('\n')}\n${src}`
 }
 
 /** Declaration bundle for the `$app/*` compat stubs (single source of

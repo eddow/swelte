@@ -1,15 +1,15 @@
-import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, mkdirSync, existsSync, statSync, utimesSync } from 'node:fs'
+import { existsSync, mkdtempSync, statSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { describe, it } from 'node:test'
 import { bridgeSrc, buildQjsProd, whichCC } from './qjs.js'
 
 describe('item 25 — QJS prod link (gcc-gated)', () => {
 	const cc = whichCC()
 	const gate = cc ? it : (it.skip ?? it)
 
-	gate('libqjs.a built once (mtime guard skips rebuild), bridge + flags shape', async (t) => {
+	gate('libqjs.a built once (mtime guard skips rebuild), bridge + flags shape', async (_t) => {
 		const root = mkdtempSync(join(tmpdir(), 'swelte-qjs-'))
 		const out1 = buildQjsProd({ root, renderJs: join(root, 'dist', 'ssr', 'render.js') })
 		assert.ok(existsSync(out1.lib))
