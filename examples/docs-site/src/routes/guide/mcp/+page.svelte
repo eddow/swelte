@@ -126,8 +126,8 @@ import { codeHtml } from '#lib/snippets.gen.js'
 <p class="opacity-80 mt-2 text-sm">
 	Automatic — the scaffold template carries a <code>postinstall</code> hook (<code
 		>npm-skills extract --skip-production --override</code
-	>, scoped via <code>npmSkills.consume.only: ["@swelte/*"]</code> so unrelated
-		packages are never resolved), so
+	>, scoped via <code>npmSkills.consume.only: ["@swelte/*"]</code> so unrelated packages are never
+	resolved), so
 	<code>npm install</code>
 	drops each dependency's <code>skills/</code> into
 	<code>.agents/skills/</code>. Versioned with the packages, no manual copy step.

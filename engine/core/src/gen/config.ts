@@ -304,9 +304,7 @@ export async function loadConfig(root: string): Promise<ResolvedSwelteOptions> {
  *  (object | function | promise), flatten `plugins` (the ssr-qjs wrapper
  *  returns `[core, adapter]`), and read the non-enumerable
  *  `__swelteOptions` core stashes on its plugin instance. Never throws. */
-export async function loadProjectSwelteOptions(
-	root: string
-): Promise<Record<string, unknown>> {
+export async function loadProjectSwelteOptions(root: string): Promise<Record<string, unknown>> {
 	try {
 		const dir = resolve(root)
 		const files = [
@@ -423,15 +421,15 @@ export function renderHarness(
 	let src = readFileSync(file, 'utf8')
 	if (hooks?.roomSse && !src.includes('import backend'))
 		src = src.replace('import veb', `import backend\nimport veb`)
-	if (!hooks?.roomSse)
-		src = src.replace('import net\n', '')
+	if (!hooks?.roomSse) src = src.replace('import net\n', '')
 	if (hooks?.roomSse) {
 		// Room mode (future.md #4): the harness owns the subscription.
 		// `sub(room)` subscribes; `emit` pushes hub messages. The route fn
 		// returns when IT decides — then we unsubscribe everything left
 		// behind. Hub state lives in the backend hub module (imported
 		// above); main reaches it only through backend's pub fns.
-		const anchor = '\t// [swelte] room-mode\n\tif routes.swelte_sse_is_room(job.prefix) {\n\t\t// (room branch spliced here when hooks.roomSse)\n'
+		const anchor =
+			'\t// [swelte] room-mode\n\tif routes.swelte_sse_is_room(job.prefix) {\n\t\t// (room branch spliced here when hooks.roomSse)\n'
 		const branch = [
 			'\t// [swelte] room-mode',
 			'\tif routes.swelte_sse_is_room(job.prefix) {',
@@ -468,40 +466,41 @@ export function renderHarness(
 				src += '\n// [swelte] ws-section anchors missing — harness template changed.\n'
 			// Present: nothing to do (import + branches already in place).
 		} else {
-		// No room routes: drop the room branch head so the harness never
-		// references `backend.*` (no import without the hub). The emit arm
-		// becomes the first branch — byte-identical shape otherwise.
-		const anchor =
-			'\t// [swelte] room-mode\n\tif routes.swelte_sse_is_room(job.prefix) {\n\t\t// (room branch spliced here when hooks.roomSse)\n\t} else if routes.swelte_sse_is_emit(job.prefix) {'
-		const emitHead = '\tif routes.swelte_sse_is_emit(job.prefix) {'
-		if (src.includes(anchor)) src = src.replace(anchor, emitHead)
-		else src += '\n// [swelte] room-mode anchor missing — harness template changed.\n'
-		// No room/WS routes: drop the whole WS section (handshake + pump
-		// reference backend.* with no import). Dispatch is unaffected:
-		// generated swelte_ws_route returns '' with no @[ws] routes.
-		const wsStart = src.indexOf('// [swelte] ws-section\n')
-		const wsEnd = src.indexOf('// [swelte] ws-section-end')
-		if (wsStart >= 0 && wsEnd > wsStart) {
-			const wsStub = [
-				'// [swelte] ws-section (stripped: no room/@[ws] routes, no backend hub)',
-				'struct SwelteWsJob {',
-				'\tprefix    string',
-				'\treq       routes.SwelteRequest',
-				'\tpch       chan string',
-				'\tinch      chan string',
-				'\tdone      chan bool',
-				'}',
-				'',
-				'fn swelte_serve_ws(mut ctx Ctx, _prefix string, _req routes.SwelteRequest) veb.Result {',
-				'\tctx.res.set_status(.not_found)',
-				'\treturn ctx.send_response_to_client(\'application/json\', \'{"error":"not found"}\')',
-				'}',
-				'',
-			].join('\n')
-			src = src.slice(0, wsStart) + wsStub + src.slice(wsEnd + '// [swelte] ws-section-end'.length)
-		} else {
-			src += '\n// [swelte] ws-section anchors missing — harness template changed.\n'
-		}
+			// No room routes: drop the room branch head so the harness never
+			// references `backend.*` (no import without the hub). The emit arm
+			// becomes the first branch — byte-identical shape otherwise.
+			const anchor =
+				'\t// [swelte] room-mode\n\tif routes.swelte_sse_is_room(job.prefix) {\n\t\t// (room branch spliced here when hooks.roomSse)\n\t} else if routes.swelte_sse_is_emit(job.prefix) {'
+			const emitHead = '\tif routes.swelte_sse_is_emit(job.prefix) {'
+			if (src.includes(anchor)) src = src.replace(anchor, emitHead)
+			else src += '\n// [swelte] room-mode anchor missing — harness template changed.\n'
+			// No room/WS routes: drop the whole WS section (handshake + pump
+			// reference backend.* with no import). Dispatch is unaffected:
+			// generated swelte_ws_route returns '' with no @[ws] routes.
+			const wsStart = src.indexOf('// [swelte] ws-section\n')
+			const wsEnd = src.indexOf('// [swelte] ws-section-end')
+			if (wsStart >= 0 && wsEnd > wsStart) {
+				const wsStub = [
+					'// [swelte] ws-section (stripped: no room/@[ws] routes, no backend hub)',
+					'struct SwelteWsJob {',
+					'\tprefix    string',
+					'\treq       routes.SwelteRequest',
+					'\tpch       chan string',
+					'\tinch      chan string',
+					'\tdone      chan bool',
+					'}',
+					'',
+					'fn swelte_serve_ws(mut ctx Ctx, _prefix string, _req routes.SwelteRequest) veb.Result {',
+					'\tctx.res.set_status(.not_found)',
+					'\treturn ctx.send_response_to_client(\'application/json\', \'{"error":"not found"}\')',
+					'}',
+					'',
+				].join('\n')
+				src =
+					src.slice(0, wsStart) + wsStub + src.slice(wsEnd + '// [swelte] ws-section-end'.length)
+			} else {
+				src += '\n// [swelte] ws-section anchors missing — harness template changed.\n'
+			}
 		}
 	}
 	const indent = (body: string): string =>

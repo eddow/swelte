@@ -88,7 +88,10 @@
 				<td>list mode <code>[]string</code> or emit mode; client is <code>AsyncGenerator</code></td>
 			</tr>
 			<tr>
-				<td><code>@&#91;ws]</code> <span class="badge badge-sm">needs <code>@swelte/plus/db</code></span></td>
+				<td>
+					<code>@&#91;ws]</code>
+					<span class="badge badge-sm">needs <code>@swelte/plus/db</code></span>
+				</td>
 				<td>GET + <code>Upgrade: websocket</code></td>
 				<td>one socket per file — <a href="/plus/realtime" class="link">full reference</a></td>
 			</tr>

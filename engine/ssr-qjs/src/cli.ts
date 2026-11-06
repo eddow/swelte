@@ -320,7 +320,10 @@ export async function runSsrCheck(
 					let hasBridge = false
 					let hasPlugins = false
 					try {
-						const bridge = readFileSyncV(join(root, outDir, 'routes', 'swelte_qjs_bridge.v'), 'utf8')
+						const bridge = readFileSyncV(
+							join(root, outDir, 'routes', 'swelte_qjs_bridge.v'),
+							'utf8'
+						)
 						hasBridge = bridge.includes('__global')
 					} catch {
 						/* no bridge */

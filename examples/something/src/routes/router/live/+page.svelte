@@ -29,7 +29,6 @@ let {
 	paramsEcho?: string
 	params?: Record<string, string>
 } = $props()
-
 </script>
 
 <main>
@@ -46,4 +45,3 @@ let {
 		{/snippet}
 	</svelte:boundary>
 </main>
-

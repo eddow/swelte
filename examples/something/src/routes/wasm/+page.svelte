@@ -20,9 +20,16 @@ async function hashName() {
 <main>
 	<h1>wasm (#lib isomorphic)</h1>
 	<nav><a href="/">home</a></nav>
-	<p><input bind:value={name} placeholder="your name" /></p>
+	<p><input bind:value={name} placeholder="your name"></p>
 	<button onclick={hashName}>Hash (#lib WASM)</button>
-	{#if hashed}<p>{hashed}</p>{/if}
-	{#if note}<p>{note}</p>{/if}
-	<p>Backend-only modules (<code>src/lib/backend/*</code>) are a build error from browser code — physical secret boundary.</p>
+	{#if hashed}
+		<p>{hashed}</p>
+	{/if}
+	{#if note}
+		<p>{note}</p>
+	{/if}
+	<p>
+		Backend-only modules (<code>src/lib/backend/*</code>) are a build error from browser code —
+		physical secret boundary.
+	</p>
 </main>

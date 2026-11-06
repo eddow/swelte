@@ -53,8 +53,8 @@ async function listeners() {
 	<h1>store (embedded KV + hub listeners)</h1>
 	<nav><a href="/">home</a> · <a href="/chat">chat</a></nav>
 	<p>
-		<label>key <input bind:value={key} /></label>
-		<label>value <input bind:value={value} /></label>
+		<label>key <input bind:value={key}></label>
+		<label>value <input bind:value></label>
 	</p>
 	<div style="display:flex; gap:0.5rem; flex-wrap:wrap;">
 		<button onclick={write}>write</button>
@@ -62,7 +62,7 @@ async function listeners() {
 		<button onclick={drop}>delete</button>
 	</div>
 	<p>
-		<label>room <input bind:value={room} /></label>
+		<label>room <input bind:value={room}></label>
 		<button onclick={listeners}>hub listeners</button>
 	</p>
 	{#if out}

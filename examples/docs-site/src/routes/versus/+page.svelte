@@ -59,15 +59,17 @@
 
 <h2 class="text-2xl font-bold mt-8">Scaling</h2>
 <p class="pt-2 opacity-80">
-	Swelte scales <strong>vertically</strong>. A compiled V binary with an embedded SQLite/KV file on a
-	local volume handles tens of thousands of concurrent requests and SSE streams on one modest VPS —
-	where a Node/Bun server would need a cluster. Multi-node clustering stays out of the core: needing
-	Redis or NATS to run Swelte would break the zero-ops promise.
+	Swelte scales <strong>vertically</strong>. A compiled V binary with an embedded SQLite/KV file on
+	a local volume handles tens of thousands of concurrent requests and SSE streams on one modest VPS
+	— where a Node/Bun server would need a cluster. Multi-node clustering stays out of the core:
+	needing Redis or NATS to run Swelte would break the zero-ops promise.
 </p>
 <ul class="text-sm opacity-80 list-disc list-inside space-y-1 pt-2">
 	<li>Upgrade cores, not services — no connection strings, brokers, or multi-service deploys</li>
-	<li>Need multiple instances anyway? Plug in an optional <code>@swelte/extras</code> adapter (e.g. a
-		Redis SSE broadcaster)</li>
+	<li>
+		Need multiple instances anyway? Plug in an optional <code>@swelte/extras</code> adapter (e.g. a
+		Redis SSE broadcaster)
+	</li>
 </ul>
 
 <div class="alert mt-6">

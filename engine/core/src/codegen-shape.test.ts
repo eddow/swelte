@@ -155,64 +155,66 @@ describeGoldens('item 4 — literal golden strings for jsFetchFor/jsWasmFor', ()
 			const { execFileSync: checkStubProbe } = require('node:child_process')
 			const probeFile = joinStubPath(stubTmpdir(), `swelte-stub-probe-${Date.now()}.mjs`)
 			try {
-			const got = jsFetchForGolden('/users/[id]', [
-				goldenFn({ name: 'g', qualifier: 'q' }),
-				goldenFn({ name: 'tick', attr: 'sse' }),
-			])
-			assertGolden.ok(got.includes('const __swelteBase = "/users/[id]"'))
-			assertGolden.ok(got.includes('function __swelteUrl(args = {})'))
-			assertGolden.ok(got.includes('missing route param'))
-			assertGolden.ok(
-				got.includes('return __swelteFetch(__swelteUrl(args), "g", "get", __swelteArgs, "q")')
-			)
-			assertGolden.ok(
-				got.includes('yield* __swelteStream(__swelteUrl(args), "tick", __swelteArgs, "")')
-			)
-			assertGolden.ok(got.includes('async function * tick'))
-			// The dynamic stub must be parseable JS: the __swelteUrl regex
-			// and the throw lines both broke byte-escaping before (Vite
-			// import-analysis 500'd the page on `import ... from '#routes/…[id].v'`).
-			// node --check pins the whole emit, no Vite needed.
-			writeStubProbe(probeFile, got)
-			checkStubProbe(process.execPath, ['--check', probeFile])
-			// Matcher + catch-all + optional shapes share the same template.
-			for (const r of ['/posts/[slug=slug]', '/files/[...rest]', '/docs/[[slug]]']) {
-				const other = jsFetchForGolden(r, [goldenFn({ name: 'g' })])
-				assertGolden.ok(
-					other.includes('new RegExp('),
-					`${r} stub must build its matcher regex via new RegExp (slash-safe)`
-				)
-				assertGolden.ok(!other.includes('matchAll(/'), `${r} stub must not inline a /…/ literal`)
-				writeStubProbe(probeFile, other)
-				checkStubProbe(process.execPath, ['--check', probeFile])
-			}
-			} finally {
-				try { rmStubProbe(probeFile) } catch {}
-			}
-			{
-			const got2 = jsFetchForGolden('/users/[id]', [
-				goldenFn({ name: 'g', qualifier: 'q' }),
-				goldenFn({ name: 'tick', attr: 'sse' }),
-			])
-			// literal pin on the two export tails (dyn head is covered by includes above)
-			assertGolden.ok(
-				got2.endsWith(
-					[
-						'void __swelteRest',
-						'  return __swelteFetch(__swelteUrl(args), "g", "get", __swelteArgs, "q")',
-						'}',
-						'export async function * tick(args = {}) {',
-					].join('\n')
-				) === false
-			)
-			// full byte comparison via JSON round-trip: regenerating yields identical bytes
-			assertGolden.equal(
-				jsFetchForGolden('/users/[id]', [
+				const got = jsFetchForGolden('/users/[id]', [
 					goldenFn({ name: 'g', qualifier: 'q' }),
 					goldenFn({ name: 'tick', attr: 'sse' }),
-				]),
-				got2
-			)
+				])
+				assertGolden.ok(got.includes('const __swelteBase = "/users/[id]"'))
+				assertGolden.ok(got.includes('function __swelteUrl(args = {})'))
+				assertGolden.ok(got.includes('missing route param'))
+				assertGolden.ok(
+					got.includes('return __swelteFetch(__swelteUrl(args), "g", "get", __swelteArgs, "q")')
+				)
+				assertGolden.ok(
+					got.includes('yield* __swelteStream(__swelteUrl(args), "tick", __swelteArgs, "")')
+				)
+				assertGolden.ok(got.includes('async function * tick'))
+				// The dynamic stub must be parseable JS: the __swelteUrl regex
+				// and the throw lines both broke byte-escaping before (Vite
+				// import-analysis 500'd the page on `import ... from '#routes/…[id].v'`).
+				// node --check pins the whole emit, no Vite needed.
+				writeStubProbe(probeFile, got)
+				checkStubProbe(process.execPath, ['--check', probeFile])
+				// Matcher + catch-all + optional shapes share the same template.
+				for (const r of ['/posts/[slug=slug]', '/files/[...rest]', '/docs/[[slug]]']) {
+					const other = jsFetchForGolden(r, [goldenFn({ name: 'g' })])
+					assertGolden.ok(
+						other.includes('new RegExp('),
+						`${r} stub must build its matcher regex via new RegExp (slash-safe)`
+					)
+					assertGolden.ok(!other.includes('matchAll(/'), `${r} stub must not inline a /…/ literal`)
+					writeStubProbe(probeFile, other)
+					checkStubProbe(process.execPath, ['--check', probeFile])
+				}
+			} finally {
+				try {
+					rmStubProbe(probeFile)
+				} catch {}
+			}
+			{
+				const got2 = jsFetchForGolden('/users/[id]', [
+					goldenFn({ name: 'g', qualifier: 'q' }),
+					goldenFn({ name: 'tick', attr: 'sse' }),
+				])
+				// literal pin on the two export tails (dyn head is covered by includes above)
+				assertGolden.ok(
+					got2.endsWith(
+						[
+							'void __swelteRest',
+							'  return __swelteFetch(__swelteUrl(args), "g", "get", __swelteArgs, "q")',
+							'}',
+							'export async function * tick(args = {}) {',
+						].join('\n')
+					) === false
+				)
+				// full byte comparison via JSON round-trip: regenerating yields identical bytes
+				assertGolden.equal(
+					jsFetchForGolden('/users/[id]', [
+						goldenFn({ name: 'g', qualifier: 'q' }),
+						goldenFn({ name: 'tick', attr: 'sse' }),
+					]),
+					got2
+				)
 			}
 		}
 	)
@@ -970,9 +972,14 @@ describe('item 11 — codegen golden project (sample-overlay variant + routes.js
 		// Fake plugin include dir (no real package needed).
 		const incDir = join(root, 'fake-inc', 'backend')
 		mkdirSync(incDir, { recursive: true })
-		writeFileSync(join(incDir, 'db.v'), 'module backend\npub fn kv_get(key string) !string {\n\treturn key\n}\n')
+		writeFileSync(
+			join(incDir, 'db.v'),
+			'module backend\npub fn kv_get(key string) !string {\n\treturn key\n}\n'
+		)
 		await generate(root, {
-			plugins: [{ name: 'fake-db', attrs: [], includes: () => [{ module: 'backend', absDir: incDir }] }],
+			plugins: [
+				{ name: 'fake-db', attrs: [], includes: () => [{ module: 'backend', absDir: incDir }] },
+			],
 		})
 		const copied = readFileSync(join(root, '.swelte', 'backend', 'db.v'), 'utf8')
 		assert.ok(copied.includes('module backend'))
@@ -1003,7 +1010,9 @@ describe('item 11 — codegen golden project (sample-overlay variant + routes.js
 		writeFileSync(join(incDir, 'x.v'), 'module routes\n')
 		// Reserved 'routes' is skipped, not copied over the dispatcher.
 		await generate(root, {
-			plugins: [{ name: 'fake', attrs: [], includes: () => [{ module: 'routes', absDir: incDir }] }],
+			plugins: [
+				{ name: 'fake', attrs: [], includes: () => [{ module: 'routes', absDir: incDir }] },
+			],
 		})
 		const disp = readFileSync(join(root, '.swelte', 'routes', 'server_gen.v'), 'utf8')
 		assert.ok(disp.includes('pub fn swelte_route('), 'dispatcher intact')
@@ -1040,7 +1049,10 @@ describe('item 11 — codegen golden project (sample-overlay variant + routes.js
 		)
 		await assert.rejects(() => generate(root), /needs the backend hub/)
 		const stub = readFileSync(join(root, '.swelte', 'routes', 'swelte_qjs_bridge.v'), 'utf8')
-		assert.ok(stub.includes('pub fn swelte_qjs_render_page('), 'stub has the symbol despite the throw')
+		assert.ok(
+			stub.includes('pub fn swelte_qjs_render_page('),
+			'stub has the symbol despite the throw'
+		)
 		assert.ok(!stub.includes('__global'), 'stub carries no globals')
 	})
 
@@ -1059,13 +1071,12 @@ describe('item 11 — codegen golden project (sample-overlay variant + routes.js
 		assert.equal(readFileSync(join(root, '.swelte', 'plugin_modules.json'), 'utf8'), '["backend"]')
 	})
 
-
-
 	it('toolchain: bridge helpers (real vs stub vs dangling)', async () => {
 		const { mkdtempSync, mkdirSync, writeFileSync, rmSync } = await import('node:fs')
 		const { tmpdir } = await import('node:os')
-		const { hasRealBridge, bridgeLinkedArchives, healDanglingBridge, needsGlobals } =
-			await import('./toolchain.js')
+		const { hasRealBridge, bridgeLinkedArchives, healDanglingBridge, needsGlobals } = await import(
+			'./toolchain.js'
+		)
 		const gen = mkdtempSync(join(tmpdir(), 'swelte-bridge-'))
 		mkdirSync(join(gen, 'routes'), { recursive: true })
 		// No bridge → nothing real, nothing to heal, no globals.
@@ -1115,9 +1126,14 @@ describe('item 11 — codegen golden project (sample-overlay variant + routes.js
 		// With the db include → room accessors + harness import backend.
 		const incDir = join(root, 'fake-inc', 'backend')
 		mkdirSync(incDir, { recursive: true })
-		writeFileSync(join(incDir, 'db.v'), 'module backend\npub fn emit(room string, msg string) int {\n\t_ = room\n\t_ = msg\n\treturn 0\n}\n')
+		writeFileSync(
+			join(incDir, 'db.v'),
+			'module backend\npub fn emit(room string, msg string) int {\n\t_ = room\n\t_ = msg\n\treturn 0\n}\n'
+		)
 		await generate(root, {
-			plugins: [{ name: 'fake-db', attrs: [], includes: () => [{ module: 'backend', absDir: incDir }] }],
+			plugins: [
+				{ name: 'fake-db', attrs: [], includes: () => [{ module: 'backend', absDir: incDir }] },
+			],
 		})
 		const leaf = readFileSync(join(root, '.swelte', 'routes', 'api_rooms.v'), 'utf8')
 		assert.ok(leaf.includes('pub fn swelte_api_rooms_sse_is_room() bool'))
@@ -1129,7 +1145,10 @@ describe('item 11 — codegen golden project (sample-overlay variant + routes.js
 		assert.ok(srv.includes('import backend'), 'harness imports the hub module')
 		assert.ok(srv.includes('swelte_sse_room_for'), 'produce drives room mode')
 		// Client stub is unchanged (AsyncGenerator over query args).
-		const stub = readFileSync(join(root, '.swelte', 'generated', 'routes', 'api', 'rooms.js'), 'utf8')
+		const stub = readFileSync(
+			join(root, '.swelte', 'generated', 'routes', 'api', 'rooms.js'),
+			'utf8'
+		)
 		assert.ok(stub.includes('export async function * stream('))
 	})
 
@@ -1156,9 +1175,14 @@ describe('item 11 — codegen golden project (sample-overlay variant + routes.js
 		// With the db include → ws accessors + harness upgrade path.
 		const incDir = join(root, 'fake-inc', 'backend')
 		mkdirSync(incDir, { recursive: true })
-		writeFileSync(join(incDir, 'db.v'), 'module backend\npub fn emit(room string, msg string) int {\n\t_ = room\n\t_ = msg\n\treturn 0\n}\n')
+		writeFileSync(
+			join(incDir, 'db.v'),
+			'module backend\npub fn emit(room string, msg string) int {\n\t_ = room\n\t_ = msg\n\treturn 0\n}\n'
+		)
 		await generate(root, {
-			plugins: [{ name: 'fake-db', attrs: [], includes: () => [{ module: 'backend', absDir: incDir }] }],
+			plugins: [
+				{ name: 'fake-db', attrs: [], includes: () => [{ module: 'backend', absDir: incDir }] },
+			],
 		})
 		const leaf = readFileSync(join(root, '.swelte', 'routes', 'api_sock.v'), 'utf8')
 		assert.ok(leaf.includes('_swelte_ws_is() bool'))
@@ -1173,7 +1197,10 @@ describe('item 11 — codegen golden project (sample-overlay variant + routes.js
 		assert.ok(srv.includes('swelte_serve_ws'), 'upgrade handshake present')
 		assert.ok(srv.includes('swelte_ws_open_for'), 'produce drives ws open')
 		// Client stub is a URL builder (browser opens a native WebSocket).
-		const stub = readFileSync(join(root, '.swelte', 'generated', 'routes', 'api', 'sock.js'), 'utf8')
+		const stub = readFileSync(
+			join(root, '.swelte', 'generated', 'routes', 'api', 'sock.js'),
+			'utf8'
+		)
 		assert.ok(stub.includes('__swelteWsUrl'))
 		assert.ok(stub.includes('export function sock('))
 	})

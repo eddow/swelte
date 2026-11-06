@@ -125,7 +125,11 @@ describe('config normalization (tmp roots)', () => {
 		const root = tmpCfgRoot()
 		writeFileSync(
 			join(root, 'package.json'),
-			JSON.stringify({ name: 'x', type: 'module', swelte: { targetOs: 'linux', targetArch: 'arm64' } })
+			JSON.stringify({
+				name: 'x',
+				type: 'module',
+				swelte: { targetOs: 'linux', targetArch: 'arm64' },
+			})
 		)
 		// No svelte.config at all → package.json wins.
 		const cfg = await loadConfig(root)

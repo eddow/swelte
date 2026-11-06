@@ -61,24 +61,24 @@ function wsBase() {
 		const http =
 			import.meta.env.SWELTE_V_BACKEND_URL ??
 			import.meta.env.VITE_SWELTE_V_BACKEND_URL ??
-			'http://localhost:8131';
-		return String(http).replace(/^http/, 'ws');
+			'http://localhost:8131'
+		return String(http).replace(/^http/, 'ws')
 	}
-	return '';
+	return ''
 }
 // __swelteWsUrl already returns an absolute ws:// URL (from location.host,
 // i.e. Vite :5174 in dev). Rebase the host onto the backend, don't prepend.
 function wsUrl(url: string) {
-	const base = wsBase();
-	if (!base) return url;
+	const base = wsBase()
+	if (!base) return url
 	try {
-		const rebased = new URL(url, location.href);
-		const backend = new URL(base);
-		rebased.protocol = backend.protocol;
-		rebased.host = backend.host;
-		return rebased.toString();
+		const rebased = new URL(url, location.href)
+		const backend = new URL(base)
+		rebased.protocol = backend.protocol
+		rebased.host = backend.host
+		return rebased.toString()
 	} catch {
-		return url;
+		return url
 	}
 }
 
@@ -153,8 +153,8 @@ async function publishWs() {
 	<h1>chat (rooms: SSE + WS on one hub)</h1>
 	<nav><a href="/">home</a></nav>
 	<p>
-		<label>room <input bind:value={room} /></label>
-		<label>message <input bind:value={msg} /></label>
+		<label>room <input bind:value={room}></label>
+		<label>message <input bind:value={msg}></label>
 	</p>
 	<h2>SSE room</h2>
 	<div style="display:flex; gap:0.5rem; flex-wrap:wrap;">
@@ -171,7 +171,7 @@ async function publishWs() {
 	{/if}
 	<h2>WS echo</h2>
 	<p>
-		<label>echo <input bind:value={echoMsg} /></label>
+		<label>echo <input bind:value={echoMsg}></label>
 		<button onclick={openEcho}>open /api/ws-echo</button>
 		<button onclick={sendEcho}>send</button>
 		<button onclick={closeEcho}>close</button>

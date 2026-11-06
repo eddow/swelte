@@ -125,7 +125,10 @@ describe('generate() validation errors (tmp scaffold, no V binary)', () => {
 		let root = scaffold({
 			'+page.v': 'module p\n@[ws] pub fn s(req SwelteRequest) { }',
 		})
-		await assert.rejects(() => buildStart(root), /needs trailing \(sub fn \(string\) chan string, recv chan string, emit fn \(string\) bool\)/)
+		await assert.rejects(
+			() => buildStart(root),
+			/needs trailing \(sub fn \(string\) chan string, recv chan string, emit fn \(string\) bool\)/
+		)
 		// Emit without bool → SSE emit-tail parse → wrong-attr rejection, not ws.
 		root = scaffold({
 			'+page.v':

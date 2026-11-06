@@ -53,7 +53,10 @@ async function ask(question: string, pipedYes: (line: string) => boolean): Promi
 }
 
 async function askSample(): Promise<boolean> {
-	return ask('Include sample routes (demo api/admin/files/users)? [y/N] ', (piped) => piped.length <= 1)
+	return ask(
+		'Include sample routes (demo api/admin/files/users)? [y/N] ',
+		(piped) => piped.length <= 1
+	)
 }
 
 async function askSsr(): Promise<boolean> {
@@ -61,7 +64,7 @@ async function askSsr(): Promise<boolean> {
 	// the `swelte` import in vite.config.ts — tell the user, then ask.
 	return ask(
 		'Enable SSR via @swelte/ssr-qjs (else SPA-only; install later with `npm install @swelte/ssr-qjs`)? [y/N] ',
-		() => false,
+		() => false
 	)
 }
 
@@ -112,6 +115,8 @@ export async function runInit(ctx: Ctx): Promise<void> {
 		}
 		writeFileSync(abs, text)
 	}
-	ctx.log(`scaffolded ${wantSample ? 'sample' : 'empty'}${wantSsr ? ' +ssr' : ''} project at ${root}`)
-	ctx.log('next: npm install && swelte dev')
+	ctx.log(
+		`scaffolded ${wantSample ? 'sample' : 'empty'}${wantSsr ? ' +ssr' : ''} project at ${root}`
+	)
+	ctx.log(`next: cd ${root} && npm install && swelte dev`)
 }

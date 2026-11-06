@@ -30,7 +30,11 @@ async function probe(label: string, path: string) {
 			<li><a href="/types">types</a> — TypeRow + narrow + bytes</li>
 			<li><a href="/session">session</a> — locals + cookies + redirect</li>
 			<li><a href="/admin">admin</a> — before/after guard + layout contract</li>
-			<li><a href="/router">router</a> — load + client router + <a href="/router/live">live</a> + <a href="/router/tags">tags</a> + <a href="/router/verbs">verbs</a> + <a href="/router/enhance">enhance</a></li>
+			<li>
+				<a href="/router">router</a>
+				— load + client router + <a href="/router/live">live</a> + <a href="/router/tags">tags</a> +
+				<a href="/router/verbs">verbs</a> + <a href="/router/enhance">enhance</a>
+			</li>
 			<!-- Headless API demos (no +page.svelte — fetch probes, not links:
 			     navigating to these shows the SPA 404 by design, no request) -->
 			<li>
@@ -45,7 +49,11 @@ async function probe(label: string, path: string) {
 			<li><a href="/boom">boom</a> — throw gate (+error)</li>
 		</ul>
 	</nav>
-	{#if apiNote}<p>{apiNote}</p>{/if}
-	{#if apiError}<pre style="color:crimson; white-space:pre-wrap;">{apiError}</pre>{/if}
+	{#if apiNote}
+		<p>{apiNote}</p>
+	{/if}
+	{#if apiError}
+		<pre style="color:crimson; white-space:pre-wrap;">{apiError}</pre>
+	{/if}
 	<p><button onclick={() => get_greeting({ payload: 'hub' })}>hub probe (GET /)</button></p>
 </main>

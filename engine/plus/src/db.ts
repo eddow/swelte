@@ -171,7 +171,11 @@ export const dbPlugin: SweltePlugin = defineSweltePlugin({
 				'Apply db/migrations/*.sql to the embedded SQLite file (scaffolds helper + KV table on first run).',
 			args: [
 				{ name: 'root', help: 'Project root', value: 'string' },
-				{ name: 'db', help: 'SQLite path (else SWELTE_DB_PATH, else data/app.db)', value: 'string' },
+				{
+					name: 'db',
+					help: 'SQLite path (else SWELTE_DB_PATH, else data/app.db)',
+					value: 'string',
+				},
 			],
 			run(ctx) {
 				const root = resolve(String(ctx.opts.root ?? process.cwd()))
@@ -182,4 +186,3 @@ export const dbPlugin: SweltePlugin = defineSweltePlugin({
 		},
 	],
 })
-

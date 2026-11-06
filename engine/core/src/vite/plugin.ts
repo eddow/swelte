@@ -352,7 +352,10 @@ export function swelte(options: SweltePluginOptions = {}): Plugin {
 								}
 							}
 						}
-						writeIfChanged(join(genDir, 'plugin_modules.json'), JSON.stringify([...earlyWanted].sort()))
+						writeIfChanged(
+							join(genDir, 'plugin_modules.json'),
+							JSON.stringify([...earlyWanted].sort())
+						)
 					}
 				} catch {
 					/* ignore — main pass retries below */
@@ -499,9 +502,7 @@ ${list(params, (p) => `\t${p.name}${p.optional ? '?' : ''}: ${p.tstype}\n`)}}
 									`export function ${fn.name}(args: { ${dynPs.map((n) => `${n}: ${routeParamTs(route, n)}`).join(', ')} } & Record<string, string>): string`
 								)
 							} else {
-								out.push(
-									`export function ${fn.name}(args?: Record<string, string>): string`
-								)
+								out.push(`export function ${fn.name}(args?: Record<string, string>): string`)
 							}
 							out.push('')
 							continue
@@ -797,7 +798,11 @@ ${list(params, (p) => `\t${p.name}${p.optional ? '?' : ''}: ${p.tstype}\n`)}}
 						)
 					}*/
 						}
-						if (rpcFns.length === 0 && verbFns.length === 0 && fns.every((x) => x.attr !== 'sse' && x.attr !== 'ws'))
+						if (
+							rpcFns.length === 0 &&
+							verbFns.length === 0 &&
+							fns.every((x) => x.attr !== 'sse' && x.attr !== 'ws')
+						)
 							continue
 						// @[load]: at most one per leaf file; never stacked with
 						// a verb/rpc/sse/ws on the same fn (one transport per fn).
@@ -901,44 +906,48 @@ ${list(params, (p) => `\t${p.name}${p.optional ? '?' : ''}: ${p.tstype}\n`)}}
 								)
 						}
 						// SSE room mode (future.md #4): trailing `sub fn (string)` +
-				// `emit fn (string) bool` — the harness injects the room
-				// subscribe closure. Track file-level room-ness for the
-				// harness `import backend` decision below. Without a backend
-				// include the harness cannot compile hub state — build error
-				// naming the fix (install @swelte/plus/db).
-				const isRoomSseFile = fns.some(
-					(fn) =>
-						fn.attr === 'sse' &&
-						fn.params.length >= 2 &&
-						/^fn\s*\(\s*string\s*\)\s*chan\s+string$/.test(fn.params[fn.params.length - 2].vtype.trim()) &&
-						/^fn\s*\(\s*string\s*\)(\s*bool)?$/.test(fn.params[fn.params.length - 1].vtype.trim())
-				)
-				if (isRoomSseFile) {
-					hasRoomSse = true
-					const hasBackend = plugins.some((pl) =>
-						(pl.includes?.() ?? []).some((inc) => inc.module === 'backend')
-					)
-					if (!hasBackend) {
-						throw new Error(
-							`[swelte] ${routesDir}/${rel}: room-mode @[sse] needs the backend hub — add dbPlugin to swelte({ plugins: [...] }) (npm install @swelte/plus).`
+						// `emit fn (string) bool` — the harness injects the room
+						// subscribe closure. Track file-level room-ness for the
+						// harness `import backend` decision below. Without a backend
+						// include the harness cannot compile hub state — build error
+						// naming the fix (install @swelte/plus/db).
+						const isRoomSseFile = fns.some(
+							(fn) =>
+								fn.attr === 'sse' &&
+								fn.params.length >= 2 &&
+								/^fn\s*\(\s*string\s*\)\s*chan\s+string$/.test(
+									fn.params[fn.params.length - 2].vtype.trim()
+								) &&
+								/^fn\s*\(\s*string\s*\)(\s*bool)?$/.test(
+									fn.params[fn.params.length - 1].vtype.trim()
+								)
 						)
-					}
-				}
-				// WS (future.md #3): same hub requirement — the route fn and
-				// the harness frame loop both run against backend hub state.
-				const isWsFile = fns.some((fn) => fn.attr === 'ws')
-				if (isWsFile) {
-					hasRoomSse = true
-					const hasBackend = plugins.some((pl) =>
-						(pl.includes?.() ?? []).some((inc) => inc.module === 'backend')
-					)
-					if (!hasBackend) {
-						throw new Error(
-							`[swelte] ${routesDir}/${rel}: @[ws] needs the backend hub — add dbPlugin to swelte({ plugins: [...] }) (npm install @swelte/plus).`
-						)
-					}
-				}
-				dispatched.push({ route, mod, prefix: vPrefix(mod) })
+						if (isRoomSseFile) {
+							hasRoomSse = true
+							const hasBackend = plugins.some((pl) =>
+								(pl.includes?.() ?? []).some((inc) => inc.module === 'backend')
+							)
+							if (!hasBackend) {
+								throw new Error(
+									`[swelte] ${routesDir}/${rel}: room-mode @[sse] needs the backend hub — add dbPlugin to swelte({ plugins: [...] }) (npm install @swelte/plus).`
+								)
+							}
+						}
+						// WS (future.md #3): same hub requirement — the route fn and
+						// the harness frame loop both run against backend hub state.
+						const isWsFile = fns.some((fn) => fn.attr === 'ws')
+						if (isWsFile) {
+							hasRoomSse = true
+							const hasBackend = plugins.some((pl) =>
+								(pl.includes?.() ?? []).some((inc) => inc.module === 'backend')
+							)
+							if (!hasBackend) {
+								throw new Error(
+									`[swelte] ${routesDir}/${rel}: @[ws] needs the backend hub — add dbPlugin to swelte({ plugins: [...] }) (npm install @swelte/plus).`
+								)
+							}
+						}
+						dispatched.push({ route, mod, prefix: vPrefix(mod) })
 						// Runtime fetch stub for the browser import (dev + build).
 						// Sorted by mod: readdir order is filesystem-dependent;
 						// the stubs land per-mod but keep them deterministic too.
@@ -1636,7 +1645,9 @@ export declare const dev: boolean
 								continue
 							}
 							if (inc.module === 'routes' || inc.module === 'main') {
-								warnings.push(`plugin ${pp.name}: include module '${inc.module}' reserved — skipped`)
+								warnings.push(
+									`plugin ${pp.name}: include module '${inc.module}' reserved — skipped`
+								)
 								continue
 							}
 							let files: string[] = []
@@ -1705,7 +1716,12 @@ export declare const dev: boolean
 						renderHarness(
 							cfg,
 							import.meta.url,
-							{ startupBody: hooks.startupBody, rerouteBody: hooks.rerouteBody, errorBody: hooks.errorBody, roomSse: hasRoomSse },
+							{
+								startupBody: hooks.startupBody,
+								rerouteBody: hooks.rerouteBody,
+								errorBody: hooks.errorBody,
+								roomSse: hasRoomSse,
+							},
 							pluginHarness
 						)
 					)

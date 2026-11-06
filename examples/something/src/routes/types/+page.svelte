@@ -54,8 +54,16 @@ async function loadHook() {
 		<button onclick={loadBlob}>Blob ([]u8)</button>
 		<button onclick={loadHook}>Raw (?hook)</button>
 	</div>
-	{#if rowInfo}<p>{rowInfo}</p>{/if}
-	{#if calcInfo}<p>{calcInfo}</p>{/if}
-	{#if blobInfo}<p>{blobInfo}</p>{/if}
-	{#if hookInfo}<p>{hookInfo}</p>{/if}
+	{#if rowInfo}
+		<p>{rowInfo}</p>
+	{/if}
+	{#if calcInfo}
+		<p>{calcInfo}</p>
+	{/if}
+	{#if blobInfo}
+		<p>{blobInfo}</p>
+	{/if}
+	{#if hookInfo}
+		<p>{hookInfo}</p>
+	{/if}
 </main>

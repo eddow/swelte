@@ -140,7 +140,7 @@ async function patchTouch() {
 <main>
 	<h1>rpc (verbs + @[rpc] + narrow + fail-lite)</h1>
 	<nav><a href="/">home</a></nav>
-	<input bind:value={name} placeholder="your name" />
+	<input bind:value={name} placeholder="your name">
 	<div style="display:flex; gap:0.5rem; margin-top:0.5rem; flex-wrap:wrap;">
 		<button onclick={loadGreeting}>Greet (GET)</button>
 		<button onclick={saveName}>Save (POST)</button>
@@ -154,26 +154,50 @@ async function patchTouch() {
 		<button onclick={saveFailLite}>Save fail-lite (422)</button>
 		<button onclick={deserEnvelope}>Deserialize</button>
 	</div>
-	{#if greeting}<p>{greeting}</p>{/if}
-	{#if saved}<p>{saved}</p>{/if}
-	{#if saveFailNote}<p>{saveFailNote}</p>{/if}
-	{#if deserNote}<p>{deserNote}</p>{/if}
-	{#if session}<p>session {session.id} for {session.user}</p>{/if}
-	{#if pureSession}<p>pure {pureSession.id} for {pureSession.user}</p>{/if}
-	{#if pdfInfo}<p>{pdfInfo}</p>{/if}
-	{#if createdInfo}<p>{createdInfo}</p>{/if}
-	{#if narrow}<p>{narrow}</p>{/if}
-	{#if renamed}<p>{renamed}</p>{/if}
-	{#if touched}<p>{touched}</p>{/if}
-	{#if lastError}<pre style="color:crimson; white-space:pre-wrap;">{lastError}</pre>{/if}
-	<hr />
+	{#if greeting}
+		<p>{greeting}</p>
+	{/if}
+	{#if saved}
+		<p>{saved}</p>
+	{/if}
+	{#if saveFailNote}
+		<p>{saveFailNote}</p>
+	{/if}
+	{#if deserNote}
+		<p>{deserNote}</p>
+	{/if}
+	{#if session}
+		<p>session {session.id} for {session.user}</p>
+	{/if}
+	{#if pureSession}
+		<p>pure {pureSession.id} for {pureSession.user}</p>
+	{/if}
+	{#if pdfInfo}
+		<p>{pdfInfo}</p>
+	{/if}
+	{#if createdInfo}
+		<p>{createdInfo}</p>
+	{/if}
+	{#if narrow}
+		<p>{narrow}</p>
+	{/if}
+	{#if renamed}
+		<p>{renamed}</p>
+	{/if}
+	{#if touched}
+		<p>{touched}</p>
+	{/if}
+	{#if lastError}
+		<pre style="color:crimson; white-space:pre-wrap;">{lastError}</pre>
+	{/if}
+	<hr>
 	<h2>No-JS proof (plain forms, no fetch)</h2>
 	<form method="post" action="/rpc">
-		<input type="hidden" name="payload" value="nojs-alice" />
+		<input type="hidden" name="payload" value="nojs-alice">
 		<button type="submit">Save via plain form (→ 303 → /rpc)</button>
 	</form>
 	<form method="post" action="/api/greet?upload" enctype="multipart/form-data">
-		<input type="file" name="file" />
+		<input type="file" name="file">
 		<button type="submit">Upload via plain form (→ 303)</button>
 	</form>
 </main>

@@ -160,10 +160,7 @@ export function validateWsFn(rel: string, m: RpcFn): void {
 	const last = ps.length > 0 ? ps[ps.length - 1] : null
 	const isEmitTail = last !== null && /^fn\s*\(\s*string\s*\)(\s*bool)?$/.test(last.vtype.trim())
 	const second = ps.length >= 2 ? ps[ps.length - 2] : null
-	const isRecvTail =
-		isEmitTail &&
-		second !== null &&
-		/^chan\s+string$/.test(second.vtype.trim())
+	const isRecvTail = isEmitTail && second !== null && /^chan\s+string$/.test(second.vtype.trim())
 	const third = ps.length >= 3 ? ps[ps.length - 3] : null
 	const isSubTail =
 		isRecvTail &&
@@ -855,19 +852,20 @@ pub fn swelte_sse_room_for(prefix string, qualifier string, req SwelteRequest, s
 		`	if (headers['Upgrade'] or { headers['upgrade'] or { '' } }).to_lower() != 'websocket' { return '' }`,
 		// No @[ws] routes: skip the normalize (unused var warning) — the
 		// table below is empty and the fn always returns ''.
-		...([...wsMods].length > 0
-			? [`	norm_path := swelte_normalize_path(path)`]
-			: [`	_ = path`]),
+		...([...wsMods].length > 0 ? [`	norm_path := swelte_normalize_path(path)`] : [`	_ = path`]),
 		...dispatched
 			.filter((d) => wsMods.has(d.mod))
-			.map((d) => `	if swelte_route_hit(${vJsonStr(d.route)}, norm_path) { return ${vJsonStr(d.prefix)} }`),
+			.map(
+				(d) =>
+					`	if swelte_route_hit(${vJsonStr(d.route)}, norm_path) { return ${vJsonStr(d.prefix)} }`
+			),
 		`	return ''`,
 		`}`,
 		``,
 		`pub fn swelte_ws_is(prefix string) bool {`,
 		...[...wsMods].map(
 			(mod) =>
-				`	if prefix == ${vJsonStr(dispatched.find((d) => d.mod === mod)?.prefix ?? mod)} { return ${vPrefix(mod)}swelte_ws_is() }`,
+				`	if prefix == ${vJsonStr(dispatched.find((d) => d.mod === mod)?.prefix ?? mod)} { return ${vPrefix(mod)}swelte_ws_is() }`
 		),
 		`	return false`,
 		`}`,
@@ -875,7 +873,7 @@ pub fn swelte_sse_room_for(prefix string, qualifier string, req SwelteRequest, s
 		`pub fn swelte_ws_open_for(prefix string, req SwelteRequest, sub fn (string) chan string, recv chan string, emit fn (string) bool) ! {`,
 		...[...wsMods].map(
 			(mod) =>
-				`	if prefix == ${vJsonStr(dispatched.find((d) => d.mod === mod)?.prefix ?? mod)} { ${vPrefix(mod)}swelte_ws_open('', req, sub, recv, emit) or { return err } return }`,
+				`	if prefix == ${vJsonStr(dispatched.find((d) => d.mod === mod)?.prefix ?? mod)} { ${vPrefix(mod)}swelte_ws_open('', req, sub, recv, emit) or { return err } return }`
 		),
 		`	return error('no ws route for prefix: ' + prefix)`,
 		`}`,
@@ -1304,21 +1302,22 @@ export function emitWsEvents(prefix: string, _mod: string, fns: RpcFn[]): string
 	const arm = (body: string, tail: string): string => (body ? `${body}\n${tail}` : tail)
 	const wsFns = fns.filter((f) => f.attr === 'ws')
 	if (!wsFns.length) return ''
-	const openArm = list(
-		wsFns,
-		(h) => {
-			const narrow = h.params.slice(0, -3)
-			const isReq = narrow.length === 1 && narrow[0].vtype === 'SwelteRequest'
-			const built = isReq ? null : narrowCall(`${prefix}${h.name}`, narrow)
-			const callArgs = isReq ? `req, sub, recv, emit` : narrow.length ? `${built!.call}, sub, recv, emit` : `sub, recv, emit`
-			const pre =
-				built && built.stmts.length ? `${built.stmts.map((st) => `\t\t${st}`).join('\n')}\n` : ''
-			const run = h.fallible
-				? `\t\t${prefix}${h.name}(${callArgs}) or { return err }`
-				: `\t\t${prefix}${h.name}(${callArgs})`
-			return `\tif qualifier == '' {\n${pre}${run}\n\t\treturn\n\t}`
-		},
-	)
+	const openArm = list(wsFns, (h) => {
+		const narrow = h.params.slice(0, -3)
+		const isReq = narrow.length === 1 && narrow[0].vtype === 'SwelteRequest'
+		const built = isReq ? null : narrowCall(`${prefix}${h.name}`, narrow)
+		const callArgs = isReq
+			? `req, sub, recv, emit`
+			: narrow.length
+				? `${built!.call}, sub, recv, emit`
+				: `sub, recv, emit`
+		const pre =
+			built && built.stmts.length ? `${built.stmts.map((st) => `\t\t${st}`).join('\n')}\n` : ''
+		const run = h.fallible
+			? `\t\t${prefix}${h.name}(${callArgs}) or { return err }`
+			: `\t\t${prefix}${h.name}(${callArgs})`
+		return `\tif qualifier == '' {\n${pre}${run}\n\t\treturn\n\t}`
+	})
 	return `
 pub fn ${prefix}swelte_ws_is() bool {
 	return true
@@ -1523,7 +1522,14 @@ ${tupleStat('res')}`
 		sharedReq == null && fns.some((f) => f.attr === 'get')
 			? `\treturn swelte_method_not_allowed()`
 			: `\treturn ${methodGate}`
-	return [rpcBlock, sseArm, wsArm, ...['get', 'post', 'put', 'delete', 'patch'].map(verbArm), tail, `}\n`]
+	return [
+		rpcBlock,
+		sseArm,
+		wsArm,
+		...['get', 'post', 'put', 'delete', 'patch'].map(verbArm),
+		tail,
+		`}\n`,
+	]
 		.filter((s) => s !== '')
 		.join('\n')
 }
