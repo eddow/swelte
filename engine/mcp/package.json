@@ -6,7 +6,7 @@
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "bin": {
-    "swelte-mcp": "./bin/swelte-mcp.js"
+    "swelte-mcp": "bin/swelte-mcp.js"
   },
   "files": [
     "README.md",

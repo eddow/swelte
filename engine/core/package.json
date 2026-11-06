@@ -14,7 +14,7 @@
     "./toolchain": "./dist/toolchain.js"
   },
   "bin": {
-    "swelte": "./bin/swelte.js"
+    "swelte": "bin/swelte.js"
   },
   "files": [
     "dist",

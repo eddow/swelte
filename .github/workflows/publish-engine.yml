@@ -60,6 +60,9 @@ jobs:
       - name: Publish engine packages
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          # npm CLI still requires('punycode') transitively (DEP0040);
+          # unrelated to engine/** — silence it to keep logs clean.
+          NODE_NO_WARNINGS: 1
         run: |
           set -euo pipefail
           TAG="${{ inputs.tag || 'latest' }}"
