@@ -1,5 +1,6 @@
 <script lang="ts">
 import Code from '#lib/Code.svelte'
+import DocsNav from '#lib/DocsNav.svelte'
 import { codeHtml } from '#lib/snippets.gen.js'
 </script>
 
@@ -80,3 +81,4 @@ import { codeHtml } from '#lib/snippets.gen.js'
 	</svg>
 	<span>Docs live in <code>docs/*.md</code> — these pages render the same content.</span>
 </div>
+<DocsNav next={{ href: '/install', label: 'Installation' }} related={[{ href: '/quickstart', label: 'Quickstart' }]} />

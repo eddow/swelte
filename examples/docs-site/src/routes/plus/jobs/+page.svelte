@@ -1,5 +1,6 @@
 <script lang="ts">
 import Code from '#lib/Code.svelte'
+import DocsNav from '#lib/DocsNav.svelte'
 import { codeHtml } from '#lib/snippets.gen.js'
 </script>
 
@@ -148,3 +149,4 @@ import { codeHtml } from '#lib/snippets.gen.js'
 	<li>No persistence yet: tick log is console-only; cross-restart catchup is future work.</li>
 	<li>No cron-expression parser in v1 — duration literal only.</li>
 </ul>
+<DocsNav next={{ href: '/plus/db', label: 'Database' }} related={[{ href: '/guide/mcp', label: 'Agents' }]} />

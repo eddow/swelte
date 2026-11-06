@@ -1,5 +1,6 @@
 <script lang="ts">
 import Code from '#lib/Code.svelte'
+import DocsNav from '#lib/DocsNav.svelte'
 import { codeHtml } from '#lib/snippets.gen.js'
 </script>
 
@@ -81,3 +82,4 @@ import { codeHtml } from '#lib/snippets.gen.js'
 	Only JSON Accept, JSON bodies, and form bodies proxy to V. Exact <code>dist/</code> files win over
 	both.
 </p>
+<DocsNav next={{ href: '/guide/config', label: 'Config' }} related={[{ href: '/guide/forms', label: 'Forms' }]} />

@@ -1,3 +1,8 @@
+<script lang="ts">
+	import DocsNav from '#lib/DocsNav.svelte'
+</script>
+
+
 <div class="breadcrumbs text-sm">
 	<ul>
 		<li><a href="/">Home</a></li>
@@ -168,7 +173,4 @@
 	</li>
 </ul>
 
-<div class="flex gap-2 mt-6 flex-wrap">
-	<a href="/guide/types" class="btn btn-primary btn-sm">Next: Types</a>
-	<a href="/guide/forms" class="btn btn-ghost btn-sm">Forms</a>
-</div>
+<DocsNav next={{ href: '/guide/types', label: 'Types' }} related={[{ href: '/guide/forms', label: 'Forms' }]} />

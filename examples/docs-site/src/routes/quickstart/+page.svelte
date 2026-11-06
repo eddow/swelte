@@ -1,5 +1,6 @@
 <script lang="ts">
 import Code from '#lib/Code.svelte'
+import DocsNav from '#lib/DocsNav.svelte'
 import { codeHtml } from '#lib/snippets.gen.js'
 </script>
 
@@ -31,7 +32,4 @@ import { codeHtml } from '#lib/snippets.gen.js'
 	<Code snippet={codeHtml['quickstart-shape']} dense />
 </div>
 
-<div class="flex gap-2 mt-6 flex-wrap">
-	<a href="/guide/rpc" class="btn btn-primary btn-sm">Next: RPC & routes</a>
-	<a href="/guide/forms" class="btn btn-ghost btn-sm">No-JS forms</a>
-</div>
+<DocsNav next={{ href: '/guide/rpc', label: 'RPC & routes' }} related={[{ href: '/guide/forms', label: 'Forms' }]} />

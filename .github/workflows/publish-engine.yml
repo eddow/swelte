@@ -1,0 +1,76 @@
+# Manually launched: build + npm-publish every engine/** package.
+#
+# Run from the GitHub UI: Actions → "Publish engine packages" → Run workflow.
+# Publishes in dependency order (vvm → core → mcp / plus / ssr-qjs)
+# so intra-workspace ^ranges always resolve to the just-published version.
+#
+# Requires a repository secret `NPM_TOKEN` (npm access token with
+# publish rights on the @swelte scope).
+
+name: Publish engine packages
+
+'on':
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'npm dist-tag to publish under'
+        required: false
+        default: latest
+        type: string
+      dry-run:
+        description: 'Build + pack without publishing to npm'
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org/
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build engine packages
+        run: >-
+          npm run build
+          --workspace=@swelte/vvm
+          --workspace=@swelte/core
+          --workspace=@swelte/mcp
+          --workspace=@swelte/plus
+          --workspace=@swelte/ssr-qjs
+          --if-present
+
+      - name: Publish engine packages
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          set -euo pipefail
+          TAG="${{ inputs.tag || 'latest' }}"
+          DRY_RUN="${{ inputs.dry-run }}"
+          ARGS=(--tag "$TAG" --access public)
+          if [ "$DRY_RUN" = "true" ]; then
+            ARGS+=(--dry-run)
+          fi
+          # Dependency order matters: vvm ← core ← (mcp, plus, ssr-qjs)
+          for pkg in @swelte/vvm @swelte/core @swelte/mcp @swelte/plus @swelte/ssr-qjs; do
+            echo "::group::npm publish $pkg (tag: $TAG)"
+            npm publish --workspace="$pkg" "${ARGS[@]}"
+            echo "::endgroup::"
+          done

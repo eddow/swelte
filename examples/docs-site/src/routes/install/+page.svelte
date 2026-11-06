@@ -1,5 +1,6 @@
 <script lang="ts">
 import Code from '#lib/Code.svelte'
+import DocsNav from '#lib/DocsNav.svelte'
 import { codeHtml } from '#lib/snippets.gen.js'
 </script>
 
@@ -71,3 +72,4 @@ import { codeHtml } from '#lib/snippets.gen.js'
 		runs Vite + V backend in one command.</span
 	>
 </div>
+<DocsNav next={{ href: '/quickstart', label: 'Quickstart' }} related={[{ href: '/guide/rpc', label: 'RPC & routes' }]} />

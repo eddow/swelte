@@ -1,5 +1,6 @@
 <script lang="ts">
 import Code from '#lib/Code.svelte'
+import DocsNav from '#lib/DocsNav.svelte'
 import { codeHtml } from '#lib/snippets.gen.js'
 </script>
 
@@ -132,3 +133,4 @@ import { codeHtml } from '#lib/snippets.gen.js'
 	drops each dependency's <code>skills/</code> into
 	<code>.agents/skills/</code>. Versioned with the packages, no manual copy step.
 </p>
+<DocsNav next={{ href: '/plus/jobs', label: 'Jobs' }} related={[{ href: '/guide/cli', label: 'CLI' }]} />

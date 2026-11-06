@@ -3,42 +3,6 @@
 
 SvelteKit couldn't / didn't:
 
-1. **Cron → jobs**: DONE + hardened (`@swelte/plus/jobs`, single scheduler
-   thread — one `spawn swelte_cron_run()`, sleeps to the nearest deadline
-   (idle = zero CPU), missed ticks coalesce (with a `status=catchup` console
-   notice when lag >= 2 intervals), no CLI/no SSH, starts at boot in the
-   container. `jobsPlugin` claims `attrs: ['cron']`; core stays
-   plugin-agnostic via `extraAttrs`). Retry: `@[cron('5m,retry=3')]`
-   (`retry=1..5`, fallible `!void` only, blocking 5s-linear backoff in the
-   tick's arm); outcomes to the console (`[swelte:cron] tick=<name>
-   status=retry|dead|ok|error|catchup`). Next: persistent tick log,
-   cross-restart catchup.
-2. **Embedded SQLite/KV**: DONE (`@swelte/plus/db`, single SQLite file —
-   WAL, `SWELTE_DB_PATH` else `data/app.db`). `swelte migrate`
-   (via `SWELTE_PLUGINS=@swelte/plus/db`) scaffolds `src/lib/backend/db.v`
-   (shared conn + `kv_get/kv_set/kv_del`) + `db/migrations/001_swelte_kv.sql`,
-   applies pendings in order (tracked in `_swelte_migrations`, idempotent).
-   V lesson: DDL/DML need `exec_none` (`exec` only steps row queries).
-   Next: KV-backed SSE rooms / SWR regen / outbox queue.
-3. **First-class `@[ws]`**: DONE (`@swelte/plus/db` hub + core
-   `@[ws]`). `validateWsFn` shape + codegen (`swelte_ws_open` /
-   `swelte_ws_route,is,open_for` / `swelte_serve_ws` pump +
-   `__swelteWsUrl` stub) + `ws.v` RFC 6455 frames (accept-key,
-   masked-read/unmasked-write, ping/pong/close/continuation) +
-   `ws-echo` (echo) / `ws-rooms` (room join + `ws_say` emit) fixtures
-   + raw `wsConnect()` helper. SvelteKit has no WS primitive. V `veb`
-   + Svelte runes = typed socket Rooms/broadcast on the same hub as
-   `@[sse]` rooms (`sub` closure + `emit`, auto-reap on disconnect).
-   Proven live: echo round-trip + two-subscriber fan-out (e2e
-   battery `defineWsContract`, dev + preview).
-4. **SSE broadcast channels**: DONE (`@swelte/plus/db` hub + core room-mode
-   `@[sse]`). Cross-request `backend.emit('room', msg)` fans out to every
-   live stream: route fn takes trailing `(sub fn (string) chan string,
-   emit fn (string) bool)`; harness injects the subscribe closure and
-   auto-reaps on disconnect. In-memory, cap-1 per-subscriber buffer
-   (slow subscriber drops, publisher never stalls). Single-instance
-   best-effort (same tier as cron) — SvelteKit has no WS/SSE primitive
-   at all. Next: `@[ws]` rooms on the same hub.
 5. **ISR → SWR background regen**: today headers-only
    (`s-maxage+X-Swelte-Revalidate`) in core (parity). Background regen
    (re-render on timer + atomic `dist/*.html` swap) not started — the `swr`
@@ -49,16 +13,21 @@ SvelteKit couldn't / didn't:
 7. **Offline outbox**: core SW stays network-first for API (parity). Replay
    queue not started — the `outbox` skeleton (key helpers only, no SW
    snippet) was removed; re-add when background-sync + replay land.
-8. **Hardening as config**: DONE — `BODY_LIMIT/RATE_LIMIT/HANDLER_TIMEOUT` global env knobs + per-route `export const limits = {rate, rateWindowMs, timeoutMs, bodyLimit}` (`swelte_route_limits()` table, longest-prefix match, `limited` E2E fixture).
-9. **Agent-native**: `swelte check --format json` + MCP + contract snapshot already ahead. Next: mcp `list_routes` + `explain_bytecode_error` for prod traces.
+8. **Agent-native**: `swelte check --format json` + MCP + contract snapshot already ahead. Next: mcp `list_routes` + `explain_bytecode_error` for prod traces.
+9. `$page` can't work here, and I verified it the hard way. I tried it, and it 500s every SSR render:
 
-## Suggested order
+- In the QJS SSR bundle, **every** `@swelte/core` import is rewritten to a render-time throw-stub by `stubSdkImports` (`engine/ssr-qjs/src/ssr.ts`). The something-example even documents this: *"only `@swelte/core` store values ($page/$navigating/$updated) and router fns need the browser gate (throw-stubs in QJS)"*.
+- `$page.url` compiles to a **call** on that stub, so the sync `renderRoute` throws `page() called during SSR render` → Hand falls back to the 500 page. I confirmed via the built `dist/ssr/render.js`: `renderRoute('/guide/rpc')` returned the 279-byte 500 shell with `$page`, versus 9150 bytes of real content without it.
+- Gating the *read* behind `{#if browser}` doesn't help either — the subscription is compiled into the component setup and still executes during SSR. The only sanctioned pattern (per `examples/something/.../router/+page.svelte`) is putting `$page`/`$navigating` reads behind the `browser` gate *and* never subscribing during SSR, which a layout-level nav can't do — it must render its links on the server.
 
-1. #8 Hardening as config — DONE (global + per-route `limits` shipped, close it).
-2. #2 Embedded SQLite/KV — DONE (unlocks everything below; KV is the primitive).
-3. #4 SSE broadcast (`emit(room, msg)`) — DONE (hub + room-mode SSE, proven end-to-end).
-4. #3 First-class `@[ws]` — DONE (rooms/broadcast on the same hub + `ws.v` frames + e2e battery, proven live).
-5. #5 SWR background regen — reuses cron timer + atomic `dist/*.html` swap.
-6. #7 Offline outbox — needs SW + #2 replay queue.
-7. #6 V-native image pipeline — heavy, isolated, late.
-8. #9 `swelte studio` — parallel agent-track, any time after #2.
+So I kept the equivalent behavior without the store: `+route.svelte` now tracks a client-only `currentPath = $state('')` seeded from `window.location.pathname` in `onMount` (a server noop, so SSR renders with no active link and hydration fills it in), kept current via `popstate` + a delegated same-document click listener (deferred with `queueMicrotask` so the client router's `pushState` lands first), and applies DaisyUI's `menu-active` class plus `aria-current="page"`:
+
+```svelte
+{@const isActive = link.href !== '' && currentPath === link.href}
+<li><a href={link.href} class={isActive ? 'menu-active' : ''} aria-current={isActive ? 'page' : undefined}>{link.label}</a></li>
+```
+
+`npm run build:local` passes and `renderRoute` returns full bodies again (`/` 7860, `/install` 8771, `/guide/rpc` 9150, `/plus/jobs` 18522 bytes — no 500s).
+
+That'd be an engine change: the SSR shim would need a real (non-throwing) `page` value per request, e.g. resolving it from the request path in `swelte_page_props()` instead of stubbing it.
+(note: should update examples/docs-site/src/routes/+route.svelte)

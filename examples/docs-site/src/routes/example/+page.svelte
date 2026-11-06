@@ -1,6 +1,7 @@
 <script lang="ts">
-import Code from '#lib/Code.svelte'
-import { codeHtml } from '#lib/snippets.gen.js'
+	import DocsNav from '#lib/DocsNav.svelte'
+	import Code from '#lib/Code.svelte'
+	import { codeHtml } from '#lib/snippets.gen.js'
 </script>
 
 <div class="breadcrumbs text-sm">
@@ -83,3 +84,4 @@ import { codeHtml } from '#lib/snippets.gen.js'
 		source with <code>examples/something/src/routes/+page.svelte</code>.</span
 	>
 </div>
+<DocsNav related={[{ href: '/guide/rpc', label: 'RPC & routes' }, { href: '/from-sveltekit', label: 'From SvelteKit' }]} />

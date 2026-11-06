@@ -16,6 +16,15 @@ let dark = $state(false)
 let query = $state('')
 let open = $state(false)
 let active = $state(0)
+let currentPath = $state('')
+// Active left-nav link: `currentPath` is client-only state (SSR renders no
+// active link, hydration fills it in). We deliberately do NOT use the `$page`
+// store à la SvelteKit: in the QJS SSR bundle every `@swelte/core` import is
+// a render-time throw-stub (`page() called during SSR render` — see
+// engine/ssr-qjs/src/ssr.ts `stubSdkImports`), and `$page.url` compiles to a
+// call on that stub, 500ing every SSR render. The `window.location` +
+// `popstate`/click tracking below only runs in `onMount` (a server noop),
+// so SSR never touches it.
 // SSR-safe: searchDocs is plain client data (static index, no RPC).
 // Evaluate lazily only in the browser render — the server bundle
 // renders the shell (query starts empty) and hydrates interactivity.
@@ -32,6 +41,25 @@ function toggleTheme(next: boolean) {
 // after hydration). `goto` stays inside the click handler, where it
 // never executes during SSR.
 onMount(() => {
+	// Active link tracking (see `currentPath` note above): seed from the
+	// browser path, then follow router-driven navigations (same-document
+	// clicks that never reload) and history traversal.
+	currentPath = window.location.pathname
+	const syncPath = () => {
+		currentPath = window.location.pathname
+	}
+	window.addEventListener('popstate', syncPath)
+	const onClick = (e: MouseEvent) => {
+		const a = (e.target as HTMLElement | null)?.closest?.('a[href]')
+		if (!a) return
+		const href = a.getAttribute('href')
+		if (!href || href.startsWith('#') || href.includes(':') || (a as HTMLAnchorElement).target === '_blank') return
+		if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return
+		// Same-document link: the client router swaps content without a
+		// reload — defer the sync so the router's pushState lands first.
+		queueMicrotask(syncPath)
+	}
+	window.addEventListener('click', onClick)
 	// src/app.ts already applied the theme before hydration; just sync the
 	// toggle to it so the control shows the truth.
 	const theme: Theme = preferredTheme()
@@ -49,7 +77,11 @@ onMount(() => {
 		}
 	}
 	window.addEventListener('keydown', onKey)
-	return () => window.removeEventListener('keydown', onKey)
+	return () => {
+		window.removeEventListener('keydown', onKey)
+		window.removeEventListener('popstate', syncPath)
+		window.removeEventListener('click', onClick)
+	}
 })
 
 const groups: { title: string; links: { href: string; label: string }[] }[] = [
@@ -244,7 +276,8 @@ const groups: { title: string; links: { href: string; label: string }[] }[] = [
 				<li class="menu-title">{group.title}</li>
 				<ul>
 					{#each group.links as link}
-						<li><a href={link.href}>{link.label}</a></li>
+						{@const isActive = link.href !== '' && currentPath === link.href}
+						<li><a href={link.href} class={isActive ? 'menu-active' : ''} aria-current={isActive ? 'page' : undefined}>{link.label}</a></li>
 					{/each}
 				</ul>
 			{/each}

@@ -1,5 +1,6 @@
 <script lang="ts">
 import Code from '#lib/Code.svelte'
+import DocsNav from '#lib/DocsNav.svelte'
 import { codeHtml } from '#lib/snippets.gen.js'
 </script>
 
@@ -52,3 +53,4 @@ import { codeHtml } from '#lib/snippets.gen.js'
 	stays inline, never <code>page.error</code>). <code>applyAction(result)</code> is also usable
 	standalone.
 </p>
+<DocsNav next={{ href: '/guide/errors', label: 'Errors' }} related={[{ href: '/guide/rpc', label: 'RPC & routes' }]} />

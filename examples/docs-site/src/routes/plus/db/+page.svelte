@@ -1,5 +1,6 @@
 <script lang="ts">
 import Code from '#lib/Code.svelte'
+import DocsNav from '#lib/DocsNav.svelte'
 import { codeHtml } from '#lib/snippets.gen.js'
 </script>
 
@@ -52,7 +53,4 @@ import { codeHtml } from '#lib/snippets.gen.js'
 	<code>Row.get_string/get_int</code>.
 </p>
 
-<div class="flex gap-2 mt-6 flex-wrap">
-	<a href="/plus/realtime" class="btn btn-primary btn-sm">Next: Realtime</a>
-	<a href="/plus/jobs" class="btn btn-ghost btn-sm">Jobs</a>
-</div>
+<DocsNav next={{ href: '/plus/realtime', label: 'Realtime' }} related={[{ href: '/plus/jobs', label: 'Jobs' }]} />

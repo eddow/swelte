@@ -1,5 +1,6 @@
 <script lang="ts">
 import Code from '#lib/Code.svelte'
+import DocsNav from '#lib/DocsNav.svelte'
 import { codeHtml } from '#lib/snippets.gen.js'
 </script>
 
@@ -85,3 +86,4 @@ import { codeHtml } from '#lib/snippets.gen.js'
 		+ warning.</span
 	>
 </div>
+<DocsNav next={{ href: '/guide/forms', label: 'Forms' }} related={[{ href: '/guide/rpc', label: 'RPC & routes' }]} />

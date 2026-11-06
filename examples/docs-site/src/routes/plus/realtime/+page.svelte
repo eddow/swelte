@@ -1,5 +1,6 @@
 <script lang="ts">
 import Code from '#lib/Code.svelte'
+import DocsNav from '#lib/DocsNav.svelte'
 import { codeHtml } from '#lib/snippets.gen.js'
 </script>
 
@@ -58,7 +59,4 @@ import { codeHtml } from '#lib/snippets.gen.js'
 	<Code snippet={codeHtml['plus-sockets-client']} dense title="browser: new WebSocket(url)" />
 </div>
 
-<div class="flex gap-2 mt-6 flex-wrap">
-	<a href="/plus/db" class="btn btn-ghost btn-sm">Database</a>
-	<a href="/plus/jobs" class="btn btn-ghost btn-sm">Jobs</a>
-</div>
+<DocsNav next={{ href: '/from-sveltekit', label: 'From SvelteKit' }} related={[{ href: '/plus/db', label: 'Database' }]} />
