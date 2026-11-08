@@ -30,6 +30,11 @@ helpers). `.swelte/server.v` (generated harness: `Hand` + static handlers
   Same V compiles native + `v -b wasm`; TS import is always `async`.
   Import from `#lib/...`. `src/lib/**/backend/*.v` (or `*_backend.v`) is **backend-only**
   (build error from browser code).
+- npm V libraries — reusable modules declared by a dependency's
+  `package.json` `swelte.v.exports`. TypeScript imports
+  `@scope/package/v/path.v`; V imports the staged deterministic module
+  `npm_scope_package.path`. See `npm-v-libraries.md`. `#lib` remains
+  application-local.
 
 ## Imports (named everywhere)
 

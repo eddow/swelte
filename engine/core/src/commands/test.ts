@@ -69,7 +69,12 @@ export async function runTest(ctx: Ctx): Promise<void> {
 	let vTested = 0
 	for (const dir of [...dirs].sort()) {
 		try {
-			execFileSync(v, ['test', dir], {
+			// npm V libraries are materialized under the generated module root.
+			// `v test src/...` otherwise searches only beside the tested source,
+			// @vlib and @vmodules, so application tests could not import the same
+			// npm_* modules used by dev/build.
+			const modulePath = `${resolve(root, cfg.outDir)}|@vlib|@vmodules`
+			execFileSync(v, ['-path', modulePath, 'test', dir], {
 				cwd: root,
 				stdio: ['ignore', 'pipe', 'pipe'],
 				env: toolchainEnv(),
@@ -136,6 +141,7 @@ export async function runTest(ctx: Ctx): Promise<void> {
 	try {
 		walkBoth(join(typesDir, 'routes'), join(genDir, 'routes'), 'routes/')
 		walkBoth(join(typesDir, 'lib'), join(genDir, 'lib'), 'lib/')
+		walkBoth(join(typesDir, 'npm'), join(genDir, 'npm'), 'npm/')
 	} catch {
 		/* missing dirs */
 	}

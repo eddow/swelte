@@ -8,6 +8,7 @@ Contributor notes live in `internal/`. Forward plans live in `specs/`.
 Documentation for users of Swelte (all describe built behavior):
 
 - `rpc.md` — `.v` imports, attributes, transport (implemented)
+- `npm-v-libraries.md` — publish and consume reusable V modules through npm
 - `types.md` — V → TS projection, codegen (implemented)
 - `errors.md` — error envelope, `SwelteRpcError`, SPA-first rule (implemented)
 - `config.md` — `svelte.config.js` (`swelte` key) + `SWELTE_*` env knobs, routing knobs, per-route types, no-JS (implemented)
@@ -30,7 +31,9 @@ Internal docs to modify Swelte (design rationale, decisions, ephemeral notes):
 
 ## Specs
 
-Forward plans (parity is built; these track what's beyond):
+Forward plans and migration validation (demo coverage does not imply production
+migration parity):
 
+- `specs/dogfood-roadmap.md` — active EMV/micro execution tracker: ownership, verified baseline, delivery gates and progress
+- `specs/micro.md` — micro-specific inventory; shared progress lives in the dogfooding roadmap
 - `specs/future.md` — Beyond SvelteKit (jobs done in `@swelte/plus`; channels/SWR/images/outbox/hardening/agent-native next)
-- `specs/future-doc.md` — parity audit: all P0/P1/P2 items DONE (documented below; E2E `examples/tests` battery green)

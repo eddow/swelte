@@ -1,19 +1,40 @@
-### P0 — cannot boot `micro` without
+# micro migration inventory
 
-1. __Postgres in `V` + `swelte migrate` for `pg`.__ Today: only `SQLite` single file (`plus/db`, `exec_none` rule, `_swelte_migrations`). `micro` is `pg + drizzle + kysely`, 42 migrations, `Neon`, connection pooling, `runPgMigrate` at boot (`SERVER_BOOTSTRAP`, `bootstrapServer`). Needed: `db.pg` in harness, `DATABASE_URL` wiring, pooled handle in `src/app.v @[startup]`, `migrate` runner tracking `_swelte_migrations` in `pg`, typed row projection (`time.Time→number` already decided). Without this every `store.ts/structures.ts/credits.ts/queue.ts` has nowhere to go. Effort: `M` (harness + plugin + docs + E2E fixture).
+Updated: 2026-11-08. Shared execution status lives in the
+[native dogfooding roadmap](dogfood-roadmap.md). This document retains
+micro-specific scope; it is no longer a second framework implementation plan.
 
-2. __Auth/session primitive.__ Today: cookies helpers + `locals map[string]string` only. `micro/ai1` use `better-auth` (`auth/[...all]`, `svelteKitHandler`, `event.locals.user`, DB-first locale, `MODULE_SUBDOMAINS`, `Vary: Cookie`). `better-auth` is `Node`-only, cannot run in `V` binary. Needed: `V` session create/verify (HMAC/JWT or opaque + `pg` lookup), password hashing (`crypto.bcrypt` or `argon2` binding), `@[before]` guard recipe + `swelte_cookie_set_full` age/domain/sameSite, `locals['user']` convention. Decide: re-implement minimal session in `V` (recommended) vs keep `Node` sidecar (kills single-binary story). Effort: `M`.
+The original inventory grouped application ports with framework features and
+treated native dependencies as missing implementations. Reuse V database,
+HTTP, crypto and other native facilities before introducing Swelte APIs.
+Production migration uses native code without a Node backend/sidecar. Pure
+browser JS libraries can remain JS; WASM is an option, not a migration rule.
 
-3. __Queue + worker + sweep.__ Today: `@[cron]` = one sleeping thread, no persistence, no distributed lock, `retry=1..5` blocking backoff, console-only log, missed ticks coalesce. `micro` needs: `registerBillQueue` (`BullMQ`+`Redis`), `scheduleBillSweep` (overdue `working→expired`), bill `worker.ts`, `TTL` sweeper repeatable job, `retake-race/capture-concurrency` semantics. `ai1/tasks/server` needs steer/stop/wait/answer + progress. Needed: `pg`- or `KV`-backed outbox (`future.md#2` primitive exists), persistent tick log + cross-restart catchup (`future.md#1` next step), or document `Redis/BullMQ` via `V redis client` + separate worker binary. Single-instance best-effort is __not__ enough for money/bills. Effort: `M–L`.
+## Shared requirements
 
-4. __Realtime: SSE broadcast + WS.__ DONE: `@[sse]` list/emit/room + `@[ws]` on the same hub — shape validation + codegen + `ws.v` RFC 6455 frames + `ws-echo`/`ws-rooms` E2E fixtures (`defineWsContract`: echo round-trip + two-subscriber fan-out over `ws_say`) + zero-dep `wsConnect()` helper, all proven live (no V warnings; `select` timeout uses the non-deprecated form, `>` removed). `ai1/live`, `market/tasks/[runId]/events`, `ChatView` map here.
+| Original area | Shared roadmap / qualification |
+|---|---|
+| PostgreSQL and startup migrations | DF-08. V already has PostgreSQL ORM, pooling, pinned connections and transactions. Integrate existing schema/history; do not blindly replace it with `_swelte_migrations`. |
+| Realtime SSE / WS | DF-04, DF-10, DF-11. Existing rooms/GET SSE do not establish guarded POST streams or disconnect cleanup. |
+| Binary bodies and uploads | DF-04, DF-07, DF-16. Transport exists; prove actual multipart/binary flows and configured limits. |
+| i18n / locale / theme / subdomains / PWA | DF-02, DF-05, DF-06, DF-14. Reuse Paraglide/browser assets; the app owns locale/host policy and configuration. No V catalogue generator is established as necessary. |
+| Mail / signed webhooks / HTTP integrations | DF-08, DF-16. Reuse native HTTP/crypto and preserve application idempotency. |
+| Observability | DF-09, DF-13, DF-15. Reporting hooks/context belong in the shared lifecycle; provider adapters can live in ai1. |
+| Validation / parsing libraries | DF-16, DF-20. Audit reachable code and runtime requirements. Browser-safe TS reuse and native backend ports are separate decisions. |
 
-5. __Binary/uploads/images/PDF.__ Today: `[]u8↔Blob`, `files/files_bytes`, `SwelteResponse{body_bytes,is_bytes}`, `Content-Disposition` — envelope is ready. Missing: V-image pipeline (`future.md#6` not started — no `Sharp` equiv), PDF gen/parse (`pdf-lib/unpdf` have no `V` equiv), `ZIP` export (`structures/[id]/export/zip.ts`), `QR` (`qrcode-generator`), `S3` (`@aws-sdk/client-s3`). Needed: either `V` bindings (`stbi`, `libharu`-lite, `miniz`) or explicit `Node` helper sidecar + `raw_body` passthrough. Also `BODY_LIMIT` per-route exists — set it for `bills/[id]/image|source|pdf`. Effort: `M`.
+## Additional micro scope
 
-### P1 — needed for parity, can stub first release
+These requirements came from the original inventory and still need a fresh
+call-site and behavior audit before implementation estimates are accepted.
 
-6. __`i18n`.__ `paraglide` (1700 generated files, `paraglideMiddleware`, `deLocalizeUrl`, `transformPageChunk` lang/dir/theme injection, DB-first locale, domain cookies) has no `swelte` equiv. Options: (a) keep `paraglide` TS-only for client + do locale negotiate in `V @[before]` and pass `locale` in `@[load]` props; (b) build `V` message catalog codegen. (a) first. Effort: `S–M`.
-7. __Mail + webhooks + payments HTTP.__ `resend` inbound, `stripe` topup validate/webhook, `enablebanking` redirect/auth/pay. `raw_body []u8` already covers HMAC. Missing: `V` HTTP client recipe + `Stripe-Signature`/`HMAC` verify + idempotency (`webhook_events` table) + `SwelteResponse` raw passthrough. `stripe`/`resend` SDKs stay `TS` only if you keep a thin `Node` proxy — otherwise port signature check to `V crypto.hmac`. Effort: `S–M`.
-8. __Validation libs → `#lib/*.v` WASM.__ `ibantools/stdnum/postal-codes/libphonenumber/date-holidays/markdown-it/js-yaml/cheerio/scrapers` — pure ones belong in `#lib/*.v` (offline, testable, no fetch). `cheerio/scrapers/unpdf` (HTML/PDF ingest) stay backend-only or `Node` sidecar. Effort: `S` per lib, highly parallel, agent-friendly.
-9. __Observability.__ `@sentry/sveltekit` (`initSentryServer`, `handleErrorWithSentry`, `reportError`, scrub `sendDefaultPii:false`) → `src/app.v @[error]` sanitize + `V` log + optional `Sentry` HTTP envelope from `V`. Plus `analytics.ts`, `gtag.ts`, `telemetry/`. Effort: `S`.
-10. __Subdomains + locale + theme + PWA shell.__ `reroute`, `cookieDomainFor`, `EMW_THEME/EMW_TEXT_LARGE`, `manifest.webmanifest`, `serviceWorker {enabled,register}`, `offline.fallback`, prerender/ISR-headers — all have `swelte` knobs already (`reroute`, `trailingSlash/base/assets/csp/csrf/methodOverride/version`, `SW`/offline/prerender/isr/chunking). Mostly config mapping + `+route.v @[before]` port. Effort: `S`.
+| Area | Application requirements | Tracker |
+|---|---|---|
+| Authentication/session | Existing better-auth consumers, auth catch-all, user/session context, required password/provider behavior, DB-first locale, module subdomains and cookie/cache policy. EMV's salt gate does not satisfy this scope. | DF-18 |
+| Durable financial jobs | `registerBillQueue`, `scheduleBillSweep`, bill workers, TTL expiry, capture concurrency and retake races. Preserve durable effects and restart/worker coordination; ticks alone are insufficient. | DF-19 |
+| Payments and banking | Stripe top-ups/signatures and Enable Banking redirect/auth/payment flows; retain event idempotency and original raw-body verification. | DF-20 |
+| Documents and media | Enabled bill image/source/PDF flows, structures ZIP exports, QR generation, PDF ingestion, image processing and storage. Select native libraries/bindings for actual capabilities rather than asserting no equivalent exists. | DF-20 |
+
+App-specific queries, migrations, workers, auth policy and integrations stay
+in micro or reusable native libraries. Swelte owns the transport/lifecycle
+contracts they need. Financial workflow acceptance is required before those
+flows migrate; it is not optional post-release polish.

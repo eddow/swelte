@@ -1,7 +1,7 @@
 import { execFileSync as execVSync } from 'node:child_process'
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync } from 'node:fs'
 import type { IncomingMessage, ServerResponse } from 'node:http'
-import { join, resolve, sep } from 'node:path'
+import { dirname, join, resolve, sep } from 'node:path'
 import type { Plugin } from 'vite'
 import { loadConfig, renderAppDts, renderClientEntry, renderHarness } from '../gen/config.js'
 import { isBackendMod, SWELTE_GEN_CORE_DIRS } from '../gen/paths.js'
@@ -10,6 +10,7 @@ import { emitClientRouter } from './client-router.js'
 import { list, writeIfChanged } from './fs.js'
 import { loadServerHooks } from './hooks.js'
 import { loadMatchers } from './matchers.js'
+import { materializeNpmV, parseNpmVSpecifier, type NpmVExport } from './npm-v.js'
 import { parseStructs, parseVFile, pascal } from './parse.js'
 import {
 	collectPrerenderEntries,
@@ -55,7 +56,14 @@ import type {
 	VStruct,
 	WrapperMw,
 } from './types.js'
-import { compileLibWasm, WASM_KNOWN_BROKEN, wasmBlockedImports } from './wasm.js'
+import {
+	compileLibWasm,
+	compileNpmVModuleWasm,
+	npmVWasmImport,
+	npmVWasmWrapper,
+	WASM_KNOWN_BROKEN,
+	wasmBlockedImports,
+} from './wasm.js'
 
 export function swelte(options: SweltePluginOptions = {}): Plugin {
 	let routesDir = options.routesDir ?? 'src/routes'
@@ -154,6 +162,8 @@ export function swelte(options: SweltePluginOptions = {}): Plugin {
 	// the prod wasm. Reset per build (buildStart) so dev/test resolutions
 	// never leak into a bundle.
 	const usedLibFiles = new Set<string>()
+	const usedNpmVExports = new Set<string>()
+	let npmVBySpecifier = new Map<string, NpmVExport>()
 	// Lazy V binary for `v -b wasm` (resolved on first compile).
 	let vBin = ''
 	const vBackendUrl =
@@ -261,6 +271,24 @@ export function swelte(options: SweltePluginOptions = {}): Plugin {
 				const typesDir = join(genDir, 'types')
 				mkdirSync(genDir, { recursive: true })
 				mkdirSync(typesDir, { recursive: true })
+				const npmVExports = materializeNpmV(root, genDir)
+				npmVBySpecifier = new Map(npmVExports.map((item) => [item.specifier, item]))
+				const serverNpmModules = npmVExports
+					.filter((item) => item.target === 'server')
+					.map((item) => item.moduleImport)
+				const rejectServerNpmImport = (src: string, file: string): void => {
+					for (const match of src.matchAll(/^\s*import\s+([^\s,]+)/gm)) {
+						const imported = match[1]
+						const server = serverNpmModules.find(
+							(module) => imported === module || imported.startsWith(`${module}.`)
+						)
+						if (server) {
+							throw new Error(
+								`[swelte] ${file}: universal WASM code imports server-only npm V module ${server}`
+							)
+						}
+					}
+				}
 				const warnings: string[] = []
 				const dispatched: { route: string; mod: string; prefix: string }[] = []
 				// Room-mode SSE (future.md #4) or @[ws] (future.md #3) present
@@ -638,6 +666,82 @@ ${list(st.fields, (fld) => `\t${fld.name}${fld.optional ? '?' : ''}: ${fld.tstyp
 					return out
 				}
 
+				function rejectReservedNpmModule(src: string, file: string): void {
+					const declared = /^\s*module\s+([A-Za-z_][A-Za-z0-9_]*)/m.exec(src)?.[1]
+					if (declared?.startsWith('npm_')) {
+						throw new Error(
+							`[swelte] ${file}: module names beginning with npm_ are reserved for npm V dependencies`
+						)
+					}
+				}
+
+				// npm V packages use their npm specifier on the TS side and a
+				// deterministic npm_* module on the V side. Server-only modules are
+				// staged for native imports but deliberately have no browser stub.
+				const wantedNpmTypes = new Set<string>()
+				const wantedNpmStubs = new Set<string>()
+				for (const item of npmVExports) {
+					if (item.target === 'server') continue
+					const src = readFileSync(item.entryFile, 'utf8')
+					const parsed = parseVFile(src, extraAttrs)
+					const rpcFns = parsed.filter((fn) => fn.attr === 'rpc')
+					for (const fn of rpcFns) validateRpcFn(`${item.specifier} (${item.entryFile})`, fn)
+					const unsupported = parsed.find((fn) => fn.attr !== 'rpc')
+					if (unsupported) {
+						throw new Error(
+							`[swelte] ${item.specifier}: @[${unsupported.attr}] ${unsupported.name} is not valid in an npm universal module — expose browser calls with @[rpc]`
+						)
+					}
+					if (rpcFns.length === 0) continue
+					const mod = `${item.namespace}/${item.modulePath.replaceAll('.', '/')}`
+					wantedNpmTypes.add(resolve(emitTypes('npm', mod, src, rpcFns)))
+					const generated = join(genDir, 'generated', 'npm', `${mod}.js`)
+					mkdirSync(dirname(generated), { recursive: true })
+					writeIfChanged(generated, jsWasmFor(isBuild, mod, rpcFns))
+					wantedNpmStubs.add(resolve(generated))
+					const sources = listVFiles(item.sourceDir)
+					for (const source of sources) {
+						rejectServerNpmImport(readFileSync(source, 'utf8'), item.specifier)
+					}
+					const outWasm = join(devWasmDirFor(root), `${mod}.wasm`)
+					let fresh = existsSync(outWasm)
+					if (fresh) {
+						const builtAt = statSync(outWasm).mtimeMs
+						fresh = sources.every((file) => statSync(file).mtimeMs <= builtAt)
+					}
+					if (!fresh) {
+						try {
+							compileNpmVModuleWasm(
+								item.moduleImport,
+								rpcFns,
+								outWasm,
+								sources,
+								item.specifier,
+								genDir
+							)
+						} catch (error) {
+							throw new Error(`WASM compile failed: ${(error as Error).message}`)
+						}
+					}
+				}
+				const pruneNpmArtifacts = (dir: string, wanted: Set<string>, suffix: string): void => {
+					if (!existsSync(dir)) return
+					const walk = (current: string) => {
+						for (const item of readdirSync(current, { withFileTypes: true })) {
+							const file = join(current, item.name)
+							if (item.isDirectory()) {
+								walk(file)
+								if (readdirSync(file).length === 0) rmSync(file, { recursive: true })
+							} else if (item.name.endsWith(suffix) && !wanted.has(resolve(file))) {
+								rmSync(file)
+							}
+						}
+					}
+					walk(dir)
+				}
+				pruneNpmArtifacts(join(typesDir, 'npm'), wantedNpmTypes, '.d.ts')
+				pruneNpmArtifacts(join(genDir, 'generated', 'npm'), wantedNpmStubs, '.js')
+
 				// Layout (spec v-imports.md §2): routes → server fetch stubs,
 				// lib → isomorphic WASM stubs. Types land under types/routes|lib so
 				// the *.v resolveId/load below can re-export them 1:1.
@@ -684,6 +788,7 @@ ${list(st.fields, (fld) => `\t${fld.name}${fld.optional ? '?' : ''}: ${fld.tstyp
 						const verbFns = fns.filter((x) => x.attr !== 'rpc')
 						const mod = modulePath(routesAbs, f)
 						const rel = relPosix(routesAbs, f)
+						rejectReservedNpmModule(src, `${routesDir}/${rel}`)
 						// V+TS plugins: the parser only emits core attrs + plugin-claimed
 						// attrs (extraAttrs), so every fn here is known. Dispatch
 						// plugin-claimed fns to the owning plugin's validate(); core
@@ -1144,9 +1249,11 @@ ${list(st.fields, (fld) => `\t${fld.name}${fld.optional ? '?' : ''}: ${fld.tstyp
 					for (const f of listVFiles(libAbs)) {
 						const src = readFileSync(f, 'utf8')
 						const mod = modulePath(libAbs, f)
+						rejectReservedNpmModule(src, `${libDir}/${mod}.v`)
 						// #lib/backend convention (spec §7): backend-only, no stub, no
 						// browser import — record types for V-to-V reference only.
 						if (isBackendMod(mod)) continue
+						rejectServerNpmImport(src, `${libDir}/${mod}.v`)
 						// Roadmap 16-remainder: only #routes/*.v may import backend.
 						// A #lib/*.v (non-backend) file importing backend fails here
 						// (generate-time, file+line) — the resolveId guard covers
@@ -1196,7 +1303,7 @@ ${list(st.fields, (fld) => `\t${fld.name}${fld.optional ? '?' : ''}: ${fld.tstyp
 							} catch {
 								/* missing */
 							}
-							if (!fresh) compileLibWasm(src, mod, outWasm, `${libDir}/${mod}.v`)
+							if (!fresh) compileLibWasm(src, mod, outWasm, `${libDir}/${mod}.v`, genDir)
 						} catch (e) {
 							throw new Error(`WASM compile failed: ${(e as Error).message}`)
 						}
@@ -1253,6 +1360,15 @@ ${list(st.fields, (fld) => `\t${fld.name}${fld.optional ? '?' : ''}: ${fld.tstyp
 							collect('lib', mod)
 						}
 					}
+					for (const item of npmVExports) {
+						if (item.target !== 'universal') continue
+						const src = readFileSync(item.entryFile, 'utf8')
+						if (!parseVFile(src, extraAttrs).some((fn) => fn.attr === 'rpc')) continue
+						collect(
+							'npm',
+							`${item.namespace}/${item.modulePath.replaceAll('.', '/')}`
+						)
+					}
 					const emit = (spec: string, sub: string, mod: string) => {
 						const body = bodies.get(`${sub}/${mod}`)
 						if (!body) return
@@ -1267,6 +1383,14 @@ ${list(st.fields, (fld) => `\t${fld.name}${fld.optional ? '?' : ''}: ${fld.tstyp
 					for (const key of [...bodies.keys()].filter((k) => k.startsWith('lib/'))) {
 						emit(`#lib/${key.slice('lib/'.length)}.v`, 'lib', key.slice('lib/'.length))
 					}
+					for (const item of npmVExports) {
+						if (item.target !== 'universal') continue
+						emit(
+							item.specifier,
+							'npm',
+							`${item.namespace}/${item.modulePath.replaceAll('.', '/')}`
+						)
+					}
 					// Roadmap §17: exact-key `./<base>.v` aliases — only when the
 					// basename is UNIQUE across the whole project (routes + lib).
 					// Ambiguous basenames (`+page.v` ×3) and sub-path relatives
@@ -1276,6 +1400,7 @@ ${list(st.fields, (fld) => `\t${fld.name}${fld.optional ? '?' : ''}: ${fld.tstyp
 						const baseCount = new Map<string, number>()
 						const baseBody = new Map<string, { spec: string; sub: string; mod: string }>()
 						for (const key of bodies.keys()) {
+							if (key.startsWith('npm/')) continue
 							const mod = key.includes('/') ? key.slice(key.indexOf('/') + 1) : key
 							const base = mod.includes('/') ? mod.slice(mod.lastIndexOf('/') + 1) : mod
 							baseCount.set(base, (baseCount.get(base) ?? 0) + 1)
@@ -1607,6 +1732,7 @@ export declare const dev: boolean
 						for (const e of readdirSync(genDir, { withFileTypes: true })) {
 							if (!e.isDirectory()) continue
 							if (SWELTE_GEN_CORE_DIRS.includes(e.name)) continue
+							if (e.name.startsWith('npm_')) continue
 							if (ADAPTER_OWNED_DIRS.has(e.name)) continue
 							if (e.name.startsWith('.')) continue
 							if (!wanted.has(e.name)) {
@@ -1749,6 +1875,7 @@ export declare const dev: boolean
 			// Production builds must regenerate (configResolved may run in a
 			// different context; never reuse a stale .swelte/ from dev).
 			usedLibFiles.clear()
+			usedNpmVExports.clear()
 			return generate(activeRoot || process.cwd())
 		},
 		transformIndexHtml(html) {
@@ -1803,6 +1930,27 @@ export declare const dev: boolean
 		},
 		async resolveId(source, importer, _opts) {
 			if (!importer) return null
+			const npmVRef = parseNpmVSpecifier(source)
+			if (npmVRef) {
+				if (npmVBySpecifier.size === 0) {
+					const root = activeRoot || process.cwd()
+					const found = materializeNpmV(root, resolve(root, outDir))
+					npmVBySpecifier = new Map(found.map((item) => [item.specifier, item]))
+				}
+				const item = npmVBySpecifier.get(source)
+				if (!item) {
+					throw new Error(
+						`[swelte] npm V export '${source}' is not declared by ${npmVRef.packageName} in package.json swelte.v.exports`
+					)
+				}
+				if (item.target === 'server') {
+					throw new Error(
+						`[swelte] ${source} is server-only and cannot be imported by browser/TypeScript code; use 'import ${item.moduleImport}' from application V code`
+					)
+				}
+				usedNpmVExports.add(source)
+				return `\0swelte:npm-v:${encodeURIComponent(source)}`
+			}
 			// New: direct `.v` imports (spec §4). Resolve `#routes/x.v`,
 			// `#lib/y.v`, and relative `./x.v` to absolute file paths under
 			// the virtual prefix; load() codegens the stub.
@@ -1912,6 +2060,19 @@ export declare const dev: boolean
 			return null // legacy ./$types / self / $ssapi / $csapi removed — import the .v file.
 		},
 		async load(id) {
+			if (id.startsWith('\0swelte:npm-v:')) {
+				const specifier = decodeURIComponent(id.slice('\0swelte:npm-v:'.length))
+				const item = npmVBySpecifier.get(specifier)
+				if (!item || item.target !== 'universal') return null
+				const src = readFileSync(item.entryFile, 'utf8')
+				const fns = parseVFile(src, extraAttrs).filter((fn) => fn.attr === 'rpc')
+				if (fns.length === 0) return 'export {}; // swelte: no @[rpc] fns in this npm V export'
+				return jsWasmFor(
+					isBuild,
+					`${item.namespace}/${item.modulePath.replaceAll('.', '/')}`,
+					fns
+				)
+			}
 			// Codegen for direct `.v` imports (spec §4). The id is the virtual
 			// `\0swelte:v:<abs path>` minted in resolveId above.
 			if (!id.startsWith('\0swelte:v:')) return null
@@ -1976,7 +2137,11 @@ export declare const dev: boolean
 			// Root-anchored (never cwd-relative): language-server and
 			// non-cwd roots resolve through server.config.root.
 			const root = server.config.root
-			const watch = [resolve(root, routesDir), resolve(root, libDir)]
+			const watch = [
+				resolve(root, routesDir),
+				resolve(root, libDir),
+				...[...npmVBySpecifier.values()].map((item) => item.sourceDir),
+			]
 			server.watcher.add(watch)
 			const regen = (file: string) => {
 				if (!file.endsWith('.v')) return
@@ -2138,7 +2303,7 @@ export declare const dev: boolean
 			// the wasm `emitFile` lands too late for the bundle scan to see it).
 			let wasmAsset: string | null = null
 			const libAbs = resolve(root, libDir)
-			if (existsSync(libAbs)) {
+			if (existsSync(libAbs) || usedNpmVExports.size > 0) {
 				// Tree-shaking: only bundle #lib/ files actually imported
 				// by client code (recorded in resolveId). Vite's own
 				// tree-shaking then drops unused exports within them —
@@ -2147,21 +2312,31 @@ export declare const dev: boolean
 				const usedSet = new Set([...usedLibFiles].map(usedNorm))
 				const mods: string[] = []
 				const bodies: string[] = []
-				for (const f of listVFiles(libAbs)) {
-					if (!usedSet.has(usedNorm(f))) continue
-					const mod = modulePath(libAbs, f)
-					if (isBackendMod(mod)) continue
-					const src = readFileSync(f, 'utf8')
-					if (!parseVFile(src, extraAttrs).some((x) => x.attr === 'rpc')) continue
-					mods.push(mod)
-					bodies.push(src)
+				if (existsSync(libAbs)) {
+					for (const f of listVFiles(libAbs)) {
+						if (!usedSet.has(usedNorm(f))) continue
+						const mod = modulePath(libAbs, f)
+						if (isBackendMod(mod)) continue
+						const src = readFileSync(f, 'utf8')
+						if (!parseVFile(src, extraAttrs).some((x) => x.attr === 'rpc')) continue
+						mods.push(mod)
+						bodies.push(src)
+					}
 				}
-				if (mods.length > 0) {
+				const npmItems = [...usedNpmVExports]
+					.map((specifier) => npmVBySpecifier.get(specifier))
+					.filter((item): item is NpmVExport => item?.target === 'universal')
+					.sort((a, b) => a.specifier.localeCompare(b.specifier))
+				if (mods.length > 0 || npmItems.length > 0) {
 					const seenFns = new Set<string>()
 					const parts: string[] = []
+					const bundleImports = new Set<string>()
 					for (let i = 0; i < mods.length; i++) {
 						const mod = mods[i]
 						const src = bodies[i]
+						for (const match of src.matchAll(/^\s*import\s+(.+)$/gm)) {
+							bundleImports.add(`import ${match[1].trim()}`)
+						}
 						for (const fn of parseVFile(src, extraAttrs).filter((x) => x.attr === 'rpc')) {
 							if (seenFns.has(fn.name))
 								throw new Error(`WASM bundle: duplicate fn ${fn.name} (in ${mod}.v)`)
@@ -2181,7 +2356,7 @@ export declare const dev: boolean
 							...new Set(
 								[...src.matchAll(/^\s*import\s+([^\n;]+)/gm)]
 									.flatMap((m) => m[1].split(','))
-									.map((p) => p.trim().split(/\s+/).pop() as string)
+									.map((p) => p.trim().split(/\s+/)[0])
 									.map((mm) => mm.split('.')[0])
 									.filter((top) => WASM_KNOWN_BROKEN.has(top))
 							),
@@ -2198,6 +2373,7 @@ export declare const dev: boolean
 						parts.push(
 							src
 								.replace(/^\s*module\s+\S+.*$/m, '')
+								.replace(/^\s*import\s+.+$/gm, '')
 								.replace(/@\[([^\]]*)\]\s*/g, (_m, attrs: string) => {
 									const keep = attrs
 										.split(';')
@@ -2207,8 +2383,23 @@ export declare const dev: boolean
 								})
 						)
 					}
+					for (const item of npmItems) {
+						const src = readFileSync(item.entryFile, 'utf8')
+						const fns = parseVFile(src, extraAttrs).filter((fn) => fn.attr === 'rpc')
+						for (const fn of fns) {
+							if (seenFns.has(fn.name))
+								throw new Error(
+									`WASM bundle: duplicate fn ${fn.name} (in ${item.specifier})`
+								)
+							seenFns.add(fn.name)
+						}
+						bundleImports.add(npmVWasmImport(item.moduleImport))
+						parts.push(npmVWasmWrapper(item.moduleImport, fns))
+					}
 					const entry = [
 						`module main
+
+${[...bundleImports].sort().join('\n')}
 
 @[export: 'swelte_alloc']
 pub fn swelte_alloc(n int) &u8 {
@@ -2235,13 +2426,22 @@ pub fn swelte_alloc(n int) &u8 {
 							join(resolve(root, outDir), 'app_lib.wasm.map'),
 							JSON.stringify(
 								{
-									modules: mods.map((mod, i) => ({
-										mod,
-										file: `${libDir}/${mod}.v`,
-										functions: parseVFile(bodies[i], extraAttrs)
-											.filter((x) => x.attr === 'rpc')
-											.map((f) => f.name),
-									})),
+									modules: [
+										...mods.map((mod, i) => ({
+											mod,
+											file: `${libDir}/${mod}.v`,
+											functions: parseVFile(bodies[i], extraAttrs)
+												.filter((x) => x.attr === 'rpc')
+												.map((f) => f.name),
+										})),
+										...npmItems.map((item) => ({
+											mod: item.moduleImport,
+											file: item.specifier,
+											functions: parseVFile(readFileSync(item.entryFile, 'utf8'), extraAttrs)
+												.filter((fn) => fn.attr === 'rpc')
+												.map((fn) => fn.name),
+										})),
+									],
 								},
 								null,
 								2

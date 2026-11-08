@@ -29,7 +29,9 @@ npm install @swelte/ssr-qjs @swelte/mcp @swelte/vvm @swelte/plus
 
 - `src/routes/` — server RPC (`.v` = route handler, `#routes/...` import → fetch)
 - `src/lib/` — isomorphic lib (`.v` = local compute, `#lib/...` import → WASM call; `backend/` subdirs (or `*_backend.v`) are backend-only)
-- `.swelte/` — generated: `types/routes|lib/**` projected from V signatures + `generated/` runtime stubs + `v-shim.d.ts`
+- npm V libraries — TS imports `@scope/package/v/path.v`; V imports the
+  corresponding `npm_scope_package.path` module materialized in `.swelte/`
+- `.swelte/` — generated: `types/routes|lib|npm/**` projected from V signatures + `generated/` runtime stubs + staged npm V modules + `v-shim.d.ts`
 
 ```text
 browser (:5174 dev) ── routes/HMR (Vite) ───┐
@@ -66,6 +68,7 @@ Built behavior, user-facing only:
 - [SSR](https://github.com/eddow/swelte/blob/master/docs/ssr.md) — ownership, request path, `@[load]`
   cascade, `+error` contract, measured budgets, gate
 - [RPC](https://github.com/eddow/swelte/blob/master/docs/rpc.md) — `.v` imports, attributes, transport
+- [npm V libraries](https://github.com/eddow/swelte/blob/master/docs/npm-v-libraries.md) — publish and consume reusable native/WASM V modules through npm
 - [Types](https://github.com/eddow/swelte/blob/master/docs/types.md) — V → TS projection, codegen
 - [Errors](https://github.com/eddow/swelte/blob/master/docs/errors.md) — error envelope, `SwelteRpcError`, SPA-first rule
 - [Config](https://github.com/eddow/swelte/blob/master/docs/config.md) — `svelte.config.js` (`swelte` key) + `SWELTE_*` env knobs, routing, per-route types

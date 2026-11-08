@@ -12,13 +12,16 @@ Swelte is V + Svelte 5. V is the compute engine (native server binary, WASM clie
 ```text
 src/routes/**/*.v   — server RPC (file path is the route, `#routes/...` import → fetch)
 src/lib/**/*.v      — isomorphic lib (no route, `#lib/...` import → local WASM call)
-.swelte/            — generated: types/routes|lib/** + generated/ stubs + v-shim.d.ts
+node_modules V libs — TS: `@scope/pkg/v/x.v`; V: `npm_scope_pkg.x`
+.swelte/            — generated: types/routes|lib|npm/** + staged npm V + stubs
 dist/server         — single self-contained prod binary + dist/ static
 ```
 
 `src/routes/+page.v` → `/`, `src/routes/api/greet.v` → `/api/greet`,
 `src/routes/users/[id].v` → `/users/[id]`, `src/routes/files/[...rest].v` → `/files/[...rest]`.
 `src/lib/**/backend/*.v` (or `*_backend.v`) is backend-only — a build error from browser code.
+Npm packages opt in with `package.json` `swelte.v.exports`; Swelte stages their
+modules in the reserved `.swelte/npm_*` namespace. See `docs/npm-v-libraries.md`.
 
 ## Commands
 

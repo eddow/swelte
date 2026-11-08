@@ -73,7 +73,9 @@ so idle `dev` stays quiet (no phantom HMR), and the watcher ignores
 
 1. `generate()` (types must be fresh).
 2. `v test` on every dir under `src/lib` + `src/routes` holding `.v`
-   files (native, no browser — `*_test.v` files).
+   files (native, no browser — `*_test.v` files). The generated `.swelte`
+   module root is added to V's lookup path so tests resolve npm V modules
+   exactly like dev/build.
 3. Contract check: every `.d.ts` fn must exist in its generated stub
    JS (types↔stubs parity), plus `tsc` over `types/`.
 4. Shape snapshot: every `.d.ts` projection recorded in
