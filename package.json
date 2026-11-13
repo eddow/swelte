@@ -11,10 +11,12 @@
     "dev": "npm run dev --workspace=examples/something",
     "build": "npm run build --workspace=examples/something",
     "build:engine": "npm run build --workspace=@swelte/core",
-    "test": "npm run test:unit && npm run test:install && npm run test:examples",
+    "test": "npm run test:unit && npm run test:install && npm run test:dogfood && npm run test:examples",
     "test:unit": "npm run test --workspace=@swelte/core",
     "test:examples": "npm run test:full --workspace=examples/tests",
     "test:install": "node scripts/test-install.mjs",
+    "test:dogfood": "node scripts/test-dogfood.mjs",
+    "test:postgres": "node scripts/test-postgres.mjs",
     "version:sync": "node scripts/sync-version.mjs",
     "version:patch": "node scripts/sync-version.mjs patch",
     "version:minor": "node scripts/sync-version.mjs minor",
@@ -25,6 +27,7 @@
   },
   "devDependencies": {
     "@biomejs/biome": "^2.6.4",
+    "@sveltejs/package": "^2.5.8",
     "typescript": "^5.0.0"
   }
 }

@@ -6,6 +6,7 @@
 // stay build errors in generate() only (diagnostics warns types/orphans/clashes).
 import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { join, resolve, sep } from 'node:path'
+import { validateNpmVExports } from '../vite/npm-v.js'
 import { parseStructs, parseVFile } from '../vite/parse.js'
 import { loadConfig } from './config.js'
 import { isBackendMod } from './paths.js'
@@ -64,8 +65,16 @@ function relPosix(abs: string, f: string): string {
 		.join('/')
 }
 
-/** Collect warnings for a project root (mirrors generate() warn sites). */
-export async function collectDiagnostics(root: string): Promise<Diagnostic[]> {
+/** Collect warnings for a project root (mirrors generate() warn sites).
+ * With `{ lib: true }`, additionally validates the library schema from
+ * `docs/libraries.md` (no side effects): `swelte.v.exports` rules plus
+ * `exports`/`files` packaging coverage and the no-`src/routes`-leak rule.
+ * Library-schema violations surface as `lib-*` diagnostics (warnings, same
+ * as every other `check` entry — never build errors). */
+export async function collectDiagnostics(
+	root: string,
+	opts: { lib?: boolean } = {}
+): Promise<Diagnostic[]> {
 	const cfg = await loadConfig(root)
 	const routesDir = cfg.routesDir
 	const libDir = cfg.libDir
@@ -75,6 +84,7 @@ export async function collectDiagnostics(root: string): Promise<Diagnostic[]> {
 	const warn = (file: string, kind: string, message: string, line = 1) => {
 		out.push({ file, line, kind, message })
 	}
+	if (opts.lib) out.push(...collectLibDiagnostics(root))
 	if (existsSync(routesAbs)) {
 		for (const f of listVFiles(routesAbs)) {
 			const rel = relPosix(routesAbs, f)
@@ -354,6 +364,126 @@ export async function collectDiagnostics(root: string): Promise<Diagnostic[]> {
 						)
 				}
 			}
+		}
+	}
+	return out.sort((a, b) => a.file.localeCompare(b.file) || a.kind.localeCompare(b.kind))
+}
+
+interface LibPackageJson {
+	[K: string]: unknown
+	name?: unknown
+	files?: unknown
+	exports?: unknown
+	swelte?: {
+		v?: {
+			exports?: Record<string, { source?: unknown; entry?: unknown; target?: unknown }>
+		}
+	}
+}
+
+/** Library-schema checks (`swelte check --lib`, see `docs/libraries.md`).
+ * Pure reads over `package.json` + the declared V sources: no staging, no
+ * tarball, no build. Every violation is a `lib-*` warning. */
+export function collectLibDiagnostics(root: string): Diagnostic[] {
+	const out: Diagnostic[] = []
+	const warn = (file: string, kind: string, message: string, line = 1) => {
+		out.push({ file, line, kind, message })
+	}
+	const abs = resolve(root)
+	let pkg: LibPackageJson
+	try {
+		pkg = JSON.parse(readFileSync(join(abs, 'package.json'), 'utf8')) as LibPackageJson
+	} catch (error) {
+		warn('package.json', 'lib-manifest', `cannot read package.json: ${(error as Error).message}`)
+		return out.sort((a, b) => a.file.localeCompare(b.file) || a.kind.localeCompare(b.kind))
+	}
+	// 1. `swelte.v.exports` — same rules as the consumer path (shared validator).
+	let validated: {
+		exportKey: string
+		specifier: string
+		target: string
+		sourceDir: string
+		entryFile: string
+	}[] = []
+	try {
+		validated = validateNpmVExports(abs, pkg as never)
+	} catch (error) {
+		warn(
+			'package.json',
+			'lib-exports',
+			(error as Error).message.replace(/^\[swelte\] /, 'swelte.v.exports: ')
+		)
+		return out.sort((a, b) => a.file.localeCompare(b.file) || a.kind.localeCompare(b.kind))
+	}
+	if (!pkg.swelte?.v?.exports || Object.keys(pkg.swelte.v.exports).length === 0) {
+		warn('package.json', 'lib-exports', 'no swelte.v.exports — library publishes no V modules')
+	}
+	// 2. `exports` coverage: Svelte entries + package.json passthrough + ./v/*.v.
+	const exportsMap =
+		pkg.exports && typeof pkg.exports === 'object' && !Array.isArray(pkg.exports)
+			? (pkg.exports as Record<string, unknown>)
+			: null
+	if (!exportsMap) {
+		warn(
+			'package.json',
+			'lib-exports',
+			'missing exports map (expected ".", "./package.json" and per-file Svelte entries)'
+		)
+	} else {
+		if (!('./package.json' in exportsMap))
+			warn('package.json', 'lib-exports', 'exports misses "./package.json" passthrough')
+		for (const v of validated) {
+			const tsSpecifier = `${typeof pkg.name === 'string' ? pkg.name : '<name>'}/v/${v.exportKey.slice(2)}`
+			if (!(v.specifier in exportsMap) && !(`./v/${v.exportKey.slice(2)}` in exportsMap))
+				warn(
+					'package.json',
+					'lib-exports',
+					`exports misses "${`./v/${v.exportKey.slice(2)}`}" for V export ${v.exportKey} (TS imports ${tsSpecifier})`
+				)
+		}
+	}
+	// 3. `files`: Svelte output + V sources in, dogfood out.
+	const files = Array.isArray(pkg.files)
+		? pkg.files.filter((f): f is string => typeof f === 'string')
+		: null
+	if (!files) {
+		warn(
+			'package.json',
+			'lib-files',
+			'missing files allowlist (expected dist + src/lib V sources, never src/routes)'
+		)
+	} else {
+		const coversDist = files.some((f) => f === 'dist' || f.startsWith('dist/'))
+		if (!coversDist)
+			warn('package.json', 'lib-files', 'files misses "dist" (svelte-package output)')
+		for (const v of validated) {
+			const rel = v.sourceDir
+				.slice(abs.length + 1)
+				.split(sep)
+				.join('/')
+			const covered = files.some(
+				(f) =>
+					rel === f ||
+					rel.startsWith(`${f.replace(/\/\*\*\/\*\.v$/, '').replace(/\/\*\*$/, '')}/`) ||
+					f.includes('.v')
+			)
+			if (!covered)
+				warn(
+					'package.json',
+					'lib-files',
+					`files misses V source "${rel}" for export ${v.exportKey}`
+				)
+		}
+		if (
+			files.some(
+				(f) => f === 'src/routes' || f.startsWith('src/routes/') || f === 'src' || f === 'src/'
+			)
+		) {
+			warn(
+				'package.json',
+				'lib-routes-leak',
+				'files would publish src/routes dogfood (demo/test only — never published)'
+			)
 		}
 	}
 	return out.sort((a, b) => a.file.localeCompare(b.file) || a.kind.localeCompare(b.kind))

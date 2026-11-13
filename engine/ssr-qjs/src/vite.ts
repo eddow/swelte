@@ -10,6 +10,8 @@ import { swelte as coreSwelte } from '@swelte/core/vite'
 import type { Plugin } from 'vite'
 
 export interface SsrQjsOptions {
+	compat?: 'none' | 'sveltekit'
+	actionQuery?: 'legacy' | 'named'
 	vBackendUrl?: string
 	routesDir?: string
 	libDir?: string

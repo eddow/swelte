@@ -7,6 +7,8 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 import type { SvelteConfig as SvelteBaseConfig } from '@sveltejs/vite-plugin-svelte'
 
 export interface SwelteOptions {
+	compat?: 'none' | 'sveltekit'
+	actionQuery?: 'legacy' | 'named'
 	name?: string
 	routesDir?: string
 	libDir?: string
@@ -145,6 +147,8 @@ function normalize(raw: SwelteOptions | null | undefined): ResolvedSwelteOptions
 	const r = (raw ?? {}) as SwelteOptions
 	return {
 		name: String(r.name ?? ''),
+		compat: r.compat === 'sveltekit' ? 'sveltekit' : 'none',
+		actionQuery: r.actionQuery ?? (r.compat === 'sveltekit' ? 'named' : 'legacy'),
 		routesDir: String(r.routesDir ?? DEFAULTS.routesDir),
 		libDir: String(r.libDir ?? DEFAULTS.libDir),
 		outDir: String(r.outDir ?? DEFAULTS.outDir),
@@ -442,8 +446,11 @@ export function renderHarness(
 			'\t\t\treturn ch',
 			'\t\t}',
 			'\t\temit := fn [job] (e string) bool {',
-			'\t\t\tjob.pch <- e',
-			'\t\t\treturn true',
+			'\t\t\tselect {',
+			'\t\t\t\t_ := <-job.done { return false }',
+			'\t\t\t\tjob.pch <- e { return true }',
+			'\t\t\t}',
+			'\t\t\treturn false',
 			'\t\t}',
 			'\t\troutes.swelte_sse_room_for(job.prefix, job.qualifier, job.req, sub, emit) or {}',
 			'\t\tfor room, id in subs {',
@@ -565,8 +572,22 @@ export function renderHarness(
 		} else src += `\n${inject}`
 	}
 	for (const frag of fragments ?? []) {
-		if (frag.imports && src.includes('import veb'))
-			src = src.replace('import veb', `import veb\n${frag.imports}`)
+		if (frag.imports && src.includes('import veb')) {
+			const existing = new Set(
+				[...src.matchAll(/^import\s+(.+)$/gm)].map((match) => match[1].trim())
+			)
+			const imports = frag.imports
+				.split('\n')
+				.filter((line) => {
+					const spec = line.match(/^\s*import\s+(.+)$/)?.[1].trim()
+					if (!spec) return line.trim() !== ''
+					if (existing.has(spec)) return false
+					existing.add(spec)
+					return true
+				})
+				.join('\n')
+			if (imports) src = src.replace('import veb', `import veb\n${imports}`)
+		}
 		if (frag.main) {
 			const anchor = 'fn main() {'
 			if (src.includes(anchor)) src = src.replace(anchor, `${frag.main}\n${anchor}`)
@@ -619,6 +640,8 @@ export declare const navigating: SwelteStore<SwelteNavigatingState | null>
 export declare const updated: SwelteStore<boolean>
 export declare function goto(url: string, opts?: unknown): Promise<void>
 export declare function preloadData(url: string): Promise<unknown>
+export declare function invalidate(tag: string | URL): Promise<void>
+export declare function invalidateAll(): Promise<void>
 export declare function preloadCode(url: string): Promise<unknown>
 export declare function pushState(url: string, state?: unknown): Promise<void>
 export declare function replaceState(url: string, state?: unknown): Promise<void>

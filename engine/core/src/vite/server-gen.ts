@@ -22,8 +22,10 @@ export function doubleClaimCheck(
 		pairs.push([`${inDir(other)}.v`, `${inDir(other)}.svelte`])
 		if (d !== '') pairs.push([`${d}.v`, `${d}.svelte`])
 	} else {
-		pairs.push([`${inDir('index')}.v`, `${inDir('index')}.svelte`])
-		pairs.push([`${inDir('+page')}.v`, `${inDir('+page')}.svelte`])
+		// A flat /events leaf competes with events/+page, not with the
+		// surrounding directory's root page (which serves a different URL).
+		pairs.push([`${mod}/index.v`, `${mod}/index.svelte`])
+		pairs.push([`${mod}/+page.v`, `${mod}/+page.svelte`])
 	}
 	const others: string[] = []
 	const selfV = `${mod}.v`
@@ -387,7 +389,8 @@ export function emitServerGen(
 	noCsrRoutes: string[] = [],
 	routeLimits: { route: string; limits: RouteLimits }[] = [],
 	serializedHeaders: { route: string; headers: string[] }[] = [],
-	wsMods: Set<string> = new Set()
+	wsMods: Set<string> = new Set(),
+	lifecycle: { compat?: boolean; namedActions?: boolean; pages?: string[] } = {}
 ): string {
 	/** Dynamic route arms (section 8): static beats dynamic; among dynamics,
 	 * fewer [segs] first, [...rest] catch-all last (stable sort). */
@@ -411,6 +414,9 @@ module routes
 
 import json
 import net.urllib
+
+pub fn swelte_compat() bool { return ${lifecycle.compat === true} }
+pub fn swelte_named_actions() bool { return ${lifecycle.namedActions === true} }
 
 fn swelte_unescape(s string) string {
 return urllib.path_unescape(s) or { s }
@@ -501,6 +507,20 @@ cookies []SwelteCookie
 body string
 body_bytes []u8
 is_bytes bool
+// Native response streaming: callback writes raw bytes and returns false after
+// disconnect, idle timeout or an oversized chunk. Headers precede the producer.
+stream fn (SwelteStream) ! = unsafe { nil }
+}
+
+pub struct SwelteStream {
+pub:
+	write fn ([]u8) bool @[required]
+	// Closed by the transport on disconnect, idle timeout or completion.
+	cancelled chan bool
+}
+
+pub fn swelte_stream(headers map[string]string, producer fn (SwelteStream) !) SwelteResponse {
+	return SwelteResponse{headers: headers, stream: producer}
 }
 
 // Page-load result envelope (P0 item 2): value-only loads keep
@@ -513,6 +533,8 @@ status int = 200
 headers map[string]string
 cookies []SwelteCookie
 body string
+levels map[string]string
+level_order []string
 }
 
 // Constructors (sugar over the struct literal).
@@ -540,6 +562,20 @@ pub:
 	message string
 }
 
+pub struct SwelteRedirect {
+pub:
+	status int = 303
+	location string
+}
+pub fn (e SwelteRedirect) msg() string { return e.location }
+pub fn (e SwelteRedirect) code() int { return e.status }
+pub fn swelte_redirect_error(location string, status int) SwelteRedirect {
+	return SwelteRedirect{if status >= 300 && status < 400 { status } else { 303 }, location}
+}
+pub fn swelte_error_response(req SwelteRequest, err IError) SwelteResponse {
+	return swelte_err_typed(req.path, '', err)
+}
+
 pub fn (e SwelteError) msg() string {
 	return e.message
 }
@@ -554,6 +590,7 @@ pub fn swelte_error(status int, message string) SwelteError {
 }
 
 fn swelte_err_typed(path string, fn_name string, err IError) SwelteResponse {
+	if err is SwelteRedirect { return swelte_redirect(err.location, err.status) }
 	st := err.code()
 	if st >= 400 {
 		return SwelteResponse{ status: st, headers: {'Content-Type': 'application/json'}, body: '{"error":' + json.encode(err.msg()) + ',"fn":' + json.encode(fn_name) + ',"path":' + json.encode(path) + '}' }
@@ -566,11 +603,12 @@ fn swelte_err_typed(path string, fn_name string, err IError) SwelteResponse {
 // envelope (harness renders +error with that status); plain throws keep
 // the old default envelope (200 + empty body).
 fn swelte_load_err_typed(err IError) SwelteLoadResult {
+	if err is SwelteRedirect { return SwelteLoadResult{status: err.status, headers: {'Location': err.location}, body: '{}'} }
 	st := err.code()
 	if st >= 400 {
 		return SwelteLoadResult{ status: st, body: '{"status":' + st.str() + ',"message":' + json.encode(err.msg()) + '}' }
 	}
-	return SwelteLoadResult{ body: '{}' }
+	return SwelteLoadResult{ status: 500, body: '{"status":500,"message":' + json.encode(err.msg()) + '}' }
 }
 
 pub fn swelte_bytes(data []u8, content_type string) SwelteResponse {
@@ -889,6 +927,24 @@ pub fn swelte_sse_room_for(prefix string, qualifier string, req SwelteRequest, s
 		`\treturn error('no load route for prefix: ' + prefix)
 }
 `,
+		`pub fn swelte_guard_for(prefix string, req SwelteRequest) !SwelteRequest {`,
+		...dispatched.map(
+			(d) =>
+				`if prefix == ${vJsonStr(d.prefix)} { mut input := req\n _, params := swelte_match_route(${vJsonStr(d.route)}, req.path)\n input.params = params.clone()\n return ${d.prefix}swelte_guard(input) }`
+		),
+		`return error('no route guard')\n}`,
+		`pub fn swelte_stream_meta(prefix string, req SwelteRequest) !SwelteLoadResult {`,
+		...dispatched.map(
+			(d) =>
+				`if prefix == ${vJsonStr(d.prefix)} { return ${d.prefix}swelte_finish(req, SwelteLoadResult{}) }`
+		),
+		`return error('no stream metadata')\n}`,
+		`pub fn swelte_page_identity(prefix string) (string, string) {`,
+		...dispatched.map(
+			(d) =>
+				`if prefix == ${vJsonStr(d.prefix)} { return ${vJsonStr(`/${d.mod.replace(/(^|\/)(\+page|index)$/, '').replace(/\/$/, '')}`)}, ${vJsonStr(d.route)} }`
+		),
+		`return '', ''\n}`,
 		// Page-route resolver for the load path: path → (prefix, params),
 		// same precedence as swelte_route (static-first, dynamics sorted).
 		// Only non-api routes resolve (api/* never has page data).
@@ -896,13 +952,19 @@ pub fn swelte_sse_room_for(prefix string, qualifier string, req SwelteRequest, s
 		`pub fn swelte_load_route(path string) (string, map[string]string) {
 \tnorm_path := swelte_normalize_path(path)`,
 		...dispatched
-			.filter((x) => !x.route.includes('[') && !x.route.startsWith('/api/'))
+			.filter(
+				(x) =>
+					!x.route.includes('[') &&
+					(lifecycle.pages ? lifecycle.pages.includes(x.mod) : !x.route.startsWith('/api/'))
+			)
 			.map(
 				(d) =>
 					`\tif norm_path == ${vJsonStr(d.route)} { return ${vJsonStr(d.prefix)}, map[string]string{} }`
 			),
 		...dynSorted()
-			.filter((d) => !d.route.startsWith('/api/'))
+			.filter((d) =>
+				lifecycle.pages ? lifecycle.pages.includes(d.mod) : !d.route.startsWith('/api/')
+			)
 			.map(
 				(d) =>
 					`\t${d.prefix}matched, ${d.prefix}params := swelte_match_route(${vJsonStr(d.route)}, norm_path)
@@ -1000,7 +1062,8 @@ export function emitRouteFile(
 	src: string,
 	fns: RpcFn[],
 	chain: WrapperMw[],
-	loads: LoadFn[]
+	loads: LoadFn[],
+	emittedWrappers = new Set<string>()
 ): string {
 	// Hoisted-source note: `generate()` + `load()` call the single
 	// exported `routeFor`/`jsFetchFor`/`jsWasmFor` above (no closure copy).
@@ -1016,7 +1079,7 @@ export function emitRouteFile(
 			f.attr === 'delete' ||
 			f.attr === 'patch'
 	)
-	const needHttp = verbFns.length > 0
+	const needHttp = verbFns.length > 0 || chain.some((w) => w.mws.length > 0)
 	// json.encode sites in this file: rpc decode/encode arms, verb value
 	// arms (non-void/non-envelope/non-bytes/non-tuple), load cascade leaf.
 	// void/SwelteResponse/[]u8/tuple-only verbs skip the generic wrapper.
@@ -1057,12 +1120,14 @@ export function emitRouteFile(
 	for (const w of chain) {
 		for (const st of parseStructs(w.src)) structNames.add(st.name)
 	}
-	const wrapperLines = chain.flatMap((w) => inlineWrapperFns(w.src, w.wmod, structNames))
+	const newWrappers = chain.filter((w) => !emittedWrappers.has(w.wmod))
+	for (const w of newWrappers) emittedWrappers.add(w.wmod)
+	const wrapperLines = newWrappers.flatMap((w) => inlineWrapperFns(w.src, w.wmod, structNames))
 	// Wrapper struct decls: inlineWrapperFns skips them (fn-only inline),
 	// so emit them here under the wrapper's prefixed name. Leaf decls
 	// flow through srcLines below; skip any the leaf redefines.
 	const leafStructs = new Set(parseStructs(src).map((s) => s.name))
-	const wrapperStructDecls = chain.flatMap((w) =>
+	const wrapperStructDecls = newWrappers.flatMap((w) =>
 		parseStructs(w.src)
 			.filter((st) => !leafStructs.has(st.name))
 			.map(
@@ -1123,6 +1188,16 @@ module routes
 		const an = a.includes('_') ? a.slice(a.lastIndexOf('_') + 1) : a
 		return `\tswelte_res = ${a}(swelte_req, swelte_res) or { return swelte_err_typed(path, '${an}', err) }\n`
 	})
+	o.push(`pub fn ${prefix}swelte_guard(input SwelteRequest) !SwelteRequest {
+mut req := input
+${befores.map((b) => `req = ${b}(req)!`).join('\n')}
+return req
+}
+pub fn ${prefix}swelte_finish(req SwelteRequest, input SwelteLoadResult) !SwelteLoadResult {
+mut res := SwelteResponse{status: input.status, headers: input.headers, cookies: input.cookies, body: input.body}
+${aftersLeafFirst.map((a) => `res = ${a}(req, res)!`).join('\n')}
+return SwelteLoadResult{status: res.status, headers: res.headers, cookies: res.cookies, body: res.body, levels: input.levels, level_order: input.level_order}
+}`)
 	if (befores.length === 0 && afters.length === 0) {
 		return [
 			...o,
@@ -1180,7 +1255,8 @@ _ = cookies
 _ = body
 _ = content_type
 _ = qualifier
-mut req := swelte_req`,
+mut req := swelte_req
+_ = req`,
 		dispatchBody(prefix, mod, fns, 'swelte_req'),
 		emitSseEvents(prefix, mod, fns),
 		emitWsEvents(prefix, mod, fns),
@@ -1341,8 +1417,9 @@ ${arm(openArm, `\treturn error('unknown qualifier for ws: ' + qualifier)`)}
 export function emitLoadCascade(prefix: string, loads: LoadFn[]): string {
 	if (loads.length === 0)
 		return `
-pub fn ${prefix}swelte_load(req SwelteRequest) !SwelteLoadResult {
-\treturn SwelteLoadResult{ body: '{}' }
+pub fn ${prefix}swelte_load(input SwelteRequest) !SwelteLoadResult {
+\treq := ${prefix}swelte_guard(input) or { return swelte_load_err_typed(err) }
+\treturn ${prefix}swelte_finish(req, SwelteLoadResult{ body: '{}' }) or { return swelte_load_err_typed(err) }
 }
 `
 	const fnPrefix = (l: LoadFn): string => vPrefix(l.mod)
@@ -1359,12 +1436,16 @@ pub fn ${prefix}swelte_load(req SwelteRequest) !SwelteLoadResult {
 	// wrapped once at the edge (`json.encode`) with a 200 default envelope.
 	const tail =
 		loads[leaf].vret === 'SwelteLoadResult'
-			? `\treturn frag_${leaf}`
-			: `\treturn SwelteLoadResult{ body: json.encode(frag_${leaf}) }`
+			? `\tmut result := frag_${leaf}`
+			: `\tmut result := SwelteLoadResult{ body: json.encode(frag_${leaf}) }`
 	return `
-pub fn ${prefix}swelte_load(req SwelteRequest) !SwelteLoadResult {
+pub fn ${prefix}swelte_load(input SwelteRequest) !SwelteLoadResult {
+req := ${prefix}swelte_guard(input) or { return swelte_load_err_typed(err) }
 ${chained}
 ${tail}
+result.levels = {${loads.map((l, i) => `${vJsonStr(l.mod)}: ${l.vret === 'SwelteLoadResult' ? `frag_${i}.body` : `json.encode(frag_${i})`}`).join(', ')}}
+result.level_order = [${loads.map((l) => vJsonStr(l.mod)).join(', ')}]
+return ${prefix}swelte_finish(req, result) or { return swelte_load_err_typed(err) }
 }
 `
 }

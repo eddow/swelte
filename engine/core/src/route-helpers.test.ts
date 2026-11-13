@@ -501,7 +501,8 @@ describe('route helpers', () => {
 				fallible: true,
 			},
 		] as never)
-		assert.ok(env.includes('return frag_0'))
+		assert.ok(env.includes('mut result := frag_0'))
+		assert.ok(env.includes('swelte_finish(req, result)'))
 		assert.ok(!env.includes('json.encode(frag_0)'))
 	})
 })

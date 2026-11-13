@@ -554,7 +554,7 @@ describe('codegen shape snapshots (fetch/SSE/dispatcher)', () => {
 		// No remount fallback: wrapper routes hydrate through the chain.
 		assert.ok(!js.includes('nested hydrate falls back to mount'), js.slice(0, 500))
 		assert.ok(
-			js.includes('hydrate(__rc0.wrappers[0], { target, props: { params, children: child } })'),
+			js.includes('hydrate(__rc0.wrappers[0], { target: hydrationTarget, props, recover: false })'),
 			js.slice(0, 3000)
 		)
 		// Emitted matcher regex keeps its escapes (parse check, not string match).
@@ -743,11 +743,11 @@ describe('item 11 — codegen golden project (sample-overlay variant + routes.js
 				assert.ok(js.includes(fn), `routes.js must export ${fn}`)
 			}
 		})
-		it('client router: hasLoad gating + no-clear navigation + unmount tracking', async () => {
+		it('client router: guarded load protocol + no-clear navigation + unmount tracking', async () => {
 			const root = scaffold()
 			mkdirSync(join(root, 'src', 'routes', 'static'), { recursive: true })
 			writeFileSync(join(root, 'src', 'routes', 'static', '+page.svelte'), '<h1>s</h1>')
-			// Static page: GET probe only, no @[load] - must not trigger a fetch.
+			// Even pages without a load must use the guarded navigation protocol.
 			writeFileSync(
 				join(root, 'src', 'routes', 'static', '+page.v'),
 				'module s\n@[get] pub fn ping() string { return "ok" }'
@@ -764,19 +764,19 @@ describe('item 11 — codegen golden project (sample-overlay variant + routes.js
 			// 1. ROUTES entries carry hasLoad: true only where @[load] exists.
 			// Lazy emits `chunkMods` between wrappers and hasLoad — tolerate it.
 			const entryRe =
-				/\{ path: "([^"]+)", page: \w+, wrappers: \[[^\]]*\](?:, chunkMods: \[[^\]]*\])?, hasLoad: (true|false) \}/g
+				/\{ path: "([^"]+)", page: \w+, wrappers: \[[^\]]*\](?:, chunkMods: \[[^\]]*\])?, hasLoad: (true|false)/g
 			const got = new Map<string, string>()
 			for (const m of js.matchAll(entryRe)) got.set(m[1], m[2])
-			assert.equal(got.get('/static'), 'false', 'static page must be hasLoad:false (no fetch)')
+			assert.equal(got.get('/static'), 'false', 'static page has no load function')
 			assert.equal(got.get('/dyn'), 'true', 'load page must be hasLoad:true')
-			// 2. Both fetch sites gate on hasLoad - static pages never fetch.
+			// 2. The protocol selects loads without invoking ordinary GET handlers.
 			assert.ok(
-				js.includes('if (!hit.route.hasLoad) return'),
-				'preloadData must early-return for static routes'
+				js.includes("'X-Swelte-Load': '1'"),
+				'preloadData must select the guarded load protocol'
 			)
 			assert.ok(
-				js.includes('if (!opts.noPreload && hit.route.hasLoad)'),
-				'navigate must gate fetch on hasLoad'
+				js.includes('const loaded = await preloadData(pathname)'),
+				'navigation must not skip guards for static routes'
 			)
 			// 3. No blank frame: navigate never clears before the fetch resolves.
 			const navBody = js.slice(js.indexOf('async function __navigateTo'))
@@ -961,7 +961,7 @@ describe('item 11 — codegen golden project (sample-overlay variant + routes.js
 			.filter((l) => l.startsWith('{ path:'))
 		// One route, no wrapper suffix leak, no wrapper chain in chunkMods.
 		assert.deepEqual(routePaths, [
-			`{ path: "/admin/users", page: __swelteLoad_admin_users__page, wrappers: [], chunkMods: ["admin/users/+page"], hasLoad: true },`,
+			`{ path: "/admin/users", page: __swelteLoad_admin_users__page, wrappers: [], chunkMods: ["admin/users/+page"], hasLoad: true, mod: "admin/users/+page", wrapperMods: [], id: "/admin/users" },`,
 		])
 		const mani = JSON.parse(readFileSync(join(root, '.swelte', 'ssr-manifest.json'), 'utf8')) as {
 			routes: { route: string; hasData: boolean; layout: unknown }[]

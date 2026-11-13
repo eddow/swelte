@@ -12,7 +12,7 @@
 // - top-level `fetch(` / top-level `await` in component sources
 //   (QJS-compat: pure-sync renderer; fetch inside handlers is fine)
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
-import { dirname, join, posix, resolve, sep } from 'node:path'
+import { dirname, isAbsolute, join, posix, resolve, sep } from 'node:path'
 
 /** posix-normalize a relative import against a `./`-relative module key. */
 export function posixNormalize(fromKey: string, id: string): string {
@@ -37,6 +37,7 @@ export interface SsrComposeOptions {
 }
 
 export interface SsrManifest {
+	compat?: boolean
 	hasError: boolean
 	routes: {
 		route: string
@@ -451,12 +452,17 @@ export function stubSdkImports(code: string, relFile: string): string {
 	let m: RegExpExecArray | null
 	while ((m = re.exec(code)) !== null) {
 		if (isCommentedOut(m.index)) continue
+		if (m[2] === '$app/state' || m[2] === '$app/stores') continue
 		out.push(code.slice(last, m.index))
 		const defs: string[] = []
 		for (const part of (m[1] as string).split(',')) {
 			const bits = part.trim().split(/\s+as\s+/)
 			const nm = (bits[bits.length - 1] as string).trim()
 			if (!nm || !/^[A-Za-z_$][A-Za-z0-9_$]*$/.test(nm) || nm === 'type') continue
+			if (m[2] === '@swelte/core' && ['page', 'navigating', 'updated'].includes(bits[0].trim())) {
+				defs.push(`import { ${bits[0].trim()} as ${nm} } from '#app/state';`)
+				continue
+			}
 			defs.push(
 				'const ' +
 					nm +
@@ -538,6 +544,9 @@ export async function assertNoSdkTopLevelCalls(
 // (`typeof window !== 'undefined'`). The sync QJS bundle needs the
 // server value (`false`) — resolve it to a literal at bundle time.
 function resolveSdkShim(id: string, _importer: string): string | null {
+	if (id === '#app/state' || id === '$app/state' || id === '$app/stores') {
+		return readFileSync(new URL('../shims/page-state.js', import.meta.url), 'utf8')
+	}
 	// Only these exact IDs are shimmed (nothing else: no `#app/secret`,
 	// `$app/forms`/`$app/server`, `$env/*` — unknown IDs return null and
 	// fail the build; no TS server exists, secrets live in V `backend/*.v`).
@@ -645,6 +654,32 @@ export async function bundleSsr(
 		}
 	}
 	if (!svelteRoot) throw new Error('[swelte:ssr-qjs] cannot resolve svelte (peer dep missing)')
+	// Match installed packages' ESM/Svelte exports instead of require-only
+	// resolution. Route keys are synthetic (./+page.svelte), so resolve from
+	// their real source locations, not from the adapter or process cwd.
+	const { resolveConfig } = await import('vite')
+	const config = await resolveConfig(
+		{
+			root: bundleRoot || process.cwd(),
+			configFile: false,
+			envFile: false,
+			logLevel: 'silent',
+			resolve: {
+				conditions: ['svelte', 'module', 'node', 'production'],
+				mainFields: ['svelte', 'module', 'jsnext:main', 'jsnext'],
+			},
+		},
+		'build',
+		'production'
+	)
+	const resolvePackage = config.createResolver()
+	const sourceFile = (key: string): string => {
+		if (isAbsolute(key)) return key
+		const root = bundleRoot || process.cwd()
+		if (key.startsWith('./__lib__/'))
+			return resolve(root, bundleLibDir, key.slice('./__lib__/'.length))
+		return resolve(root, bundleRoutesDir, key)
+	}
 	const plugin = {
 		name: 'swelte-ssr-resolve',
 		async resolveId(id: string, importer: string | undefined) {
@@ -724,7 +759,7 @@ export async function bundleSsr(
 				if (!modules.has(key)) {
 					modules.set(
 						key,
-						`export * from ${JSON.stringify(clientAbs)};\nexport function onMount() {}\nexport function beforeUpdate() {}\nexport function afterUpdate() {}\n`
+						`export * from ${JSON.stringify(clientAbs)};\nexport { getContext, setContext, hasContext, getAllContexts } from ${JSON.stringify(join(svelteRoot, 'src/internal/server/context.js'))};\nexport function onMount() {}\nexport function beforeUpdate() {}\nexport function afterUpdate() {}\n`
 					)
 				}
 				return key
@@ -754,25 +789,11 @@ export async function bundleSsr(
 				}
 				return null
 			}
-			// Bare runtime deps of svelte internals (clsx, esm-env, devalue):
-			// resolve from the importing file's node_modules chain.
-			// Prefer ESM entry (module/import condition) — CJS breaks IIFE.
-			// (Rollup resolveId may return a Promise.)
+			// Installed UI packages and runtime dependencies use the same
+			// package export conditions. In particular a `svelte` export need
+			// not expose a CommonJS/default entry to Node's require resolver.
 			if (!id.startsWith('.') && !id.startsWith('/') && !modules.has(id) && importer) {
-				try {
-					const { createRequire: fresh } = await import('node:module')
-					const resolved = fresh(importer).resolve(id)
-					// resolved may be CJS main — try the ESM sibling first.
-					const esm =
-						resolved.replace(/\.js$/, '.mjs') !== resolved &&
-						existsSync(resolved.replace(/\.js$/, '.mjs'))
-							? resolved.replace(/\.js$/, '.mjs')
-							: null
-					if (esm) return esm
-					return resolved
-				} catch {
-					return null
-				}
+				return await resolvePackage(id, sourceFile(importer))
 			}
 			if (id.startsWith('.') && importer) {
 				const full = resolve(dirname(importer), id)
@@ -792,16 +813,41 @@ export async function bundleSsr(
 					const alt = norm.split(posix.sep).join(psep)
 					if (modules.has(alt)) return alt
 				}
+				// Installed components may import .svelte.ts state through its
+				// emitted .svelte.js spelling, just like application TS modules.
+				return await resolvePackage(id, sourceFile(importer))
 			}
 			return null
 		},
-		load(id: string) {
-			return modules.get(id) ?? null
+		async load(id: string) {
+			if (modules.has(id)) return modules.get(id)
+			if (id.endsWith('.svelte')) return compileSsrComponent(id, id)
+			if (/\.svelte\.[jt]s$/.test(id)) {
+				const raw = readFileSync(id, 'utf8')
+				assertQjsCompatible(id, raw)
+				const { compileModule } = await import('svelte/compiler')
+				const js = await transpileSiblingLoad(id, raw)
+				return stubSdkImports(compileModule(js, { generate: 'server', filename: id }).js.code, id)
+			}
+			if (id.endsWith('.ts')) return transpileSiblingLoad(id, readFileSync(id, 'utf8'))
+			return null
 		},
 	}
-	const bundle = await rollup({ input: entry, plugins: [plugin], onwarn() {} })
-	const { output } = await bundle.generate({ format: 'esm' })
-	await bundle.close()
+	const bundle = await rollup({
+		input: entry,
+		plugins: [plugin],
+		onwarn(warning) {
+			if (warning.code === 'UNRESOLVED_IMPORT') {
+				throw new Error(`[swelte:ssr-qjs] unresolved SSR import: ${warning.message}`)
+			}
+		},
+	})
+	let output
+	try {
+		output = (await bundle.generate({ format: 'esm' })).output
+	} finally {
+		await bundle.close()
+	}
 	const code = output[0].code
 	// Bundle-level guard: node: externals only. fetch/top-level-await are
 	// checked per-component-source (assertQjsCompatible runs in
@@ -823,6 +869,7 @@ export async function composeRenderJs(
 	const routesDir = opts.routesDir ?? 'src/routes'
 	const libDir = opts.libDir ?? 'src/lib'
 	const modules = new Map<string, string>()
+	const universalModules = new Map<string, string>()
 
 	// ssr=false-lite subtree skip: a page whose sibling opts out of sync
 	// renderRoute is client-only — and so is every .svelte it pulls in
@@ -967,6 +1014,11 @@ export async function composeRenderJs(
 			const wantSsr = readUniversalSsrFlag(tsSrc)
 			assertUniversalLoadSync(`${routesDir}/${sib.rel}`, tsSrc, { ssr: wantSsr })
 			if (!wantSsr) return key // ssr=false: async load stays client-only, never enters the sync QJS bundle
+			if (/export\s+(?:async\s+)?function\s+load\b|export\s+const\s+load\b/.test(tsSrc)) {
+				const moduleKey = withDot(sib.rel)
+				modules.set(moduleKey, await transpileSiblingLoad(sib.rel, tsSrc))
+				universalModules.set(key, moduleKey)
+			}
 		}
 		if (modules.has(key)) return key
 		return key
@@ -1037,6 +1089,8 @@ export async function composeRenderJs(
 		.join('\n')
 	const __compKeys = [...modules.keys()].filter((k) => !k.endsWith('.ts') && !k.endsWith('.js'))
 	const entrySrc = `import { render } from 'svelte/internal/server';
+${[...universalModules.values()].map((key, i) => `import * as UNIVERSAL_${i} from ${JSON.stringify(key)};`).join('\n')}
+const UNIVERSAL = { ${[...universalModules.keys()].map((key, i) => `${JSON.stringify(key)}: UNIVERSAL_${i}.load`).join(', ')} };
 ${__compKeys.map((key, i) => `import C${i} from ${JSON.stringify(key)};`).join('\n')}
 ${(() => {
 	let __li = 0
@@ -1077,18 +1131,19 @@ ${(() => {
 })()}
 };
 const ERROR = ${manifest.error ? JSON.stringify(withDot(manifest.error.split('/').join('/'))) : 'null'};
-function applyUniversalLoad(route, props) {
-  const fn = LOADEDMODS[route];
+function applyUniversalLoad(route, props, key) {
+  const fn = UNIVERSAL[key] ?? LOADEDMODS[route];
   if (typeof fn !== 'function') return props;
   try {
-    const out = fn({ params: props?.params ?? {}, props, url: route });
-    return out && typeof out === 'object' ? { ...props, ...out } : props;
+    const out = fn({ params: props?.params ?? {}, props, url: globalThis.__swelteSsrPage?.url ?? route, depends() {} });
+    return out && typeof out === 'object' ? (globalThis.__swelteSsrPage?.compat ? { ...props, data: { ...props.data, ...out } } : { ...props, ...out }) : props;
   } catch (e) { throw e; }
 }
 function run(Component, props, route) {
-  const merged = route && LOADEDMODS[route] ? applyUniversalLoad(route, props) : props;
+  const merged = route ? applyUniversalLoad(route, props, ROUTES[route]) : props;
+  if (route && globalThis.__swelteSsrPage) globalThis.__swelteSsrPage.data = globalThis.__swelteSsrPage.compat ? merged.data : merged;
   const out = render(Component, { props: merged });
-  return { head: out.head, body: '<div data-swelte-ssr="1">' + out.body + '</div>' };
+  return { head: out.head, body: '<div data-swelte-ssr="1"' + (globalThis.__swelteSsrPage?.renderError ? ' data-swelte-render-error="1"' : '') + '>' + out.body + '</div>' };
 };
 // Nested-page run: page renders inside its wrapper chain (root to leaf) via
 // the same snippet contract the client router uses — each wrapper's
@@ -1098,35 +1153,65 @@ function runNested(keys, props, route) {
   const last = keys[keys.length - 1];
   if (!PAGES[last]) return null;
   for (const k of keys) if (!PAGES[k]) return null;
-  const renderLevel = (i) => {
-    if (i === keys.length - 1) {
-      const merged = route && LOADEDMODS[route] ? applyUniversalLoad(route, props) : props;
-      const out = render(PAGES[keys[i]], { props: merged });
-      return () => out.body;
-    }
-    const innerBody = renderLevel(i + 1)();
-    const snippet = (renderer) => { renderer.push(innerBody); };
-    const out = render(PAGES[keys[i]], { props: { params: props?.params, children: snippet } });
-    return () => out.body;
+  const views = {};
+  let inherited = {};
+  const envelope = globalThis.__swelteSsrPage;
+  for (const key of keys) {
+    const mod = key.startsWith('./') ? key.slice(2, -7) : key.slice(0, -7);
+    const leaf = key === last;
+    let data = envelope?.levels?.[mod] ?? (leaf ? (envelope?.data ?? props) : {});
+    data = envelope?.compat ? { ...inherited, ...data } : { ...data, ...inherited };
+    const before = envelope?.compat ? { params: props.params, data, form: envelope.form } : { ...props, ...data };
+    const fn = UNIVERSAL[key];
+    const extra = fn ? fn({ params: props.params ?? {}, props: before, url: envelope?.url ?? route, depends() {} }) : null;
+    if (extra && typeof extra === 'object') { data = { ...data, ...extra }; inherited = { ...inherited, ...extra }; }
+    views[key] = envelope?.compat ? { ...before, data } : { ...before, ...data };
+    if (envelope?.compat) inherited = data;
+  }
+  if (envelope) envelope.data = envelope.compat ? views[last].data : views[last];
+  const tree = (renderer) => {
+    const level = (i, target) => {
+      const key = keys[i];
+      const envelope = globalThis.__swelteSsrPage;
+      const mod = key.startsWith('./') ? key.slice(2, -7) : key.slice(0, -7);
+      let data = envelope?.levels?.[mod];
+      if (data === undefined) {
+        for (const [name, value] of Object.entries(envelope?.levels ?? {})) {
+          if (name === '+route' || (name.endsWith('/+route') && mod.startsWith(name.slice(0, -6)))) data = value;
+        }
+      }
+      const p = views[key];
+      PAGES[key](target, i === keys.length - 1 ? p : { ...p, children: (inner) => level(i + 1, inner) });
+    };
+    level(0, renderer);
   };
-  const bodies = renderLevel(0)();
-  return { head: '', body: '<div data-swelte-ssr="1">' + bodies + '</div>' };
+  const out = render(tree);
+  return { head: out.head, body: '<div data-swelte-ssr="1">' + out.body + '</div>' };
 }
 export function renderRoute(route, props_json) {
   let props = {};
   try { props = JSON.parse(props_json || '{}'); } catch (e) { props = {}; }
+  const envelope = props && props.version === 1 ? props : null;
+  globalThis.__swelteSsrPage = envelope ?? { url: 'http://localhost' + route, data: props, route: { id: route, pattern: route }, params: props.params ?? {} };
+  if (envelope) {
+    route = envelope.error ? '/+error' : (envelope.route?.pattern ?? route);
+    props = envelope.error ? envelope.error : (envelope.compat ? { params: envelope.params, data: envelope.data, form: envelope.form } : { params: envelope.params, ...envelope.data, form: envelope.form });
+  }
   const abs = ROUTES[route];
   if (abs && PAGES[abs]) {
     try {
       const chain = [abs];
       const wc = CHAINS[abs];
       if (wc && wc.length) {
-        const keys = [...wc.slice().reverse(), abs];
+        const keys = [...wc, abs];
         const nested = runNested(keys, props, route);
         if (nested) return nested;
       }
       return run(PAGES[abs], props, route);
-    } catch (e) { /* fall to +error */ }
+    } catch (e) {
+      if (globalThis.__swelteSsrPage) globalThis.__swelteSsrPage.renderError = String(e?.stack ?? e);
+      props = { status: 500, message: 'render failed' };
+    }
   }
   if (ERROR && PAGES[ERROR]) {
     try {

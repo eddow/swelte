@@ -6,11 +6,13 @@ import type { Plugin } from 'vite'
 import { loadConfig, renderAppDts, renderClientEntry, renderHarness } from '../gen/config.js'
 import { isBackendMod, SWELTE_GEN_CORE_DIRS } from '../gen/paths.js'
 import { resolveV } from '../toolchain.js'
+import { stageBackendModules } from './backend.js'
 import { emitClientRouter } from './client-router.js'
 import { list, writeIfChanged } from './fs.js'
 import { loadServerHooks } from './hooks.js'
 import { loadMatchers } from './matchers.js'
-import { materializeNpmV, parseNpmVSpecifier, type NpmVExport } from './npm-v.js'
+import { materializeNpmV, type NpmVExport, parseNpmVSpecifier } from './npm-v.js'
+import { reactivePropsSource, reactiveStateSource } from './page-state.js'
 import { parseStructs, parseVFile, pascal } from './parse.js'
 import {
 	collectPrerenderEntries,
@@ -66,6 +68,8 @@ import {
 } from './wasm.js'
 
 export function swelte(options: SweltePluginOptions = {}): Plugin {
+	let compat = options.compat === 'sveltekit'
+	let actionQuery = options.actionQuery ?? (compat ? 'named' : 'legacy')
 	let routesDir = options.routesDir ?? 'src/routes'
 	let libDir = options.libDir ?? 'src/lib'
 	let outDir = options.outDir ?? '.swelte'
@@ -230,6 +234,10 @@ export function swelte(options: SweltePluginOptions = {}): Plugin {
 				try {
 					const { loadConfig } = await import('../gen/config.js')
 					const cfg = await loadConfig(root)
+					if (options.compat === undefined) compat = cfg.compat === 'sveltekit'
+					actionQuery =
+						options.actionQuery ??
+						(options.compat !== undefined ? (compat ? 'named' : 'legacy') : cfg.actionQuery)
 					if (options.routesDir === undefined) routesDir = cfg.routesDir
 					if (options.libDir === undefined) libDir = cfg.libDir
 					if (options.outDir === undefined) outDir = cfg.outDir
@@ -383,7 +391,8 @@ export function swelte(options: SweltePluginOptions = {}): Plugin {
 				// their attrs via loadAppHooks: collected here, errors thrown like
 				// core shape errors, fragments merged into the harness fragments.
 				const hooks = loadServerHooks(root)
-				const appHookFragments: { imports?: string; main?: string; mainInner?: string }[] = []
+				const appHookFragments: { imports?: string; main?: string; mainInner?: string }[] =
+					hooks.imports ? [{ imports: hooks.imports }] : []
 				for (const plug of plugins) {
 					if (!plug.loadAppHooks) continue
 					const got = plug.loadAppHooks(root)
@@ -1013,7 +1022,8 @@ ${list(st.fields, (fld) => `\t${fld.name}${fld.optional ? '?' : ''}: ${fld.tstyp
 								route,
 								fns.filter((x) => x.attr !== 'load'),
 								trailingSlash,
-								matchers
+								matchers,
+								actionQuery === 'named'
 							)
 						)
 					}
@@ -1023,8 +1033,16 @@ ${list(st.fields, (fld) => `\t${fld.name}${fld.optional ? '?' : ''}: ${fld.tstyp
 					// Naming (.v + flat stems like `_page.v`) collided when
 					// `+page` and `+route` flattened alike — vFileSafe maps `/`
 					// to `__` so leaf and wrapper names never collide.
+					// UI-only leaves still need inherited guards and loads.
+					for (const page of collectSvelteManifest(routesAbs, routesDir, vMods).entries) {
+						if (page.kind === 'wrapper' || page.kind === 'error') continue
+						const mod = page.svelte.replace(/\.svelte$/, '')
+						if (!dispatched.some((d) => d.mod === mod))
+							dispatched.push({ route: page.route, mod, prefix: vPrefix(mod) })
+					}
 					const routesGenDir = join(genDir, 'routes')
 					const seenMods = new Set<string>()
+					const emittedWrappers = new Set<string>()
 					// NOTE: `routes/` once held a file literally named `routes/`
 					// from an older flat scheme — wipe semantics: rewrite the
 					// whole dir (write fresh AFTER deleting stale), so renamed
@@ -1036,7 +1054,8 @@ ${list(st.fields, (fld) => `\t${fld.name}${fld.optional ? '?' : ''}: ${fld.tstyp
 						// never the generated output dir (same leaf names exist
 						// in both; reading output back as input made routeFor
 						// flip between `/x` and `/x/+page` on alternating runs).
-						const src = readFileSync(join(routesAbs, `${d.mod}.v`), 'utf8')
+						const sourceFile = join(routesAbs, `${d.mod}.v`)
+						const src = existsSync(sourceFile) ? readFileSync(sourceFile, 'utf8') : 'module page\n'
 						// §7: per-leaf ancestor chain (ancestors' +route.v middleware,
 						// inlined by emitRouteFile). A leaf with no wrappers passes
 						// an empty chain (byte-identical output).
@@ -1083,7 +1102,7 @@ ${list(st.fields, (fld) => `\t${fld.name}${fld.optional ? '?' : ''}: ${fld.tstyp
 						mkdirSync(routesGenDir, { recursive: true })
 						writeIfChanged(
 							join(routesGenDir, `${vFileSafe(d.mod)}.v`),
-							emitRouteFile(d.mod, d.route, d.prefix, src, fns, chain, loads)
+							emitRouteFile(d.mod, d.route, d.prefix, src, fns, chain, loads, emittedWrappers)
 						)
 					}
 					// Prune stale generated files (renamed/deleted routes).
@@ -1192,7 +1211,14 @@ ${list(st.fields, (fld) => `\t${fld.name}${fld.optional ? '?' : ''}: ${fld.tstyp
 								noCsrRoutes,
 								routeLimits,
 								serializedHeaders,
-								wsMods
+								wsMods,
+								{
+									compat,
+									namedActions: actionQuery === 'named',
+									pages: collectSvelteManifest(routesAbs, routesDir, vMods)
+										.entries.filter((e) => e.kind !== 'wrapper' && e.kind !== 'error')
+										.map((e) => e.svelte.replace(/\.svelte$/, '')),
+								}
 							)
 						)
 					}
@@ -1364,10 +1390,7 @@ ${list(st.fields, (fld) => `\t${fld.name}${fld.optional ? '?' : ''}: ${fld.tstyp
 						if (item.target !== 'universal') continue
 						const src = readFileSync(item.entryFile, 'utf8')
 						if (!parseVFile(src, extraAttrs).some((fn) => fn.attr === 'rpc')) continue
-						collect(
-							'npm',
-							`${item.namespace}/${item.modulePath.replaceAll('.', '/')}`
-						)
+						collect('npm', `${item.namespace}/${item.modulePath.replaceAll('.', '/')}`)
 					}
 					const emit = (spec: string, sub: string, mod: string) => {
 						const body = bodies.get(`${sub}/${mod}`)
@@ -1385,11 +1408,7 @@ ${list(st.fields, (fld) => `\t${fld.name}${fld.optional ? '?' : ''}: ${fld.tstyp
 					}
 					for (const item of npmVExports) {
 						if (item.target !== 'universal') continue
-						emit(
-							item.specifier,
-							'npm',
-							`${item.namespace}/${item.modulePath.replaceAll('.', '/')}`
-						)
+						emit(item.specifier, 'npm', `${item.namespace}/${item.modulePath.replaceAll('.', '/')}`)
 					}
 					// Roadmap §17: exact-key `./<base>.v` aliases — only when the
 					// basename is UNIQUE across the whole project (routes + lib).
@@ -1474,6 +1493,8 @@ declare module '*.v' {
 						`}`,
 						``,
 						`declare module '$app/navigation' {`,
+						`\texport function invalidate(tag: string | URL): Promise<void>`,
+						`\texport function invalidateAll(): Promise<void>`,
 						`	export const page: unknown`,
 						`	export const navigating: unknown`,
 						`	export const updated: unknown`,
@@ -1494,7 +1515,22 @@ declare module '*.v' {
 						`}`,
 						``
 					)
-					writeIfChanged(join(genDir, 'v-shim.d.ts'), decls.join('\n'))
+					decls.push(
+						"declare module '#app/state' { export const page: import('@swelte/core').SwelteReactivePage }"
+					)
+					if (compat)
+						decls.push(
+							"declare module '$app/forms' { export { enhanceKit as enhance, applyAction, deserialize } from '@swelte/core' }"
+						)
+					writeIfChanged(
+						join(genDir, 'v-shim.d.ts'),
+						decls
+							.join('\n')
+							.replace(
+								/(declare module '\$app\/state' \{\n\s*export const page:) unknown/,
+								`$1 ${compat ? "import('@swelte/core').SwelteReactivePage" : "import('@swelte/core').SwelteStore<import('@swelte/core').SweltePageState>"}`
+							)
+					)
 				}
 				// Roadmap §1.5 + §1.9: virtual `#app/paths` + `#app/environment`
 				// modules and the version stamp — generated from loadConfig()
@@ -1546,7 +1582,7 @@ declare module '*.v' {
 export { page, navigating, updated } from '@swelte/core'
 `
 					const GEN_NAV_JS = `// Auto-generated by swelte. Do not edit.
-export { goto, preloadData, preloadCode, pushState, replaceState, captureSnapshot, restoreSnapshot, beforeNavigate, afterNavigate, onNavigate, checkUpdated, handleFetch, swelteError, isRedirect } from '@swelte/core'
+export { goto, preloadData, preloadCode, pushState, replaceState, captureSnapshot, restoreSnapshot, beforeNavigate, afterNavigate, onNavigate, checkUpdated, handleFetch, swelteError, isRedirect, invalidateAsync as invalidate, invalidateAll } from '@swelte/core'
 `
 					const GEN_ENV_JS = `// Auto-generated by swelte. Do not edit.
 export const browser = typeof window !== 'undefined';
@@ -1557,10 +1593,28 @@ export declare const browser: boolean
 export declare const dev: boolean
 `
 					writeIfChanged(join(appDir, 'stores.js'), GEN_STORES_JS)
-					writeIfChanged(join(appDir, 'state.js'), GEN_STORES_JS)
+					writeIfChanged(join(appDir, 'state.svelte.js'), reactiveStateSource)
+					writeIfChanged(join(appDir, 'props.svelte.js'), reactivePropsSource)
+					writeIfChanged(
+						join(appDir, 'state.js'),
+						compat
+							? "export { page, navigating, updated } from './state.svelte.js'\n"
+							: GEN_STORES_JS
+					)
+					if (compat)
+						writeIfChanged(
+							join(appDir, 'forms.js'),
+							"export { enhanceKit as enhance, applyAction, deserialize } from '@swelte/core'\n"
+						)
+					else rmSync(join(appDir, 'forms.js'), { force: true })
 					writeIfChanged(join(appDir, 'navigation.js'), GEN_NAV_JS)
 					writeIfChanged(join(appDir, 'stores.d.ts'), renderAppDts())
-					writeIfChanged(join(appDir, 'state.d.ts'), renderAppDts())
+					writeIfChanged(
+						join(appDir, 'state.d.ts'),
+						compat
+							? "export declare const page: import('@swelte/core').SwelteReactivePage\nexport { navigating, updated } from '@swelte/core'\n"
+							: renderAppDts()
+					)
 					writeIfChanged(join(appDir, 'navigation.d.ts'), renderAppDts())
 					writeIfChanged(join(appDir, 'environment.js'), GEN_ENV_JS)
 					writeIfChanged(join(appDir, 'environment.d.ts'), GEN_ENV_DTS)
@@ -1643,6 +1697,7 @@ export declare const dev: boolean
 					if (chain.length) wrappersByRoute[`./${e.svelte}`] = chain.map((w) => `./${w}`)
 				}
 				const manifest = {
+					compat,
 					hasError,
 					routes: svelteEntries
 						.filter((e) => e.kind !== 'wrapper' && e.kind !== 'error')
@@ -1684,7 +1739,14 @@ export declare const dev: boolean
 				// routes/harness can `import <module>`. Source of truth stays
 				// in the plugin package; core only copies `*.v`. Missing dirs
 				// skipped (TS-only install); stale module dirs pruned.
-				const wanted = new Set<string>()
+				const pluginFiles = new Set<string>()
+				for (const plugin of plugins)
+					for (const include of plugin.includes?.() ?? []) {
+						if (!existsSync(include.absDir)) continue
+						for (const file of readdirSync(include.absDir))
+							if (file.endsWith('.v')) pluginFiles.add(`${include.module}/${file}`)
+					}
+				const wanted = new Set(stageBackendModules(libAbs, genDir, pluginFiles))
 				try {
 					for (const pp of plugins) {
 						let incs: { module: string; absDir: string }[] = []
@@ -1800,6 +1862,8 @@ export declare const dev: boolean
 							'\texport function mountSwelteRoute(target: Element, pathname: string, errorProps?: unknown): Promise<{ params: Record<string, string>; path: string | null }>\n' +
 							'\texport function hydrateSwelteRoute(target: Element, pathname: string, errorProps?: unknown): Promise<{ params: Record<string, string>; path: string | null; hydrated: boolean }>\n' +
 							'\texport function initSwelteRouter(target: Element | null): () => void\n' +
+							'\texport function preloadData(url: string): Promise<{ data: unknown } | null>\n' +
+							'\texport function setError(error: { status: number; message: string }): Promise<void>\n' +
 							'}\n'
 					)
 				} catch (e) {
@@ -1853,6 +1917,7 @@ export declare const dev: boolean
 						{ find: '#routes', replacement: routesAbs },
 						{ find: '#lib', replacement: libAbs },
 						{ find: '#app/paths', replacement: join(resolve(root, outDir), 'paths.js') },
+						{ find: '#app/state', replacement: join(resolve(root, outDir), 'app/state.svelte.js') },
 						{
 							find: '#app/environment',
 							replacement: join(resolve(root, outDir), 'environment.js'),
@@ -2067,11 +2132,7 @@ export declare const dev: boolean
 				const src = readFileSync(item.entryFile, 'utf8')
 				const fns = parseVFile(src, extraAttrs).filter((fn) => fn.attr === 'rpc')
 				if (fns.length === 0) return 'export {}; // swelte: no @[rpc] fns in this npm V export'
-				return jsWasmFor(
-					isBuild,
-					`${item.namespace}/${item.modulePath.replaceAll('.', '/')}`,
-					fns
-				)
+				return jsWasmFor(isBuild, `${item.namespace}/${item.modulePath.replaceAll('.', '/')}`, fns)
 			}
 			// Codegen for direct `.v` imports (spec §4). The id is the virtual
 			// `\0swelte:v:<abs path>` minted in resolveId above.
@@ -2114,7 +2175,7 @@ export declare const dev: boolean
 					(x) => x.attr !== 'before' && x.attr !== 'after' && x.attr !== 'load'
 				)
 				if (fns.length === 0) return 'export {}; // swelte: no RPC fns in this .v file'
-				return jsFetchFor(route, fns, trailingSlash, routeMatchers)
+				return jsFetchFor(route, fns, trailingSlash, routeMatchers, actionQuery === 'named')
 			}
 			if (norm === libNorm || norm.startsWith(`${libNorm}/`)) {
 				const mod = modulePath(libAbs, abs)
@@ -2388,9 +2449,7 @@ export declare const dev: boolean
 						const fns = parseVFile(src, extraAttrs).filter((fn) => fn.attr === 'rpc')
 						for (const fn of fns) {
 							if (seenFns.has(fn.name))
-								throw new Error(
-									`WASM bundle: duplicate fn ${fn.name} (in ${item.specifier})`
-								)
+								throw new Error(`WASM bundle: duplicate fn ${fn.name} (in ${item.specifier})`)
 							seenFns.add(fn.name)
 						}
 						bundleImports.add(npmVWasmImport(item.moduleImport))

@@ -124,6 +124,19 @@ network, database, or time modules.
 Packages contribute reusable modules, not application routes. URL ownership,
 middleware, and `@[load]` remain in the consuming application.
 
+Native server modules use V's existing database, HTTP and crypto facilities;
+they do not need browser RPC signatures or a Swelte integration plugin for
+every native library. PostgreSQL ORM/pooling integration should reuse `db.pg`
+and the selected toolchain, with libpq and migration ownership documented.
+
+`npm run test:dogfood` in the Swelte repository packs/installs a library with
+server interfaces, callbacks/channels, nested V modules, native SQLite/crypto
+dependencies and shared Svelte UI. It builds browser assets and serves native
+JSON/QuickJS HTML with an empty runtime PATH. SQLite tests native linking only;
+PostgreSQL persistence has separate acceptance. Installed UI dependencies with
+Svelte-only exports, nested components and typed runes modules are bundled for
+SSR; unresolved imports fail the build.
+
 ## Resolution and generated output
 
 Swelte scans the application's dependencies, optional dependencies, and dev

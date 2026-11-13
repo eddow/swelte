@@ -59,7 +59,7 @@ Also rejected in SSR-compiled components: `node:` imports, `fetch(`, top-level `
 
 ## `+error.svelte` contract
 
-Single global `src/routes/+error.svelte`, props `{ status?: number; message?: string }`. Same file renders server-side and client-side (via `loadPage()` mapping `SwelteRpcError` → `{ error: { status, message } }`). No per-directory inheritance — by design, not a gap.
+Single global `src/routes/+error.svelte`, props `{ status?: number; message?: string }`. Same file renders server-side and client-side (via `loadPage()` mapping `SwelteRpcError` → `{ error: { status, message } }`). Per-directory inheritance is currently unimplemented; this scope restriction is not imposed by V or QuickJS.
 
 ## Sources
 

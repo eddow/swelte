@@ -17,15 +17,22 @@ pub fn delete_account(req SwelteRequest) !string { ... }
 `<form action="?q">` → the file's `@[post('q')]` handler. Content-Type
 decides: JSON → `@[rpc]`, form (multipart/urlencoded) → verb dispatch.
 
+Opt in to `swelte: { compat: 'sveltekit' }` in `svelte.config.js` for
+`?/delete` named actions, nested `{ data, form, params }` page props,
+reactive `$app/state` and the `$app/forms` callback adapter. The default
+keeps flat props and legacy qualifiers. `actionQuery: 'named' | 'legacy'`
+overrides qualifier selection independently.
+
 ## No-JS (§12)
 
 Browser navigations (`Accept: text/html`, no `application/json`) bypass
 JSON: success → `303` + `Location` (cookies preserved), failure →
-rendered HTML error page (same status, message HTML-escaped). Fetch
+the page rendered with `form` data and the failure status. Fetch
 stubs (`Accept: application/json`) keep JSON. Same handler,
-content-negotiated. `GET` navigations never redirect (`303` is
-POST-only). No-JS form redirects target the POST path (`Location:
-<path>` back to the form).
+content-negotiated. Automatic form success redirects apply to mutations;
+load envelopes may independently redirect HTML GETs with 3xx + `Location`.
+No-JS success redirects preserve ordinary query filters and remove the action
+qualifier, for example `?/save&q=hello` redirects to `?q=hello`.
 
 ## `fail`-lite (§2.11)
 
@@ -40,23 +47,25 @@ catch (e) { if (isFail(e)) showInline(e.body.fieldErrors) }
 
 ## `deserialize` (§2.12)
 
-Pure TS port of SvelteKit's `deserialize` in `sdk.ts` — parses the
+The native `deserialize(response)` helper parses the
 action-result envelope
 (`{"type":"success"|"failure"|"error"|"redirect",…}`) from a `fetch`
-response. Verbs return raw JSON — never the envelope — so
+response. It takes a `Response`, rather than SvelteKit's serialized string.
+Verbs return raw JSON — never the envelope — so
 `__swelteActionResult` tries `deserialize` first, then maps raw bodies
-by status (`2xx` → `success`, else `failure`). `redirect` carries
+by status (`2xx` → `success`, `4xx` → `failure`, `5xx` → `error`). `redirect` carries
 `{ status, location }`; unknown `type` or non-JSON throws.
 
 ## `use:enhance` / `applyAction` (progressive-enhancement cycle)
 
 No-JS still works untouched (browser submits natively, `Hand` answers
-`303` / error page). With JS, `use:enhance` intercepts the submit and
+`303` / inline failure). With JS, `use:enhance` intercepts the submit and
 replays it as `fetch` with `Accept: application/json`:
 
 ```svelte
 <script>
-  import { enhance } from '@swelte/core';
+  // Requires swelte.compat: 'sveltekit'.
+  import { enhance } from '$app/forms';
 </script>
 
 <form method="post" use:enhance>
@@ -72,13 +81,19 @@ replays it as `fetch` with `Accept: application/json`:
 }}>
 ```
 
-Behavior: default `update()` is `applyAction` + form reset. `success`
-publishes the payload on `page.form` and invalidates cached loads
-(`update({ invalidate: false })` skips); `failure`/`error` publish on
-`page.form` too (action failures stay inline — never `page.error`,
-which remains load-time only); `redirect` navigates via the client
-router (`goto`, `location.href` fallback outside the router).
-`applyAction(result)` is also usable standalone. Out of scope:
-file-upload progress, `invalidateAll` outside the default update,
-multi-form ordering — same lite line as the rest of this page.
+Submission is prevented synchronously. A second submit or action destruction
+aborts the previous request. The callback receives an AbortController and
+submitter; method/action/enctype overrides are honored. Only success resets
+the form. `update()` awaits the current page's load refresh, preserving mounted
+component state; `update({ reset: false, invalidateAll: false })` opts out.
+Validation failures stay inline on `page.form`; redirects use the router.
+An action targeting another page refreshes the current page without publishing
+the unrelated form result there. `applyAction(result)` is available standalone.
+
+The native `@swelte/core` enhance callback returns `(result, update) => ...`
+and uses `invalidate: false`; the `$app/forms` adapter accepts
+`({ result, update }) => ...` and `invalidateAll: false`. The adapter is a
+supported subset, not complete SvelteKit parity. Action exceptions publish
+their status/error and render the global error component; validation failures
+remain inline. Upload progress is not implemented.
 

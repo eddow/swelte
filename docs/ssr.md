@@ -53,6 +53,35 @@ source imports are NOT stubs: the SSR bundler resolves them from disk
 (`#app/secret`, `$app/forms`, `$env/*`) are not shimmed: build error.
 ## Request path
 
+UI HTML requests and `X-Swelte-Load: 1` navigation requests share a guarded
+load path, including pages with only Svelte components. Before hooks prepare
+locals before loads; after hooks supply headers and cookies. Load redirects
+are HTTP redirects for HTML, and encoded locations for navigation fetches.
+Untyped load exceptions produce 500; the watchdog produces 504.
+
+The versioned page envelope preserves wrapper levels, route identity, params,
+status and form data. HTML embeds it in escaped inert `__swelte_page` JSON;
+hydration consumes it before mounting. Wrapper and page components render in
+one Svelte tree, preserving context and head output. Page state is request-local
+in SSR. Universal sibling loads run root-first in both SSR and the browser
+(synchronous only in QuickJS).
+
+With `swelte.compat: 'sveltekit'`, props are `{ data, form, params }` and
+`$app/state.page` exposes reactive URL, route, data and form values. Default
+flat props and legacy stores remain available. Browser `invalidateAll()` awaits
+the current page load and updates mounted props, preserving component state.
+Universal loads can register tags with their supplied `depends(...tags)`
+callback, including after an await on client-only loads. Navigation
+`invalidate(tag)` awaits refresh when a current wrapper/page declares that
+tag. The native SDK retains its synchronous matching-key return and schedules
+refresh; `invalidateAsync(tag)` provides explicit completion there. This is
+active-page invalidation, not a general data cache or predicate API.
+
+`SWELTE_SSR_STRICT=1` rejects unexpected renderer fallback. A render exception
+marks the error output so the native response returns 500. Browser fixtures
+can set `globalThis.__swelteStrictHydration = true` to fail on hydration
+mismatch; ordinary fallback emits `swelte:hydration-fallback`.
+
 Browser `GET /` (`Accept: text/html`) → `Hand.before_request` →
 `swelte_ssr_enabled()` (HTML navigation, V route 200, `SWELTE_DIST`
 set) → `swelte_page_props()` (`swelte_load_for()` cascade) →
@@ -66,7 +95,8 @@ SSR DOM adopted, leaf interactive; mismatch → mount fallback). Failures
 (no bundle, throw, timeout, OOM, too-big) → SPA shell / `+error` HTML —
 never blank/JSON for navigations.
 
-* `GET` navigations never redirect (§12 `303` is POST-only).
+* A load envelope with 3xx status and `Location` redirects an HTML GET.
+  Automatic no-JS form success redirects are a separate POST behavior.
 * `Accept: application/json` bypasses SSR — API stays JSON (same
 handler, content-negotiated). `curl` without a browser Accept and
 bare `curl` probes see static/SPA + JSON, never SSR (build asserts artifacts only — booting is `swelte preview`).
@@ -103,6 +133,12 @@ server-side and client-side (via `loadPage()` mapping `SwelteRpcError`
 rejects (`/admin` without cookie → 400), 500 handler throws — all
 HTML with the right status, server stays up. Missing `+error.svelte`
 → SPA `index.html` 200 (back-compat).
+
+Only the root error component is supported; nested error files are rejected.
+This is an implementation scope restriction, not a native-runtime requirement.
+Per-directory boundaries would need ancestor selection and consistent wrapper,
+status and fallback behavior in SSR and client navigation.
+
 ## Measured budgets (2026-10-31, `examples/something`, 73KB bundle)
 
 * `renderRoute('/')` in-process (Node, same bundle the binary embeds):
@@ -137,9 +173,9 @@ no `<!--ssr-body-->` leftover, JSON bypass intact):
 plus exactly one artifact in `dist/ssr/` and a 20× repeat-render
 (no crash, stable timing). Verified green.
 
-## Non-goals (locked)
+## Current limits and architecture
 
-* No per-directory `+error` inheritance (single global).
+* Per-directory `+error` inheritance is unimplemented (single global).
 * No React/Vue adapters in core — `core` lists `.svelte` because
 Swelte is Svelte.
 * No async in the qjs renderer — streaming SSR is a non-goal.

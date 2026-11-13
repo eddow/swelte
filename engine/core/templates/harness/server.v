@@ -4,6 +4,8 @@ import net
 import net.http
 import net.http.mime
 import net.urllib
+import json
+import x.json2
 import os
 import routes
 import strconv
@@ -182,7 +184,7 @@ fn swelte_html_escape(s string) string {
 // `@[error] (message string, status int) string` body when src/app.v
 // defines one. Return '' to keep the message, else the replacement.
 fn swelte_sanitize_error(message string, status int) string {
-	_ = status
+	if status >= 500 { return 'internal server error' }
 	return message
 }
 
@@ -430,7 +432,21 @@ fn (mut app App) before_request(mut ctx Ctx) veb.Result {
 		return ctx.send_response_to_client('application/json', '{"error":"body too large"}')
 	}
 	mut qualifier := query['q'] or { '' }
-	if qualifier == '' {
+	if routes.swelte_named_actions() {
+		qualifier = ''
+		mut count := 0
+		raw_query := if ctx.req.url.contains('?') { ctx.req.url.all_after('?') } else { '' }
+		for raw in raw_query.split('&') {
+			key := urllib.query_unescape(raw.all_before('=')) or { '' }
+			if !key.starts_with('/') { continue }
+			count++
+			if key.len < 2 || (raw.contains('=') && raw.all_after('=') != '') || count > 1 {
+				ctx.res.set_status(.bad_request)
+				return ctx.send_response_to_client('application/json', '{"error":"ambiguous or empty named action"}')
+			}
+			qualifier = key[1..]
+		}
+	} else if qualifier == '' {
 		for k, v in query {
 			// First bare key (`?delete`, value == '') doubles as qualifier.
 			// Real args (`?payload=x`) have values and are skipped.
@@ -458,6 +474,19 @@ fn (mut app App) before_request(mut ctx Ctx) veb.Result {
 		}
 	}
 	// §WS (future.md #3): WebSocket upgrade. before_request owns `ctx`, so
+	// Reject cross-origin writes before any handler can perform side effects.
+	if !cors_ok && origin != '' && ctx.req.method != .get && ctx.req.method != .head {
+		host := ctx.req.header.get(.host) or { '' }
+		parsed_origin := urllib.parse(origin) or {
+			ctx.res.set_status(.forbidden)
+			return ctx.send_response_to_client('application/json', '{"error":"forbidden"}')
+		}
+		if host != '' && parsed_origin.host != host {
+			ctx.res.set_status(.forbidden)
+			return ctx.send_response_to_client('application/json', '{"error":"forbidden"}')
+		}
+	}
+	// WebSocket upgrade. before_request owns `ctx`, so
 	// the Upgrade handshake is intercepted HERE — never reaches dispatch.
 	// On a GET+Upgrade:websocket match on an `@[ws]` file: build the
 	// SwelteRequest, take over the conn, 101 + frame pump. Non-upgrade
@@ -465,6 +494,9 @@ fn (mut app App) before_request(mut ctx Ctx) veb.Result {
 	ws_prefix := routes.swelte_ws_route(path, dispatch_method, headers)
 	if ws_prefix != '' {
 		mut ws_req := routes.SwelteRequest{ query: query, form: map[string]string{}, files: map[string]string{}, files_bytes: map[string][]u8{}, raw_body: []u8{}, headers: headers, cookies: cookies, params: map[string]string{}, locals: map[string]string{}, method: 'GET', path: path, qualifier: '' }
+		ws_req = swelte_stream_request(mut ctx, ws_prefix, ws_req) or {
+			return swelte_send_envelope(mut ctx, routes.swelte_error_response(ws_req, err))
+		}
 		return swelte_serve_ws(mut ctx, ws_prefix, ws_req)
 	}
 	// §14 SSE (true streaming, veb): before_request owns `ctx`, so SSE
@@ -474,14 +506,17 @@ fn (mut app App) before_request(mut ctx Ctx) veb.Result {
 	sse_prefix, sse_params := routes.swelte_sse_route(path, dispatch_method, query, headers, qualifier)
 	if sse_prefix != '' {
 		mut sse_req := routes.SwelteRequest{ query: query, form: map[string]string{}, files: map[string]string{}, files_bytes: map[string][]u8{}, raw_body: []u8{}, headers: headers, cookies: cookies, params: sse_params, locals: map[string]string{}, method: 'GET', path: path, qualifier: qualifier }
+		sse_req = swelte_stream_request(mut ctx, sse_prefix, sse_req) or {
+			return swelte_send_envelope(mut ctx, routes.swelte_error_response(sse_req, err))
+		}
 		if cors_ok {
 			ctx.set_header(.access_control_allow_origin, if cors_origin == '*' { '*' } else { origin })
 			ctx.res.header.set_custom('Access-Control-Allow-Credentials', 'true') or {}
 		}
+		mut events := []string{}
 		if !routes.swelte_sse_is_emit(sse_prefix) {
-			routes.swelte_sse_events_for(sse_prefix, qualifier, sse_req) or {
-				ctx.res.set_status(.bad_request)
-				return ctx.send_response_to_client('application/json', '{"error":"' + err.msg() + '"}')
+			events = routes.swelte_sse_events_for(sse_prefix, qualifier, sse_req) or {
+				return swelte_send_envelope(mut ctx, routes.swelte_error_response(sse_req, err))
 			}
 		} else {
 			// Emit-mode fns run inside the writer (post-takeover), so an
@@ -493,7 +528,13 @@ fn (mut app App) before_request(mut ctx Ctx) veb.Result {
 				return ctx.send_response_to_client('application/json', '{"error":"' + err.msg() + '"}')
 			}
 		}
-		return swelte_serve_sse(mut ctx, sse_prefix, qualifier, sse_req)
+		return swelte_serve_sse(mut ctx, sse_prefix, qualifier, sse_req, events)
+	}
+	page_accept := headers['Accept'] or { headers['accept'] or { '' } }
+	page_load := (headers['X-Swelte-Load'] or { headers['x-swelte-load'] or { '' } }) == '1'
+	page_prefix, _ := routes.swelte_load_route(path)
+	if ctx.req.method == .get && page_prefix != '' && (page_load || page_accept.contains('text/html')) {
+		return swelte_serve_page(mut ctx, path, query, headers, cookies, page_load)
 	}
 	// (swelte_call_route is sync — veb runs before_request on a worker;
 	// the `spawn select` watchdog keeps the server responsive).
@@ -505,15 +546,6 @@ fn (mut app App) before_request(mut ctx Ctx) veb.Result {
 	// same-origin POST/fetch). Only cross-origin writes need cors_ok —
 	// otherwise every default same-origin POST 403s when SWELTE_CORS_ORIGIN
 	// is unset. Mirrors the CSRF host check above.
-	if !cors_ok && origin != '' && ctx.req.method != .get && ctx.req.method != .head {
-		host := ctx.req.header.get_custom('Host') or { ctx.req.header.get(.host) or { '' } }
-		if host == '' || origin.contains(host) {
-			// same-origin (or no Host to compare) — allow
-		} else {
-			ctx.res.set_status(.forbidden)
-			return ctx.send_response_to_client('application/json', '{"error":"forbidden"}')
-		}
-	}
 	dist := os.getenv_opt('SWELTE_DIST') or { '' }
 	// ISR lite (item 15c): stamp early — before the SSR/static/shell early
 	// returns below — so every GET HTML 200 serve path carries the headers,
@@ -536,7 +568,7 @@ fn (mut app App) before_request(mut ctx Ctx) veb.Result {
 	// file regardless of Accept. The SPA-first proxy rule is about ROUTES
 	// (page navigations vs API dispatch) — real files always win so the SW
 	// registration fetch and precache never see dispatcher 404/shell HTML.
-	if dist != '' && ctx.req.method == .get {
+	if dist != '' && ctx.req.method == .get && (status < 400 || body.contains('not found')) {
 		full := dist + path
 		if !path.contains('..') && os.exists(full) && !os.is_dir(full) {
 			data := os.read_bytes(full) or { return ctx.send_response_to_client('application/json', '{"error":"read failed"}') }
@@ -569,6 +601,30 @@ fn (mut app App) before_request(mut ctx Ctx) veb.Result {
 		ctx.res.header.add(.set_cookie, c.to_header())
 	}
 	set_cors(mut ctx, cors_ok, cors_origin, origin)
+	if out.res.stream != unsafe { nil } {
+		return swelte_serve_stream(mut ctx, out.res, path)
+	}
+	if wants_html && ctx.req.method != .get {
+		for k, v in out.res.headers { ctx.res.header.set_custom(k, v) or {} }
+		if status >= 300 && status < 400 { return swelte_send_envelope(mut ctx, routes.SwelteResponse{status: status, headers: out.res.headers}) }
+		if status >= 200 && status < 300 {
+			mut kept := []string{}
+			if ctx.req.url.contains('?') {
+				for part in ctx.req.url.all_after('?').split('&') {
+					key := urllib.query_unescape(part.all_before('=')) or { '' }
+					if (routes.swelte_named_actions() && key.starts_with('/')) || (!routes.swelte_named_actions() && (key == 'q' || key == qualifier)) { continue }
+					kept << part
+				}
+			}
+			return ctx.redirect(path + if kept.len > 0 { '?' + kept.join('&') } else { '' }, typ: .see_other)
+		}
+		prefix, _ := routes.swelte_load_route(path)
+		if prefix != '' {
+			mut form_body := body
+			if !body.starts_with('{') { form_body = json.encode(body) }
+			return swelte_serve_page_form(mut ctx, path, query, headers, cookies, false, form_body, status)
+		}
+	}
 	// Load cascade → SSR props. On HTML navigations (never fetch), resolve
 	// the page route, run ancestor +route `@[load]` fns root-first (leaf
 	// merges parent + own data), and hand the resulting JSON to the SSR
@@ -582,7 +638,7 @@ fn (mut app App) before_request(mut ctx Ctx) veb.Result {
 	// §4 ssr=false-lite: `export const ssr = false` routes skip the
 	// QJS/sidecar entirely — Hand serves the SPA shell; async universal
 	// loads + client router take over in the browser.
-	if wants_html && !wants_json && swelte_ssr_enabled() && !routes.swelte_no_ssr(path) {
+	if wants_html && !wants_json && swelte_ssr_enabled() && !routes.swelte_no_ssr(path) && (page_prefix != '' || status >= 400) {
 		if status == 200 {
 			load_res := swelte_page_props(path, query, headers, cookies, map[string]string{})
 			props_json := load_res.body
@@ -808,6 +864,8 @@ struct SwelteSseJob {
 	qualifier string
 	req       routes.SwelteRequest
 	pch       chan string
+	done      chan bool
+	events    []string
 }
 
 // §SSR: engine hook. Core ships the sidecar proxy (SWELTE_SSR_URL);
@@ -944,6 +1002,134 @@ fn swelte_min_shell() string {
 	return '<!doctype html><html><head><meta charset="utf-8"><!--ssr-head--></head><body><div id="app"><!--ssr-body--></div></body></html>'
 }
 
+fn swelte_send_envelope(mut ctx Ctx, res routes.SwelteResponse) veb.Result {
+	ctx.res.set_status(http.status_from_int(res.status))
+	for k, v in res.headers { ctx.res.header.set_custom(k, v) or {} }
+	for cookie in res.cookies { ctx.res.header.add(.set_cookie, cookie.to_header()) }
+	return ctx.send_response_to_client('application/json', res.body)
+}
+
+fn swelte_stream_request(mut ctx Ctx, prefix string, input routes.SwelteRequest) !routes.SwelteRequest {
+	req := routes.swelte_guard_for(prefix, input)!
+	meta := routes.swelte_stream_meta(prefix, req)!
+	for k, v in meta.headers { ctx.res.header.set_custom(k, v) or {} }
+	for cookie in meta.cookies { ctx.res.header.add(.set_cookie, cookie.to_header()) }
+	if meta.status >= 300 && meta.status < 400 {
+		return routes.swelte_redirect_error(meta.headers['Location'] or { meta.headers['location'] or { '/' } }, meta.status)
+	}
+	if meta.status >= 400 { return routes.swelte_error(meta.status, 'stream rejected') }
+	return req
+}
+
+fn swelte_script_json(value string) string {
+	return value.replace('&', '\\u0026').replace('<', '\\u003c').replace('>', '\\u003e').replace('\u2028', '\\u2028').replace('\u2029', '\\u2029')
+}
+
+fn swelte_serve_page(mut ctx Ctx, path string, query map[string]string, headers map[string]string, cookies map[string]string, protocol bool) veb.Result {
+	return swelte_serve_page_form(mut ctx, path, query, headers, cookies, protocol, 'null', 0)
+}
+
+fn swelte_serve_page_form(mut ctx Ctx, path string, query map[string]string, headers map[string]string, cookies map[string]string, protocol bool, form string, form_status int) veb.Result {
+	prefix, params := routes.swelte_load_route(path)
+	identity, pattern := routes.swelte_page_identity(prefix)
+	request := routes.SwelteRequest{query: query, headers: headers, cookies: cookies, params: params, method: 'GET', path: path}
+	ch := chan routes.SwelteLoadResult{cap: 1}
+	spawn swelte_load_spawned(prefix, request, ch)
+	limits := swelte_limits_for(path)
+	budget := if limits.timeout_ms > 0 { i64(limits.timeout_ms) } else { swelte_handler_timeout_ms() }
+	mut loaded := routes.SwelteLoadResult{}
+	select {
+		result := <-ch { loaded = result }
+		budget * time.millisecond { loaded = routes.SwelteLoadResult{status: 504, body: '{"message":"load timeout"}'} }
+	}
+	if form_status >= 400 && loaded.status == 200 { loaded.status = form_status }
+	if form_status >= 500 { loaded.status = form_status; loaded.body = form }
+	mut data := if loaded.body == '' { '{}' } else { loaded.body }
+	json2.decode[json2.Any](data) or { loaded.status = 500; data = '{}' }
+	mut level_json := []string{}
+	mut merged := map[string]json2.Any{}
+	for key in loaded.level_order {
+		raw := loaded.levels[key] or { '{}' }
+		if routes.swelte_compat() {
+			fields := json2.decode[map[string]json2.Any](raw) or {
+				loaded.status = 500
+				map[string]json2.Any{}
+			}
+			for k, v in fields { merged[k] = v }
+			level_json << json.encode(key) + ':' + raw
+		} else {
+			level_json << json.encode(key) + ':' + raw
+		}
+	}
+	if routes.swelte_compat() && loaded.level_order.len > 0 { data = json2.encode(merged) }
+	mut error_json := 'null'
+	if loaded.status >= 400 && (form_status == 0 || form_status >= 500) {
+		fields := json2.decode[map[string]json2.Any](loaded.body) or { map[string]json2.Any{} }
+		message := (fields['message'] or { fields['error'] or { json2.Any('load failed') } }).str()
+		error_json = '{"status":' + loaded.status.str() + ',"message":' + json.encode(swelte_sanitize_error(message, loaded.status)) + '}'
+		data = '{}'
+	}
+	location := loaded.headers['Location'] or { loaded.headers['location'] or { '' } }
+	mut redirect_json := 'null'
+	if loaded.status >= 300 && loaded.status < 400 && location != '' { redirect_json = json.encode(location) }
+	host := headers['Host'] or { headers['host'] or { 'localhost' } }
+	origin := os.getenv_opt('SWELTE_ORIGIN') or { 'http://' + host }
+	url := origin.trim_right('/') + ctx.req.url
+	mut payload := '{"version":1,"compat":' + routes.swelte_compat().str() + ',"url":' + json.encode(url) + ',"route":{"id":' + json.encode(identity) + ',"pattern":' + json.encode(pattern) + '},"params":' + json.encode(params) + ',"data":' + data + ',"levels":{' + level_json.join(',') + '},"form":' + form + ',"status":' + loaded.status.str() + ',"error":' + error_json + ',"redirect":' + redirect_json + '}'
+	filtered, allowed := swelte_serialized_lookup(path)
+	for k, v in loaded.headers {
+		if filtered && k.to_lower() != 'location' {
+			mut keep := false
+			for name in allowed { if name.to_lower() == k.to_lower() { keep = true; break } }
+			if !keep { continue }
+		}
+		ctx.res.header.set_custom(k, v) or {}
+	}
+	for cookie in loaded.cookies { ctx.res.header.add(.set_cookie, cookie.to_header()) }
+	ctx.res.header.set_custom('Cache-Control', 'private, no-store') or {}
+	ctx.res.header.set_custom('Vary', 'X-Swelte-Load, Accept, Cookie') or {}
+	if protocol {
+		// Fetch cannot inspect a manual redirect response; carry its real
+		// status/location in the envelope without following it on the server.
+		ctx.res.set_status(http.status_from_int(if redirect_json != 'null' { 200 } else { loaded.status }))
+		return ctx.send_response_to_client('application/json', payload)
+	}
+	ctx.res.set_status(http.status_from_int(loaded.status))
+	if redirect_json != 'null' { return ctx.send_response_to_client('text/html; charset=utf-8', '') }
+	dist := os.getenv_opt('SWELTE_DIST') or { '' }
+	mut shell := swelte_shell_for(dist, path)
+	if swelte_ssr_enabled() && !routes.swelte_no_ssr(path) {
+		joined, ok := swelte_render_page(if error_json != 'null' { '/+error' } else { path }, payload)
+		if ok {
+			head := swelte_page_head_split(joined)
+			body, _ := swelte_split_head_body(joined, true)
+			if body.contains('data-swelte-render-error="1"') {
+				eprintln('[swelte:ssr] route=' + path + ' reason=render-error')
+				ctx.res.set_status(.internal_server_error)
+				if (os.getenv_opt('SWELTE_SSR_STRICT') or { '' }) == '1' { return ctx.send_response_to_client('text/plain', 'swelte: expected SSR render failed') }
+				mut failure := json2.decode[map[string]json2.Any](payload) or { map[string]json2.Any{} }
+				failure['status'] = json2.Any(500)
+				failure['error'] = json2.Any({'status': json2.Any(500), 'message': json2.Any('render failed')})
+				failure['data'] = json2.Any(map[string]json2.Any{})
+				failure['form'] = json2.null
+				payload = json2.encode(failure)
+			}
+			shell = swelte_fill_ssr(shell, head, body)
+		} else if (os.getenv_opt('SWELTE_SSR_STRICT') or { '' }) == '1' {
+			ctx.res.set_status(.internal_server_error)
+			return ctx.send_response_to_client('text/plain', 'swelte: expected SSR render failed')
+		}
+	}
+	state := '<script type="application/json" id="__swelte_page">' + swelte_script_json(payload) + '</script>'
+	shell = if shell.contains('</body>') { shell.replace('</body>', state + '</body>') } else { shell + state }
+	return ctx.send_response_to_client('text/html; charset=utf-8', shell)
+}
+
+fn swelte_load_spawned(prefix string, request routes.SwelteRequest, ch chan routes.SwelteLoadResult) {
+	result := routes.swelte_load_for(prefix, request) or { routes.SwelteLoadResult{status: 500, body: '{"message":"load failed"}'} }
+	ch <- result
+}
+
 // Page-data path: resolve `path` to a routes prefix (same precedence as
 // swelte_route), build a SwelteRequest, run the load cascade.
 // Any throw → status-carrying envelope (typed throws via
@@ -992,32 +1178,43 @@ fn swelte_sse_produce(job SwelteSseJob) {
 		// (room branch spliced here when hooks.roomSse)
 	} else if routes.swelte_sse_is_emit(job.prefix) {
 		emit := fn [job] (e string) bool {
-			job.pch <- e
-			return true
+			select {
+				_ := <-job.done { return false }
+				job.pch <- e { return true }
+			}
+			return false
 		}
 		routes.swelte_sse_emit_for(job.prefix, job.qualifier, job.req, emit) or {}
 	} else {
-		events := routes.swelte_sse_events_for(job.prefix, job.qualifier, job.req) or {
-			[]string{}
-		}
-		for e in events {
-			job.pch <- e
+		for e in job.events {
+			select {
+				_ := <-job.done { job.pch.close(); return }
+				job.pch <- e {}
+			}
 		}
 	}
 	job.pch.close()
 }
 
-fn swelte_serve_sse(mut ctx Ctx, prefix string, qualifier string, req routes.SwelteRequest) veb.Result {
+fn swelte_serve_sse(mut ctx Ctx, prefix string, qualifier string, req routes.SwelteRequest, events []string) veb.Result {
 	ctx.takeover_conn()
 	pch := chan string{cap: 64}
-	job := SwelteSseJob{prefix, qualifier, req, pch}
+	done := chan bool{}
+	job := SwelteSseJob{prefix, qualifier, req, pch, done, events}
 	spawn swelte_sse_produce(job)
-	spawn swelte_sse_write(mut ctx, pch)
+	spawn swelte_sse_write(mut ctx, pch, done)
 	return veb.no_result()
 }
 
-fn swelte_sse_write(mut ctx Ctx, pch chan string) {
-	mut sse_conn := sse.start_connection(mut ctx.Context)
+fn swelte_sse_write(mut ctx Ctx, pch chan string, done chan bool) {
+	defer { done.close() }
+	ctx.res.header.delete(.content_length)
+	ctx.res.header.delete(.transfer_encoding)
+	ctx.res.header.set(.content_type, 'text/event-stream')
+	ctx.res.header.set(.cache_control, 'no-cache')
+	ctx.res.header.set(.connection, 'close')
+	ctx.conn.write_string('HTTP/1.1 200 OK\r\n' + ctx.res.header.render() + '\r\n') or { return }
+	mut sse_conn := &sse.SSEConnection{conn: ctx.conn}
 	cap := swelte_sse_max_events()
 	mut n := 0
 	for {
@@ -1037,6 +1234,60 @@ fn swelte_sse_write(mut ctx Ctx, pch chan string) {
 	}
 	sse_conn.send_message(data: 'swelte:close') or {}
 	sse_conn.close()
+}
+
+struct SwelteByteStreamJob {
+	producer fn (routes.SwelteStream) ! @[required]
+	chunks chan []u8
+	done chan bool
+	path string
+}
+
+fn swelte_byte_stream_produce(job SwelteByteStreamJob) {
+	write := fn [job] (bytes []u8) bool {
+		if bytes.len == 0 {
+			select { _ := <-job.done { return false } else { return true } }
+		}
+		if bytes.len > int(swelte_env_int('SWELTE_STREAM_CHUNK_LIMIT', 65536)) { return false }
+		chunk := bytes.clone()
+		select {
+			_ := <-job.done { return false }
+			job.chunks <- chunk { return true }
+		}
+		return false
+	}
+	job.producer(routes.SwelteStream{write, job.done}) or { eprintln('[swelte:stream] route=' + job.path + ' reason=producer-error') }
+	job.chunks.close()
+}
+
+fn swelte_serve_stream(mut ctx Ctx, response routes.SwelteResponse, path string) veb.Result {
+	ctx.res.set_status(http.status_from_int(response.status))
+	for k, v in response.headers { ctx.res.header.set_custom(k, v) or {} }
+	ctx.res.header.delete(.content_length)
+	ctx.res.header.delete(.transfer_encoding)
+	ctx.res.header.set(.connection, 'close')
+	ctx.takeover_conn()
+	ctx.conn.write_string('HTTP/1.1 ' + response.status.str() + ' ' + http.status_from_int(response.status).str() + '\r\n' + ctx.res.header.render() + '\r\n') or { ctx.conn.close() or {}; return veb.no_result() }
+	chunks := chan []u8{cap: 8}
+	done := chan bool{}
+	spawn swelte_byte_stream_produce(SwelteByteStreamJob{response.stream, chunks, done, path})
+	spawn swelte_byte_stream_write(mut ctx, chunks, done)
+	return veb.no_result()
+}
+
+fn swelte_byte_stream_write(mut ctx Ctx, chunks chan []u8, done chan bool) {
+	defer { done.close(); ctx.conn.close() or {} }
+	idle := swelte_env_int('SWELTE_STREAM_IDLE_MS', 30000)
+	ctx.conn.set_write_timeout(idle * time.millisecond)
+	for {
+		select {
+			chunk := <-chunks {
+				if chunk.len == 0 { return }
+				ctx.conn.write(chunk) or { return }
+			}
+			idle * time.millisecond { return }
+		}
+	}
 }
 
 // §WS (future.md #3): bidirectional socket Rooms over the hub. Upgrade +
@@ -1072,7 +1323,13 @@ fn swelte_serve_ws(mut ctx Ctx, prefix string, req routes.SwelteRequest) veb.Res
 		return ctx.send_response_to_client('application/json', '{"error":"unsupported Sec-WebSocket-Version (want 13)"}')
 	}
 	accept := backend.ws_accept_key(key)
-	handshake := 'HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ${accept}\r\n\r\n'
+	ctx.res.header.delete(.content_length)
+	ctx.res.header.delete(.content_type)
+	ctx.res.header.delete(.transfer_encoding)
+	ctx.res.header.set(.upgrade, 'websocket')
+	ctx.res.header.set(.connection, 'Upgrade')
+	ctx.res.header.set_custom('Sec-WebSocket-Accept', accept) or {}
+	handshake := 'HTTP/1.1 101 Switching Protocols\r\n' + ctx.res.header.render() + '\r\n'
 	ctx.takeover_conn()
 	mut conn := ctx.conn
 	if conn == unsafe { nil } {

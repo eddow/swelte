@@ -1,8 +1,12 @@
-// `swelte init <dir>`: scaffold a new Swelte project.
+// `swelte init <dir>`: scaffold a new Swelte project — app or library.
 // `templates/base/` is the empty skeleton (SPA-only: `@swelte/core/vite`);
 // `templates/sample/src/` overlays the demo routes/lib on top (`--sample`,
-// or interactive pick). `--ssr` (interactive opt-in, default No) adds the
-// `@swelte/ssr-qjs` engine (SSR via embedded QuickJS; SPA otherwise).
+// or interactive pick). `--lib` (or interactive kind pick) scaffolds a
+// library instead: same base, plus `templates/lib/` overlay (public
+// `src/lib` sample + `src/routes` dogfood demo, `build` + `build:lib`
+// scripts, `swelte.v.exports` starter). `--ssr` (interactive opt-in,
+// default No) adds the `@swelte/ssr-qjs` engine (SSR via embedded
+// QuickJS; SPA otherwise).
 // Only `__NAME__` (+ `__SWELTE_VERSION__` in package.json) is replaced.
 // Generated files (server harness, client entry, routers) are NEVER
 // scaffolded — `dev`/`build` derive them into `.swelte/`.
@@ -52,6 +56,24 @@ async function ask(question: string, pipedYes: (line: string) => boolean): Promi
 	}
 }
 
+async function askKind(): Promise<'app' | 'lib'> {
+	// SvelteKit-style: the first question is what you are building.
+	// Piped/non-TTY: can't prompt, default app (same as before).
+	if (!process.stdin.isTTY) return 'app'
+	const rl = readline.createInterface({ input: process.stdin, output: process.stdout })
+	try {
+		const answer = await new Promise<string>((resolveQ) => {
+			rl.question(
+				'Project kind: app (routes served) or lib (src/lib published, src/routes dogfood)? [app/lib] ',
+				resolveQ
+			)
+		})
+		return /^l/i.test(answer.trim()) ? 'lib' : 'app'
+	} finally {
+		rl.close()
+	}
+}
+
 async function askSample(): Promise<boolean> {
 	return ask(
 		'Include sample routes (demo api/admin/files/users)? [y/N] ',
@@ -74,8 +96,17 @@ export async function runInit(ctx: Ctx): Promise<void> {
 	if (existsSync(root) && readdirSync(root).length > 0) {
 		throw new Error(`target ${root} exists and is not empty (pass an empty dir)`)
 	}
-	const wantSample =
-		ctx.opts.sample === true || ctx.opts.template === 'sample'
+	// Kind first: a library's src/routes is the dogfood demo, never the app
+	// sample — so libs skip the sample question entirely.
+	const wantLib =
+		ctx.opts.lib === true || ctx.opts.kind === 'lib' || ctx.opts.template === 'lib'
+			? true
+			: ctx.opts.kind === 'app' || ctx.opts.lib === false
+				? false
+				: await askKind().then((k) => k === 'lib')
+	const wantSample = wantLib
+		? false
+		: ctx.opts.sample === true || ctx.opts.template === 'sample'
 			? true
 			: ctx.opts.empty === true || ctx.opts.template === 'empty'
 				? false
@@ -89,16 +120,27 @@ export async function runInit(ctx: Ctx): Promise<void> {
 	const templates = templatesRoot()
 	cpSync(join(templates, 'base'), root, { recursive: true })
 	if (wantSample) cpSync(join(templates, 'sample', 'src'), join(root, 'src'), { recursive: true })
+	if (wantLib) {
+		// Library overlay: public src/lib sample + src/routes dogfood demo on
+		// top of the base skeleton (no sample overlay — a lib's routes are
+		// the dogfood demo, not the app sample). Overwrites the base +page
+		// pair with the dogfood demo that imports #lib.
+		cpSync(join(templates, 'lib', 'src'), join(root, 'src'), { recursive: true })
+	}
 	// Only placeholders: project name (+ engine version pin in package.json).
 	// SSR: swap the `swelte` import to the QJS adapter + add the dep.
-	for (const rel of [
+	// Lib: private=false, build + build:lib scripts, svelte/package.json
+	// exports entries, swelte.v.exports starter pointing at src/lib.
+	const placeholderFiles = [
 		'package.json',
 		'vite.config.ts',
 		'svelte.config.js',
 		'index.html',
 		'src/routes/+page.svelte',
 		'src/routes/+page.v',
-	]) {
+		...(wantLib ? ['src/lib/hello/api.v'] : []),
+	]
+	for (const rel of placeholderFiles) {
 		const abs = join(root, rel)
 		if (!existsSync(abs)) continue
 		let text = readFileSync(abs, 'utf8').split('__NAME__').join(name)
@@ -113,10 +155,43 @@ export async function runInit(ctx: Ctx): Promise<void> {
 		} else {
 			text = text.split('__SWELTE_VERSION__').join(VERSION)
 		}
+		if (wantLib && rel === 'package.json') {
+			const pkg = JSON.parse(text) as Record<string, unknown>
+			delete pkg.private
+			pkg.files = ['dist', 'src/lib/**/*.v']
+			pkg.exports = {
+				'.': { svelte: './dist/index.js', types: './dist/index.d.ts' },
+				'./package.json': './package.json',
+				'./v/hello.v': { types: './.swelte/types/npm/hello.d.ts' },
+			}
+			pkg.svelte = './dist/index.js'
+			const scripts = (pkg.scripts ?? {}) as Record<string, string>
+			scripts['build:lib'] = 'svelte-package && swelte check --lib'
+			pkg.scripts = scripts
+			const devDeps = (pkg.devDependencies ?? {}) as Record<string, string>
+			devDeps['@sveltejs/package'] = '^2.0.0'
+			pkg.devDependencies = devDeps
+			pkg.swelte = {
+				v: {
+					exports: {
+						'./hello.v': {
+							source: './src/lib/hello',
+							entry: './src/lib/hello/api.v',
+							target: 'universal',
+						},
+					},
+				},
+			}
+			text = `${JSON.stringify(pkg, null, 2)}\n`
+		}
 		writeFileSync(abs, text)
 	}
 	ctx.log(
-		`scaffolded ${wantSample ? 'sample' : 'empty'}${wantSsr ? ' +ssr' : ''} project at ${root}`
+		`scaffolded ${wantLib ? 'lib' : wantSample ? 'sample' : 'empty'}${wantSsr ? ' +ssr' : ''} project at ${root}`
 	)
-	ctx.log(`next: cd ${root} && npm install && swelte dev`)
+	ctx.log(
+		wantLib
+			? `next: cd ${root} && npm install && swelte dev (dogfood demo) / npm run build:lib (publish)`
+			: `next: cd ${root} && npm install && swelte dev`
+	)
 }

@@ -1,0 +1,40 @@
+{
+  "name": "@swelte-dogfood/ai1",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "files": ["dist", "src/lib/**/*.v"],
+  "svelte": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "peerDependencies": { "svelte": "^5.0.0" },
+  "scripts": {
+    "build": "swelte build",
+    "build:lib": "svelte-package && swelte check --lib"
+  },
+  "exports": {
+    ".": { "types": "./dist/index.d.ts", "svelte": "./dist/index.js" },
+    "./package.json": "./package.json",
+    "./Panel.svelte": {
+      "types": "./dist/Panel.svelte.d.ts",
+      "svelte": "./dist/Panel.svelte"
+    },
+    "./v/text.v": { "types": "./dist/text.d.ts" },
+    "./v/runner.v": { "default": "./src/lib/backend/runner/api.v" }
+  },
+  "swelte": {
+    "v": {
+      "exports": {
+        "./runner.v": {
+          "source": "./src/lib/backend/runner",
+          "entry": "./src/lib/backend/runner/api.v",
+          "target": "server"
+        },
+        "./text.v": {
+          "source": "./src/lib/text",
+          "entry": "./src/lib/text/api.v",
+          "target": "universal"
+        }
+      }
+    }
+  }
+}

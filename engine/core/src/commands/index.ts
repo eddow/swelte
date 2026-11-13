@@ -72,7 +72,7 @@ const previewCmd: Command = {
 const initCmd: Command = {
 	name: 'init',
 	summary:
-		'Scaffold a new Swelte project in <dir> (default my-swelte-app). Empty skeleton unless --sample; SPA-only unless --ssr.',
+		'Scaffold a new Swelte project in <dir> (default my-swelte-app). App (routes served) or lib (src/lib published, src/routes dogfood); empty skeleton unless --sample; SPA-only unless --ssr.',
 	args: [
 		{ name: 'root', help: 'Parent dir for the scaffold', value: 'string' },
 		{ name: 'dir', help: 'Target directory name', value: 'string' },
@@ -82,7 +82,13 @@ const initCmd: Command = {
 			value: 'boolean',
 		},
 		{ name: 'empty', help: 'Empty skeleton only (no prompt)', value: 'boolean' },
-		{ name: 'template', help: 'Template to use: empty | sample', value: 'string' },
+		{ name: 'template', help: 'Template to use: empty | sample | lib', value: 'string' },
+		{ name: 'kind', help: 'Project kind: app | lib (no prompt)', value: 'string' },
+		{
+			name: 'lib',
+			help: 'Scaffold a library (src/lib published, src/routes dogfood; build + build:lib scripts)',
+			value: 'boolean',
+		},
 		{
 			name: 'ssr',
 			help: 'Include SSR via @swelte/ssr-qjs (else SPA-only; no prompt)',
@@ -100,12 +106,17 @@ const checkCmd: Command = {
 	args: [
 		{ name: 'root', help: 'Project root', value: 'string' },
 		{ name: 'format', help: 'Output format: text | json', value: 'string' },
+		{
+			name: 'lib',
+			help: 'Also validate the library schema (src/lib published, src/routes dogfood)',
+			value: 'boolean',
+		},
 	],
 	async run(ctx: Ctx) {
 		const { resolve } = await import('node:path')
 		const root = resolve(String(ctx.opts.root ?? process.cwd()))
 		const { collectDiagnostics } = await import('../gen/diagnostics.js')
-		const diags = await collectDiagnostics(root)
+		const diags = await collectDiagnostics(root, { lib: Boolean(ctx.opts.lib) })
 		const fmt = String(ctx.opts.format ?? 'text')
 		if (fmt !== 'text' && fmt !== 'json')
 			throw new Error(`--format must be text or json (got ${fmt})`)

@@ -4,6 +4,8 @@
  *  them from `@swelte/core/config` (or the `vite` barrel), never here. */
 
 export interface SweltePluginOptions {
+	compat?: 'none' | 'sveltekit'
+	actionQuery?: 'legacy' | 'named'
 	routesDir?: string
 	libDir?: string
 	outDir?: string
@@ -173,6 +175,7 @@ export interface MatcherDef {
 }
 
 export interface ServerHooks {
+	imports?: string
 	/** Raw V body of `@[startup]` (inlined into main before veb.run). */
 	startupBody?: string
 	/** Raw V body of `@[reroute]` (inlined into before_request). */

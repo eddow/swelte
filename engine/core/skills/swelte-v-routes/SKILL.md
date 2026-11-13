@@ -16,7 +16,7 @@ Every `.v` file is an ES module. Every `pub fn` with an attribute is a named exp
 | `#routes/` | `@[sse]` / `@[sse('q')]` | GET `Accept: text/event-stream` | three shapes (below); same default/qualifier rules as verbs |
 | `#routes/` | `@[ws]` (needs `@swelte/plus/db`) | GET + `Upgrade: websocket` | one socket per file, no qualifier, never stacked; `(req, sub, recv, emit)` → void; TS stub is a URL builder (browser opens native `WebSocket`) |
 | `#routes/` | `@[post]` / `@[put]` / `@[delete]` / `@[patch]` (+`('q')`) | respective method | form fields = args; default, or `?q` qualifier |
-| `#routes/` leaf + `+route.v` | `@[load]` | page data, `Hand` HTML navigations only | `(SwelteRequest[, parent T]) -> !R`; zero/one per file, never stacked, no qualifier |
+| `#routes/` leaf + `+route.v` | `@[load]` | page data for HTML, navigation and refresh | `(SwelteRequest[, parent T]) -> !R`; zero/one per file, never stacked, no qualifier |
 | `+route.v` only | `@[before]` / `@[after]` | subtree middleware; root `+route.v` = global head | `SwelteRequest -> !SwelteRequest` / observe-or-replace response; never exported to TS |
 | `#lib/` | `@[rpc]` | local WASM call | none (direct dispatch) |
 | `src/matchers.v` | `@[matcher]` | param matcher, both sides | `(s string) bool`, non-fallible, portable subset only; `integer` builtin |
@@ -26,6 +26,20 @@ Every `.v` file is an ES module. Every `pub fn` with an attribute is a named exp
 Rules: verbs stack (`@[get; post]`), one default per verb per file, qualifiers unique per verb per file. Never stack `@[sse]`/`@[ws]` with a verb/rpc/sse/ws on one fn (one transport per fn). `@[ws]` never stacks and takes no qualifier (one socket per file). `@[load]` never stacked, no qualifier. Dynamic segments: `[id]` any segment, `[id=matcher]` constrained (`integer` builtin = digits, `Params: number`; custom `@[matcher]` fns in `src/matchers.v`, `Params: string`), `[[slug]]` last-segment optional, `[...rest]` catch-all last. `src/matchers.v` / `src/app.v` are never routed and never importable from browser code; `@[matcher]`/`@[startup]`/`@[reroute]` in `src/routes/*` is a build error.
 
 ## Handler shapes
+
+Before hooks run before page loads, mutations and SSE/WS takeover; their locals
+reach the handler. After hooks preserve metadata/cookies on those paths.
+Use `return swelte_redirect_error('/login', 303)` from fallible middleware for
+redirects. `swelte.compat: 'sveltekit'` selects named `?/save` actions;
+legacy qualifiers remain the default. PostgreSQL is an ordinary native V
+dependency (`db.pg`), not a missing Swelte ORM.
+
+For native byte streaming, return `swelte_stream(headers, fn (s SwelteStream) ! { ... })`
+from a verb handler. `s.write(bytes)` returns false when disconnected or a
+chunk exceeds the configured limit; select on `s.cancelled` while idle and
+release app-owned resources on return. Bytes are sent unchanged, including
+application-owned SSE framing. The buffer is bounded; idle/write timeout and
+chunk limit use `SWELTE_STREAM_IDLE_MS` and `SWELTE_STREAM_CHUNK_LIMIT`.
 
 ```v
 module greet

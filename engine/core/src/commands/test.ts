@@ -6,7 +6,8 @@
 //    and tsc fails pre-browser.
 import { execFileSync } from 'node:child_process'
 import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
-import { join, resolve } from 'node:path'
+import { homedir } from 'node:os'
+import { delimiter, join, resolve } from 'node:path'
 import type { Ctx } from './types.js'
 
 function listVFiles(dir: string): string[] {
@@ -31,7 +32,7 @@ function listVFiles(dir: string): string[] {
 
 export async function runTest(ctx: Ctx): Promise<void> {
 	const root = resolve(String(ctx.opts.root ?? process.cwd()))
-	const { resolveV, vVersion, toolchainEnv } = await import('../toolchain.js')
+	const { resolveV, vVersion, toolchainEnv, needsGlobals } = await import('../toolchain.js')
 	const { loadConfig, loadProjectSwelteOptions } = await import('../gen/config.js')
 	const v = resolveV(import.meta.url)
 	ctx.log(`V toolchain: ${vVersion(v)} (${v})`)
@@ -73,11 +74,15 @@ export async function runTest(ctx: Ctx): Promise<void> {
 			// `v test src/...` otherwise searches only beside the tested source,
 			// @vlib and @vmodules, so application tests could not import the same
 			// npm_* modules used by dev/build.
-			const modulePath = `${resolve(root, cfg.outDir)}|@vlib|@vmodules`
-			execFileSync(v, ['-path', modulePath, 'test', dir], {
+			// V's test runner reconstructs compiler flags through a shell and
+			// loses quoting on -path values containing pipes or spaces. Pass
+			// module search roots through the inherited VMODULES environment.
+			const generated = resolve(root, cfg.outDir)
+			const modulePaths = [generated, process.env.VMODULES || join(homedir(), '.vmodules')]
+			execFileSync(v, [...(needsGlobals(generated) ? ['-enable-globals'] : []), 'test', dir], {
 				cwd: root,
 				stdio: ['ignore', 'pipe', 'pipe'],
-				env: toolchainEnv(),
+				env: toolchainEnv({ VMODULES: modulePaths.join(delimiter) }),
 			})
 			vTested++
 		} catch (e) {

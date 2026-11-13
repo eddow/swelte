@@ -2,6 +2,7 @@
 
 [![npm version](https://img.shields.io/npm/v/@swelte/ssr-qjs.svg)](https://www.npmjs.com/package/@swelte/ssr-qjs)
 [![npm downloads](https://img.shields.io/npm/dm/@swelte/ssr-qjs.svg)](https://www.npmjs.com/package/@swelte/ssr-qjs)
+[![Support on Ko-fi](https://img.shields.io/badge/Support-Ko--fi-ff5e5b?style=for-the-badge&logo=kofi&logoColor=white)](https://ko-fi.com/emedware)
 
 > 📚 [Documentation](https://swelte.emedware.dev/)
 

@@ -277,6 +277,61 @@ describe('SDK error contract', () => {
 		else g.__swelteRoutes = prev
 	})
 
+	it('action errors publish status and invoke the router error boundary', async () => {
+		const g = globalThis as Record<string, unknown>
+		const previous = g.__swelteRoutes
+		let rendered: unknown
+		try {
+			g.__swelteRoutes = {
+				setError: async (error: unknown) => {
+					rendered = error
+				},
+			}
+			page.set({ url: '/', params: {}, route: '/', form: { old: true } })
+			await applyAction({ type: 'error', status: 503, error: { message: 'try later' } })
+			assert.deepEqual(rendered, { status: 503, message: 'try later' })
+			assert.equal(page.get().status, 503)
+			assert.equal(page.get().form, null)
+			assert.deepEqual(page.get().error, rendered)
+		} finally {
+			if (previous === undefined) delete g.__swelteRoutes
+			else g.__swelteRoutes = previous
+		}
+	})
+
+	it('tagged invalidation retains async dependencies and awaits the router refresh', async () => {
+		const { __swelteTrackLoad, invalidateAsync } = await import('./sdk.js')
+		const g = globalThis as Record<string, unknown>
+		const previous = g.__swelteRoutes
+		let release!: () => void
+		const gate = new Promise<void>((resolve) => {
+			release = resolve
+		})
+		let committed = false
+		try {
+			await __swelteTrackLoad('async-page', async (register) => {
+				await Promise.resolve()
+				register('app:async')
+			})
+			g.__swelteRoutes = {
+				refreshTagged: async (keys: string[]) => {
+					assert.deepEqual(keys, ['async-page'])
+					await gate
+					committed = true
+				},
+			}
+			const pending = invalidateAsync('app:async')
+			assert.equal(committed, false)
+			release()
+			await pending
+			assert.equal(committed, true)
+		} finally {
+			release()
+			if (previous === undefined) delete g.__swelteRoutes
+			else g.__swelteRoutes = previous
+		}
+	})
+
 	it('§1 enhance intercepts submit and defaults to applyAction+reset', async () => {
 		let fetched = ''
 		let accepted = ''

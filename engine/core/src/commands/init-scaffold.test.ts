@@ -55,6 +55,39 @@ describe('swelte init scaffolds (no prompt in tests)', () => {
 		assert.ok(existsSync(join(parent, 'alias-app', 'package.json')))
 	})
 
+	it('--lib scaffolds src/lib hello.v + src/routes dogfood (no sample, lib package.json)', async () => {
+		const parent = mkdtempSync(join(tmpdir(), 'swelte-init-'))
+		const { ctx } = ctxFor(parent, { lib: true, root: parent }, ['my-lib'])
+		await runInit(ctx as never)
+		assert.ok(existsSync(join(parent, 'my-lib', 'src', 'lib', 'hello', 'api.v')))
+		assert.ok(existsSync(join(parent, 'my-lib', 'src', 'routes', '+page.v')))
+		assert.ok(!existsSync(join(parent, 'my-lib', 'src', 'routes', 'api')))
+		const pkg = JSON.parse(readFileSync(join(parent, 'my-lib', 'package.json'), 'utf8'))
+		assert.equal(pkg.private, undefined)
+		assert.deepEqual(pkg.files, ['dist', 'src/lib/**/*.v'])
+		assert.ok(pkg.scripts['build:lib'].includes('svelte-package'))
+		assert.ok(pkg.scripts['build:lib'].includes('swelte check --lib'))
+		assert.ok(pkg.scripts.build === 'swelte build')
+		assert.ok(pkg.devDependencies['@sveltejs/package'])
+		assert.ok(pkg.swelte.v.exports['./hello.v'])
+		assert.equal(pkg.swelte.v.exports['./hello.v'].source, './src/lib/hello')
+		assert.equal(pkg.swelte.v.exports['./hello.v'].entry, './src/lib/hello/api.v')
+	})
+
+	it('--kind lib equals --lib (explicit kind, no prompt)', async () => {
+		const parent = mkdtempSync(join(tmpdir(), 'swelte-init-'))
+		const { ctx } = ctxFor(parent, { kind: 'lib', root: parent }, ['kind-lib'])
+		await runInit(ctx as never)
+		assert.ok(existsSync(join(parent, 'kind-lib', 'src', 'lib', 'hello', 'api.v')))
+	})
+
+	it('--template lib scaffolds a library', async () => {
+		const parent = mkdtempSync(join(tmpdir(), 'swelte-init-'))
+		const { ctx } = ctxFor(parent, { template: 'lib', root: parent }, ['tpl-lib'])
+		await runInit(ctx as never)
+		assert.ok(existsSync(join(parent, 'tpl-lib', 'src', 'lib', 'hello', 'api.v')))
+	})
+
 	it('--ssr adds @swelte/ssr-qjs dep + adapter import', async () => {
 		const parent = mkdtempSync(join(tmpdir(), 'swelte-init-'))
 		const { ctx } = ctxFor(parent, { empty: true, ssr: true, root: parent }, ['ssr-app'])

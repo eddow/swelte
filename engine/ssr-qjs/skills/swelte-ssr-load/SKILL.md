@@ -12,9 +12,20 @@ description: Swelte SSR and page-data loading — @[load] cascade, +route wrappe
 
 ## Request path
 
-Browser `GET /` (`Accept: text/html`) → `Hand.before_request` → `swelte_ssr_enabled()` → `swelte_page_props()` (`swelte_load_for()` cascade) → embedded QuickJS `renderRoute(path, props)` (or sidecar POST when `SWELTE_SSR_URL` is set) → HTML at `<!--ssr-body-->` + `data-swelte-ssr="1"` on `#app`. Failures → SPA shell / `+error` HTML — never blank/JSON for navigations. `Accept: application/json` bypasses SSR (API stays JSON). `GET` navigations never redirect (`303` is POST-only).
+Browser `GET /` (`Accept: text/html`) → `Hand.before_request` → `swelte_ssr_enabled()` → `swelte_page_props()` (`swelte_load_for()` cascade) → embedded QuickJS `renderRoute(path, props)` (or sidecar POST when `SWELTE_SSR_URL` is set) → HTML at `<!--ssr-body-->` + `data-swelte-ssr="1"` on `#app`. Failures → SPA shell / `+error` HTML — never blank/JSON for navigations. `Accept: application/json` bypasses SSR (API stays JSON). A load envelope with 3xx status and `Location` can redirect an HTML GET; middleware redirect support is a separate contract.
 
 ## `@[load]` cascade
+
+The guarded versioned envelope is shared by HTML, client navigation and refresh,
+including Svelte-only leaves inheriting wrapper loads. SSR renders wrappers and
+page in one tree, preserving head and context; initial JSON is escaped into
+`__swelte_page` for hydration. `compat: 'sveltekit'` selects nested data/form
+props and reactive `$app/state`; default flat props remain supported.
+`invalidateAll()` awaits refresh and updates mounted props without remounting.
+Universal loads receive `depends(...tags)`; navigation `invalidate(tag)` awaits
+refresh for matching active loads. Native `invalidate()` keeps its synchronous
+matching-key return; use `invalidateAsync()` to await. Action exceptions render
+the global error component, while validation failures remain on `page.form`.
 
 Initial paint data comes from a `load` fn; interaction data comes from stubs.
 
@@ -45,6 +56,18 @@ pub fn load_admin(req SwelteRequest, parent AdminRoute_AdminLayout) !AdminProps 
 ## `+error` contract
 
 Single global `src/routes/+error.svelte`, `{ status?: number; message?: string }`. 404 unknown path, 4xx guard rejects, 500 handler throws — all HTML with the right status, server stays up. Missing `+error.svelte` → SPA `index.html` 200.
+
+Nested error files are currently rejected. This is a routing scope restriction,
+not a V/QuickJS requirement; per-directory boundaries need ancestor selection
+and matching SSR/client wrapper and fallback behavior.
+
+## Installed UI dependencies
+
+The SSR bundler resolves installed ESM/Svelte package exports and compiles
+transitive `.svelte`, `.ts` and `.svelte.ts/js` modules for synchronous SSR.
+Unresolved imports fail composition instead of remaining external in a broken
+QuickJS bundle. Browser-only/Node server dependencies still need separation;
+package installation does not make an asynchronous or Node backend QJS-safe.
 
 ## Budgets (measured 2026-10-31, `examples/something`, 73KB bundle)
 

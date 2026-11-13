@@ -10,20 +10,32 @@
 // SSR: hydrate when Hand filled the SSR body marker, else mount the SPA shell.
 // Then boot the §1.4 client router (goto/preloadData/pushState + guards).
 // The SDK bridge (`globalThis.__swelteRouterSdk`) is wired by the app
-// bundle — entry-main never imports @swelte/core directly (keeps the
-// generated entry resolvable without workspace symlinks).
-import { hydrateSwelteRoute, mountSwelteRoute, initSwelteRouter } from './routes.js'
+// bundle; the side-effect SDK import ensures it exists before hydration.
+import { hydrateSwelteRoute, mountSwelteRoute, initSwelteRouter, preloadData, setError } from './routes.js'
+import '@swelte/core'
 
 const target = document.getElementById('app')!
 async function __swelteBoot() {
-	if (target.dataset.swelteSsr === '1' || target.childNodes.length > 0) {
-		await hydrateSwelteRoute(target, location.pathname, undefined)
+	const url = location.pathname + location.search + location.hash
+	const serialized = document.getElementById('__swelte_page')?.textContent
+	let initial: unknown
+	if (serialized) {
+		const parsed = JSON.parse(serialized)
+		if (parsed.version !== 1 || !parsed.route || !parsed.params) throw new Error('swelte: invalid initial page envelope')
+		initial = parsed
 	} else {
-		await mountSwelteRoute(target, location.pathname, undefined)
+		initial = (await preloadData(url))?.data ?? undefined
+	}
+	if (target.dataset.swelteSsr === '1' || target.childNodes.length > 0) {
+		await hydrateSwelteRoute(target, url, initial)
+	} else {
+		await mountSwelteRoute(target, url, initial)
 	}
 	initSwelteRouter(target)
 }
 __swelteBoot().catch((e) => {
-	console.error('[swelte] boot failed, mounting shell', e)
-	mountSwelteRoute(target, location.pathname, undefined).then(() => initSwelteRouter(target))
+	if ((globalThis as { __swelteStrictHydration?: boolean }).__swelteStrictHydration) throw e
+	console.error('[swelte] page boot failed', e)
+	initSwelteRouter(target)
+	return setError({ status: 500, message: 'page load failed' })
 })

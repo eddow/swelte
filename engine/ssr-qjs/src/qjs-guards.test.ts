@@ -133,12 +133,13 @@ describe('item 18 — stubSdkImports rewrite + compileSsrComponent', () => {
 		assert.ok(out.includes(`from './local.js'`))
 	})
 
-	it('$app/* client imports become throw-stubs (never in the sync bundle)', () => {
+	it('navigation calls become throw-stubs while SSR store reads retain their request-local shim', () => {
 		const code = `import { goto, page } from '$app/navigation';\nimport { page as p } from '$app/stores';\nimport '$app/state';\n`
 		const out = stubSdkImports(code, 'src/routes/router/+page.svelte')
 		assert.ok(out.includes('goto() called during SSR render'))
 		assert.ok(out.includes('page() called during SSR render'))
-		assert.ok(!out.includes('$app/'))
+		assert.ok(!out.includes('$app/navigation'))
+		assert.ok(out.includes("from '$app/stores'"))
 	})
 
 	it('aliased SDK names use the local name; import type not matched', () => {

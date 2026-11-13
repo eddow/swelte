@@ -196,6 +196,14 @@ async function postJson<TResult>(
 	return decodeBody<TResult>(base, fn, res)
 }
 
+function swelteQualifierQuery(qualifier: string): string {
+	return qualifier
+		? qualifier.startsWith('/')
+			? `?/${encodeURIComponent(qualifier.slice(1))}`
+			: `?q=${encodeURIComponent(qualifier)}`
+		: ''
+}
+
 async function getVerb<TResult>(
 	base: string,
 	fn: string,
@@ -204,7 +212,7 @@ async function getVerb<TResult>(
 	args: object,
 	envelope = false
 ): Promise<TResult> {
-	const q = qualifier ? `?q=${encodeURIComponent(qualifier)}` : ''
+	const q = swelteQualifierQuery(qualifier)
 	const init = await swelteRunFetchHooks(
 		base,
 		fn,
@@ -233,7 +241,7 @@ async function postForm<TResult>(
 	args: object,
 	envelope = false
 ): Promise<TResult> {
-	const q = qualifier ? `?q=${encodeURIComponent(qualifier)}` : ''
+	const q = swelteQualifierQuery(qualifier)
 	// §13 uploads: File/Blob values go multipart (browser sets the boundary);
 	// plain values stay urlencoded. Server reads filenames from req.files.
 	const entries = Object.entries((args ?? {}) as Record<string, unknown>)
@@ -337,7 +345,7 @@ export async function* __swelteStream(
 	qualifier = '',
 	opts: { signal?: AbortSignal; lastEventId?: string } = {}
 ): AsyncGenerator<string, void, void> {
-	const q = qualifier ? `?q=${encodeURIComponent(qualifier)}` : ''
+	const q = swelteQualifierQuery(qualifier)
 	const url = `${base}${q}${encodeQuery(args ?? {}).replace(/^\?/, q ? '&' : '?')}`
 	const headers: Record<string, string> = { accept: 'text/event-stream' }
 	if (opts.lastEventId) headers['last-event-id'] = opts.lastEventId
@@ -585,6 +593,8 @@ export function isPageData<T>(r: SwelteLoadResult<T>): r is { data: T } {
 // navigation status, and per-route load cache tags.
 
 export interface SweltePageState {
+	routeInfo?: { id: string | null; pattern: string | null }
+	status?: number
 	url: string
 	params: Record<string, string>
 	route: string | null
@@ -595,6 +605,17 @@ export interface SweltePageState {
 	 * `pushState(url, { page-state })` / `replaceState(url, { page-state })`,
 	 * survives history traversal, never sent to the server. */
 	state?: Record<string, unknown>
+}
+
+export interface SwelteReactivePage {
+	readonly url: URL
+	readonly route: { id: string | null; pattern: string | null }
+	readonly params: Record<string, string>
+	readonly data: Record<string, unknown>
+	readonly form: unknown
+	readonly status: number
+	readonly error: SweltePageError | null
+	readonly state: Record<string, unknown>
 }
 
 export interface SwelteNavigatingState {
@@ -860,6 +881,16 @@ export function depends(...tags: string[]): void {
 }
 
 export function invalidate(...tags: string[]): string[] {
+	const hit = invalidateTags(tags)
+	if (hit.length) {
+		const refresh = __routerFn('refreshTagged')
+		if (refresh)
+			void refresh(hit).catch((error) => console.error('[swelte] tagged refresh failed', error))
+	}
+	return hit
+}
+
+function invalidateTags(tags: string[]): string[] {
 	const hit: string[] = []
 	for (const [key, set] of loadTags) {
 		if (tags.some((t) => set.has(t))) hit.push(key)
@@ -868,16 +899,30 @@ export function invalidate(...tags: string[]): string[] {
 	return hit
 }
 
-export function invalidateAll(): void {
-	loadTags.clear()
+/** Awaited tagged invalidation used by the navigation compatibility adapter. */
+export async function invalidateAsync(tag: string | URL): Promise<void> {
+	const hit = invalidateTags([String(tag)])
+	const refresh = __routerFn('refreshTagged')
+	if (hit.length && refresh) await refresh(hit)
 }
 
-export function __swelteTrackLoad(key: string, fn: () => unknown): unknown {
+export async function invalidateAll(): Promise<void> {
+	loadTags.clear()
+	const refresh = __routerFn('refresh')
+	if (refresh) await refresh()
+}
+
+export function __swelteTrackLoad(
+	key: string,
+	fn: (register: (...tags: string[]) => void) => unknown
+): unknown {
 	const prev = activeCollect
 	const tags = new Set<string>()
 	activeCollect = tags
 	try {
-		return fn()
+		return fn((...values) => {
+			for (const value of values) tags.add(value)
+		})
 	} finally {
 		activeCollect = prev
 		loadTags.set(key, tags)
@@ -903,6 +948,7 @@ if (typeof globalThis !== 'undefined') {
 			__afterNav: afterNav,
 			__swelteCaptureSnapshot,
 			__swelteRestoreSnapshot,
+			__swelteTrackLoad,
 		}
 	}
 }
@@ -1031,10 +1077,13 @@ export async function __swelteActionResult(res: Response): Promise<SwelteActionR
 	}
 	if (probe) return probe
 	if (res.ok) return { type: 'success', status: res.status, data: await swelteSafeJson(res) }
+	if (res.status >= 500)
+		return { type: 'error', status: res.status, error: await swelteSafeJson(res) }
 	return { type: 'failure', status: res.status, data: await swelteSafeJson(res) }
 }
 
 export interface SwelteEnhanceSubmit {
+	controller: AbortController
 	action: URL
 	formData: FormData
 	formElement: HTMLFormElement
@@ -1083,12 +1132,31 @@ export async function applyAction(
 		return
 	}
 	if (result.type === 'success') {
-		if (doInvalidate) invalidateAll()
-		page.set({ ...page.get(), form: result.data ?? null })
+		if (doInvalidate) await invalidateAll()
+		page.set({ ...page.get(), status: result.status, error: undefined, form: result.data ?? null })
+		const setForm = __routerFn('setForm')
+		if (setForm) await setForm(result.data ?? null, result.status)
 		navigating.set(null)
 		return
 	}
-	page.set({ ...page.get(), form: result.type === 'failure' ? (result.data ?? null) : null })
+	if (result.type === 'error') {
+		const body = result.error
+		const message =
+			body && typeof body === 'object' && 'message' in body
+				? String(body.message)
+				: typeof body === 'string'
+					? body
+					: 'action failed'
+		const error = { status: result.status, message }
+		page.set({ ...page.get(), status: result.status, error, form: null })
+		const setError = __routerFn('setError')
+		if (setError) await setError(error)
+		navigating.set(null)
+		return
+	}
+	page.set({ ...page.get(), status: result.status, error: undefined, form: result.data ?? null })
+	const setForm = __routerFn('setForm')
+	if (setForm) await setForm(result.data ?? null, result.status)
 	navigating.set(null)
 }
 
@@ -1102,16 +1170,28 @@ export function enhance(
 	cb?: SwelteEnhanceCallback
 ): { update?: (next?: SwelteEnhanceCallback) => void; destroy: () => void } {
 	let current = cb
+	let controller: AbortController | null = null
 	const onSubmit = (e: Event) => {
+		// This must happen in the event listener's synchronous call stack.
+		e.preventDefault()
+		controller?.abort()
+		controller = new AbortController()
+		const requestController = controller
 		void (async () => {
 			const submit = e as SubmitEvent & { submitter?: HTMLElement | null }
 			const formData = new FormData(node, submit.submitter ?? undefined)
-			const rawAction = node.getAttribute('action') ?? ''
+			const rawAction =
+				submit.submitter?.getAttribute('formaction') ?? node.getAttribute('action') ?? ''
 			const base =
 				typeof globalThis.location !== 'undefined' ? globalThis.location.href : 'http://localhost/'
 			const action = new URL(rawAction === '' ? base : rawAction, base)
-			const method = (node.getAttribute('method') ?? 'post').toUpperCase()
+			const method = (
+				submit.submitter?.getAttribute('formmethod') ??
+				node.getAttribute('method') ??
+				'post'
+			).toUpperCase()
 			const input: SwelteEnhanceSubmit = {
+				controller: requestController,
 				action,
 				formData,
 				formElement: node,
@@ -1127,29 +1207,57 @@ export function enhance(
 			} catch {
 				return
 			}
-			if (input.cancelled) return
-			e.preventDefault()
+			if (input.cancelled || requestController.signal.aborted) return
 			const from = typeof globalThis.location !== 'undefined' ? globalThis.location.pathname : null
 			navigating.set({ from, to: action.pathname })
 			let res: Response
 			try {
+				if (method === 'GET') {
+					for (const [key, value] of formData.entries())
+						action.searchParams.append(key, typeof value === 'string' ? value : value.name)
+				}
+				const enctype =
+					submit.submitter?.getAttribute('formenctype') ??
+					node.getAttribute('enctype') ??
+					'application/x-www-form-urlencoded'
+				let body: BodyInit = formData
+				if (
+					enctype === 'application/x-www-form-urlencoded' &&
+					typeof formData.entries === 'function'
+				) {
+					const encoded = new URLSearchParams()
+					for (const [key, value] of formData.entries())
+						encoded.append(key, typeof value === 'string' ? value : value.name)
+					body = encoded
+				}
 				res = await fetch(action.toString(), {
 					method,
-					body: formData,
+					...(method === 'GET' ? {} : { body }),
 					headers: { accept: 'application/json' },
+					signal: requestController.signal,
 				})
 			} catch {
-				navigating.set(null)
+				if (controller === requestController) navigating.set(null)
 				return
 			}
 			const result = await __swelteActionResult(res)
+			if (requestController.signal.aborted) return
 			const update = async (updateOpts: SwelteEnhanceUpdateOptions = {}): Promise<void> => {
-				if (updateOpts.reset ?? true) {
+				if (requestController.signal.aborted) return
+				if (result.type === 'success' && (updateOpts.reset ?? true)) {
 					try {
 						node.reset()
 					} catch {
 						/* non-DOM stub */
 					}
+				}
+				const currentPath =
+					typeof globalThis.location !== 'undefined'
+						? globalThis.location.pathname
+						: action.pathname
+				if (action.pathname !== currentPath && result.type !== 'redirect') {
+					if (result.type === 'success' && (updateOpts.invalidate ?? true)) await invalidateAll()
+					return
 				}
 				await applyAction(result, { invalidate: updateOpts.invalidate })
 			}
@@ -1159,6 +1267,13 @@ export function enhance(
 			}
 			await update()
 		})()
+			.catch((error: unknown) => {
+				if (!requestController.signal.aborted)
+					console.error('[swelte] form submission failed', error)
+			})
+			.finally(() => {
+				if (controller === requestController) navigating.set(null)
+			})
 	}
 	node.addEventListener('submit', onSubmit)
 	return {
@@ -1166,8 +1281,46 @@ export function enhance(
 			current = next
 		},
 		destroy: () => {
+			controller?.abort()
 			node.removeEventListener('submit', onSubmit)
 		},
+	}
+}
+
+export function enhanceKit(
+	node: HTMLFormElement,
+	callback?: (
+		input: SwelteEnhanceSubmit
+	) =>
+		| void
+		| ((input: {
+				result: SwelteActionResult
+				update: (options?: { reset?: boolean; invalidateAll?: boolean }) => Promise<void>
+		  }) => void | Promise<void>)
+		| Promise<
+				| void
+				| ((input: {
+						result: SwelteActionResult
+						update: (options?: { reset?: boolean; invalidateAll?: boolean }) => Promise<void>
+				  }) => void | Promise<void>)
+		  >
+) {
+	const adapt = (next: typeof callback): SwelteEnhanceCallback | undefined =>
+		next
+			? async (input) => {
+					const handler = await next(input)
+					if (!handler) return
+					return (result, update) =>
+						handler({
+							result,
+							update: (opts = {}) => update({ reset: opts.reset, invalidate: opts.invalidateAll }),
+						})
+				}
+			: undefined
+	const control = enhance(node, adapt(callback))
+	return {
+		destroy: control.destroy,
+		update: (next?: typeof callback) => control.update?.(adapt(next)),
 	}
 }
 

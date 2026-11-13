@@ -102,18 +102,26 @@ enumeration): copies `.swelte/entries.json` + every additive
 at }`). Fails when `.swelte/entries.json` is missing (run `swelte
 build` first).
 
-## `swelte check [--root dir] [--format text|json]`
+## `swelte check [--root dir] [--format text|json] [--lib]`
 
 `swelte check` diagnostics without side effects: same scans as
 generate-time warns (`gen/diagnostics.ts`), file+line entries for
-humans and `--format json` for agents.
+humans and `--format json` for agents. `--lib` additionally validates
+the library schema (`docs/libraries.md`): `swelte.v.exports` rules
+(shared validator with the consumer path), `exports`/`files` coverage,
+and the no-`src/routes`-leak rule — all as `lib-*` warnings.
 
-## `swelte init [<dir>] [--sample | --empty] [--template empty|sample] [--ssr] [--root dir] [--dir name]`
+## `swelte init [<dir>] [--sample | --empty | --lib] [--template empty|sample|lib] [--kind app|lib] [--ssr] [--root dir] [--dir name]`
 
 Scaffold a project. `--sample` (default): the `something` example
-shape. `src/app.ts` is the optional user-owned setup hook (plus
-`src/app.css` when present) — both auto-imported by the generated
-`.swelte/entry-main.ts`; routers are
+shape. `--lib` / `--kind lib` / `--template lib`: a library instead —
+same base skeleton plus public `src/lib` starter (`hello` universal V
+module with matching `swelte.v.exports`) and a `src/routes` dogfood
+demo; `package.json` gets `"build": "swelte build"` (local dogfood
+build, same as apps) plus `"build:lib": "svelte-package && swelte
+check --lib"` (publish path). `src/app.ts` is the optional user-owned
+setup hook (plus `src/app.css` when present) — both auto-imported by
+the generated `.swelte/entry-main.ts`; routers are
 NEVER scaffolded — `dev`/`build` derive them into `.swelte/`.
 
 SSR is opt-in (default: SPA-only): `--ssr` adds `@swelte/ssr-qjs`

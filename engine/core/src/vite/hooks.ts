@@ -28,6 +28,10 @@ export function loadServerHooks(root: string, srcDir = 'src'): ServerHooks {
 	const rel = `src/app.v`
 	const fns = parseVFile(src)
 	const out: ServerHooks = { hasFile: true }
+	const imports = [
+		...src.matchAll(/^\s*import[ \t]+([\w.]+(?:[ \t]+as[ \t]+\w+)?)[ \t]*(?:\/\/[^\n]*)?$/gm),
+	].map((match) => `import ${match[1]}`)
+	if (imports.length) out.imports = imports.join('\n')
 	let startup: RpcFn | undefined
 	let reroute: RpcFn | undefined
 	let handleError: RpcFn | undefined

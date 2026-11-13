@@ -118,7 +118,7 @@ describe('Bunch1', () => {
 		plug.configResolved?.({ root })
 		await plug.buildStart?.()
 		const entry = readFileSync(join(root, '.swelte', 'entry-main.ts'), 'utf8')
-		assert.ok(entry.includes('pathname, undefined)'), entry.slice(-400))
+		assert.ok(entry.includes('hydrateSwelteRoute(target, url, initial)'), entry.slice(-800))
 		const dts = readFileSync(join(root, '.swelte', 'entry-main.d.ts'), 'utf8')
 		assert.ok(dts.includes('errorProps?: unknown'), dts.slice(0, 400))
 	})

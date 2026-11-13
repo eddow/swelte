@@ -266,7 +266,9 @@ export function defineSharedContract(getState, label = 'shared') {
     if (!runnable) return
     const res = await get(base + '/boom', { accept: 'text/html,application/xhtml+xml' })
     const body = await res.text()
-    assert.equal(res.status, 400)
+    // An untyped load exception is a server failure; verb errors keep their
+    // existing independent status contract.
+    assert.equal(res.status, 500)
     assert.ok((res.headers.get('content-type') ?? '').includes('html'))
     const again = await get(base + '/api/ping?payload=test', { accept: 'application/json' })
     assert.equal(again.status, 200)

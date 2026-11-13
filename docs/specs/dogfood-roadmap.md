@@ -1,6 +1,6 @@
 # Native application dogfooding roadmap
 
-Updated: 2026-11-08.
+Updated: 2026-11-13.
 
 This is the execution and progress tracker for Swelte work discovered by EMV
 (the native counterpart of EMW) and micro. Shared requirements live here;
@@ -62,11 +62,11 @@ fixes and downstream reports. Do not duplicate this checklist in application spe
 
 | Existing capability | Evidence / limit |
 |---|---|
-| V PostgreSQL | Bundled toolchain contains ORM, pooled `pg.DB`, parameterized execution, pinned `db.conn()` and transactions. Live database behavior and reproducible deployment still need validation. |
+| V PostgreSQL | Bundled toolchain contains ORM, pooled `pg.DB`, parameterized execution, pinned connections and transactions. The disposable native integration fixture now validates these paths; actual application migration history/deployment remains open. |
 | Native SSR | Embedded QuickJS and per-render runtime/context exist. Application composition, state and fallback behavior need fixes/validation. |
-| npm V modules | Current working tree materializes universal/server exports; server entries skip browser RPC projection. Packed ai1 consumption is unproven. Do not assume this working-tree implementation is released. |
+| npm V modules | Current source materializes universal/server exports; server entries skip browser RPC projection. DF-01 now proves a packed ai1-shaped dependency; full ai1 remains DF-09/12. Source validation does not imply a published release. |
 | HTTP primitives | Cookies, structured/binary responses, raw bodies, uploads, loads and middleware exist. Cross-path behavior is incomplete. |
-| Realtime / jobs | GET SSE, WS rooms and cron ticks exist. POST streaming, guard coverage and cancellation are incomplete; ticks do not establish durable queue semantics. |
+| Realtime / jobs | GET SSE, WS rooms, POST byte streams and cron ticks exist. Fixtures cover guarded metadata and stream disconnect/idle cleanup; run/subscriber lifetimes and shutdown remain open. Ticks do not establish durable queue semantics. |
 
 2026-11-08 validation: compiled current core and SSR test targets; 27 focused
 SDK/npm V tests and 5 SSR composition tests passed. Temporary generated-bundle
@@ -83,13 +83,25 @@ opt-in adapter where useful; a full SvelteKit compatibility project is not requi
 | ID | Status | Deliverable / acceptance |
 |---|---|---|
 | DF-00 | done | Review requirements against source; distinguish framework defects, existing V integration and downstream ports. Evidence recorded above. |
-| DF-01 | pending | Pack/install a minimal ai1-shaped dependency with Svelte UI and server V modules: nested modules, interfaces, callbacks/channels and a native dependency. Build a native consumer; resolve browser declarations; reject browser imports of server exports. Record tested V/Svelte/Vite/package versions, including the Vite 6/8 decision. |
-| DF-02 | pending | Specify state and wrapper/leaf data/form contracts, route identity including groups or equivalent metadata, request-local SSR state, safe initial serialization, refresh and redirect/error behavior. Define navigation load requests alongside same-path JSON endpoints. Decide adapter scope while preserving current consumers. |
-| DF-03 | pending | Specify unambiguous action selection. Current `q` qualifier collides with EMW search `q`; bare empty query keys can select handlers. Preserve public/search URLs and define named/cross-page action behavior with and without JS. |
+| DF-01 | done | [Installed-package fixture](../../fixtures/dogfood/README.md) packs/installs native interfaces, callbacks/channels, nested V, SQLite/crypto and Svelte UI. `npm run test:dogfood` checks TS declarations, rejects browser server imports, builds browser assets and serves native JSON/QuickJS HTML with empty runtime PATH. Fixed SSR resolution of installed Svelte/TS/runes modules. Tested versions below; Vite 6 retained for pilot. |
+| DF-02 | done | [Lifecycle contract](page-lifecycle-contract.md) specifies opt-in Kit props/state adaptation, request-local SSR, per-level data, safe hydration state, explicit load-header protocol alongside ordinary JSON, refresh and error/redirect handling. Implementation remains DF-04–09. |
+| DF-03 | done | [Action contract](page-lifecycle-contract.md#action-selection) selects named `?/action` mode without reserving search `q`; legacy applications retain parsing unless configured/migrated. Defines no-JS, cross-page and query-retention behavior. Parser/adapter implementation remains DF-07. |
 
 Gate acceptance: the installed native/UI consumer compiles, and lifecycle/action
 contracts are concrete enough to implement and test together. This is a small
 feasibility fixture, not a port of the full ai1 backend.
+
+Gate 0 accepted, 2026-11-08. Tested source packages `@swelte/core` and
+`@swelte/ssr-qjs` 0.1.4, fixture 0.0.0, V `0.5.2 7647ce1`, Svelte 5.57.3,
+Vite 6.4.5 and TypeScript 5.9.3 on Linux. Node 22.14.0 is build/test tooling
+only. This is not a Vite 8 compatibility claim or a full application migration.
+SQLite validates native linking only; PostgreSQL headers/integration remain
+DF-08. The full SSR suite passed 51 tests, including installed package exports,
+nested components, TS/runes modules, unresolved-import failures and source guards.
+All 252 core tests passed with Node 22's `--experimental-strip-types` flag.
+Without it, the unchanged core suite has two `.ts`/`.mts` dynamic-import failures
+(legacy config and async prerender entries); this is a build/test tooling
+constraint, not a native runtime dependency.
 
 ## Gate 1 — Guarded, hydrated page and PostgreSQL mutation
 
@@ -99,12 +111,12 @@ under P1 in the original requirements.
 
 | ID | Status | Deliverable / acceptance |
 |---|---|---|
-| DF-04 | pending | Unify guarded requests for HTML, navigation loads, mutations, binary endpoints, SSE and WS before handler execution/connection takeover. Carry middleware locals into loads; preserve cookies/headers and support middleware redirects. Unauthorized requests cannot reach protected handlers/loads/streams. |
-| DF-05 | pending | Run the same V load contract for HTML, client navigation and refresh. Transfer initial data safely into hydration; supply wrapper/leaf props and initialized reactive page state. Preserve query/hash/history; handle redirects/errors without mounting a success page. Refresh data without unnecessarily discarding local UI/form state. |
-| DF-06 | pending | Fix SSR composition to retain head metadata and wrapper/leaf data. Validate parent context and snippets through the composed tree. Render an EMW-shaped root wrapper; preserve locale/auth isolation and verify hydration with exact initial data. |
-| DF-07 | pending | Fix synchronous interception and cancellation, callback/result adaptation and refreshed props. Cover inline validation, optional reset/value retention, multipart and cross-page submission. Preserve filters on refresh and no-JS redirect. |
-| DF-08 | pending | Integrate existing V PostgreSQL: pool/startup recipe, query/mutation, wire types, rollback and pinned advisory-lock cleanup. Reconcile existing migration history; test replay, migration coordination and failed initialization before jobs. Document native dependencies. Add an optional package only where repeated integration justifies it. |
-| DF-09 | pending | Expose SSR failure reasons and strict checks for unexpected fallback: render exception, timeout, memory/output limits and hydration fallback. Retain original errors for diagnostics; sanitize client output. Exercise representative ai1/Markdown/Paraglide/Tailwind dependencies. |
+| DF-04 | verify | Shared before/load/after lifecycle covers UI HTML/navigation, mutations, binary responses and SSE/WS takeover. Native fixture proves middleware locals, redirects, headers/multiple cookies, denied mutations without side effects and guarded binary bytes; cross-origin writes are rejected before handlers. Remaining: actual application salt authorization acceptance. |
+| DF-05 | active | Versioned loads, initial hydration, reactive page state and awaited refresh update mounted props. Browser fixture proves query/back/forward, inherited loads on Svelte-only pages, redirects, hash preservation, stale-request suppression, tagged invalidation and local-state retention. Native watchdog proves 504. Remaining: dynamic-route/browser acceptance, refresh/navigation races and actual application flows. |
+| DF-06 | verify | One SSR tree preserves nested head/context and per-level data; request-local state and root-first universal loads match browser hydration. Fixture proves exact SSR DOM retention and concurrent locale isolation. Remaining: complete native EMW locale/auth/head acceptance and representative production dependencies. |
+| DF-07 | active | Named/legacy actions, synchronous interception, aborts, callback adapter, inline failures and awaited refresh implemented. Native/browser fixtures prove no-JS 422/303, filters, component/value retention, multipart binary bytes, submitter overrides, cross-page result isolation and action-error boundaries. Remaining: overlapping submission/navigation races and actual application mutations. |
+| DF-08 | verify | [Native PostgreSQL recipe](../../fixtures/postgres/README.md) reuses V pooling/parameters/transactions; app-local backend staging and startup imports are wired. Disposable real DB passes typed UUID/UTC/JSONB/decimal/null rows, rollback, migration replay/checksum/failure, lock contention/cleanup and failed startup before dependent work. Remaining: reconcile actual application migration history and validate deployment dependencies there. No new ORM/plugin required. |
+| DF-09 | active | Native render exceptions produce sanitized 500 plus matching initial error state; strict renderer/hydration fallback switches exist. Fixture verifies sanitized render failure. Remaining: original-error diagnostic transport, timeout/memory/output reason coverage and full ai1/Markdown/Paraglide/Tailwind dependencies. |
 
 Gate acceptance in EMV: direct HTML has correct locale, head and status before
 JS; hydration retains data; `/threads?filter=unread&q=example` supports read/note/
@@ -112,27 +124,25 @@ status mutations without losing filters; failures stay inline; back/forward load
 the correct query. No-JS forms work. Unauthorized variants cannot execute
 protected work. PostgreSQL tests use an isolated real database.
 
-Implementation starting points:
+Implementation locations (the original defects below are now addressed in the fixture):
 
-- [Client entry](../../engine/core/templates/client/main.ts): hydration currently
-  receives no initial props.
-- [Router](../../engine/core/src/vite/client-router.ts): ordinary GET JSON for
-  navigation, missing wrapper data and lost query on popstate.
-- [SDK](../../engine/core/src/sdk.ts): store state, invalidation without reload,
-  awaited callbacks before submit prevention.
-- [Harness](../../engine/core/templates/harness/server.v): qualifiers, stream
-  interception outside ordinary dispatch and reconstructed load requests.
+- [Client entry](../../engine/core/templates/client/main.ts): initial-envelope hydration.
+- [Router](../../engine/core/src/vite/client-router.ts): navigation load protocol,
+  per-level props, universal transforms and history.
+- [SDK](../../engine/core/src/sdk.ts): state, forms, invalidation and router bridge.
+- [Harness](../../engine/core/templates/harness/server.v): guarded page requests,
+  action selection, SSR status and native stream transport.
 - [Server generation](../../engine/core/src/vite/server-gen.ts): middleware,
   load cascades and transport accessors.
-- [SSR composition](../../engine/ssr-qjs/src/ssr.ts): undefined page shims,
-  separate nested renders, discarded head and swallowed exceptions.
+- [SSR composition](../../engine/ssr-qjs/src/ssr.ts): installed dependencies,
+  request-local state, nested tree/head and error rendering.
 
 ## Gate 2 — Native ai1 streaming application
 
 | ID | Status | Deliverable / acceptance |
 |---|---|---|
-| DF-10 | pending | Support native POST response streams with request bodies and response headers, including `x-ai1-run-id`. Support ai1 named SSE framing without double encoding, failures before headers and termination after headers. Reuse V incremental HTTPS callbacks for the upstream adapter. |
-| DF-11 | pending | Make disconnect/cancellation observable; release blocked producers/subscribers, bound buffering and define idle timeout. Test slow clients, fragmented UTF-8/frames and shutdown. Preserve ai1's distinct run/subscriber lifetimes; disconnect does not universally cancel a run. |
+| DF-10 | verify | Native `swelte_stream(headers, producer)` sends bytes unchanged from POST handlers. Native fixture passes body/header handling, run ID, named SSE frames, first event before completion, fragmented UTF-8 and pre/post-start failure behavior. Remaining: integrate ai1's actual provider using existing V incremental HTTPS callbacks. |
+| DF-11 | active | Bounded stream channel, chunk limit, cancellation channel and idle/write timeout implemented. Native fixture passes disconnect and idle resource release; SSE emitters stop when transport closes. Remaining: slow-client/shutdown stress, room subscriber cleanup and ai1 run/subscriber lifetime scenarios. |
 | DF-12 | pending | Integrate ai1-owned native provider, runner and PostgreSQL RunStore through EMV routes. Run shared scenarios for chat, replay/live handoff, stop/steer races, human waits and tools against the unchanged browser protocol. Track ports in ai1/EMV and framework defects here. |
 
 Gate acceptance: first events arrive before provider completion; reconnect/replay,
@@ -162,9 +172,15 @@ corresponding micro production flows migrate.
 
 ## Next step and session handoff
 
-Audit complete; no delivery gate accepted and no framework fix implemented in
-this review. Start DF-01, DF-02 and DF-03, then implement Gate 1 as a coordinated
-lifecycle change. Do not start the full native ai1 port before package feasibility.
+Gate 0 is complete. The coordinated lifecycle and native PostgreSQL/streaming
+fixtures pass; Gates 1 and 2 remain open for the remaining acceptance above
+and actual application integration. No full application/ai1 readiness is claimed.
+The broader examples suite now passes: V tests use `VMODULES` to avoid V's
+unquoted reconstruction of `-path`, the unified page path respects response
+header allowlists, and the untyped load-error expectation is 500.
+Next: complete refresh/submission/navigation race acceptance, dynamic-route
+browser coverage and SSR budget diagnostics, then integrate the first real
+application slice without treating fixture coverage as a completed port.
 
 For each session record task IDs advanced, changed contracts, fixture/test
 evidence, remaining acceptance and next actionable step. Keep downstream behavior
@@ -173,3 +189,6 @@ tests in EMV/ai1/micro and minimal framework regressions in Swelte.
 | Date | Progress | Validation | Next |
 |---|---|---|---|
 | 2026-11-08 | DF-00 done; consolidated EMV/micro overlap and ownership | 32 existing focused tests passed; temporary probes reproduced lifecycle/SSR/form defects; native E2E gates unrun | DF-01 installed-package fixture; DF-02/03 contracts |
+| 2026-11-08 | DF-01–03 done; Gate 0 accepted; fixed SSR installed-package resolution and documented native integration/error-boundary limits | Packed native/UI fixture passed browser/type/native JSON/QJS checks; 51 SSR tests and 252 core tests passed (Node 22 core suite needs type-stripping flag) | DF-04–07 guarded lifecycle implementation; DF-08 PostgreSQL |
+| 2026-11-13 | DF-04–11 advanced; migrated fixture to refactored library layout; native backend staging/startup imports, shared page lifecycle, forms, SSR state/tree and POST streaming implemented; PostgreSQL recipe added | 260 core and 51 SSR tests passed. `test:postgres -- --browser` passed packed-library, native empty-PATH JSON/QJS HTML, sanitized render failure, PostgreSQL, stream cleanup and real Chromium hydration/forms/history checks. PostgreSQL 18.6; disposable DB only. Broader examples suite blocked by V `-path` shell quoting. | Repair examples test runner; multipart/cross-page/action errors, tagged invalidation, navigation races; retain application gates open |
+| 2026-11-13 | Resolved examples runner and header-filter regression; added awaited tagged invalidation, action error boundaries and broader browser acceptance | 262 core and 51 SSR tests passed. Full `test:examples` passed V/contract/build checks, 10 unit tests, 23 direct + 23 preview E2E cases and 17 dev/HMR cases. Final current-source `test:postgres -- --browser` passed multipart, submitter, cross-page, hash/stale navigation, action/load/universal errors, no-JS action errors, denied side effects and guarded binary bytes. Strict boot now fails rather than silently mounting after unexpected hydration failure; its negative-path coverage remains open. | DF-04 ready for application verification; DF-05/07 race/application cases and DF-09 diagnostics remain open |

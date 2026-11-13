@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, it } from 'node:test'
-import { collectDiagnostics } from './diagnostics.js'
+import { collectDiagnostics, collectLibDiagnostics } from './diagnostics.js'
 
 function rootWith(files: Record<string, string>): string {
 	const root = mkdtempSync(join(tmpdir(), 'swelte-diag-'))
@@ -90,5 +90,107 @@ describe('diagnostics parity (tmp fixtures)', () => {
 		})
 		const diags = await collectDiagnostics(root)
 		assert.ok(!diags.some((d) => d.kind === 'sse'))
+	})
+
+	it('lib: valid schema is quiet (no lib-* warnings)', () => {
+		const root = rootWith({
+			'src/lib/hello/api.v':
+				'module hello\n\npub struct HelloArgs {\npub:\n\tname string\n}\n\n@[rpc]\npub fn hello(args HelloArgs) string { return args.name }\n',
+		})
+		writeFileSync(
+			join(root, 'package.json'),
+			JSON.stringify({
+				name: 'my-lib',
+				files: ['dist', 'src/lib/**/*.v'],
+				exports: {
+					'.': { svelte: './dist/index.js', types: './dist/index.d.ts' },
+					'./package.json': './package.json',
+					'./v/hello.v': { types: './.swelte/types/npm/hello.d.ts' },
+				},
+				swelte: {
+					v: {
+						exports: {
+							'./hello.v': {
+								source: './src/lib/hello',
+								entry: './src/lib/hello/api.v',
+								target: 'universal',
+							},
+						},
+					},
+				},
+			})
+		)
+		const diags = collectLibDiagnostics(root)
+		assert.deepEqual(diags, [])
+	})
+
+	it('lib: entry outside source + routes leak + missing exports are lib-* warnings', () => {
+		const root = rootWith({
+			'src/lib/hello/api.v': 'module hello\n\n@[rpc]\npub fn hello() string { return "hi" }\n',
+		})
+		writeFileSync(
+			join(root, 'package.json'),
+			JSON.stringify({
+				name: 'my-lib',
+				files: ['dist', 'src'],
+				exports: { '.': './dist/index.js' },
+				swelte: {
+					v: {
+						exports: {
+							'./hello.v': {
+								source: './src/lib/hello',
+								entry: './src/lib/other.v',
+								target: 'universal',
+							},
+						},
+					},
+				},
+			})
+		)
+		let diags = collectLibDiagnostics(root)
+		assert.ok(
+			diags.some((d) => d.kind === 'lib-exports'),
+			JSON.stringify(diags)
+		)
+		writeFileSync(
+			join(root, 'package.json'),
+			JSON.stringify({
+				name: 'my-lib',
+				files: ['dist', 'src'],
+				exports: { '.': './dist/index.js', './package.json': './package.json' },
+				swelte: {
+					v: {
+						exports: {
+							'./hello.v': {
+								source: './src/lib/hello',
+								entry: './src/lib/hello/api.v',
+								target: 'universal',
+							},
+						},
+					},
+				},
+			})
+		)
+		diags = collectLibDiagnostics(root)
+		assert.ok(
+			diags.some((d) => d.kind === 'lib-exports' && d.message.includes('./v/hello.v')),
+			JSON.stringify(diags)
+		)
+		assert.ok(
+			diags.some((d) => d.kind === 'lib-routes-leak'),
+			JSON.stringify(diags)
+		)
+	})
+
+	it('collectDiagnostics(root, { lib }) includes lib-* warnings', async () => {
+		const root = rootWith({
+			'src/routes/+page.v': 'module p\n@[get] pub fn g() string { return "" }',
+		})
+		assert.deepEqual(await collectDiagnostics(root), [])
+		const diags = await collectDiagnostics(root, { lib: true })
+		assert.ok(
+			diags.some((d) => d.kind.startsWith('lib-')),
+			JSON.stringify(diags)
+		)
 	})
 })

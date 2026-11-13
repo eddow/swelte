@@ -45,7 +45,8 @@ export function jsFetchFor(
 	route: string,
 	fns: RpcFn[],
 	trailingSlash = 'ignore',
-	matcherDefs?: Map<string, MatcherDef>
+	matcherDefs?: Map<string, MatcherDef>,
+	namedActions = false
 ): string {
 	const hasDyn = route.includes('[')
 	// Dynamics: [id] required, [id=integer] matcher, [...rest] catch-all, [[slug]] optional.
@@ -98,7 +99,7 @@ import { __swelteFetch${fns.some((f) => f.attr === 'sse') ? ', __swelteStream' :
 
 ${dynHelper}${list(fns, (fn) => {
 	const kind = fn.attr === 'sse' ? 'async function *' : 'function'
-	const q = JSON.stringify(fn.qualifier ?? '')
+	const q = JSON.stringify(fn.qualifier ? (namedActions ? '/' : '') + fn.qualifier : '')
 	const nm = JSON.stringify(fn.name)
 	const attr = JSON.stringify(fn.attr)
 	// WS fns (future.md #3): no fetch — browser opens a native WebSocket.
