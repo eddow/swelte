@@ -84,6 +84,8 @@ export interface RpcFn {
 		| 'load'
 		| 'matcher'
 		| 'startup'
+		| 'shutdown'
+		| 'report'
 		| 'reroute'
 		| 'error'
 		| (string & {})
@@ -95,7 +97,7 @@ export interface RpcFn {
 	singleArgsStruct?: string
 	/** Raw V body of a `@[matcher]` fn (transpiled to JS for the router). */
 	body?: string
-	/** Raw V body of a `@[reroute]`/`@[startup]` hook (inlined into hooks). */
+	/** Raw V body of a server lifecycle/reporting hook. */
 	hookBody?: string
 }
 
@@ -178,6 +180,9 @@ export interface ServerHooks {
 	imports?: string
 	/** Raw V body of `@[startup]` (inlined into main before veb.run). */
 	startupBody?: string
+	shutdownBody?: string
+	reportBody?: string
+	reportParam?: string
 	/** Raw V body of `@[reroute]` (inlined into before_request). */
 	rerouteBody?: string
 	/** Raw V body of `@[error]` (SvelteKit `handleError` lite): called
@@ -220,8 +225,7 @@ export interface SweltePluginHarness {
 	appFields?: string
 	/** V emitted BEFORE `fn main()` (top-level fns/types). */
 	main?: string
-	/** V emitted INSIDE `fn main()` (spawns, startup stmts). Spliced
-	 *  right after `mut app := &App{}` so ordering matches user hooks. */
+	/** V emitted INSIDE `fn main()` after app startup succeeds. */
 	mainInner?: string
 	beforeRequest?: string
 	protect?: string[]

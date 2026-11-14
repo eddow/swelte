@@ -809,11 +809,13 @@ ${list(st.fields, (fld) => `\t${fld.name}${fld.optional ? '?' : ''}: ${fld.tstyp
 							(x) =>
 								x.attr === 'matcher' ||
 								x.attr === 'startup' ||
+								x.attr === 'shutdown' ||
+								x.attr === 'report' ||
 								x.attr === 'reroute' ||
 								x.attr === 'error'
 						))
 							throw new Error(
-								`[swelte] ${routesDir}/${rel}: @[${bad.attr}] ${bad.name} is only allowed in its own file (matcher → src/matchers.v, startup/reroute/error → src/app.v).`
+								`[swelte] ${routesDir}/${rel}: @[${bad.attr}] ${bad.name} is only allowed in its own file (matcher → src/matchers.v, startup/shutdown/report/reroute/error → src/app.v).`
 							)
 						const isWrapper = mod === '+route' || mod.endsWith('/+route')
 						if (isWrapper) {
@@ -1835,6 +1837,9 @@ export declare const dev: boolean
 							import.meta.url,
 							{
 								startupBody: hooks.startupBody,
+								shutdownBody: hooks.shutdownBody,
+								reportBody: hooks.reportBody,
+								reportParam: hooks.reportParam,
 								rerouteBody: hooks.rerouteBody,
 								errorBody: hooks.errorBody,
 								roomSse: hasRoomSse,

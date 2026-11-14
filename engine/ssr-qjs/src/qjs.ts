@@ -335,18 +335,19 @@ pub fn swelte_qjs_load_bundle() string {
 pub fn swelte_qjs_render_page(route string, props_json string) (string, bool) {
 	src := swelte_qjs_load_bundle()
 	if src == '' || src.len <= 0 || src.len > 16 * 1024 * 1024 {
-		return '', false
+		return swelte_qjs_failure(route, 'bundle-unavailable')
 	}
 	// Heap buffers ([]u8, not fixed arrays — 1MB of stack overflows
 	// constrained threads). &buf[0] requires V 0.5.x unsafe blocks.
-	// Head rides the same render: 8KB covers title/meta/link; overflow
-	// grows once to 64KB, else head drops (body still renders).
+	// Head and body have independent limits; overflow must not silently
+	// discard head metadata or return truncated HTML.
 	mut hbuf := []u8{len: 8192}
 	mut buf := []u8{len: 65536}
 	mut rt := C.swelte_qjs_new_runtime()
 	if rt == 0 {
-		return '', false
+		return swelte_qjs_failure(route, 'runtime-unavailable')
 	}
+	defer { C.swelte_qjs_free_runtime(rt) }
 	mut need_h := 0
 	mut need_b := 0
 	mut rc := 0
@@ -355,45 +356,56 @@ pub fn swelte_qjs_render_page(route string, props_json string) (string, bool) {
 	}
 	if rc == -4 {
 		// Rendered but empty: keep the SPA shell (don't escalate to +error).
-		C.swelte_qjs_free_runtime(rt)
 		return '', true
 	}
 	if rc < 0 {
-		C.swelte_qjs_free_runtime(rt)
-		return '', false
+		return swelte_qjs_failure(route, swelte_qjs_reason(rc))
 	}
-	if need_b > buf.len - 1 {
-		if need_b > 1024 * 1024 {
-			C.swelte_qjs_free_runtime(rt)
-			return '', false
+	if need_b > buf.len - 1 || need_h > hbuf.len - 1 {
+		if need_b > 1048575 || need_h > 65535 {
+			return swelte_qjs_failure(route, 'output-limit')
 		}
 		mut big := []u8{len: 1048576}
+		hbuf = []u8{len: 65536}
 		need_h = 0
 		need_b = 0
 		unsafe {
 			rc = C.swelte_qjs_render_head_body(rt, src.str, src.len, route.str, route.len, props_json.str, props_json.len, &char(&hbuf[0]), hbuf.len, &need_h, &char(&big[0]), big.len, &need_b, swelte_qjs_timeout_ms(), swelte_qjs_mem_cap_mb())
 		}
 		if rc == -4 {
-			C.swelte_qjs_free_runtime(rt)
 			return '', true
 		}
-		if rc < 0 || need_b > big.len - 1 {
-			C.swelte_qjs_free_runtime(rt)
-			return '', false
+		if rc < 0 { return swelte_qjs_failure(route, swelte_qjs_reason(rc)) }
+		if need_b > big.len - 1 || need_h > hbuf.len - 1 {
+			return swelte_qjs_failure(route, 'output-limit')
 		}
 		s := swelte_qjs_join_head_body(hbuf, need_h, big, need_b)
-		C.swelte_qjs_free_runtime(rt)
 		return s, true
 	}
 	s := swelte_qjs_join_head_body(hbuf, need_h, buf, need_b)
-	C.swelte_qjs_free_runtime(rt)
 	return s, true
+}
+
+fn swelte_qjs_reason(code int) string {
+	return match code {
+		-5 { 'timeout' }
+		-6 { 'memory-limit' }
+		-3 { 'compile-or-load' }
+		-2 { 'missing-export' }
+		else { 'exception' }
+	}
+}
+
+fn swelte_qjs_failure(route string, reason string) (string, bool) {
+	safe_route := route.replace('\\r', '').replace('\\n', '')
+	eprintln('[swelte:ssr] route=' + safe_route + ' reason=' + reason)
+	return '', false
 }
 
 // Join head+body with an unambiguous separator (ssr-head-body marker)
 // so Hand can split without escaping: head is svelte-head output
-// (title/meta/link), body is the page HTML. Head overflow (>64KB) drops
-// the head (body still renders).
+// (title/meta/link), body is the page HTML. Both buffers have already been
+// checked against their independent limits before joining.
 fn swelte_qjs_join_head_body(hbuf []u8, need_h int, buf []u8, need int) string {
 	mut head := ''
 	if need_h > 0 && need_h <= 65536 && need_h < hbuf.len {

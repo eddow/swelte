@@ -222,7 +222,7 @@ fn ws_write_pong(mut conn net.TcpConn, payload []u8) ! {
 	}
 }
 
-fn ws_write_close(mut conn net.TcpConn, code int, reason string) ! {
+pub fn ws_write_close(mut conn net.TcpConn, code int, reason string) ! {
 	mut body := []u8{}
 	body << u8((code >> 8) & 0xff)
 	body << u8(code & 0xff)

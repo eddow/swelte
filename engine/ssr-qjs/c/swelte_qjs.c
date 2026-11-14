@@ -99,6 +99,7 @@ void swelte_qjs_free_runtime(int handle) {
 typedef struct {
     uint64_t start_ms;
     int timeout_ms;
+    int interrupted;
 } swelte_qjs_budget;
 
 static uint64_t swelte_qjs_now_ms(void) {
@@ -112,7 +113,11 @@ static int swelte_qjs_interrupt(JSRuntime *rt, void *opaque) {
     swelte_qjs_budget *b = (swelte_qjs_budget *)opaque;
     if (b->timeout_ms <= 0)
         return 0;
-    return (int)(swelte_qjs_now_ms() - b->start_ms >= (uint64_t)b->timeout_ms);
+    if (swelte_qjs_now_ms() - b->start_ms >= (uint64_t)b->timeout_ms) {
+        b->interrupted = 1;
+        return 1;
+    }
+    return 0;
 }
 
 typedef struct {
@@ -275,6 +280,7 @@ static int swelte_qjs_render_inner(int rt_handle, const char *mod_src, int mod_l
     swelte_qjs_budget budget;
     budget.start_ms = swelte_qjs_now_ms();
     budget.timeout_ms = timeout_ms;
+    budget.interrupted = 0;
     if (timeout_ms > 0)
         JS_SetInterruptHandler(rt, swelte_qjs_interrupt, &budget);
     swelte_qjs_mod holder;
@@ -289,8 +295,11 @@ static int swelte_qjs_render_inner(int rt_handle, const char *mod_src, int mod_l
     const uint8_t *use_bc = NULL;
     size_t use_bc_len = 0;
     uint8_t *bc_snap = NULL;
-    swelte_qjs_cached *cached = swelte_qjs_ensure_bytecode(mod_src, mod_len);
+    swelte_qjs_ensure_bytecode(mod_src, mod_len);
     pthread_mutex_lock(&swelte_qjs_mu);
+    /* The ring can rotate between ensure and this lock. Look up again by
+     * source bytes so a concurrent bundle cannot supply the wrong bytecode. */
+    swelte_qjs_cached *cached = swelte_qjs_cache_lookup_locked(mod_src, mod_len);
     if (cached && cached->bc && cached->bc_len > 0) {
         bc_snap = (uint8_t *)malloc(cached->bc_len ? cached->bc_len : 1);
         if (bc_snap) {
@@ -306,7 +315,8 @@ static int swelte_qjs_render_inner(int rt_handle, const char *mod_src, int mod_l
     JSContext *ctx = JS_NewContext(rt);
     if (!ctx) {
         free(bc_snap);
-        return -3;
+        JS_SetInterruptHandler(rt, NULL, NULL);
+        return -6;
     }
     int rc = -3;
     char rbuf[4096];
@@ -444,6 +454,15 @@ static int swelte_qjs_render_inner(int rt_handle, const char *mod_src, int mod_l
         rc = (int)blen;
     }
 done:
+    if (budget.interrupted) {
+        rc = -5;
+    } else if (rc < 0) {
+        JSValue exception = JS_GetException(ctx);
+        const char *message = JS_ToCString(ctx, exception);
+        if (message && strstr(message, "out of memory")) rc = -6;
+        if (message) JS_FreeCString(ctx, message);
+        JS_FreeValue(ctx, exception);
+    }
     free(rdup);
     free(pdup);
     free(bc_snap);

@@ -1,5 +1,5 @@
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
-import { join, relative, resolve, sep } from 'node:path'
+import { dirname, join, relative, resolve, sep } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { dynSegPattern } from './matchers.js'
 import type { RouteLimits, SvelteRouteEntry } from './types.js'
@@ -601,7 +601,10 @@ export async function collectPrerenderEntries(
 		mods.add(rel)
 	}
 	const { entries } = collectSvelteManifest(routesAbs, routesDir, mods)
-	const byRoute = new Map(entries.map((e) => [e.route, e]))
+	const byRoute = new Map(
+		entries.filter((e) => e.kind !== 'wrapper' && e.kind !== 'error').map((e) => [e.route, e])
+	)
+	const sourceByRoute = new Map<string, string>()
 	const wrappers = entries.filter((e) => e.kind === 'wrapper')
 	// Explicit per-page flag for a svelte pattern: leaf wins, else the
 	// nearest ancestor `+route.ts` with an explicit flag, else inherit.
@@ -610,7 +613,7 @@ export async function collectPrerenderEntries(
 	): 'prerender-true' | 'prerender-false' | 'prerender-auto' | null => {
 		const leaf = byRoute.get(route)
 		if (leaf && leaf.prerender !== 'inherit') return leaf.prerender
-		const segs = route.split('/').filter(Boolean)
+		const segs = leaf?.svelte.split('/').slice(0, -1) ?? route.split('/').filter(Boolean)
 		for (let i = segs.length; i >= 0; i--) {
 			const prefix = `/${segs.slice(0, i).join('/')}`
 			const norm = prefix === '/' ? '/' : prefix
@@ -638,6 +641,7 @@ export async function collectPrerenderEntries(
 	// Injected by the plugin (already loaded); absent = builtin only.
 	for (const f of listVFiles(routesAbs)) {
 		const r = routeFor(routesDir, routesAbs, f, knownMatchers)
+		if (r) sourceByRoute.set(r, f)
 		if (r && !seen.has(r)) {
 			seen.add(r)
 			patterns.push(r)
@@ -651,7 +655,13 @@ export async function collectPrerenderEntries(
 	// Accepted shapes: `string[]`, `{ slug: string }[]`-ish rows, or
 	// `{ params: Record<string,string> }[]`. Anything else = build error.
 	for (const pattern of part.dynamics) {
-		const sibling = dynamicEntriesSibling(routesAbs, pattern)
+		const leafFile = byRoute.get(pattern)?.svelte
+		const source = leafFile ? join(routesAbs, leafFile) : sourceByRoute.get(pattern)
+		const candidates = source
+			? ['entries.ts', 'entries.js'].map((name) => join(dirname(source), name))
+			: []
+		const sibling =
+			candidates.find((file) => existsSync(file)) ?? dynamicEntriesSibling(routesAbs, pattern)
 		if (!sibling) continue
 		let mod: Record<string, unknown>
 		try {
@@ -709,9 +719,9 @@ export function expandDynamicPattern(pattern: string, row: unknown, file: string
 	}
 	let params: Record<string, string>
 	if (typeof row === 'string') {
-		const names = [
-			...pattern.matchAll(/\[\.\.\.(\w+)\]|`\[\[(\w+)\]\]`|\[(\w+)(?:=[^\]]+)?\]/g),
-		].map((m) => m[1] ?? m[2] ?? m[3])
+		const names = [...pattern.matchAll(/\[\.\.\.(\w+)\]|\[\[(\w+)\]\]|\[(\w+)(?:=[^\]]+)?\]/g)].map(
+			(m) => m[1] ?? m[2] ?? m[3]
+		)
 		if (names.length === 1) params = { [names[0]]: row }
 		else fail(`must be an object when the pattern has ${names.length} params`)
 		params = params!
@@ -735,13 +745,13 @@ export function expandDynamicPattern(pattern: string, row: unknown, file: string
 	url = url.replace(/\[\.\.\.(\w+)\]/g, (_, n: string) => {
 		const v = params[n]
 		if (v === undefined) fail(`missing param '${n}'`)
-		return v
+		return v.split('/').map(encodeURIComponent).join('/')
 	})
-	url = url.replace(/\[\[(\w+)\]\]/g, (_, n: string) => params[n] ?? '')
+	url = url.replace(/\[\[(\w+)\]\]/g, (_, n: string) => encodeURIComponent(params[n] ?? ''))
 	url = url.replace(/\[(\w+)(?:=[^\]]+)?\]/g, (_, n: string) => {
 		const v = params[n]
 		if (v === undefined) fail(`missing param '${n}'`)
-		return v
+		return encodeURIComponent(v)
 	})
 	if (url.includes('[')) fail(`unresolved pattern '${url}'`)
 	return url === '' ? '/' : url.startsWith('/') ? url : `/${url}`

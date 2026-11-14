@@ -174,13 +174,15 @@ describe('jobs cron (moved from core generate-errors.test.ts)', () => {
 		assert.ok(main.includes('fn swelte_cron_2() !void {'))
 		assert.ok(!main.includes('swelte_cron_loop'), 'no per-tick loops: one scheduler thread')
 		// Scheduler: single fn, deadline array, nearest-deadline sleep, coalesce.
-		assert.ok(main.includes('fn swelte_cron_run() {'))
+		assert.ok(main.includes('fn swelte_cron_run(lifecycle &SwelteLifecycle) {'))
 		assert.ok(main.includes('mut next := [time.now().unix() + 60, time.now().unix() + 300]'))
-		assert.ok(main.includes('if wait > 0 { time.sleep(wait * time.second) }'))
+		assert.ok(main.includes('swelte_wait_active(wait * 1000, state)'))
+		assert.ok(main.includes('defer { state.end() }'))
 		assert.ok(main.includes('next[0] = time.now().unix() + 60'))
 		assert.ok(main.includes('next[1] = time.now().unix() + 300'))
 		// Fallible without retry logs status=error; plain fns stay silent.
-		assert.ok(main.includes("eprintln('[swelte:cron] tick=sweep status=error err=' + err.msg())"))
+		assert.ok(main.includes("eprintln('[swelte:cron] tick=sweep status=error reason=failed')"))
+		assert.ok(main.includes("path: 'cron/sweep', status: 500, message: err.msg()"))
 		assert.ok(!main.includes('tick=tick status=error'), 'first-try success stays silent')
 		assert.ok(!main.includes('tick=tick status=retry'), 'plain tick has no retry loop')
 		assert.ok(!main.includes('tick=tick status=dead'), 'plain tick has no dead-letter')
@@ -188,7 +190,7 @@ describe('jobs cron (moved from core generate-errors.test.ts)', () => {
 		assert.ok(main.includes('status=catchup lag='))
 		assert.ok(main.includes('>= 120'))
 		// Inside-main fragment: header + single spawn only.
-		assert.deepEqual(mainInner.match(/spawn swelte_cron_run\(\)/g)?.length, 1)
+		assert.deepEqual(mainInner.match(/spawn swelte_cron_run\(app.lifecycle\)/g)?.length, 1)
 		assert.ok(!mainInner.includes('swelte_cron_loop'), 'no per-tick spawns')
 		assert.ok(mainInner.includes('// @[cron] (src/app.v)'))
 		// Zero ticks → empty (byte-identical harness when absent).
@@ -212,14 +214,14 @@ describe('jobs cron (moved from core generate-errors.test.ts)', () => {
 		assert.ok(main.includes('mut __a_1 := 0'))
 		assert.ok(main.includes('for __a_1 <= 3 {'))
 		// 5s linear backoff: attempt k sleeps (k+1)*5s.
-		assert.ok(main.includes('time.sleep((__a_1 + 1) * 5 * time.second)'))
+		assert.ok(main.includes('swelte_wait_active((__a_1 + 1) * 5 * 1000, state)'))
 		// Console outcomes: retry notices, dead-letter, recovery ok.
 		assert.ok(main.includes('tick=flaky status=retry attempt='))
-		assert.ok(main.includes('tick=flaky status=dead attempt=3 err='))
+		assert.ok(main.includes('tick=flaky status=dead attempt=3 reason=failed'))
 		assert.ok(main.includes('tick=flaky status=ok attempt='))
 		// Deadline advance uses parsed seconds, scheduler preserved.
 		assert.ok(main.includes('next[0] = time.now().unix() + 60'))
-		assert.deepEqual(mainInner.match(/spawn swelte_cron_run\(\)/g)?.length, 1)
+		assert.deepEqual(mainInner.match(/spawn swelte_cron_run\(app.lifecycle\)/g)?.length, 1)
 	})
 
 	it('loadAppHooks collects src/app.v crons; errors surface as errors[]', async () => {
@@ -236,7 +238,7 @@ describe('jobs cron (moved from core generate-errors.test.ts)', () => {
 		assert.ok(!got?.errors, `unexpected errors: ${got?.errors}`)
 		const frag = got?.fragment
 		assert.ok(frag?.main?.includes('fn swelte_cron_1() {'))
-		assert.ok(frag?.mainInner?.includes('spawn swelte_cron_run()'))
+		assert.ok(frag?.mainInner?.includes('spawn swelte_cron_run(app.lifecycle)'))
 		assert.ok(!frag?.mainInner?.includes('swelte_cron_loop'), 'single scheduler thread')
 		// Missing qualifier → errors[], not a throw (core throws it).
 		writeFileSync(join(root, 'src', 'app.v'), 'module s\n@[cron]\npub fn tick() { }')

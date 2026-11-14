@@ -3,7 +3,7 @@ import { join } from 'node:path'
 import { parseVFile } from './parse.js'
 import type { RpcFn, ServerHooks } from './types.js'
 
-/** Validate + collect `@[startup]`/`@[reroute]`/`@[error]` from `src/app.v`.
+/** Validate app startup/shutdown, reporting, reroute and error hooks.
  * `@[startup]`: `() void|!void`, zero/one fn, no qualifier. `@[reroute]`:
  * `(host string, path string) string`, zero/one fn, no qualifier. `@[error]`:
  * `(message string, status int) string` (return '' = keep message, else
@@ -33,15 +33,48 @@ export function loadServerHooks(root: string, srcDir = 'src'): ServerHooks {
 	].map((match) => `import ${match[1]}`)
 	if (imports.length) out.imports = imports.join('\n')
 	let startup: RpcFn | undefined
+	let shutdown: RpcFn | undefined
+	let report: RpcFn | undefined
 	let reroute: RpcFn | undefined
 	let handleError: RpcFn | undefined
 	for (const fn of fns) {
-		if (fn.attr !== 'startup' && fn.attr !== 'reroute' && fn.attr !== 'error') continue
+		if (fn.attr === 'report') {
+			if (report)
+				throw new Error(`[swelte] ${rel}: two @[report] fns — one reporting hook per app.`)
+			if (
+				fn.qualifier ||
+				fn.params.length !== 1 ||
+				fn.params[0].vtype !== 'SwelteReport' ||
+				fn.vret !== 'void'
+			)
+				throw new Error(
+					`[swelte] ${rel}: @[report] ${fn.name} must take (event SwelteReport) and return void or !void.`
+				)
+			report = fn
+			continue
+		}
+		if (
+			fn.attr !== 'startup' &&
+			fn.attr !== 'shutdown' &&
+			fn.attr !== 'reroute' &&
+			fn.attr !== 'error'
+		)
+			continue
 		if (fn.qualifier)
 			throw new Error(
 				`[swelte] ${rel}: @[${fn.attr}] ${fn.name} takes no qualifier (one hook per kind).`
 			)
-		if (fn.attr === 'startup') {
+		if (fn.attr === 'startup' || fn.attr === 'shutdown') {
+			if (fn.attr === 'shutdown') {
+				if (shutdown)
+					throw new Error(`[swelte] ${rel}: two @[shutdown] fns — one shutdown hook per app.`)
+				if (fn.params.length !== 0 || fn.vret !== 'void')
+					throw new Error(
+						`[swelte] ${rel}: @[shutdown] ${fn.name} must take no params and return void or !void.`
+					)
+				shutdown = fn
+				continue
+			}
 			if (startup)
 				throw new Error(
 					`[swelte] ${rel}: two @[startup] fns (${startup.name} + ${fn.name}) — one startup hook per app.`
@@ -99,6 +132,11 @@ export function loadServerHooks(root: string, srcDir = 'src'): ServerHooks {
 		}
 	}
 	if (startup?.hookBody !== undefined) out.startupBody = startup.hookBody
+	if (shutdown?.hookBody !== undefined) out.shutdownBody = shutdown.hookBody
+	if (report?.hookBody !== undefined) {
+		out.reportBody = report.hookBody
+		out.reportParam = report.params[0].name
+	}
 	if (reroute?.hookBody !== undefined) out.rerouteBody = reroute.hookBody
 	if (handleError?.hookBody !== undefined) out.errorBody = handleError.hookBody
 	return out

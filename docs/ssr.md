@@ -82,6 +82,20 @@ marks the error output so the native response returns 500. Browser fixtures
 can set `globalThis.__swelteStrictHydration = true` to fail on hydration
 mismatch; ordinary fallback emits `swelte:hydration-fallback`.
 
+Native bridge diagnostics include the route and a bounded reason:
+`timeout`, `memory-limit`, `output-limit`, `compile-or-load`, `missing-export`,
+`exception`, `bundle-unavailable` or `runtime-unavailable`. They omit props,
+credentials and exception bodies. Hand separately records caught render errors.
+Strict mode turns unexpected renderer fallback into HTTP 500; default mode
+retains the existing fallback behavior. Load watchdog timeouts are HTTP 504;
+they bound the response wait and do not terminate the native load thread.
+
+Body output grows from 64 KiB to at most 1 MiB; head output grows from 8 KiB
+to at most 64 KiB (each buffer reserves one byte for NUL). Larger head/body
+output fails explicitly instead of truncating HTML or dropping head metadata.
+Native C tests exercise real timeout/OOM/exception returns and concurrent
+bytecode-cache eviction; the HTTP fixture checks strict failures and recovery.
+
 Browser `GET /` (`Accept: text/html`) → `Hand.before_request` →
 `swelte_ssr_enabled()` (HTML navigation, V route 200, `SWELTE_DIST`
 set) → `swelte_page_props()` (`swelte_load_for()` cascade) →

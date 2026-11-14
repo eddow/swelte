@@ -23,10 +23,24 @@ Run `npm run test:dogfood -- --browser` to verify hydration retains SSR DOM,
 wrapper context, reactive locale/query state, inline failures and refreshes
 that preserve component state. Set `SWELTE_TEST_BROWSER` to Chromium if it
 is not installed in a standard location or the Playwright cache.
+It also covers dynamic-route SSR/hydration and decoded params, history,
+overlapping actions/refresh/navigation, and deliberate strict-hydration failure.
 
 The native suite also exercises guarded SSE/WS headers and cookies, raw POST
 streams, fragmented UTF-8, errors, disconnects and idle cleanup.
-`--keep` retains the generated scratch project for debugging.
+Stalled-reader checks verify raw POST and GET SSE producers are released even
+when the client keeps the connection open but stops consuming bytes.
+Strict native SSR checks render, timeout and output failures, head-buffer
+growth and subsequent healthy requests.
+The suite also validates translated grouped dynamic prerender artifacts,
+canonical/head content, opt-outs, redirect/error exclusion and owned-artifact
+cleanup. Browser mode hydrates an actual artifact from a static host and checks
+that `$app/state.url` uses that host's origin.
+
+`--keep` retains the generated scratch project for debugging. To measure that
+native binary, run `npm run measure:dogfood -- <scratch>/app [report.json]`.
+See [measurement method and sample](../../docs/native-runtime-measurements.md)
+for startup/RSS/HTML/stream concurrency results and their scope.
 
 Run `npm run test:postgres -- --browser` with PostgreSQL client commands on
 PATH and a local role allowed to create databases. Standard `PGHOST`, `PGPORT`,

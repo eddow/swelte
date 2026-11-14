@@ -1115,6 +1115,11 @@ async function swelteGotoOrReload(location: string): Promise<void> {
 	if (typeof globalThis.location !== 'undefined') globalThis.location.href = location
 }
 
+function swelteActionRevision(): unknown {
+	return (globalThis as unknown as { __swelteRoutes?: { actionRevision?: unknown } }).__swelteRoutes
+		?.actionRevision
+}
+
 /** Default result handling for `enhance` - also usable standalone:
  *  `success` invalidates cached loads (default) and publishes the payload
  *  on `page.form`, `failure`/`error` publish on `page.form` too (action
@@ -1123,8 +1128,11 @@ async function swelteGotoOrReload(location: string): Promise<void> {
  *  fallback outside the browser router). */
 export async function applyAction(
 	result: SwelteActionResult,
-	opts: { invalidate?: boolean } = {}
+	opts: { invalidate?: boolean; signal?: AbortSignal } = {}
 ): Promise<void> {
+	const revision = swelteActionRevision()
+	const current = () => !opts.signal?.aborted && revision === swelteActionRevision()
+	if (!current()) return
 	const doInvalidate = opts.invalidate ?? true
 	if (result.type === 'redirect') {
 		navigating.set(null)
@@ -1133,6 +1141,7 @@ export async function applyAction(
 	}
 	if (result.type === 'success') {
 		if (doInvalidate) await invalidateAll()
+		if (!current()) return
 		page.set({ ...page.get(), status: result.status, error: undefined, form: result.data ?? null })
 		const setForm = __routerFn('setForm')
 		if (setForm) await setForm(result.data ?? null, result.status)
@@ -1177,6 +1186,9 @@ export function enhance(
 		controller?.abort()
 		controller = new AbortController()
 		const requestController = controller
+		const revision = swelteActionRevision()
+		const currentRequest = () =>
+			!requestController.signal.aborted && revision === swelteActionRevision()
 		void (async () => {
 			const submit = e as SubmitEvent & { submitter?: HTMLElement | null }
 			const formData = new FormData(node, submit.submitter ?? undefined)
@@ -1207,7 +1219,7 @@ export function enhance(
 			} catch {
 				return
 			}
-			if (input.cancelled || requestController.signal.aborted) return
+			if (input.cancelled || !currentRequest()) return
 			const from = typeof globalThis.location !== 'undefined' ? globalThis.location.pathname : null
 			navigating.set({ from, to: action.pathname })
 			let res: Response
@@ -1237,13 +1249,13 @@ export function enhance(
 					signal: requestController.signal,
 				})
 			} catch {
-				if (controller === requestController) navigating.set(null)
+				if (controller === requestController && currentRequest()) navigating.set(null)
 				return
 			}
 			const result = await __swelteActionResult(res)
-			if (requestController.signal.aborted) return
+			if (!currentRequest()) return
 			const update = async (updateOpts: SwelteEnhanceUpdateOptions = {}): Promise<void> => {
-				if (requestController.signal.aborted) return
+				if (!currentRequest()) return
 				if (result.type === 'success' && (updateOpts.reset ?? true)) {
 					try {
 						node.reset()
@@ -1259,7 +1271,10 @@ export function enhance(
 					if (result.type === 'success' && (updateOpts.invalidate ?? true)) await invalidateAll()
 					return
 				}
-				await applyAction(result, { invalidate: updateOpts.invalidate })
+				await applyAction(result, {
+					invalidate: updateOpts.invalidate,
+					signal: requestController.signal,
+				})
 			}
 			if (onResult) {
 				await onResult(result, update)
@@ -1272,7 +1287,7 @@ export function enhance(
 					console.error('[swelte] form submission failed', error)
 			})
 			.finally(() => {
-				if (controller === requestController) navigating.set(null)
+				if (controller === requestController && currentRequest()) navigating.set(null)
 			})
 	}
 	node.addEventListener('submit', onSubmit)

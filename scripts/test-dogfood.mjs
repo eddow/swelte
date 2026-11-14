@@ -23,6 +23,7 @@ if (process.env.SWELTE_TEST_NATIVE_DEPS) {
 mkdirSync(join(root, 'tmp'), { recursive: true })
 const scratch = mkdtempSync(join(root, 'tmp', 'dogfood-'))
 let server
+let staticHost
 let serverLog = ''
 
 function run(command, args, cwd = root, env = process.env) {
@@ -66,7 +67,9 @@ try {
     run(process.execPath, [tsc, '-p', `engine/${name}/tsconfig.json`])
   }
   const { swelte } = await import(pathToFileURL(join(root, 'engine/core/dist/vite.js')))
-  const { dbPlugin } = await import(pathToFileURL(join(root, 'engine/plus/dist/index.js')))
+  const { dbPlugin, jobsPlugin } = await import(pathToFileURL(join(root, 'engine/plus/dist/index.js')))
+  const startupProbe = { name: 'startup-probe', attrs: [], harness: () => ({ mainInner: "\tos.write_file('dependent-plugin-started', 'yes')!\n" }) }
+  const fixturePlugins = [dbPlugin, jobsPlugin, startupProbe]
   const { resolveV, resolveCC, toolchainEnv, vVersion } = await import(pathToFileURL(join(root, 'engine/core/dist/toolchain.js')))
   const { emitRenderJs } = await import(pathToFileURL(join(root, 'engine/ssr-qjs/dist/ssr.js')))
   const { buildQjsProd } = await import(pathToFileURL(join(root, 'engine/ssr-qjs/dist/qjs.js')))
@@ -110,7 +113,7 @@ try {
   writeFileSync(invalidEntry, 'import { run } from "@swelte-dogfood/ai1/v/runner.v"; console.log(run);\n')
   await assert.rejects(
     () => build({
-      root: app, configFile: false, logLevel: 'silent', plugins: [swelte({ plugins: [dbPlugin] })],
+      root: app, configFile: false, logLevel: 'silent', plugins: [swelte({ plugins: fixturePlugins })],
       build: { write: false, rollupOptions: { input: invalidEntry } },
     }),
     /server-only/
@@ -120,7 +123,7 @@ try {
 
   await build({
     root: app, configFile: false, logLevel: 'warn',
-    plugins: [svelte({ configFile: false }), swelte({ plugins: [dbPlugin] })],
+    plugins: [svelte({ configFile: false }), swelte({ plugins: fixturePlugins })],
     build: { outDir: 'dist' },
   })
   const manifest = JSON.parse(readFileSync(join(app, '.swelte/ssr-manifest.json'), 'utf8'))
@@ -133,7 +136,7 @@ try {
   const port = await availablePort()
   // No Node executable or sidecar can be found through the runtime PATH.
   const runtimeEnv = {
-    PATH: '', PORT: String(port), SWELTE_DIST: join(app, 'dist'), SWELTE_SSR: '1', SWELTE_STREAM_IDLE_MS: '500', SWELTE_HANDLER_TIMEOUT_MS: '1000',
+    PATH: '', PORT: String(port), SWELTE_DIST: join(app, 'dist'), SWELTE_SSR: '1', SWELTE_STREAM_IDLE_MS: '500', SWELTE_SSE_HEARTBEAT_MS: '100', SWELTE_HANDLER_TIMEOUT_MS: '1000',
     ...(postgres ? { DATABASE_URL: process.env.DATABASE_URL, ...Object.fromEntries(Object.entries(process.env).filter(([key]) => key.startsWith('PG'))) } : {}),
   }
   server = spawn(binary, [], {
@@ -167,6 +170,23 @@ try {
   assert.equal(envelope.data.locale, 'fr')
   assert.equal(load.headers.get('x-dogfood-guard'), 'yes')
   assert.equal(load.headers.getSetCookie().length, 2)
+  const privateLoad = await fetch(`${url}?q=private-load`, { headers: { accept: 'application/json', 'X-Swelte-Load': '1', 'X-Swelte-Request-Id': 'untrusted' } })
+  assert.equal(privateLoad.status, 500)
+  assert.doesNotMatch(await privateLoad.text(), /private database detail/)
+  const requestId = privateLoad.headers.get('x-swelte-request-id')
+  assert.match(requestId, /^\d+-\d+$/)
+  if (!postgres) {
+    const recorded = JSON.parse(readFileSync(join(app, `report-${requestId}-load-error`), 'utf8'))
+    assert.equal(recorded.message, 'private database detail')
+    assert.equal(recorded.path, '/')
+    assert.equal(recorded.request_id, requestId)
+    assert.equal(recorded.status, 500)
+    const reportFailure = await fetch(`${url}report-fail`, { headers: { accept: 'application/json' } })
+    assert.equal(reportFailure.status, 200)
+    await reportFailure.text()
+    assert.match(serverLog, /\[swelte:report\] status=error/)
+    assert.doesNotMatch(serverLog, /private reporter detail|private database detail/)
+  }
   const denied = await fetch(`${url}?deny=1`, { headers: { accept: 'text/html' }, redirect: 'manual' })
   assert.equal(denied.status, 303)
   assert.equal(denied.headers.get('location'), '/?login=1')
@@ -181,6 +201,11 @@ try {
   const binaryResponse = await fetch(`${url}download`)
   assert.deepEqual([...new Uint8Array(await binaryResponse.arrayBuffer())], [0, 1, 2, 255])
   assert.equal(binaryResponse.headers.get('x-dogfood-guard'), 'yes')
+  const dynamicHtml = await fetch(`${url}items/alpha?q=detail&lang=fr`, { headers: { accept: 'text/html' } })
+  assert.equal(dynamicHtml.status, 200)
+  const dynamicBody = await dynamicHtml.text()
+  assert.match(dynamicBody, /<title>Item alpha<\/title>/)
+  assert.match(dynamicBody, /alpha:detail:fr/)
   const noJs = await fetch(`${url}?/save&q=example&filter=unread`, { method: 'POST', body: new URLSearchParams({ title: 'test' }), headers: { accept: 'text/html' }, redirect: 'manual' })
   assert.equal(noJs.status, 303)
   assert.equal(noJs.headers.get('location'), '/?q=example&filter=unread')
@@ -208,6 +233,10 @@ try {
   assert.equal((await timedOut.json()).error.status, 504)
   const { checkStreams } = await import('./dogfood-stream.mjs')
   await checkStreams(url, app)
+  const { checkStrictSsr } = await import('./dogfood-ssr.mjs')
+  await checkStrictSsr(binary, app, runtimeEnv, await availablePort())
+  const { checkShutdown } = await import('./dogfood-shutdown.mjs')
+  await checkShutdown(binary, scratch, runtimeEnv, availablePort, postgres)
   if (postgres) {
     assert.ok(existsSync(join(app, 'dependent-job-started')))
     const check = join(scratch, 'pg-check')
@@ -232,14 +261,18 @@ try {
     const failed = spawnSync(binary, [], { cwd: badCwd, env: { ...runtimeEnv, PORT: String(await availablePort()), SWELTE_TEST_MIGRATION_FAIL: '1' }, encoding: 'utf8', timeout: 15_000 })
     assert.notEqual(failed.status, 0, 'failed migration must abort startup')
     assert.ok(!existsSync(join(badCwd, 'dependent-job-started')), 'dependent jobs must not start after failed migrations')
+    assert.ok(!existsSync(join(badCwd, 'dependent-plugin-started')), 'plugin startup must not precede successful migrations')
     console.log('PASS: native PostgreSQL load/mutation on /threads; grouped identity, wire types and failed startup before dependent work')
   }
+  const { checkPrerender } = await import('./dogfood-prerender.mjs')
+  staticHost = await checkPrerender(root, app, binary)
   if (process.argv.includes('--browser')) {
     const { checkBrowser } = await import('./dogfood-browser.mjs')
-    await checkBrowser(url, scratch)
+    await checkBrowser(url, scratch, staticHost.url)
   }
   console.log('PASS: installed native/UI package, browser build, native JSON and QuickJS HTML with empty runtime PATH')
 } finally {
+  await staticHost?.close()
   if (server && server.exitCode === null) {
     const exited = once(server, 'exit')
     server.kill('SIGTERM')

@@ -34,6 +34,8 @@ export const CORE_ATTRS = [
 	'load',
 	'matcher',
 	'startup',
+	'shutdown',
+	'report',
 	'reroute',
 	'error',
 ] as const
@@ -165,7 +167,7 @@ export function parseVFile(src: string, extraAttrs: string[] = []): RpcFn[] {
 		if (
 			verbs.some(
 				(vb) =>
-					['matcher', 'startup', 'reroute', 'error'].includes(vb.verb) ||
+					['matcher', 'startup', 'shutdown', 'report', 'reroute', 'error'].includes(vb.verb) ||
 					extraAttrs.includes(vb.verb)
 			)
 		) {

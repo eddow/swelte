@@ -14,7 +14,8 @@
   let crossDone = $state(false)
 </script>
 
-<svelte:head><title>Native package dogfood</title></svelte:head>
+<svelte:head><title>Native package dogfood</title>{#if data.headProof}<meta name="head-proof" content={data.headProof} />{/if}</svelte:head>
+{#if data.oversized}<p>{data.oversized}</p>{/if}
 <h1>Installed native library</h1>
 <Panel message={data.message} />
 <p id="context">{context}</p>

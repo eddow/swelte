@@ -15,6 +15,8 @@ Documentation for users of Swelte (all describe built behavior):
 - `config.md` — `svelte.config.js` (`swelte` key) + `SWELTE_*` env knobs, routing knobs, per-route types, no-JS (implemented)
 - `forms.md` — verbs + `?q`, no-JS 303, `fail`-lite (`isFail`), `deserialize`, `use:enhance` / `applyAction` (implemented)
 - `streaming.md` — native POST byte streams, framing, cancellation and buffering
+- `lifecycle.md` — startup ordering, cooperative shutdown, resource drain and native reporting
+- `native-runtime-measurements.md` — repeatable native fixture workload and recorded measurement scope
 - `cli.md` — `dev`/`build`/`preview`/`test`/`check`/`init`/`export`, `--target`, contract snapshot (implemented)
 - `ssr.md` — SSR, built (ownership, request path, `@[load]` cascade, `+error` contract, measured budgets, gate)
 - `mcp.md` — Agents: MCP server + skills install (implemented)

@@ -83,6 +83,13 @@ pub fn pool() !&pg.DB {
 	return database_pool
 }
 
+pub fn close_database() ! {
+	if !database_ready { return }
+	database_ready = false
+	mut db := database_pool
+	db.close()!
+}
+
 pub fn list_threads(search string) ![]Thread {
 	mut db := pool()!
 	rows := db.exec_param('SELECT id::text, title, note, to_char(created_at AT TIME ZONE \'UTC\', \'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"\'), meta::text, amount::text FROM dogfood_threads WHERE title ILIKE $1 ORDER BY created_at, id', '%' + search + '%')!

@@ -26,6 +26,9 @@ Universal loads receive `depends(...tags)`; navigation `invalidate(tag)` awaits
 refresh for matching active loads. Native `invalidate()` keeps its synchronous
 matching-key return; use `invalidateAsync()` to await. Action exceptions render
 the global error component, while validation failures remain on `page.form`.
+Pending navigation takes priority over refresh; stale/aborted action results
+cannot publish after an awaited refresh. These are response/commit guards,
+not rollback of server-side work.
 
 Initial paint data comes from a `load` fn; interaction data comes from stubs.
 
@@ -61,6 +64,16 @@ Nested error files are currently rejected. This is a routing scope restriction,
 not a V/QuickJS requirement; per-directory boundaries need ancestor selection
 and matching SSR/client wrapper and fallback behavior.
 
+## Prerender
+
+`prerender.entries: 'all'` expands sibling `entries.ts/js` beside dynamic
+leaves, including physical route groups. Flags inherit through group wrappers;
+leaf flags override them. The native crawler skips redirects/errors/SPA shells,
+keeps `/` dynamic and only prunes artifacts recorded in its ownership manifest.
+Assert translated body/head and hydrate actual static files; HTTP 200 alone
+can be an unrendered shell. Canonicals need the application's public origin,
+while `$app/state.url` rebases to the browser hosting URL. See `docs/config.md`.
+
 ## Installed UI dependencies
 
 The SSR bundler resolves installed ESM/Svelte package exports and compiles
@@ -75,6 +88,10 @@ package installation does not make an asynchronous or Node backend QJS-safe.
 - End-to-end browser `GET /` vs `dist/server` (`SWELTE_SSR=1`): ~3–12ms wall; 404 `+error` ~3ms; JSON API ~0.4ms.
 - Binary delta (vendored QuickJS + glue): +~1MB.
 - Design envelope: ~50ms timeout → SPA fallback, ~16MB cap.
+- `SWELTE_SSR_STRICT=1` makes unexpected native fallback a 500. Diagnostics
+  report route/reason (`timeout`, `memory-limit`, `output-limit`, etc.) without
+  props or raw exception bodies. Head/body buffers grow to 64 KiB/1 MiB;
+  overflow fails explicitly. Strict browser hydration also rejects fallback.
 
 ## Sources
 

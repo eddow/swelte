@@ -20,7 +20,7 @@ function browserExecutable() {
   throw new Error('Set SWELTE_TEST_BROWSER to a Chromium executable for --browser')
 }
 
-export async function checkBrowser(url, scratch) {
+export async function checkBrowser(url, scratch, staticUrl) {
   const browser = spawn(browserExecutable(), [
     '--headless=new', '--no-sandbox', '--disable-dev-shm-usage', '--disable-gpu',
     '--remote-debugging-port=0', `--user-data-dir=${join(scratch, 'browser')}`, 'about:blank',
@@ -68,7 +68,7 @@ export async function checkBrowser(url, scratch) {
       globalThis.__dogfoodFallbacks = 0;
       addEventListener('swelte:hydration-fallback', () => __dogfoodFallbacks++);
       const observer = new MutationObserver(() => {
-        const node = document.getElementById('context');
+        const node = document.getElementById('context') || document.getElementById('item');
         if (node) { globalThis.__dogfoodSsrNode = node; observer.disconnect(); }
       });
       observer.observe(document, { childList: true, subtree: true });
@@ -109,6 +109,27 @@ export async function checkBrowser(url, scratch) {
     await evaluate('document.getElementById("cross-page").requestSubmit()')
     await wait('document.getElementById("cross-done")?.textContent === "true"', 'cross-page action completion')
     assert.equal(await evaluate('!!document.getElementById("unrelated")'), false)
+    await evaluate('globalThis.__dogfoodOriginalFetch=globalThis.fetch; globalThis.__dogfoodHeld=false; globalThis.fetch=async (...args)=>{const response=await globalThis.__dogfoodOriginalFetch(...args); if(!globalThis.__dogfoodHeld && args[1]?.headers?.["X-Swelte-Load"]){globalThis.__dogfoodHeld=true; await new Promise(resolve=>{globalThis.__dogfoodRelease=resolve})} return response}; globalThis.__dogfoodRefresh=globalThis.__swelteRoutes.refresh(); void 0')
+    await wait('globalThis.__dogfoodHeld', 'refresh held before committing')
+    await evaluate('globalThis.__swelteRoutes.goto("/items/race?q=current&lang=fr")')
+    await evaluate('globalThis.__dogfoodRelease(); globalThis.__dogfoodRefresh')
+    assert.equal(await evaluate('document.getElementById("item").textContent'), 'race:current:fr')
+    await evaluate('globalThis.fetch=globalThis.__dogfoodOriginalFetch; globalThis.__swelteRoutes.goto("/?q=first&lang=en")')
+    await evaluate('globalThis.__dogfoodOriginalFetch=globalThis.fetch; globalThis.__dogfoodSaveStarted=false; globalThis.fetch=(...args)=>{if(String(args[0]).includes("/save")) globalThis.__dogfoodSaveStarted=true; return globalThis.__dogfoodOriginalFetch(...args)}; document.getElementById("title").value="slow"; document.getElementById("save").requestSubmit()')
+    await wait('globalThis.__dogfoodSaveStarted', 'slow action dispatched')
+    await evaluate('globalThis.__swelteRoutes.goto("/?q=slow")')
+    await wait('document.getElementById("search")?.textContent === "slow"', 'navigation wins against action refresh')
+    await evaluate('globalThis.fetch=globalThis.__dogfoodOriginalFetch')
+    assert.equal(await evaluate('!!document.getElementById("saved")'), false)
+    await evaluate('globalThis.__swelteRoutes.goto("/?q=first&lang=en")')
+    await evaluate('globalThis.__dogfoodOriginalFetch=globalThis.fetch; globalThis.__dogfoodSaveStarted=false; globalThis.fetch=(...args)=>{if(String(args[0]).includes("/save")) globalThis.__dogfoodSaveStarted=true; return globalThis.__dogfoodOriginalFetch(...args)}; document.getElementById("title").value="slow"; document.getElementById("save").requestSubmit()')
+    await wait('globalThis.__dogfoodSaveStarted', 'superseded action dispatched')
+    await evaluate('document.getElementById("title").value=""; document.getElementById("save").requestSubmit()')
+    await wait('!!document.getElementById("validation")', 'newer submission validation')
+    await evaluate('new Promise(resolve=>setTimeout(resolve,350))')
+    assert.equal(await evaluate('!!document.getElementById("saved")'), false)
+    assert.equal(await evaluate('document.getElementById("validation").textContent'), 'required')
+    await evaluate('globalThis.fetch=globalThis.__dogfoodOriginalFetch')
     await evaluate('(async () => { const earlier=globalThis.__swelteRoutes.goto("/?q=slow"); await new Promise(resolve=>setTimeout(resolve,50)); await globalThis.__swelteRoutes.goto("/?q=fast#hash"); await earlier })()')
     assert.equal(await evaluate('document.getElementById("search").textContent'), 'fast')
     assert.equal(await evaluate('location.hash'), '#hash')
@@ -127,13 +148,44 @@ export async function checkBrowser(url, scratch) {
     await wait('document.getElementById("layout-locale")?.textContent === "fr:next"', 'forward navigation query')
     await evaluate('globalThis.__swelteRoutes.goto("/static?lang=ro")')
     await wait('document.getElementById("static-locale")?.textContent === "ro"', 'UI-only inherited load')
+    await evaluate('globalThis.__swelteRoutes.goto("/items/alpha?q=detail&lang=fr#section")')
+    await wait('document.getElementById("item")?.textContent === "alpha:detail:fr"', 'dynamic route data')
+    assert.equal(await evaluate('document.getElementById("item-route").textContent'), '/items/[id]')
+    assert.equal(await evaluate('document.getElementById("item-param").textContent'), 'alpha')
+    await evaluate('history.back()')
+    await wait('document.getElementById("static-locale")?.textContent === "ro"', 'dynamic route back navigation')
+    await evaluate('history.forward()')
+    await wait('document.getElementById("item")?.textContent === "alpha:detail:fr"', 'dynamic route forward navigation')
+    await command('Page.navigate', { url: `${url}items/${encodeURIComponent('café')}?q=direct&lang=ro` })
+    await wait('!!globalThis.__swelteRoutes && document.getElementById("item")?.textContent === "café:direct:ro"', 'direct dynamic hydration with decoded params')
+    assert.equal(await evaluate('globalThis.__dogfoodFallbacks'), 0)
+    assert.equal(await evaluate('document.getElementById("item") === globalThis.__dogfoodSsrNode'), true)
     await evaluate('globalThis.__swelteRoutes.goto("/?deny=1")')
     await wait('location.search === "?login=1" && !!document.getElementById("save")', 'guard redirect')
     await evaluate('document.getElementById("title").value="explode"; document.getElementById("save").requestSubmit()')
     await wait('document.getElementById("page-error")?.textContent === "500: action unavailable"', 'action exception boundary')
     assert.equal(await evaluate('!!document.getElementById("save")'), false)
     assert.deepEqual(exceptions, [])
-    console.log('PASS: browser hydration retained SSR DOM; inline forms, refresh state, query/history, inherited loads and guard redirects')
+    if (staticUrl) {
+      await command('Page.navigate', { url: `${staticUrl}/fr/article/caf%C3%A9` })
+      await wait('!!globalThis.__swelteRoutes && document.getElementById("article")?.textContent === "Bonjour café"', 'static translated artifact hydration')
+      assert.equal(await evaluate('globalThis.__dogfoodFallbacks'), 0)
+      assert.equal(await evaluate('document.getElementById("article-url").textContent === location.href'), true, 'static initial URL must use the actual hosting origin')
+      assert.equal(await evaluate('document.querySelector("link[rel=canonical]").href'), 'https://dogfood.example/fr/article/caf%C3%A9')
+      assert.deepEqual(exceptions, [])
+    }
+    await command('Page.addScriptToEvaluateOnNewDocument', { source: `
+      const corrupt = new MutationObserver(() => {
+        const root = document.querySelector('#app > [data-swelte-ssr]');
+        if (root) { root.remove(); corrupt.disconnect(); }
+      });
+      corrupt.observe(document, { childList: true, subtree: true });
+    ` })
+    await command('Page.navigate', { url: `${url}?q=strict-hydration` })
+    assert.equal(await evaluate('new Promise(resolve=>{const deadline=Date.now()+10000; const timer=setInterval(()=>{if(globalThis.__dogfoodFallbacks>0 || Date.now()>deadline){clearInterval(timer);resolve(globalThis.__dogfoodFallbacks>0)}},25)})'), true)
+    assert.equal(await evaluate('!!globalThis.__swelteRoutes'), false, 'strict boot must not silently mount after hydration failure')
+    assert.equal(await evaluate('!!document.getElementById("save")'), false)
+    console.log('PASS: browser hydration, forms/refresh races, dynamic/history navigation, error boundaries and strict hydration rejection')
   } finally {
     socket?.close()
     for (const entry of pending.values()) { clearTimeout(entry.timer); entry.reject(new Error('browser closed')) }

@@ -86,6 +86,9 @@ aborts the previous request. The callback receives an AbortController and
 submitter; method/action/enctype overrides are honored. Only success resets
 the form. `update()` awaits the current page's load refresh, preserving mounted
 component state; `update({ reset: false, invalidateAll: false })` opts out.
+Results become obsolete when navigation starts. A superseded/aborted action
+cannot publish form data after its refresh completes; refresh cannot replace
+a pending navigation. Request cancellation does not roll back server effects.
 Validation failures stay inline on `page.form`; redirects use the router.
 An action targeting another page refreshes the current page without publishing
 the unrelated form result there. `applyAction(result)` is available standalone.

@@ -76,7 +76,23 @@ build error with file+line. No prerender implied — just the crawl source.
 and GETs each crawl URL with browser Accept: 200 HTML →
 `dist/<route>/index.html` (root `/` never overwritten —
 `dist/index.html` stays the SPA shell). JSON probes and error pages
-skipped, never written. Concurrency = `prerender.concurrency`.
+skipped, never written. Redirects are not followed, and strict SSR rejects
+render failures and unrendered shells. Concurrency = `prerender.concurrency`.
+The crawler starts and stops only its own child process; it does not kill
+processes occupying a fixed port. Its environment retains native database
+configuration, so application startup still runs during the crawl.
+
+Dynamic parameter values are URL-encoded; rest parameters retain path
+separators. Sibling entries and inherited flags follow physical directories,
+including route groups such as `(content)`. Unicode URLs produce decoded
+filesystem paths (for example `/fr/article/caf%C3%A9` writes
+`dist/fr/article/café/index.html`). The static host must decode URL paths.
+`.swelte/prerendered.json` records owned artifacts: a later crawl removes
+previously generated pages that are no longer emitted, preserving other
+files and the root shell. Keep this manifest when rerunning against the same
+dist directory. Canonical URLs remain application policy; use a configured
+public origin (for example `SWELTE_ORIGIN`) rather than the crawler's temporary
+loopback origin. Hydration uses the actual hosting URL for `$app/state.url`.
 
 Per-page flag (SvelteKit `prerender` page option): `export const prerender
 = true | false | 'auto'` in the sibling `.ts` (leaf like `about/+page.ts`
@@ -252,10 +268,13 @@ export const chunk = 'eager' | 'lazy' // default: 'inherit' (follow global mode)
   (`__swelteUrl` guard + `matchSegs`). Custom matchers project
   `string` (only `integer` narrows to `number`). Unknown name/bad
   shape = build error with file+line.
-* **`src/app.v` lifecycle** (`@[startup]`, `@[reroute]`; never
+* **`src/app.v` lifecycle** (`@[startup]`, `@[shutdown]`, `@[report]`, `@[reroute]`; never
   routed/never importable from browser): `@[startup] () void|!void`
   (zero/one fn, no qualifier, no params) runs once before `veb.run`
-  (throw aborts boot); `@[reroute] (host string, path string) string`
+  (throw aborts boot before plugin jobs); `@[shutdown] () void|!void` runs
+  after cooperative request/job/stream drain. `@[report] (event SwelteReport)`
+  supplies native request/error context. See [lifecycle.md](lifecycle.md) for
+  signal ownership, deadlines and reporting. `@[reroute] (host string, path string) string`
   (zero/one fn, no qualifier)
   runs first in `before_request` — before `trailingSlash`
   normalization, CSRF/CORS/static/dispatch

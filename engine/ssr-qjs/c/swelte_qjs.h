@@ -20,7 +20,7 @@
 //   - copies `body` HTML into `out_buf` (truncated to `out_cap-1` + NUL);
 //     returns the FULL needed length. V compares: needed <= out_cap-1
 //     means complete, else grow + retry — or serve the SPA fallback.
-//   - returns -1 (JS exception / timeout-fire / OOM), -2 (no renderRoute
+//   - returns -1 (JS exception), -5 (timeout), -6 (memory exhaustion), -2 (no renderRoute
 //     export), -3 (load/compile failure). Any failure → V falls back to
 //     SPA shell / +error — never blank.
 //   swelte_qjs_render_head_body(...) is the same call but ALSO copies
@@ -34,8 +34,8 @@
 //
 // Guards (enforced here, not in JS):
 //   - interrupt handler: wall-clock budget in ms (0 = none; prod ~50).
-//     On fire the eval aborts → -1 → V serves the SPA fallback.
-//   - memory cap in MB (0 = none; prod 16). Exceeding aborts → -1.
+//     On fire the eval aborts → -5 → V serves the SPA fallback or strict 500.
+//   - memory cap in MB (0 = none; prod 16). Exhaustion returns -6.
 //   - no `fs`/`net`/`process` shims are ever registered — the context has
 //     no I/O globals at all. The QJS-compat build guard (`assertQjsCompatible`
 //     in ssr.ts) rejects `node:`/`fetch`/top-level-await at bundle time;
@@ -55,7 +55,7 @@ int swelte_qjs_new_runtime(void);
 void swelte_qjs_free_runtime(int handle);
 
 // Render into the caller buffer. Returns needed length (>=0, excl. NUL),
-// or negative on failure (-1 js/timeout/mem, -2 no export, -3 load,
+// or negative on failure (-1 js, -5 timeout, -6 memory, -2 no export, -3 load,
 // -4 empty body: rendered, nothing inside — caller keeps the SPA shell).
 // `out_buf` always NUL-terminated when out_cap > 0 (possibly truncated).
 // NOTE: body-only legacy. Prefer swelte_qjs_render_head_body (single JS

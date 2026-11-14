@@ -22,6 +22,7 @@ async function __swelteBoot() {
 	if (serialized) {
 		const parsed = JSON.parse(serialized)
 		if (parsed.version !== 1 || !parsed.route || !parsed.params) throw new Error('swelte: invalid initial page envelope')
+		parsed.url = location.href
 		initial = parsed
 	} else {
 		initial = (await preloadData(url))?.data ?? undefined

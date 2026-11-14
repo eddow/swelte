@@ -277,6 +277,67 @@ describe('SDK error contract', () => {
 		else g.__swelteRoutes = prev
 	})
 
+	it('an action refresh cannot publish after navigation supersedes it', async () => {
+		const g = globalThis as Record<string, unknown>
+		const previous = g.__swelteRoutes
+		let release!: () => void
+		const gate = new Promise<void>((resolve) => {
+			release = resolve
+		})
+		let revision = 0
+		let formWrites = 0
+		try {
+			g.__swelteRoutes = {
+				get actionRevision() {
+					return revision
+				},
+				refresh: () => gate,
+				setForm: async () => {
+					formWrites++
+				},
+			}
+			page.set({ url: '/', params: {}, route: '/', form: null })
+			const pending = applyAction({ type: 'success', status: 200, data: { stale: true } })
+			revision++
+			page.set({ url: '/next', params: {}, route: '/next', form: null })
+			release()
+			await pending
+			assert.equal(formWrites, 0)
+			assert.equal(page.get().route, '/next')
+			assert.equal(page.get().form, null)
+		} finally {
+			release()
+			if (previous === undefined) delete g.__swelteRoutes
+			else g.__swelteRoutes = previous
+		}
+	})
+
+	it('an aborted action cannot publish after its refresh completes', async () => {
+		const g = globalThis as Record<string, unknown>
+		const previous = g.__swelteRoutes
+		let release!: () => void
+		const gate = new Promise<void>((resolve) => {
+			release = resolve
+		})
+		try {
+			g.__swelteRoutes = { refresh: () => gate }
+			page.set({ url: '/', params: {}, route: '/', form: null })
+			const controller = new AbortController()
+			const pending = applyAction(
+				{ type: 'success', status: 200, data: { stale: true } },
+				{ signal: controller.signal }
+			)
+			controller.abort()
+			release()
+			await pending
+			assert.equal(page.get().form, null)
+		} finally {
+			release()
+			if (previous === undefined) delete g.__swelteRoutes
+			else g.__swelteRoutes = previous
+		}
+	})
+
 	it('action errors publish status and invoke the router error boundary', async () => {
 		const g = globalThis as Record<string, unknown>
 		const previous = g.__swelteRoutes

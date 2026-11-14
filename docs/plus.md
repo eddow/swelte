@@ -61,11 +61,11 @@ All tick outcomes go to the console (stderr) — no log file by design
 
 ```text
 [swelte:cron] tick=tick status=catchup lag=130s   # wake-up behind >= 2 intervals, fires once
-[swelte:cron] tick=sweep status=retry attempt=0 err=<msg>
-[swelte:cron] tick=sweep status=retry attempt=1 err=<msg>
+[swelte:cron] tick=sweep status=retry attempt=0 reason=failed
+[swelte:cron] tick=sweep status=retry attempt=1 reason=failed
 [swelte:cron] tick=sweep status=ok attempt=2       # recovered
-[swelte:cron] tick=sweep status=dead attempt=3 err=<msg>  # exhausted
-[swelte:cron] tick=sweep status=error err=<msg>    # fallible, no retry
+[swelte:cron] tick=sweep status=dead attempt=3 reason=failed  # exhausted
+[swelte:cron] tick=sweep status=error reason=failed    # fallible, no retry
 ```
 
 First-try success stays silent. Status reference:
@@ -82,11 +82,11 @@ First-try success stays silent. Status reference:
 ## How it works
 
 `loadAppHooks` reads `src/app.v`, validates every `@[cron]` fn, and emits
-two fragments into the V harness (before `mut app := &App{}`):
+two fragments into the V harness. Plugin jobs start after app startup succeeds:
 
 - `main`: top-level `swelte_cron_N` fns (user bodies verbatim, so fallible
-  fns compile) + `swelte_cron_run()` — the ONE scheduler thread.
-- `mainInner`: `// @[cron]` header + `spawn swelte_cron_run()`.
+  fns compile) + `swelte_cron_run(lifecycle)` — the ONE scheduler thread.
+- `mainInner`: starts the tracked scheduler with `app.lifecycle`.
 
 The scheduler holds a `next[i]` unix deadline per tick, sleeps to the
 nearest one (idle = one sleeping thread, zero wakeups/CPU), fires due
@@ -94,6 +94,10 @@ ticks, and advances `next[i] = now + every`. Retries run a **blocking**
 linear-backoff loop inside the tick's arm — the scheduler thread is
 preserved, but a retrying tick may briefly delay other ticks (cap 5 bounds
 this to ~75s worst case).
+Sleeps/backoff stop on shutdown, while an executing tick remains tracked until
+it returns. The shutdown hook runs after tracked work drains. Original failure
+messages go to the optional server-side `@[report]` hook as `job-error` events;
+console diagnostics use generic reasons. See [lifecycle](lifecycle.md).
 
 Zero ticks → empty fragments: harness byte-identical to parity output.
 

@@ -35,6 +35,10 @@ through a separate immediate socket monitor.
 socket writes. Idle providers should emit protocol-appropriate heartbeat bytes
 or choose a larger timeout. Empty writes poll cancellation and send no bytes.
 The current HTTP/1.1 response is close-delimited; the native harness owns framing.
+Taken-over sockets use nonblocking writes so the timeout also applies when a
+connected client stops reading. GET SSE uses the same write timeout and releases
+blocked emitters when its writer ends; waiting for the next GET SSE event remains
+long-lived. App-owned upstream waits must still observe cancellation.
 
 Application libraries can accept injected write/cancel callbacks without
 importing generated routes. Decide whether a subscriber disconnect cancels an

@@ -152,11 +152,12 @@ export function cronHarness(crons: JobsCronDef[]): { main: string; mainInner: st
 			mut __ok_${n} := false
 			for __a_${n} <= ${retry} {
 				swelte_cron_${n}() or {
+					swelte_report(SwelteReport{phase: 'job-error', path: 'cron/${c.name}', status: 500, message: err.msg()})
 					if __a_${n} == ${retry} {
-						eprintln('[swelte:cron] ${tag} status=dead attempt=${retry} err=' + err.msg())
+						eprintln('[swelte:cron] ${tag} status=dead attempt=${retry} reason=failed')
 					} else {
-						eprintln('[swelte:cron] ${tag} status=retry attempt=' + __a_${n}.str() + ' err=' + err.msg())
-						time.sleep((__a_${n} + 1) * ${PLUS_CRON_RETRY_STEP_S} * time.second)
+						eprintln('[swelte:cron] ${tag} status=retry attempt=' + __a_${n}.str() + ' reason=failed')
+						if !swelte_wait_active((__a_${n} + 1) * ${PLUS_CRON_RETRY_STEP_S} * 1000, state) { return }
 					}
 					__a_${n}++
 					continue
@@ -169,12 +170,13 @@ export function cronHarness(crons: JobsCronDef[]): { main: string; mainInner: st
 			}
 			_ = __ok_${n}`
 		} else if (c.fallible) {
-			fire = `swelte_cron_${n}() or { eprintln('[swelte:cron] ${tag} status=error err=' + err.msg()) }`
+			fire = `swelte_cron_${n}() or { swelte_report(SwelteReport{phase: 'job-error', path: 'cron/${c.name}', status: 500, message: err.msg()}); eprintln('[swelte:cron] ${tag} status=error reason=failed') }`
 		} else {
 			fire = `swelte_cron_${n}()`
 		}
 		arms.push(
 			`		if now >= next[${n - 1}] {
+			if state.is_stopping() { return }
 			if now - next[${n - 1}] >= ${c.seconds * 2} {
 				eprintln('[swelte:cron] ${tag} status=catchup lag=' + (now - next[${n - 1}]).str() + 's')
 			}
@@ -188,7 +190,9 @@ export function cronHarness(crons: JobsCronDef[]): { main: string; mainInner: st
 	// Scheduler fn is top-level (V forbids nested fns); only the spawn
 	// lives inside `main`. `main` gains the trailing newline back so the
 	// harness splice `${frag.main}\nfn main()` stays well-formed.
-	const sched = `fn swelte_cron_run() {
+	const sched = `fn swelte_cron_run(lifecycle &SwelteLifecycle) {
+	mut state := unsafe { &SwelteLifecycle(lifecycle) }
+	defer { state.end() }
 	mut next := [${inits}]
 	for {
 		mut now := time.now().unix()
@@ -196,7 +200,7 @@ export function cronHarness(crons: JobsCronDef[]): { main: string; mainInner: st
 		for d in next {
 			if d - now < wait { wait = d - now }
 		}
-		if wait > 0 { time.sleep(wait * time.second) }
+		if wait > 0 && !swelte_wait_active(wait * 1000, state) { return }
 		now = time.now().unix()
 ${arms}
 	}
@@ -207,7 +211,7 @@ ${arms}
 // No watchdog: long-lived by design. Missed ticks coalesce (no pile-up),
 // with a status=catchup console notice when lag >= 2 intervals.
 // Outcomes log to the console ([swelte:cron] tick=.. status=..) — no file.
-	spawn swelte_cron_run()`
+	if app.lifecycle.begin() { spawn swelte_cron_run(app.lifecycle) }`
 	return { main, mainInner }
 }
 

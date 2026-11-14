@@ -568,6 +568,9 @@ function __fullUrl(url, pathname) {
 export async function goto(url, opts) {
 	opts = opts || {}
 	const navigation = ++__navigationId
+	++__pageNavigationId
+	__pendingNavigation = navigation
+	try {
 	const destination = new URL(url, location.href)
 	if (destination.origin !== location.origin) { location.href = destination.href; return }
 	const to = destination.pathname + destination.search + destination.hash
@@ -579,6 +582,7 @@ export async function goto(url, opts) {
 	if (!opts.replaceState) history.pushState(__swelteHistState(), '', to)
 	else history.replaceState(__swelteHistState(), '', to)
 	await __navigateTo(to, { ...opts, navigation })
+	} finally { if (__pendingNavigation === navigation) __pendingNavigation = 0 }
 }
 function __swelteSnap() { try { const sdk = __routerSdk(); return sdk && sdk.__swelteCaptureSnapshot ? sdk.__swelteCaptureSnapshot() : {} } catch { return {} } }
 function __swelteHistState(pageState) { return { 'swelte:snap': __swelteSnap(), ...(pageState !== undefined ? { 'page-state': pageState } : {}) } }
@@ -602,6 +606,7 @@ export async function preloadData(url) {
 	} catch (e) { return { route: hit.route.path, params: hit.params, data: null, status: 0 } }
 }
 export async function pushState(url, state) {
+	++__pageNavigationId; ++__navigationId
 	state = state || {}
 	const pageState = state['page-state']
 	const destination = new URL(url, location.href)
@@ -611,6 +616,7 @@ export async function pushState(url, state) {
 	__setPage(__routerMounted)
 }
 export async function replaceState(url, state) {
+	++__pageNavigationId; ++__navigationId
 	state = state || {}
 	const pageState = state['page-state']
 	const destination = new URL(url, location.href)
@@ -628,6 +634,17 @@ export async function preloadCode(url) {
 	return { route: hit.route.path, params: hit.params, cached: true }
 }
 async function __navigateTo(pathname, opts) {
+	opts = opts || {}
+	if (opts.refresh && __pendingNavigation) return
+	const navigation = opts.navigation ?? ++__navigationId
+	if (!opts.refresh) {
+		if (!opts.navigation) ++__pageNavigationId
+		__pendingNavigation = navigation
+	}
+	try { return await __navigateToInner(pathname, { ...opts, navigation }) }
+	finally { if (__pendingNavigation === navigation) __pendingNavigation = 0 }
+}
+async function __navigateToInner(pathname, opts) {
 	opts = opts || {}
 	const destination = new URL(pathname, location.href)
 	pathname = destination.pathname + destination.search + destination.hash
@@ -693,6 +710,8 @@ async function __navigateTo(pathname, opts) {
 	await __runGuards('after', { from, to: __routerMounted })
 }
 let __navigationId = 0
+let __pageNavigationId = 0
+let __pendingNavigation = 0
 export async function refresh() { await __navigateTo(location.pathname + location.search + location.hash, { refresh: true }) }
 export async function refreshTagged(keys) {
   const match = __matchRoute(location.pathname)
@@ -701,6 +720,7 @@ export async function refreshTagged(keys) {
 export async function setError(error) {
   const target = __routerTarget || document.getElementById('app')
   ++__navigationId
+  ++__pageNavigationId
   const next = { ...(__lastEnvelope || {}), version: 1, status: error.status, error, form: null, data: {} }
   const match = __matchRoute(location.pathname)
   if (match) {
@@ -718,7 +738,7 @@ export async function setForm(form, status = 200) {
 }
 export function initSwelteRouter(target) {
 	__routerTarget = target || document.getElementById('app')
-	if (typeof globalThis !== 'undefined') { globalThis.__swelteRoutes = { goto, preloadData, preloadCode, pushState, replaceState, refresh, refreshTagged, setForm, setError, initSwelteRouter } }
+	if (typeof globalThis !== 'undefined') { globalThis.__swelteRoutes = { goto, preloadData, preloadCode, pushState, replaceState, refresh, refreshTagged, setForm, setError, initSwelteRouter, get actionRevision() { return __pageNavigationId } } }
 	if (typeof window === 'undefined' || !__routerTarget) return () => {}
 	const gotoOptsFor = (a, href) => {
 		const opts = {}

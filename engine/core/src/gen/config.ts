@@ -412,6 +412,9 @@ export function renderHarness(
 	fromUrl: string,
 	hooks?: {
 		startupBody?: string
+		shutdownBody?: string
+		reportBody?: string
+		reportParam?: string
 		rerouteBody?: string
 		errorBody?: string
 		/** Room-mode SSE present (future.md #4): harness imports the backend
@@ -422,10 +425,28 @@ export function renderHarness(
 ): string {
 	const file = join(templatesDir(fromUrl), 'harness', 'server.v')
 	let src = readFileSync(file, 'utf8')
+	src = src.replaceAll(
+		'@SWELTE_HARNESS_DIR@',
+		dirname(file).replaceAll('\\', '/').replaceAll('"', '\\"')
+	)
+	if (hooks?.shutdownBody !== undefined)
+		src = src.replace('\t// [swelte] shutdown-hook', hooks.shutdownBody)
+	if (hooks?.reportBody !== undefined)
+		src = src.replace(
+			'\t// [swelte] report-hook',
+			`\t(fn (${hooks.reportParam ?? 'event'} SwelteReport) ! {\n${hooks.reportBody}\n\t})(event) or { eprintln('[swelte:report] status=error') }`
+		)
 	if (hooks?.roomSse && !src.includes('import backend'))
 		src = src.replace('import veb', `import backend\nimport veb`)
-	if (!hooks?.roomSse) src = src.replace('import net\n', '')
 	if (hooks?.roomSse) {
+		src = src.replace(
+			'\t// [swelte] room-subscribe',
+			'\tbackend.hub_lock()\n\tid := backend.hub_add(room, ch)\n\tbackend.hub_unlock()\n\tsubs.entries << SwelteSubscription{room, id}'
+		)
+		src = src.replace(
+			'\t// [swelte] room-release',
+			'\tbackend.hub_lock()\n\tfor entry in subs.entries { backend.hub_remove(entry.room, entry.id) }\n\tbackend.hub_unlock()'
+		)
 		// Room mode (future.md #4): the harness owns the subscription.
 		// `sub(room)` subscribes; `emit` pushes hub messages. The route fn
 		// returns when IT decides — then we unsubscribe everything left
@@ -436,28 +457,18 @@ export function renderHarness(
 		const branch = [
 			'\t// [swelte] room-mode',
 			'\tif routes.swelte_sse_is_room(job.prefix) {',
-			'\t\tmut subs := map[string]int{}',
-			'\t\tsub := fn [mut subs] (room string) chan string {',
-			'\t\t\tch := chan string{cap: 1}',
-			'\t\t\tbackend.hub_lock()',
-			'\t\t\tid := backend.hub_add(room, ch)',
-			'\t\t\tbackend.hub_unlock()',
-			'\t\t\tsubs[room] = id',
-			'\t\t\treturn ch',
+			'\t\tsub := fn [job] (room string) chan string {',
+			'\t\t\treturn swelte_room_subscribe(room, job.subscriptions)',
 			'\t\t}',
 			'\t\temit := fn [job] (e string) bool {',
+			'\t\t\tpacket := [e]',
 			'\t\t\tselect {',
 			'\t\t\t\t_ := <-job.done { return false }',
-			'\t\t\t\tjob.pch <- e { return true }',
+			'\t\t\t\tjob.pch <- packet { return true }',
 			'\t\t\t}',
 			'\t\t\treturn false',
 			'\t\t}',
-			'\t\troutes.swelte_sse_room_for(job.prefix, job.qualifier, job.req, sub, emit) or {}',
-			'\t\tfor room, id in subs {',
-			'\t\t\tbackend.hub_lock()',
-			'\t\t\tbackend.hub_remove(room, id)',
-			'\t\t\tbackend.hub_unlock()',
-			'\t\t}',
+			'\t\troutes.swelte_sse_room_for(job.prefix, job.qualifier, job.req, sub, emit) or { swelte_stream_report(job.req, err.msg()) }',
 		].join('\n')
 		if (src.includes(anchor)) src = src.replace(anchor, `${branch}\n`)
 		else src += '\n// [swelte] room-mode anchor missing — harness template changed.\n'
@@ -516,9 +527,9 @@ export function renderHarness(
 		const inject =
 			'\tmut app := &App{}\n' +
 			'\t// @[startup] (src/app.v) — once, before veb.run. Throw aborts boot.\n' +
-			'\t{\n' +
+			'\t(fn () ! {\n' +
 			indent(hooks.startupBody) +
-			'\n\t}'
+			"\n\t})() or {\n\t\tswelte_report(SwelteReport{phase: 'startup-error', status: 500, message: err.msg()})\n\t\teprintln('[swelte:startup] status=error')\n\t\texit(1)\n\t}"
 		if (src.includes(anchor)) src = src.replace(anchor, inject)
 		else src += '\n// @[startup] anchor missing — harness template changed.\n'
 	}
@@ -593,13 +604,11 @@ export function renderHarness(
 			if (src.includes(anchor)) src = src.replace(anchor, `${frag.main}\n${anchor}`)
 			else src += `\n// [swelte] plugin main anchor missing — harness template changed.\n`
 		}
-		// mainInner splices INSIDE main, BEFORE `mut app := &App{}` (spawns,
-		// startup stmts). Matches the old cron splice: block + anchor on its
-		// own lines, startup injection (which rewrites the same anchor) lands
-		// after it, veb.run last. `main` fragments stay top-level pre-main.
+		// Plugin jobs start only after app startup has initialized shared
+		// dependencies. A failed startup must not execute these fragments.
 		if (frag.mainInner) {
-			const anchor = '\tmut app := &App{}'
-			if (src.includes(anchor)) src = src.replace(anchor, frag.mainInner + anchor)
+			const anchor = '\t// [swelte] background-start: app startup must finish before plugin jobs.'
+			if (src.includes(anchor)) src = src.replace(anchor, `${frag.mainInner}\n${anchor}`)
 			else src += `\n// [swelte] plugin mainInner anchor missing — harness template changed.\n`
 		}
 	}

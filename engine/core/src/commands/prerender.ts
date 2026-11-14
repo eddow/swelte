@@ -11,9 +11,11 @@
 // the in-memory header table — headers only, no background revalidation,
 // runtime default unchanged.
 import { type ChildProcess, spawn } from 'node:child_process'
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
-import { join, resolve } from 'node:path'
-import { freePortUnix, killPort, takePort, waitPort } from './dev.js'
+import { once } from 'node:events'
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { createServer } from 'node:net'
+import { join, resolve, sep } from 'node:path'
+import { waitPort } from './dev.js'
 
 interface CrawlFile {
 	mode: string
@@ -43,8 +45,15 @@ function distRelPath(url: string): string | null {
 	const clean = url.split('?')[0].split('#')[0]
 	if (clean === '' || clean === '/') return null
 	const rel = clean.replace(/^\/+/, '').replace(/\/+$/, '')
-	if (rel === '' || rel.includes('..') || rel.includes('\0')) return null
-	return join(rel, 'index.html')
+	if (rel === '') return null
+	try {
+		const segments = rel.split('/').map(decodeURIComponent)
+		if (segments.some((segment) => segment === '.' || segment === '..' || /[\\/\0]/.test(segment)))
+			return null
+		return join(...segments, 'index.html')
+	} catch {
+		return null
+	}
 }
 
 function isrSecondsFor(url: string, isr: Record<string, number>): number | null {
@@ -82,26 +91,67 @@ export async function runPrerender(
 		return empty
 	}
 	const urls = crawlUrls(crawl)
-	if (urls.length === 0) return empty
+	const distDir = String(cfg['distDir'] ?? 'dist')
+	const dist = resolve(root, distDir)
+	const generated = resolve(root, String(cfg['outDir'] ?? '.swelte'))
+	const ownershipFile = join(generated, 'prerendered.json')
+	const recordPages = (pages: string[]) => {
+		let old: { dist?: string; pages?: string[] } = {}
+		try {
+			old = JSON.parse(readFileSync(ownershipFile, 'utf8'))
+		} catch {
+			/* first crawl */
+		}
+		if (old.dist === dist && Array.isArray(old.pages))
+			for (const page of old.pages) {
+				if (pages.includes(page) || typeof page !== 'string') continue
+				const target = resolve(dist, page)
+				if (target.startsWith(dist + sep) && page.endsWith(`${sep}index.html`))
+					rmSync(target, { force: true })
+			}
+		mkdirSync(generated, { recursive: true })
+		writeFileSync(ownershipFile, JSON.stringify({ dist, pages }, null, 2))
+	}
+	if (urls.length === 0) {
+		recordPages([])
+		return empty
+	}
 	const prerenderCfg = cfg['prerender'] as { concurrency?: unknown } | undefined
 	const rawConc = prerenderCfg?.concurrency
 	const conc =
 		typeof rawConc === 'number' && Number.isFinite(rawConc) && rawConc > 0 ? Math.floor(rawConc) : 4
-	const distDir = String(cfg['distDir'] ?? 'dist')
 	const isr = (cfg['isr'] ?? {}) as Record<string, number>
-	const probePort = takePort(0, 4191)
-	await killPort(probePort, () => {})
+	const probe = createServer()
+	probe.listen(0, '127.0.0.1')
+	await once(probe, 'listening')
+	const probePort = (probe.address() as { port: number }).port
+	await new Promise<void>((resolveClose, reject) =>
+		probe.close((error) => (error ? reject(error) : resolveClose()))
+	)
 	const child: ChildProcess = spawn(binary, [], {
 		cwd: root,
 		// SSR on: the crawl needs real HTML (dispatch-only JSON 200s are
 		// skipped). The QJS bridge is embedded in the built binary, so
 		// SWELTE_SSR=1 needs no sidecar.
-		env: { ...process.env, PORT: String(probePort), SWELTE_DIST: distDir, SWELTE_SSR: '1' },
+		env: {
+			...process.env,
+			PORT: String(probePort),
+			SWELTE_DIST: distDir,
+			SWELTE_SSR: '1',
+			SWELTE_SSR_STRICT: '1',
+		},
 		stdio: ['ignore', 'pipe', 'pipe'],
 	})
+	const exited = once(child, 'exit')
+	void exited.catch(() => {})
+	let childLog = ''
+	for (const stream of [child.stdout, child.stderr])
+		stream?.on('data', (bytes) => {
+			childLog = (childLog + bytes).slice(-8000)
+		})
 	try {
 		if (!(await waitPort(probePort, 15000)))
-			throw new Error(`prerender binary did not listen on :${probePort} within 15s`)
+			throw new Error(`prerender binary did not listen on :${probePort} within 15s: ${childLog}`)
 		const pages: string[] = []
 		const isrHeaders: Record<string, string> = {}
 		const queue = [...urls]
@@ -110,17 +160,27 @@ export async function runPrerender(
 			try {
 				res = await fetch(`http://127.0.0.1:${probePort}${url}`, {
 					headers: { accept: 'text/html,application/xhtml+xml' },
+					redirect: 'manual',
+					signal: AbortSignal.timeout(15000),
 				})
 			} catch {
+				hooks.log(`prerender: skipped ${url} (request failed)`)
 				return
 			}
 			const ct = (res.headers.get('content-type') ?? '').toLowerCase()
-			if (res.status !== 200 || !(ct.includes('text/html') || ct === '')) return
+			if (res.status !== 200 || !(ct.includes('text/html') || ct === '')) {
+				hooks.log(`prerender: skipped ${url} (HTTP ${res.status}, ${ct || 'no content type'})`)
+				return
+			}
 			const html = await res.text()
 			if (!html.includes('<html') && !html.includes('<!doctype')) return
+			if (html.includes('<!--ssr-body-->') || html.includes('data-swelte-render-error="1"')) {
+				hooks.log(`prerender: skipped ${url} (unrendered shell or render error)`)
+				return
+			}
 			const rel = distRelPath(url)
 			if (!rel) return
-			const dest = join(resolve(root), distDir, rel)
+			const dest = join(dist, rel)
 			mkdirSync(join(dest, '..'), { recursive: true })
 			writeFileSync(dest, html)
 			pages.push(rel)
@@ -141,6 +201,7 @@ export async function runPrerender(
 		}
 		await Promise.all(workers)
 		pages.sort()
+		recordPages(pages)
 		hooks.onIsrHeaders?.(isrHeaders)
 		if (pages.length > 0) hooks.log(`prerender: ${pages.length} pages (+dist/*.html)`)
 		const offline = cfg['offline'] as { fallback?: unknown } | undefined
@@ -158,22 +219,16 @@ export async function runPrerender(
 		}
 		return { pages, isrHeaders }
 	} finally {
-		try {
+		if (child.exitCode === null && child.signalCode === null) {
 			child.kill('SIGTERM')
-		} catch {
-			/* ignore */
-		}
-		await new Promise((r) => setTimeout(r, 800))
-		try {
-			child.kill('SIGKILL')
-		} catch {
-			/* ignore */
-		}
-		await killPort(probePort, () => {})
-		try {
-			await freePortUnix(probePort)
-		} catch {
-			/* ignore */
+			const configured = Number(process.env.SWELTE_SHUTDOWN_TIMEOUT_MS)
+			const budget = Number.isFinite(configured) && configured > 0 ? configured : 10000
+			const timer = setTimeout(() => child.kill('SIGKILL'), budget + 500)
+			try {
+				await exited
+			} finally {
+				clearTimeout(timer)
+			}
 		}
 	}
 }

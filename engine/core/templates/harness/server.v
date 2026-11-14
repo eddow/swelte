@@ -14,6 +14,188 @@ import time
 import veb
 import veb.sse
 
+#include "@SWELTE_HARNESS_DIR@/swelte_shutdown.h"
+fn C.swelte_install_stop_signals() int
+fn C.swelte_received_stop() int
+
+@[heap]
+struct SwelteLifecycle {
+mut:
+	mu sync.Mutex
+	stopping bool
+	active int
+	watching bool
+	deadline i64
+	connections map[int]&net.TcpConn
+	instance string = time.now().unix_nano().str()
+	sequence u64
+	stop chan bool = chan bool{}
+	finished chan bool = chan bool{cap: 1}
+}
+
+fn (mut state SwelteLifecycle) begin() bool {
+	state.mu.lock()
+	defer { state.mu.unlock() }
+	if state.stopping { return false }
+	state.active++
+	return true
+}
+
+fn (mut state SwelteLifecycle) end() {
+	state.mu.lock()
+	state.active--
+	state.mu.unlock()
+}
+
+fn (mut state SwelteLifecycle) count() int {
+	state.mu.lock()
+	defer { state.mu.unlock() }
+	return state.active
+}
+
+fn (mut state SwelteLifecycle) is_stopping() bool {
+	state.mu.lock()
+	defer { state.mu.unlock() }
+	return state.stopping
+}
+
+fn (mut state SwelteLifecycle) request_id() string {
+	state.mu.lock()
+	defer { state.mu.unlock() }
+	state.sequence++
+	return state.instance + '-' + state.sequence.str()
+}
+
+pub struct SwelteReport {
+pub:
+	phase string
+	request_id string
+	method string
+	path string
+	status int
+	duration_ms i64
+	message string
+}
+
+fn swelte_report(event SwelteReport) {
+	_ = event
+	// [swelte] report-hook
+}
+
+fn swelte_request_report(ctx &Ctx, phase string, status int, message string) {
+	elapsed := time.now().unix_milli() - ctx.request_started
+	swelte_report(SwelteReport{phase, ctx.request_id, ctx.req.method.str().to_upper(), ctx.req.url.all_before('?'), status, if elapsed < 0 { i64(0) } else { elapsed }, message})
+}
+
+fn swelte_stream_report(req routes.SwelteRequest, message string) {
+	swelte_report(SwelteReport{phase: 'stream-error', request_id: req.headers['x-swelte-request-id'] or { '' }, method: req.method, path: req.path, status: 500, message: message})
+}
+
+fn (mut state SwelteLifecycle) request_stop() {
+	state.mu.lock()
+	defer { state.mu.unlock() }
+	if !state.stopping {
+		state.stopping = true
+		state.stop.close()
+		for handle, _ in state.connections { net.shutdown(handle) }
+	}
+}
+
+fn (mut state SwelteLifecycle) track(conn &net.TcpConn) bool {
+	state.mu.lock()
+	defer { state.mu.unlock() }
+	if state.stopping { return false }
+	state.connections[conn.sock.handle] = conn
+	return true
+}
+
+fn (mut state SwelteLifecycle) close_conn(mut conn net.TcpConn) {
+	state.mu.lock()
+	defer { state.mu.unlock() }
+	state.connections.delete(conn.sock.handle)
+	conn.close() or {}
+}
+
+fn swelte_wait_active(ms i64, state &SwelteLifecycle) bool {
+	select {
+		_ := <-state.stop { return false }
+		ms * time.millisecond { return true }
+	}
+	return false
+}
+
+pub fn (mut app App) init_server(server &veb.Server) {
+	app.lifecycle.watching = true
+	spawn swelte_shutdown_watch(server, app.lifecycle)
+}
+
+fn swelte_shutdown_watch(server &veb.Server, lifecycle &SwelteLifecycle) {
+	mut state := unsafe { &SwelteLifecycle(lifecycle) }
+	server.wait_till_running() or { state.finished <- false; return }
+	for C.swelte_received_stop() == 0 {
+		if !swelte_wait_active(25, state) { break }
+	}
+	state.request_stop()
+	budget := swelte_env_int('SWELTE_SHUTDOWN_TIMEOUT_MS', 10000)
+	deadline := time.now().unix_milli() + budget
+	state.deadline = deadline
+	eprintln('[swelte:shutdown] status=draining')
+	server.shutdown(timeout: budget * time.millisecond) or {
+		eprintln('[swelte:shutdown] status=timeout phase=http')
+		exit(1)
+	}
+	for state.count() > 0 {
+		if time.now().unix_milli() >= deadline {
+			eprintln('[swelte:shutdown] status=timeout phase=work')
+			exit(1)
+		}
+		time.sleep(10 * time.millisecond)
+	}
+	state.finished <- true
+}
+
+fn swelte_app_shutdown() ! {
+	// [swelte] shutdown-hook
+}
+
+fn swelte_run_shutdown(ch chan bool) {
+	swelte_app_shutdown() or { swelte_report(SwelteReport{phase: 'shutdown-error', status: 500, message: err.msg()}); eprintln('[swelte:shutdown] status=error phase=hook'); ch <- false; return }
+	ch <- true
+}
+
+struct SwelteSubscription {
+	room string
+	id int
+}
+
+@[heap]
+struct SwelteSubscriptions {
+mut:
+	mu sync.Mutex
+	closed bool
+	entries []SwelteSubscription
+}
+
+fn swelte_room_subscribe(room string, registry &SwelteSubscriptions) chan string {
+	mut subs := unsafe { &SwelteSubscriptions(registry) }
+	ch := chan string{cap: 1}
+	subs.mu.lock()
+	defer { subs.mu.unlock() }
+	if subs.closed { ch.close(); return ch }
+	// [swelte] room-subscribe
+	return ch
+}
+
+fn swelte_room_release(registry &SwelteSubscriptions) {
+	mut subs := unsafe { &SwelteSubscriptions(registry) }
+	subs.mu.lock()
+	defer { subs.mu.unlock() }
+	if subs.closed { return }
+	subs.closed = true
+	// [swelte] room-release
+	subs.entries.clear()
+}
+
 // §11 Hardening (global, in Hand — never in `+route.v` middleware):
 // body-size cap (413), per-IP fixed-window rate limit (429), handler
 // timeout via spawn + select (slow handlers report 500, server stays up;
@@ -93,10 +275,15 @@ mut:
 // `__global` (needs `-enable-globals`); single-instance in-memory only.
 pub struct Ctx {
 	veb.Context
+mut:
+	lifecycle &SwelteLifecycle = unsafe { nil }
+	request_id string
+	request_started i64
 }
 
 pub struct App {
 mut:
+	lifecycle &SwelteLifecycle = &SwelteLifecycle{}
 	buckets map[string]SwelteBucket
 	mu      sync.Mutex
 }
@@ -145,18 +332,22 @@ struct SwelteRouteOut {
 		res routes.SwelteResponse
 }
 
-fn swelte_route_spawned(c SwelteRouteCall, ch chan SwelteRouteOut) {
+fn swelte_route_spawned(c SwelteRouteCall, ch chan SwelteRouteOut, lifecycle &SwelteLifecycle) {
+	mut state := unsafe { &SwelteLifecycle(lifecycle) }
+	defer { state.end() }
 	res := routes.swelte_route(c.path, c.method, c.query,
 		c.headers, c.cookies, c.locals, c.body, c.content_type, c.qualifier)
 	ch <- SwelteRouteOut{ res: res }
 }
 
-fn swelte_call_route_timeout(path string, method string, query map[string]string, headers map[string]string, cookies map[string]string, locals map[string]string, body string, content_type string, qualifier string, budget_ms i64) SwelteRouteOut {
+fn swelte_call_route_timeout(path string, method string, query map[string]string, headers map[string]string, cookies map[string]string, locals map[string]string, body string, content_type string, qualifier string, budget_ms i64, lifecycle &SwelteLifecycle) SwelteRouteOut {
+	mut state := unsafe { &SwelteLifecycle(lifecycle) }
+	if !state.begin() { return SwelteRouteOut{res: routes.SwelteResponse{status: 503}} }
 	budget := if budget_ms > 0 { budget_ms } else { swelte_handler_timeout_ms() }
 	ch := chan SwelteRouteOut{cap: 1}
 	call := SwelteRouteCall{path, method, query, headers, cookies, locals, body, content_type,
 		qualifier}
-	spawn swelte_route_spawned(call, ch)
+	spawn swelte_route_spawned(call, ch, state)
 	select {
 		out := <-ch {
 			return out
@@ -304,6 +495,16 @@ fn serve_static(dist string, path string) (int, string, string) {
 }
 
 fn (mut app App) before_request(mut ctx Ctx) veb.Result {
+	ctx.lifecycle = app.lifecycle
+	if !app.lifecycle.begin() {
+		ctx.res.set_status(.service_unavailable)
+		return ctx.send_response_to_client('application/json', '{"error":"server stopping"}')
+	}
+	defer { app.lifecycle.end() }
+	ctx.request_started = time.now().unix_milli()
+	ctx.request_id = app.lifecycle.request_id()
+	ctx.res.header.set_custom('X-Swelte-Request-Id', ctx.request_id) or {}
+	defer { swelte_request_report(&ctx, 'request', ctx.res.status_code, '') }
 	mut path := if ctx.req.url.contains('?') { ctx.req.url.all_before('?') } else { ctx.req.url }
 	// @[reroute] (src/app.v) may reassign path below — mutable by design.
 	// Roadmap §1.3 `trailingSlash` (+ §1.6 CSRF + §1.6 `_method`): env wins,
@@ -380,6 +581,8 @@ fn (mut app App) before_request(mut ctx Ctx) veb.Result {
 			headers[k] = v
 		}
 	}
+	headers['x-swelte-request-id'] = ctx.request_id
+	headers['X-Swelte-Request-Id'] = ctx.request_id
 	mut cookies := map[string]string{}
 	if c := ctx.req.header.get(.cookie) {
 		for part in c.split(';') {
@@ -538,9 +741,14 @@ fn (mut app App) before_request(mut ctx Ctx) veb.Result {
 	}
 	// (swelte_call_route is sync — veb runs before_request on a worker;
 	// the `spawn select` watchdog keeps the server responsive).
-	out := swelte_call_route_timeout(path, dispatch_method, query, headers, cookies, map[string]string{}, ctx.req.data, content_type, qualifier, handler_ms)
+	out := swelte_call_route_timeout(path, dispatch_method, query, headers, cookies, map[string]string{}, ctx.req.data, content_type, qualifier, handler_ms, ctx.lifecycle)
 	status := out.res.status
 	mut body := out.res.body
+	if status >= 400 {
+		fields := json2.decode[map[string]json2.Any](body) or { map[string]json2.Any{} }
+		message := (fields['message'] or { fields['error'] or { json2.Any('handler failed') } }).str()
+		swelte_request_report(&ctx, 'handler-error', status, message)
+	}
 	set_cookies := out.res.cookies
 	// Same-origin mutating requests always pass (browser sends Origin on
 	// same-origin POST/fetch). Only cross-origin writes need cors_ok —
@@ -863,9 +1071,11 @@ struct SwelteSseJob {
 	prefix    string
 	qualifier string
 	req       routes.SwelteRequest
-	pch       chan string
+	pch       chan []string
 	done      chan bool
 	events    []string
+	lifecycle &SwelteLifecycle
+	subscriptions &SwelteSubscriptions
 }
 
 // §SSR: engine hook. Core ships the sidecar proxy (SWELTE_SSR_URL);
@@ -1034,7 +1244,8 @@ fn swelte_serve_page_form(mut ctx Ctx, path string, query map[string]string, hea
 	identity, pattern := routes.swelte_page_identity(prefix)
 	request := routes.SwelteRequest{query: query, headers: headers, cookies: cookies, params: params, method: 'GET', path: path}
 	ch := chan routes.SwelteLoadResult{cap: 1}
-	spawn swelte_load_spawned(prefix, request, ch)
+	if !ctx.lifecycle.begin() { ctx.res.set_status(.service_unavailable); return ctx.send_response_to_client('text/plain', 'server stopping') }
+	spawn swelte_load_spawned(prefix, request, ch, ctx.lifecycle)
 	limits := swelte_limits_for(path)
 	budget := if limits.timeout_ms > 0 { i64(limits.timeout_ms) } else { swelte_handler_timeout_ms() }
 	mut loaded := routes.SwelteLoadResult{}
@@ -1066,6 +1277,7 @@ fn swelte_serve_page_form(mut ctx Ctx, path string, query map[string]string, hea
 	if loaded.status >= 400 && (form_status == 0 || form_status >= 500) {
 		fields := json2.decode[map[string]json2.Any](loaded.body) or { map[string]json2.Any{} }
 		message := (fields['message'] or { fields['error'] or { json2.Any('load failed') } }).str()
+		swelte_request_report(&ctx, if form_status >= 500 { 'action-error' } else { 'load-error' }, loaded.status, message)
 		error_json = '{"status":' + loaded.status.str() + ',"message":' + json.encode(swelte_sanitize_error(message, loaded.status)) + '}'
 		data = '{}'
 	}
@@ -1104,6 +1316,7 @@ fn swelte_serve_page_form(mut ctx Ctx, path string, query map[string]string, hea
 			head := swelte_page_head_split(joined)
 			body, _ := swelte_split_head_body(joined, true)
 			if body.contains('data-swelte-render-error="1"') {
+				swelte_request_report(&ctx, 'ssr-error', 500, 'render failed')
 				eprintln('[swelte:ssr] route=' + path + ' reason=render-error')
 				ctx.res.set_status(.internal_server_error)
 				if (os.getenv_opt('SWELTE_SSR_STRICT') or { '' }) == '1' { return ctx.send_response_to_client('text/plain', 'swelte: expected SSR render failed') }
@@ -1116,6 +1329,7 @@ fn swelte_serve_page_form(mut ctx Ctx, path string, query map[string]string, hea
 			}
 			shell = swelte_fill_ssr(shell, head, body)
 		} else if (os.getenv_opt('SWELTE_SSR_STRICT') or { '' }) == '1' {
+			swelte_request_report(&ctx, 'ssr-error', 500, 'renderer unavailable or budget exceeded')
 			ctx.res.set_status(.internal_server_error)
 			return ctx.send_response_to_client('text/plain', 'swelte: expected SSR render failed')
 		}
@@ -1125,7 +1339,9 @@ fn swelte_serve_page_form(mut ctx Ctx, path string, query map[string]string, hea
 	return ctx.send_response_to_client('text/html; charset=utf-8', shell)
 }
 
-fn swelte_load_spawned(prefix string, request routes.SwelteRequest, ch chan routes.SwelteLoadResult) {
+fn swelte_load_spawned(prefix string, request routes.SwelteRequest, ch chan routes.SwelteLoadResult, lifecycle &SwelteLifecycle) {
+	mut state := unsafe { &SwelteLifecycle(lifecycle) }
+	defer { state.end() }
 	result := routes.swelte_load_for(prefix, request) or { routes.SwelteLoadResult{status: 500, body: '{"message":"load failed"}'} }
 	ch <- result
 }
@@ -1167,6 +1383,9 @@ fn swelte_page_props(
 }
 
 fn swelte_sse_produce(job SwelteSseJob) {
+	mut state := unsafe { &SwelteLifecycle(job.lifecycle) }
+	defer { state.end() }
+	defer { swelte_room_release(job.subscriptions) }
 	// Room mode (future.md #4) is spliced in by renderHarness ONLY when a
 	// room route exists (hooks.roomSse): the harness then imports the
 	// backend hub module. Without room routes this branch would reference
@@ -1178,18 +1397,20 @@ fn swelte_sse_produce(job SwelteSseJob) {
 		// (room branch spliced here when hooks.roomSse)
 	} else if routes.swelte_sse_is_emit(job.prefix) {
 		emit := fn [job] (e string) bool {
+			packet := [e]
 			select {
 				_ := <-job.done { return false }
-				job.pch <- e { return true }
+				job.pch <- packet { return true }
 			}
 			return false
 		}
-		routes.swelte_sse_emit_for(job.prefix, job.qualifier, job.req, emit) or {}
+		routes.swelte_sse_emit_for(job.prefix, job.qualifier, job.req, emit) or { swelte_stream_report(job.req, err.msg()) }
 	} else {
 		for e in job.events {
+			packet := [e]
 			select {
 				_ := <-job.done { job.pch.close(); return }
-				job.pch <- e {}
+				job.pch <- packet {}
 			}
 		}
 	}
@@ -1197,32 +1418,47 @@ fn swelte_sse_produce(job SwelteSseJob) {
 }
 
 fn swelte_serve_sse(mut ctx Ctx, prefix string, qualifier string, req routes.SwelteRequest, events []string) veb.Result {
+	if !ctx.lifecycle.begin() { ctx.res.set_status(.service_unavailable); return ctx.send_response_to_client('text/plain', 'server stopping') }
+	if !ctx.lifecycle.begin() { ctx.lifecycle.end(); ctx.res.set_status(.service_unavailable); return ctx.send_response_to_client('text/plain', 'server stopping') }
 	ctx.takeover_conn()
-	pch := chan string{cap: 64}
-	done := chan bool{}
-	job := SwelteSseJob{prefix, qualifier, req, pch, done, events}
-	spawn swelte_sse_produce(job)
-	spawn swelte_sse_write(mut ctx, pch, done)
-	return veb.no_result()
-}
-
-fn swelte_sse_write(mut ctx Ctx, pch chan string, done chan bool) {
-	defer { done.close() }
+	if !ctx.lifecycle.track(ctx.conn) { ctx.lifecycle.end(); ctx.lifecycle.end(); ctx.conn.close() or {}; return veb.no_result() }
+	ctx.conn.set_blocking(false) or { ctx.lifecycle.end(); ctx.lifecycle.end(); ctx.lifecycle.close_conn(mut ctx.conn); return veb.no_result() }
+	ctx.conn.set_write_timeout(swelte_env_int('SWELTE_STREAM_IDLE_MS', 30000) * time.millisecond)
 	ctx.res.header.delete(.content_length)
 	ctx.res.header.delete(.transfer_encoding)
 	ctx.res.header.set(.content_type, 'text/event-stream')
 	ctx.res.header.set(.cache_control, 'no-cache')
 	ctx.res.header.set(.connection, 'close')
-	ctx.conn.write_string('HTTP/1.1 200 OK\r\n' + ctx.res.header.render() + '\r\n') or { return }
-	mut sse_conn := &sse.SSEConnection{conn: ctx.conn}
+	ctx.conn.write_string('HTTP/1.1 200 OK\r\n' + ctx.res.header.render() + '\r\n') or { ctx.lifecycle.end(); ctx.lifecycle.end(); ctx.lifecycle.close_conn(mut ctx.conn); return veb.no_result() }
+	pch := chan []string{cap: 64}
+	done := chan bool{}
+	job := SwelteSseJob{prefix, qualifier, req, pch, done, events, ctx.lifecycle, &SwelteSubscriptions{}}
+	spawn swelte_sse_produce(job)
+	spawn swelte_sse_write(ctx.conn, pch, done, job.subscriptions, ctx.lifecycle)
+	return veb.no_result()
+}
+
+fn swelte_sse_write(connection &net.TcpConn, pch chan []string, done chan bool, subscriptions &SwelteSubscriptions, lifecycle &SwelteLifecycle) {
+	mut conn := unsafe { &net.TcpConn(connection) }
+	mut state := unsafe { &SwelteLifecycle(lifecycle) }
+	defer { done.close(); swelte_room_release(subscriptions); state.close_conn(mut conn); state.end() }
+	mut sse_conn := &sse.SSEConnection{conn: conn}
 	cap := swelte_sse_max_events()
 	mut n := 0
 	for {
-		e := <-pch or { break }
+		mut e := ''
+		select {
+			_ := <-state.stop { break }
+			event := <-pch { if event.len == 0 { break }; e = event[0] }
+			swelte_env_int('SWELTE_SSE_HEARTBEAT_MS', 15000) * time.millisecond {
+				conn.write_string(': swelte heartbeat\n\n') or { break }
+				continue
+			}
+		}
 		if e.starts_with('__wait_ms:') {
 			ms := e.all_after(':').int()
 			if ms > 0 && ms <= 10000 {
-				time.sleep(time.millisecond * ms)
+				if !swelte_wait_active(ms, state) { break }
 			}
 			continue
 		}
@@ -1233,7 +1469,7 @@ fn swelte_sse_write(mut ctx Ctx, pch chan string, done chan bool) {
 		sse_conn.send_message(data: e) or { break }
 	}
 	sse_conn.send_message(data: 'swelte:close') or {}
-	sse_conn.close()
+	sse_conn.send_message(event: 'close', data: 'Closing the connection', retry: -1) or {}
 }
 
 struct SwelteByteStreamJob {
@@ -1241,9 +1477,14 @@ struct SwelteByteStreamJob {
 	chunks chan []u8
 	done chan bool
 	path string
+	lifecycle &SwelteLifecycle
+	request_id string
+	method string
 }
 
 fn swelte_byte_stream_produce(job SwelteByteStreamJob) {
+	mut state := unsafe { &SwelteLifecycle(job.lifecycle) }
+	defer { state.end() }
 	write := fn [job] (bytes []u8) bool {
 		if bytes.len == 0 {
 			select { _ := <-job.done { return false } else { return true } }
@@ -1256,34 +1497,45 @@ fn swelte_byte_stream_produce(job SwelteByteStreamJob) {
 		}
 		return false
 	}
-	job.producer(routes.SwelteStream{write, job.done}) or { eprintln('[swelte:stream] route=' + job.path + ' reason=producer-error') }
+	job.producer(routes.SwelteStream{write, job.done}) or {
+		swelte_report(SwelteReport{phase: 'stream-error', request_id: job.request_id, method: job.method, path: job.path, status: 500, message: err.msg()})
+		eprintln('[swelte:stream] route=' + job.path + ' reason=producer-error')
+	}
 	job.chunks.close()
 }
 
 fn swelte_serve_stream(mut ctx Ctx, response routes.SwelteResponse, path string) veb.Result {
+	if !ctx.lifecycle.begin() { ctx.res.set_status(.service_unavailable); return ctx.send_response_to_client('text/plain', 'server stopping') }
+	if !ctx.lifecycle.begin() { ctx.lifecycle.end(); ctx.res.set_status(.service_unavailable); return ctx.send_response_to_client('text/plain', 'server stopping') }
 	ctx.res.set_status(http.status_from_int(response.status))
 	for k, v in response.headers { ctx.res.header.set_custom(k, v) or {} }
 	ctx.res.header.delete(.content_length)
 	ctx.res.header.delete(.transfer_encoding)
 	ctx.res.header.set(.connection, 'close')
 	ctx.takeover_conn()
-	ctx.conn.write_string('HTTP/1.1 ' + response.status.str() + ' ' + http.status_from_int(response.status).str() + '\r\n' + ctx.res.header.render() + '\r\n') or { ctx.conn.close() or {}; return veb.no_result() }
+	if !ctx.lifecycle.track(ctx.conn) { ctx.lifecycle.end(); ctx.lifecycle.end(); ctx.conn.close() or {}; return veb.no_result() }
+	ctx.conn.set_blocking(false) or { ctx.lifecycle.end(); ctx.lifecycle.end(); ctx.lifecycle.close_conn(mut ctx.conn); return veb.no_result() }
+	ctx.conn.set_write_timeout(swelte_env_int('SWELTE_STREAM_IDLE_MS', 30000) * time.millisecond)
+	ctx.conn.write_string('HTTP/1.1 ' + response.status.str() + ' ' + http.status_from_int(response.status).str() + '\r\n' + ctx.res.header.render() + '\r\n') or { ctx.lifecycle.end(); ctx.lifecycle.end(); ctx.lifecycle.close_conn(mut ctx.conn); return veb.no_result() }
 	chunks := chan []u8{cap: 8}
 	done := chan bool{}
-	spawn swelte_byte_stream_produce(SwelteByteStreamJob{response.stream, chunks, done, path})
-	spawn swelte_byte_stream_write(mut ctx, chunks, done)
+	spawn swelte_byte_stream_produce(SwelteByteStreamJob{response.stream, chunks, done, path, ctx.lifecycle, ctx.request_id, ctx.req.method.str().to_upper()})
+	spawn swelte_byte_stream_write(ctx.conn, chunks, done, ctx.lifecycle)
 	return veb.no_result()
 }
 
-fn swelte_byte_stream_write(mut ctx Ctx, chunks chan []u8, done chan bool) {
-	defer { done.close(); ctx.conn.close() or {} }
+fn swelte_byte_stream_write(connection &net.TcpConn, chunks chan []u8, done chan bool, lifecycle &SwelteLifecycle) {
+	mut conn := unsafe { &net.TcpConn(connection) }
+	mut state := unsafe { &SwelteLifecycle(lifecycle) }
+	defer { done.close(); state.close_conn(mut conn); state.end() }
 	idle := swelte_env_int('SWELTE_STREAM_IDLE_MS', 30000)
-	ctx.conn.set_write_timeout(idle * time.millisecond)
+	conn.set_write_timeout(idle * time.millisecond)
 	for {
 		select {
+			_ := <-state.stop { return }
 			chunk := <-chunks {
 				if chunk.len == 0 { return }
-				ctx.conn.write(chunk) or { return }
+				conn.write(chunk) or { return }
 			}
 			idle * time.millisecond { return }
 		}
@@ -1308,6 +1560,9 @@ struct SwelteWsJob {
 	pch       chan string
 	inch      chan string
 	done      chan bool
+	lifecycle &SwelteLifecycle
+	subscriptions &SwelteSubscriptions
+	produced chan bool
 }
 
 fn swelte_serve_ws(mut ctx Ctx, prefix string, req routes.SwelteRequest) veb.Result {
@@ -1323,6 +1578,7 @@ fn swelte_serve_ws(mut ctx Ctx, prefix string, req routes.SwelteRequest) veb.Res
 		return ctx.send_response_to_client('application/json', '{"error":"unsupported Sec-WebSocket-Version (want 13)"}')
 	}
 	accept := backend.ws_accept_key(key)
+	ctx.res.set_status(.switching_protocols)
 	ctx.res.header.delete(.content_length)
 	ctx.res.header.delete(.content_type)
 	ctx.res.header.delete(.transfer_encoding)
@@ -1330,30 +1586,32 @@ fn swelte_serve_ws(mut ctx Ctx, prefix string, req routes.SwelteRequest) veb.Res
 	ctx.res.header.set(.connection, 'Upgrade')
 	ctx.res.header.set_custom('Sec-WebSocket-Accept', accept) or {}
 	handshake := 'HTTP/1.1 101 Switching Protocols\r\n' + ctx.res.header.render() + '\r\n'
+	if !ctx.lifecycle.begin() { ctx.res.set_status(.service_unavailable); return ctx.send_response_to_client('text/plain', 'server stopping') }
+	if !ctx.lifecycle.begin() { ctx.lifecycle.end(); ctx.res.set_status(.service_unavailable); return ctx.send_response_to_client('text/plain', 'server stopping') }
 	ctx.takeover_conn()
 	mut conn := ctx.conn
 	if conn == unsafe { nil } {
+		ctx.lifecycle.end(); ctx.lifecycle.end()
 		return veb.no_result()
 	}
-	conn.write(handshake.bytes()) or { return veb.no_result() }
+	if !ctx.lifecycle.track(conn) { ctx.lifecycle.end(); ctx.lifecycle.end(); conn.close() or {}; return veb.no_result() }
+	conn.set_blocking(false) or { ctx.lifecycle.end(); ctx.lifecycle.end(); ctx.lifecycle.close_conn(mut conn); return veb.no_result() }
+	conn.set_write_timeout(swelte_env_int('SWELTE_STREAM_IDLE_MS', 30000) * time.millisecond)
+	conn.write(handshake.bytes()) or { ctx.lifecycle.end(); ctx.lifecycle.end(); ctx.lifecycle.close_conn(mut conn); return veb.no_result() }
 	mut pch := chan string{cap: 64}
 	mut inch := chan string{cap: 64}
 	mut done := chan bool{cap: 1}
-	mut job := SwelteWsJob{prefix: prefix, req: req, pch: pch, inch: inch, done: done}
+	mut job := SwelteWsJob{prefix: prefix, req: req, pch: pch, inch: inch, done: done, lifecycle: ctx.lifecycle, subscriptions: &SwelteSubscriptions{}, produced: chan bool{cap: 1}}
 	spawn swelte_ws_produce(job)
-	spawn swelte_ws_pump(mut conn, pch, inch, done)
+	spawn swelte_ws_pump(mut conn, pch, inch, done, ctx.lifecycle, job.subscriptions, job.produced)
 	return veb.no_result()
 }
 
 fn swelte_ws_produce(job SwelteWsJob) {
-	mut subs := map[string]int{}
-	sub := fn [mut subs] (room string) chan string {
-		ch := chan string{cap: 1}
-		backend.hub_lock()
-		id := backend.hub_add(room, ch)
-		backend.hub_unlock()
-		subs[room] = id
-		return ch
+	mut state := unsafe { &SwelteLifecycle(job.lifecycle) }
+	defer { job.produced <- true; swelte_room_release(job.subscriptions); state.end() }
+	sub := fn [job] (room string) chan string {
+		return swelte_room_subscribe(room, job.subscriptions)
 	}
 	emit := fn [job] (e string) bool {
 		// Blocking send preserves echo ordering (a drop here would lose
@@ -1372,12 +1630,7 @@ fn swelte_ws_produce(job SwelteWsJob) {
 		}
 		return true
 	}
-	routes.swelte_ws_open_for(job.prefix, job.req, sub, job.inch, emit) or {}
-	for room, id in subs {
-		backend.hub_lock()
-		backend.hub_remove(room, id)
-		backend.hub_unlock()
-	}
+	routes.swelte_ws_open_for(job.prefix, job.req, sub, job.inch, emit) or { swelte_stream_report(job.req, err.msg()) }
 }
 
 // Single pump task owns the conn for BOTH directions (TcpConn writes
@@ -1392,10 +1645,21 @@ fn swelte_ws_produce(job SwelteWsJob) {
 // in probes) — so `done` is NEVER closed while receivers still `select`
 // on it; the pump closes it exactly once at the end, and receivers use
 // the `or` form (`<-done or {}`) which DOES fire on close.
-fn swelte_ws_pump(mut conn net.TcpConn, pch chan string, inch chan string, done chan bool) {
+fn swelte_ws_pump(mut conn net.TcpConn, pch chan string, inch chan string, done chan bool, lifecycle &SwelteLifecycle, subscriptions &SwelteSubscriptions, produced chan bool) {
+	mut state := unsafe { &SwelteLifecycle(lifecycle) }
+	defer { done.close(); inch.close(); pch.close(); swelte_room_release(subscriptions); state.close_conn(mut conn); state.end() }
 	conn.set_read_timeout(100 * time.millisecond)
 	for {
+		if state.is_stopping() { return }
 		select {
+			_ := <-produced {
+				for {
+					select {
+						e := <-pch { backend.ws_write_text(mut conn, e) or { return } }
+						else { backend.ws_write_close(mut conn, 1000, '') or {}; return }
+					}
+				}
+			}
 			e := <-pch {
 				backend.ws_write_text(mut conn, e) or { break }
 				continue
@@ -1407,17 +1671,18 @@ fn swelte_ws_pump(mut conn net.TcpConn, pch chan string, inch chan string, done 
 			break
 		}
 		if msg != '' {
-			inch <- msg or { break }
+			select {
+				_ := <-state.stop { break }
+				inch <- msg {}
+				swelte_env_int('SWELTE_STREAM_IDLE_MS', 30000) * time.millisecond { break }
+			}
 		}
 	}
-	done.close()
-	inch.close()
 	// Unblock a route stuck in `emit`'s pch send: a send's `or` fires on
 	// close, so closing pch here lets produce return + reap hub subs.
 	// Sole closer is the pump (produce never closes pch). The emit path
 	// never observes `done` before sending, so there is no send-vs-close
 	// race on pch from the harness side.
-	pch.close()
 }
 
 // [swelte] ws-section-end
@@ -1431,5 +1696,23 @@ pub fn (mut app App) swelte_catchall(mut ctx Ctx, _path string) veb.Result {
 fn main() {
 	port := (os.getenv_opt('PORT') or { '8131' }).int()
 	mut app := &App{}
+	// [swelte] background-start: app startup must finish before plugin jobs.
+	if (os.getenv_opt('SWELTE_SHUTDOWN_SIGNALS') or { '1' }) != '0' {
+		if C.swelte_install_stop_signals() == 0 { panic('cannot install shutdown signals') }
+	}
 	veb.run_at[App, Ctx](mut app, port: port, family: .ip) or { panic(err.msg()) }
+	app.lifecycle.request_stop()
+	if app.lifecycle.watching {
+		drained := <-app.lifecycle.finished
+		if !drained { exit(1) }
+	}
+	cleanup := chan bool{cap: 1}
+	spawn swelte_run_shutdown(cleanup)
+	remaining := app.lifecycle.deadline - time.now().unix_milli()
+	if remaining <= 0 { eprintln('[swelte:shutdown] status=timeout phase=hook'); exit(1) }
+	select {
+		ok := <-cleanup { if !ok { exit(1) } }
+		remaining * time.millisecond { eprintln('[swelte:shutdown] status=timeout phase=hook'); exit(1) }
+	}
+	eprintln('[swelte:shutdown] status=complete')
 }
