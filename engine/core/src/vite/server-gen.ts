@@ -1423,12 +1423,27 @@ pub fn ${prefix}swelte_load(input SwelteRequest) !SwelteLoadResult {
 }
 `
 	const fnPrefix = (l: LoadFn): string => vPrefix(l.mod)
+	const levelMap = (count: number) =>
+		`{${loads
+			.slice(0, count)
+			.map(
+				(l, i) =>
+					`${vJsonStr(l.mod)}: ${l.vret === 'SwelteLoadResult' ? `frag_${i}.body` : `json.encode(frag_${i})`}`
+			)
+			.join(', ')}}`
+	const levelOrder = (count: number) =>
+		`[${loads
+			.slice(0, count)
+			.map((l) => vJsonStr(l.mod))
+			.join(', ')}]`
 	const chained = loads
-		.map((l, i) =>
-			i === 0
-				? `\tmut frag_${i} := ${fnPrefix(l)}${l.name}(req) or { return swelte_load_err_typed(err) }`
-				: `\tmut frag_${i} := ${fnPrefix(l)}${l.name}(req, frag_${i - 1}) or { return swelte_load_err_typed(err) }`
-		)
+		.map((load, index) => {
+			const failure =
+				index === 0
+					? 'return swelte_load_err_typed(err)'
+					: `mut failed := swelte_load_err_typed(err); failed.levels = ${levelMap(index)}; failed.level_order = ${levelOrder(index)}; return failed`
+			return `\tmut frag_${index} := ${fnPrefix(load)}${load.name}(req${index === 0 ? '' : `, frag_${index - 1}`}) or { ${failure} }`
+		})
 		.join('\n')
 	const leaf = loads.length - 1
 	// Envelope-aware leaf (P0 item 2): `SwelteLoadResult` carries pre-encoded
@@ -1443,9 +1458,9 @@ pub fn ${prefix}swelte_load(input SwelteRequest) !SwelteLoadResult {
 req := ${prefix}swelte_guard(input) or { return swelte_load_err_typed(err) }
 ${chained}
 ${tail}
-result.levels = {${loads.map((l, i) => `${vJsonStr(l.mod)}: ${l.vret === 'SwelteLoadResult' ? `frag_${i}.body` : `json.encode(frag_${i})`}`).join(', ')}}
-result.level_order = [${loads.map((l) => vJsonStr(l.mod)).join(', ')}]
-return ${prefix}swelte_finish(req, result) or { return swelte_load_err_typed(err) }
+result.levels = ${levelMap(loads.length)}
+result.level_order = ${levelOrder(loads.length)}
+return ${prefix}swelte_finish(req, result) or { mut failed := swelte_load_err_typed(err); failed.levels = result.levels.clone(); failed.level_order = result.level_order.clone(); return failed }
 }
 `
 }

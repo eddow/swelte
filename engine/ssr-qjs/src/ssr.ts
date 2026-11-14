@@ -13,6 +13,7 @@
 //   (QJS-compat: pure-sync renderer; fetch inside handlers is fine)
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { dirname, isAbsolute, join, posix, resolve, sep } from 'node:path'
+import { type ErrorBoundary, errorBoundaryProps, selectErrorBoundaries } from '@swelte/core/vite'
 import { parse as parseSvelte } from 'svelte/compiler'
 import ts from 'typescript'
 
@@ -50,6 +51,7 @@ export interface SsrManifest {
 		ssr?: boolean
 	}[]
 	error: string | null
+	errors?: ErrorBoundary[]
 	wrappers: string[]
 	/** Wrapper chain per page (`./`-relative svelte path → root→leaf wrappers). */
 	wrappersByRoute: Record<string, string[]>
@@ -212,6 +214,38 @@ export function stripForScan(
  * a handler is allowed (it never runs during SSR) — only a top-level call
  * would fire during render, so only that is rejected here. */
 export function assertQjsCompatible(file: string, src: string): void {
+	// Markup is not JavaScript: scan the parser's executable nodes rather
+	// than matching words in prose, attributes, CSS, or HTML comments.
+	if (file.endsWith('.svelte')) {
+		const ast = parseSvelte(src, { modern: true })
+		const deferred = deferredScopes(file, src, ast)
+		const { lineOf } = stripForScan(src)
+		const visit = (node: unknown): void => {
+			if (!node || typeof node !== 'object') return
+			if (Array.isArray(node)) {
+				for (const child of node) visit(child)
+				return
+			}
+			const n = node as Record<string, unknown>
+			const callee = n.callee as Record<string, unknown> | undefined
+			const property = callee?.property as Record<string, unknown> | undefined
+			const fetch =
+				n.type === 'CallExpression' &&
+				((callee?.type === 'Identifier' && callee.name === 'fetch') ||
+					(callee?.type === 'MemberExpression' && !callee.computed && property?.name === 'fetch'))
+			const awaitExpression = n.type === 'AwaitExpression' || n.type === 'AwaitBlock'
+			if ((fetch || awaitExpression) && typeof n.start === 'number' && !deferred(n.start)) {
+				throw new Error(
+					`[swelte:ssr-qjs] ${file}:${lineOf(n.start)}: top-level ${fetch ? 'fetch()' : 'await'} is forbidden in SSR components (QuickJS-compat: pure-sync renderer; move data loading to V)`
+				)
+			}
+			for (const [key, value] of Object.entries(n)) {
+				if (key !== 'parent' && key !== 'loc') visit(value)
+			}
+		}
+		visit(ast)
+		return
+	}
 	const deferred = deferredScopes(file, src)
 	const { code, lineOf } = stripForScan(src)
 	const at = (idx: number) => `${file}:${lineOf(idx)}`
@@ -254,11 +288,9 @@ export function assertQjsCompatible(file: string, src: string): void {
  * QJS still has no fetch/Node globals if user code invokes a handler during SSR.
  */
 
-function deferredScopes(file: string, src: string): (index: number) => boolean {
-	const outsideScripts = src.replace(/<script\b[^>]*>[\s\S]*?<\/script>/g, '')
-	const hasMarkup = /<\/?[A-Za-z][\w:.-]*(?:\s|\/?>)/.test(outsideScripts)
-	if (file.endsWith('.svelte') && hasMarkup) {
-		const ast = parseSvelte(src, { modern: true }) as unknown as Record<string, unknown>
+function deferredScopes(file: string, src: string, parsed?: unknown): (index: number) => boolean {
+	if (file.endsWith('.svelte')) {
+		const ast = parsed ?? parseSvelte(src, { modern: true })
 		const ranges: [number, number][] = []
 		const visit = (node: unknown, parent?: Record<string, unknown>): void => {
 			if (!node || typeof node !== 'object') return
@@ -1036,7 +1068,12 @@ export async function composeRenderJs(
 	// ssr=false routes skip the sync compile (SPA shell only — see above),
 	// and so does their relative-import subtree (clientOnlyRels: e.g.
 	// /router/live's ./Streamed.svelte — client <await>, never QJS).
-	if (manifest.error) await compileFile(manifest.error)
+	const boundaries =
+		manifest.errors ?? (manifest.error ? [{ svelte: manifest.error, scope: '', wrappers: [] }] : [])
+	for (const boundary of boundaries) {
+		for (const wrapper of boundary.wrappers) await compileFile(wrapper)
+		await compileFile(boundary.svelte)
+	}
 	for (const w of manifest.wrappers) await compileFile(w)
 	for (const r of manifest.routes) {
 		if (clientOnlyRels.has(r.svelte)) continue
@@ -1137,7 +1174,9 @@ ${(() => {
 		.join('\n')
 })()}
 };
-const ERROR = ${manifest.error ? JSON.stringify(withDot(manifest.error.split('/').join('/'))) : 'null'};
+const ERROR_BOUNDARIES = ${JSON.stringify(boundaries)};
+${selectErrorBoundaries.toString()}
+${errorBoundaryProps.toString()}
 function applyUniversalLoad(route, props, key) {
   const fn = UNIVERSAL[key] ?? LOADEDMODS[route];
   if (typeof fn !== 'function') return props;
@@ -1200,6 +1239,8 @@ export function renderRoute(route, props_json) {
   try { props = JSON.parse(props_json || '{}'); } catch (e) { props = {}; }
   const envelope = props && props.version === 1 ? props : null;
   globalThis.__swelteSsrPage = envelope ?? { url: 'http://localhost' + route, data: props, route: { id: route, pattern: route }, params: props.params ?? {} };
+  const requestedRoute = envelope?.route?.pattern ?? route;
+  const errorPath = envelope?.url ?? props.path ?? route;
   if (envelope) {
     route = envelope.error ? '/+error' : (envelope.route?.pattern ?? route);
     props = envelope.error ? envelope.error : (envelope.compat ? { params: envelope.params, data: envelope.data, form: envelope.form } : { params: envelope.params, ...envelope.data, form: envelope.form });
@@ -1220,13 +1261,24 @@ export function renderRoute(route, props_json) {
       props = { status: 500, message: 'render failed' };
     }
   }
-  if (ERROR && PAGES[ERROR]) {
+  const candidates = selectErrorBoundaries(ERROR_BOUNDARIES, ROUTES[requestedRoute] ?? null, String(errorPath).replace(/^https?:\\/\\/[^/]+/, ''));
+  for (const boundary of candidates) {
     try {
-      const st = (props && typeof props.status === 'number') ? props.status : 500;
-      const msg = (props && typeof props.message === 'string') ? props.message : 'render failed';
-      return run(PAGES[ERROR], { status: st, message: msg });
-    }
-    catch (e) { /* fall through */ }
+      const error = { status: typeof props.status === 'number' ? props.status : 404, message: typeof props.message === 'string' ? props.message : 'not found' };
+      const keys = [...boundary.wrappers, boundary.svelte];
+      const tree = (anchor) => {
+        const level = (index, target) => {
+          const key = keys[index];
+          const leaf = index === keys.length - 1;
+          const values = errorBoundaryProps(envelope, key.slice(0, -7), error, leaf);
+          if (!leaf) values.children = (inner) => level(index + 1, inner);
+          PAGES['./' + key](target, values);
+        };
+        level(0, anchor);
+      };
+      const out = render(tree);
+      return { head: out.head, body: '<div data-swelte-ssr="1" data-swelte-error-boundary="' + encodeURIComponent(boundary.svelte) + '"' + (globalThis.__swelteSsrPage?.renderError ? ' data-swelte-render-error="1"' : '') + '>' + out.body + '</div>' };
+    } catch (e) { /* try the next ancestor boundary */ }
   }
   return { head: '', body: globalThis.__swelteSsrPage?.renderError ? '<div data-swelte-render-error="1"></div>' : '<!--swelte:ssr:' + route + '-->' };
 }

@@ -414,12 +414,6 @@ export function collectSvelteManifest(
 		const kind = svelteModKind(mod)
 		if (kind === null) continue
 		if (kind === 'error') {
-			const dir = mod.includes('/') ? mod.slice(0, mod.lastIndexOf('/')) : ''
-			if (dir !== '') {
-				throw new Error(
-					`[swelte] ${routesDir}/${rel} is not allowed — only src/routes/+error.svelte exists (single global error boundary, no per-directory inheritance).`
-				)
-			}
 			hasError = true
 			entries.push({
 				route: '/+error',

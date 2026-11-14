@@ -17,6 +17,31 @@ import {
 } from './ssr.js'
 
 describe('item 17 — QJS-compat guards (file+line)', () => {
+	it('ignores prose, literal markup, comments and styles while checking expressions', async () => {
+		const source = `<script>const label = 'await fetch('; const pattern = /fetch\\(/;</script>
+<p>We await a result; fetch( is an example.</p>
+<div title="await fetch(" data-example='fetch('><!-- await fetch( --></div>
+<style>p::after { content: 'await fetch('; }</style>`
+		assert.doesNotThrow(() => assertQjsCompatible('docs.svelte', source))
+		assert.doesNotThrow(() =>
+			assertQjsCompatible('text.svelte', 'await a result; fetch( is an example.')
+		)
+		for (const expression of [
+			'fetch("/x")',
+			'globalThis.fetch("/x")',
+			'`result: ${fetch("/x")}`',
+		]) {
+			assert.throws(
+				() => assertQjsCompatible('docs.svelte', `<p>await a result</p>\n<p>{${expression}}</p>`),
+				/docs\.svelte:2: top-level fetch/
+			)
+		}
+		const dir = mkdtempSync(join(tmpdir(), 'swelte-ssr-prose-'))
+		const abs = join(dir, 'docs.svelte')
+		writeFileSync(abs, source)
+		assert.ok((await compileSsrComponent(abs, 'docs.svelte')).includes('We await a result'))
+	})
+
 	it('top-level fetch( rejected with file:line; handler fetch allowed', () => {
 		assert.throws(
 			() => assertQjsCompatible('a.svelte', '<script>fetch("/x")</script>'),
@@ -60,7 +85,9 @@ describe('item 17 — QJS-compat guards (file+line)', () => {
 			'const client = { async load() { const state = {}; state.ready = true; return fetch("/models") } }',
 			'<script lang="ts">class View { async load() { let ready: boolean = true; await fetch("/x") } }</script>',
 		])
-			assert.doesNotThrow(() => assertQjsCompatible('view.svelte', source))
+			assert.doesNotThrow(() =>
+				assertQjsCompatible(source.startsWith('<') ? 'view.svelte' : 'view.svelte.js', source)
+			)
 		for (const source of [
 			'class View { static { fetch("/x") } }',
 			'class View { static result = fetch("/x") }',

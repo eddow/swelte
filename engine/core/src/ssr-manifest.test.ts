@@ -74,11 +74,19 @@ describe('collectSvelteManifest (tmp routes)', () => {
 		assert.equal(by('nojs.svelte')?.ssr, false)
 	})
 
-	it('+error global-only: nested throws', () => {
-		const routesAbs = tmpRoutes({ 'admin/+error.svelte': '<p>e</p>' })
-		assert.throws(
-			() => collectSvelteManifest(routesAbs, 'src/routes', new Set()),
-			/only src\/routes\/\+error\.svelte exists/
+	it('collects nested boundaries without turning them into page routes', () => {
+		const routesAbs = tmpRoutes({
+			'+error.svelte': '<p>root</p>',
+			'admin/+error.svelte': '<p>admin</p>',
+		})
+		const { entries, hasError } = collectSvelteManifest(routesAbs, 'src/routes', new Set())
+		assert.equal(hasError, true)
+		assert.deepEqual(
+			entries.map((entry) => [entry.svelte, entry.kind]),
+			[
+				['+error.svelte', 'error'],
+				['admin/+error.svelte', 'error'],
+			]
 		)
 	})
 

@@ -97,6 +97,6 @@ The native `@swelte/core` enhance callback returns `(result, update) => ...`
 and uses `invalidate: false`; the `$app/forms` adapter accepts
 `({ result, update }) => ...` and `invalidateAll: false`. The adapter is a
 supported subset, not complete SvelteKit parity. Action exceptions publish
-their status/error and render the global error component; validation failures
+their status/error and render the nearest route error component; validation failures
 remain inline. Upload progress is not implemented.
 

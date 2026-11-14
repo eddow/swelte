@@ -13,6 +13,11 @@
 
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
+import {
+	collectErrorBoundaries,
+	errorBoundaryProps,
+	selectErrorBoundaries,
+} from './error-boundaries.js'
 import { parseVFile } from './parse.js'
 import { chunkKeyFor, collectSvelteManifest, modulePath } from './routes.js'
 import type { MatcherDef, SvelteRouteEntry } from './types.js'
@@ -222,12 +227,18 @@ export function emitClientRouter(input: ClientRouterInput): ClientRouterOutput {
 			}
 		}
 	}
-	try {
-		if (existsSync(join(routesAbs, '+error.svelte')))
-			o.push(`import SwelteErrorPage from '../${routesDir}/+error.svelte'`)
-	} catch {
-		/* no error page */
-	}
+	const boundaries = collectErrorBoundaries(svelteEntriesForChunk)
+	const boundaryFiles = [
+		...new Set(boundaries.flatMap((boundary) => [...boundary.wrappers, boundary.svelte])),
+	]
+	for (const [index, file] of boundaryFiles.entries())
+		o.push(`import SwelteBoundary${index} from '../${routesDir}/${file}'`)
+	o.push(`const ERROR_BOUNDARIES = ${JSON.stringify(boundaries)}`)
+	o.push(
+		`const ERROR_COMPONENTS = { ${boundaryFiles.map((file, index) => `${JSON.stringify(file)}: SwelteBoundary${index}`).join(', ')} }`
+	)
+	o.push(selectErrorBoundaries.toString(), errorBoundaryProps.toString())
+
 	o.push(`
 import { flushSync, mount, hydrate, unmount } from 'svelte'
 import { createProps } from './app/props.svelte.js'
@@ -374,17 +385,48 @@ function __swapIn(target, build) {
 	})
 	__mountedRoots = inst ? (Array.isArray(inst) ? inst.flat() : [inst]) : []
 }
+function __renderError(target, pathname, error, envelope, hydrating = false) {
+  const hit = __matchRoute(pathname)
+  let candidates = selectErrorBoundaries(ERROR_BOUNDARIES, hit?.route.mod ?? null, pathname)
+  const marker = target.getAttribute?.('data-swelte-error-boundary')
+  if (hydrating && marker) {
+    const selected = candidates.findIndex((boundary) => encodeURIComponent(boundary.svelte) === marker)
+    if (selected >= 0) candidates = candidates.slice(selected)
+  }
+  for (const boundary of candidates) {
+    const keys = [...boundary.wrappers, boundary.svelte]
+    const tree = (anchor) => {
+      const level = (index, target) => {
+        const key = keys[index]
+        const leaf = index === keys.length - 1
+        const props = errorBoundaryProps(envelope, key.slice(0, -7), error, leaf)
+        if (!leaf) props.children = (inner) => level(index + 1, inner)
+        ERROR_COMPONENTS[key](target, props)
+      }
+      level(0, anchor)
+    }
+    try {
+      const inst = hydrating ? hydrate(tree, { target, recover: false }) : flushSync(() => mount(tree, { target }))
+      __mountedRoots = [inst]
+      return true
+    } catch (failure) {
+      if (hydrating) throw failure
+      target.textContent = ''
+    }
+  }
+  return false
+}
 export async function mountSwelteRoute(target, pathname, errorProps = undefined) {
 	if (errorProps?.error) {
 		__teardownMounted()
 		target.textContent = ''
-		if (typeof SwelteErrorPage !== 'undefined') __mountedRoots = [mount(SwelteErrorPage, { target, props: errorProps.error })]
-		else target.textContent = errorProps.error.message
+		if (!__renderError(target, pathname, errorProps.error, errorProps)) target.textContent = errorProps.error.message
 		return { params: errorProps.params ?? {}, path: null }
 	}
 	const noparse = String(pathname ?? '').split('#')[0]
 	const pathonly = noparse.split('?')[0] || '/'
 	const path = pathonly !== '/' && pathonly.endsWith('/') ? pathonly.slice(0, -1) : pathonly
+	try {
 	for (const r of ROUTES) {
 		const params = matchSegs(r.path, path)
 		if (!params) continue
@@ -451,12 +493,19 @@ export async function mountSwelteRoute(target, pathname, errorProps = undefined)
 	}
 	return { params, path: r.path }
 	}
-	if (typeof SwelteErrorPage !== 'undefined') {
-		let inst = null
-		__swapIn(target, (host) => { inst = mount(SwelteErrorPage, { target: host, props: errorProps ?? { status: 404, message: 'not found' } }); return inst })
-		return { params: {}, path: null }
-	}
+	__teardownMounted()
+	target.textContent = ''
+	if (__renderError(target, pathname, errorProps ?? { status: 404, message: 'not found' }, errorProps)) return { params: {}, path: null }
 	throw new Error('swelte: no route for ' + pathname)
+	} catch (failure) {
+		const error = { status: 500, message: 'render failed' }
+		__teardownMounted()
+		target.textContent = ''
+		const hit = __matchRoute(pathname)
+		if (hit) __publish(hit.route, { ...errorProps, status: 500, error }, pathname, hit.params)
+		if (__renderError(target, pathname, error, errorProps)) return { params: hit?.params ?? {}, path: null }
+		throw failure
+	}
 }
 `)
 	o.push(`
@@ -473,8 +522,7 @@ export async function hydrateSwelteRoute(target, pathname, errorProps = undefine
 		if (errorProps?.error) {
 			const hit = __matchRoute(pathname)
 			if (hit) __publish(hit.route, errorProps, pathname, errorProps.params ?? hit.params)
-			if (typeof SwelteErrorPage !== 'undefined') __mountedRoots = [hydrate(SwelteErrorPage, { target: hydrationTarget, props: errorProps.error, recover: false })]
-			else target.textContent = errorProps.error.message
+			if (!__renderError(hydrationTarget, pathname, errorProps.error, errorProps, true)) target.textContent = errorProps.error.message
 			return { params: errorProps.params ?? {}, path: null, hydrated: true }
 		}
 		const noparse = String(pathname ?? '').split('#')[0]
@@ -515,8 +563,7 @@ export async function hydrateSwelteRoute(target, pathname, errorProps = undefine
 			__mountedRoots = [hydrate(__rc1.page, { target: hydrationTarget, props: __props(r, errorProps, params, r.mod, true), recover: false })]
 			return { params, path: r.path, hydrated: true }
 		}
-		if (typeof SwelteErrorPage !== 'undefined') {
-			hydrate(SwelteErrorPage, { target: hydrationTarget, props: errorProps ?? { status: 404, message: 'not found' }, recover: false })
+		if (__renderError(hydrationTarget, pathname, errorProps ?? { status: 404, message: 'not found' }, errorProps, true)) {
 			return { params: {}, path: null, hydrated: true }
 		}
 	} catch (error) {
@@ -654,10 +701,9 @@ async function __navigateToInner(pathname, opts) {
 	const hit = __matchRoute(pathname)
 	const from = __routerMounted ? __routerMounted.url : null
 	if (!hit) {
-		if (typeof SwelteErrorPage !== 'undefined') {
-			__teardownMounted()
-			target.textContent = ''
-			__mountedRoots = [mount(SwelteErrorPage, { target, props: { status: 404, message: 'not found' } })]
+		__teardownMounted()
+		target.textContent = ''
+		if (__renderError(target, pathname, { status: 404, message: 'not found' }, null)) {
 			__routerMounted = { url: pathname, params: {}, route: null, data: {}, error: { status: 404, message: 'not found' } }
 			__setPage(__routerMounted); __setNavigating(null)
 			await __runGuards('after', { from, to: __routerMounted })
@@ -676,8 +722,8 @@ async function __navigateToInner(pathname, opts) {
 		const error = envelope?.error ?? { status: loaded?.status || 500, message: 'page load failed' }
 		__teardownMounted()
 		target.innerHTML = ''
-		if (typeof SwelteErrorPage !== 'undefined') __mountedRoots = [mount(SwelteErrorPage, { target, props: error })]
 		__publish(hit.route, { ...envelope, error, status: error.status }, pathname, hit.params)
+		__renderError(target, pathname, error, envelope)
 		__setNavigating(null)
 		return
 	}
@@ -686,7 +732,10 @@ async function __navigateToInner(pathname, opts) {
 	catch (error) {
 		if (navigation !== __navigationId) return
 		console.error('[swelte] universal load failed', error)
-		await setError({ status: 500, message: 'page load failed' })
+		const failed = { ...envelope, status: 500, error: { status: 500, message: 'page load failed' } }
+		__publish(hit.route, failed, pathname, hit.params)
+		await mountSwelteRoute(target, pathname, failed)
+		__setNavigating(null)
 		return
 	}
 	if (navigation !== __navigationId) return

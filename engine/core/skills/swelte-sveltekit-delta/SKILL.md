@@ -12,10 +12,10 @@ Route groups `(group)` stripped from URL · optional `[[slug]]` · `trailingSlas
 Core remains engine-agnostic, with `Hand`/dispatcher ownership, server-only
 `@[load]`, `#routes/` fetch vs `#lib/` WASM and a native production server.
 
-Current error routing supports only root `src/routes/+error.svelte`; nested
-error files are rejected. This is an implementation scope restriction, not a
-V/QuickJS constraint. Per-directory errors would require ancestor-boundary
-selection and matching SSR/client behavior; do not treat them as implemented.
+Directory `+error.svelte` files inherit through physical ancestry, including
+route groups, with matching SSR/client selection and parent fallback. Boundaries
+retain wrappers strictly above their directory and replace the local wrapper
+and page. See `docs/ssr.md` for hydration and unknown-URL behavior.
 
 `raw_body []u8` is available for webhook HMAC checks alongside parsed form/files.
 Existing primitives do not establish full application migration parity: page

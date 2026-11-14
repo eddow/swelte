@@ -8,6 +8,7 @@ import { isBackendMod, SWELTE_GEN_CORE_DIRS } from '../gen/paths.js'
 import { resolveV } from '../toolchain.js'
 import { stageBackendModules } from './backend.js'
 import { emitClientRouter } from './client-router.js'
+import { collectErrorBoundaries } from './error-boundaries.js'
 import { list, writeIfChanged } from './fs.js'
 import { loadServerHooks } from './hooks.js'
 import { loadMatchers } from './matchers.js'
@@ -1726,9 +1727,8 @@ export declare const dev: boolean
 							prerender: e.prerender ?? 'inherit',
 						}))
 						.sort((a, b) => a.route.localeCompare(b.route)),
-					error: svelteEntries.some((e) => e.kind === 'error')
-						? (svelteEntries.find((e) => e.kind === 'error')?.svelte ?? null)
-						: null,
+					error: svelteEntries.find((e) => e.svelte === '+error.svelte')?.svelte ?? null,
+					errors: collectErrorBoundaries(svelteEntries),
 					wrappers: svelteEntries
 						.filter((e) => e.kind === 'wrapper')
 						.map((e) => e.svelte)

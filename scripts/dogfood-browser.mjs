@@ -68,7 +68,7 @@ export async function checkBrowser(url, scratch, staticUrl) {
       globalThis.__dogfoodFallbacks = 0;
       addEventListener('swelte:hydration-fallback', () => __dogfoodFallbacks++);
       const observer = new MutationObserver(() => {
-        const node = document.getElementById('context') || document.getElementById('item');
+        const node = document.getElementById('context') || document.getElementById('item') || document.getElementById('item-error');
         if (node) { globalThis.__dogfoodSsrNode = node; observer.disconnect(); }
       });
       observer.observe(document, { childList: true, subtree: true });
@@ -174,6 +174,17 @@ export async function checkBrowser(url, scratch, staticUrl) {
       assert.equal(await evaluate('document.querySelector("link[rel=canonical]").href'), 'https://dogfood.example/fr/article/caf%C3%A9')
       assert.deepEqual(exceptions, [])
     }
+    await command('Page.navigate', { url: `${url}items/denied?lang=fr` })
+    await wait('!!globalThis.__swelteRoutes && document.getElementById("item-error")?.textContent === "Item 403: item denied"', 'direct nested error hydration')
+    assert.equal(await evaluate('document.getElementById("item-error") === globalThis.__dogfoodSsrNode'), true)
+    assert.equal(await evaluate('globalThis.__dogfoodFallbacks'), 0)
+    assert.equal(await evaluate('document.getElementById("layout-locale").textContent'), 'fr:')
+    await evaluate('globalThis.__swelteRoutes.goto("/items/alpha?lang=ro")')
+    await wait('!!document.getElementById("item")', 'recover from nested boundary')
+    await evaluate('globalThis.__swelteRoutes.goto("/items/denied?lang=ro")')
+    await wait('document.getElementById("item-error")?.textContent === "Item 403: item denied"', 'client nested load error')
+    assert.equal(await evaluate('document.getElementById("layout-locale").textContent'), 'ro:')
+    assert.deepEqual(exceptions, [])
     await command('Page.addScriptToEvaluateOnNewDocument', { source: `
       const corrupt = new MutationObserver(() => {
         const root = document.querySelector('#app > [data-swelte-ssr]');

@@ -152,24 +152,6 @@ export async function collectDiagnostics(
 		} catch {
 			/* ignore */
 		}
-		// Nested +error guard: only the global is recognized.
-		for (const f of listFilesWithExt(routesAbs, '.svelte')) {
-			const rel = relPosix(routesAbs, f)
-			const mod = rel.replace(/\.svelte$/, '')
-			const slash = mod.lastIndexOf('/')
-			const base = slash < 0 ? mod : mod.slice(slash + 1)
-			const dir = slash < 0 ? '' : mod.slice(0, slash)
-			if (base === '+error' && dir !== '') {
-				warn(
-					`${routesDir}/${rel}`,
-					'ssr-error',
-					routesDir +
-						'/' +
-						rel +
-						' is not allowed — only src/routes/+error.svelte exists (single global error boundary)'
-				)
-			}
-		}
 	}
 	try {
 		const srcAbs = resolve(root, 'src')

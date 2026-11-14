@@ -901,7 +901,7 @@ fn (mut app App) before_request(mut ctx Ctx) veb.Result {
 						err_json = '{"status":' + load_res.status.str() + ',"message":' + swelte_json_str(swelte_sanitize_error(lmsg_q[1..].all_before('"'), load_res.status)) + '}'
 					}
 				}
-				joined_err, ok_err := swelte_render_page('/+error', err_json)
+				joined_err, ok_err := swelte_render_page('/+error', err_json.trim_right('}') + ',"path":' + swelte_json_str(path) + '}')
 				if ok_err {
 					head := swelte_page_head_split(joined_err)
 					html, _ := swelte_split_head_body(joined_err, true)
@@ -939,7 +939,7 @@ fn (mut app App) before_request(mut ctx Ctx) veb.Result {
 			// +error.svelte the static/SPA fallback below still applies.
 			// @[error] sanitizes the stock message too (P1 item 7).
 			nf_msg := swelte_json_str(swelte_sanitize_error('not found', 404))
-			joined, ok := swelte_render_page('/+error', '{"status":404,"message":' + nf_msg + '}')
+			joined, ok := swelte_render_page('/+error', '{"status":404,"message":' + nf_msg + ',"path":' + swelte_json_str(path) + '}')
 			if ok {
 				head := swelte_page_head_split(joined)
 				html, _ := swelte_split_head_body(joined, true)
@@ -959,7 +959,7 @@ fn (mut app App) before_request(mut ctx Ctx) veb.Result {
 				dmsg = dtmp.all_before('"')
 			}
 			dmsg = swelte_sanitize_error(dmsg, status)
-			joined, ok := swelte_render_page('/+error', '{"status":' + status.str() + ',"message":' + swelte_json_str(dmsg) + '}')
+			joined, ok := swelte_render_page('/+error', '{"status":' + status.str() + ',"message":' + swelte_json_str(dmsg) + ',"path":' + swelte_json_str(path) + '}')
 			if ok {
 				head := swelte_page_head_split(joined)
 				html, _ := swelte_split_head_body(joined, true)

@@ -59,7 +59,7 @@ Also rejected in SSR-compiled components: `node:` imports, `fetch(`, top-level `
 
 ## `+error.svelte` contract
 
-Single global `src/routes/+error.svelte`, props `{ status?: number; message?: string }`. Same file renders server-side and client-side (via `loadPage()` mapping `SwelteRpcError` → `{ error: { status, message } }`). Per-directory inheritance is currently unimplemented; this scope restriction is not imposed by V or QuickJS.
+Directory `+error.svelte` boundaries inherit through physical ancestry (including groups), props `{ status?: number; message?: string }`. SSR and client share selection and parent fallback. Boundaries retain wrappers strictly above their directory and replace the local wrapper/page. See `docs/ssr.md`.
 
 ## Sources
 

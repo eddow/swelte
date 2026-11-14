@@ -9,6 +9,12 @@
 
 export type { SwelteConfig, SwelteOptions } from './gen/config.js'
 export { defineConfig } from './gen/config.js'
+export type { ErrorBoundary } from './vite/error-boundaries.js'
+export {
+	collectErrorBoundaries,
+	errorBoundaryProps,
+	selectErrorBoundaries,
+} from './vite/error-boundaries.js'
 export { loadServerHooks } from './vite/hooks.js'
 export { dynSegPattern, loadMatchers, transpileMatcherBody } from './vite/matchers.js'
 export {

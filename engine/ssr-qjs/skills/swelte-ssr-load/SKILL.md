@@ -25,7 +25,7 @@ props and reactive `$app/state`; default flat props remain supported.
 Universal loads receive `depends(...tags)`; navigation `invalidate(tag)` awaits
 refresh for matching active loads. Native `invalidate()` keeps its synchronous
 matching-key return; use `invalidateAsync()` to await. Action exceptions render
-the global error component, while validation failures remain on `page.form`.
+the nearest route error component, while validation failures remain on `page.form`.
 Pending navigation takes priority over refresh; stale/aborted action results
 cannot publish after an awaited refresh. These are response/commit guards,
 not rollback of server-side work.
@@ -58,11 +58,13 @@ pub fn load_admin(req SwelteRequest, parent AdminRoute_AdminLayout) !AdminProps 
 
 ## `+error` contract
 
-Single global `src/routes/+error.svelte`, `{ status?: number; message?: string }`. 404 unknown path, 4xx guard rejects, 500 handler throws — all HTML with the right status, server stays up. Missing `+error.svelte` → SPA `index.html` 200.
-
-Nested error files are currently rejected. This is a routing scope restriction,
-not a V/QuickJS requirement; per-directory boundaries need ancestor selection
-and matching SSR/client wrapper and fallback behavior.
+Directory `+error.svelte` files inherit through physical ancestry (including
+groups), with `{ status?: number; message?: string }`. SSR and client use the
+same selection. Boundaries retain wrappers strictly above their directory,
+using successful parent load data, and replace the local wrapper/page. A broken
+boundary or retained wrapper falls back to the next ancestor. SSR records the
+chosen boundary for hydration. Unknown URLs select matching ungrouped scopes,
+then root. JSON/API errors retain their envelope. See `docs/ssr.md`.
 
 ## Prerender
 

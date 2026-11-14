@@ -43,6 +43,9 @@ Two copies of the same bundle:
 Guards (build errors with file+line): no `node:` imports, no
 `fetch(`, no top-level `await`, no top-level stub calls in
 SSR-compiled components (QuickJS is pure-sync; `load()` stays in V).
+Component guards inspect executable syntax: prose, literal markup, CSS, comments
+and string contents are ignored, while template interpolation and markup
+expressions are checked. Deferred event handlers remain allowed.
 `.v` RPC stub imports become render-time throw-stubs (`#routes/*.v` /
 `#lib/*.v` / `@swelte/core`,
 `$app/stores|state|navigation`; `$app|#app/environment` + `$app|#app/paths`
@@ -145,18 +148,24 @@ Full rule: `internal/load.md`; contract: `rpc.md`.
 
 ## `+error` contract
 
-Single global `src/routes/+error.svelte`, props
-`{ status?: number; message?: string }`. Same file renders
-server-side and client-side (via `loadPage()` mapping `SwelteRpcError`
-→ `{ error: { status, message } }`). 404 unknown path, 4xx guard
-rejects (`/admin` without cookie → 400), 500 handler throws — all
-HTML with the right status, server stays up. Missing `+error.svelte`
-→ SPA `index.html` 200 (back-compat).
+Place `+error.svelte` in any route directory, with props
+`{ status?: number; message?: string }`. SSR, hydration, navigation and action
+errors select the nearest boundary in the matched page's physical ancestry,
+including route groups. A boundary retains wrappers strictly above its own
+directory and replaces that directory's wrapper and page. Successful native
+parent loads remain available to those wrappers; failed universal loads are
+not rerun while rendering an error.
 
-Only the root error component is supported; nested error files are rejected.
-This is an implementation scope restriction, not a native-runtime requirement.
-Per-directory boundaries would need ancestor selection and consistent wrapper,
-status and fallback behavior in SSR and client navigation.
+If a boundary or one of its retained wrappers throws, rendering tries the next
+ancestor boundary. SSR records the selected boundary so hydration adopts the
+same tree even when a nearer boundary failed on the server. Unknown URLs use
+matching ungrouped directory scopes (including dynamic segments), then the root
+boundary; grouped scopes require a matched page. Error components are imported
+eagerly in the client, independently of page chunking and layout resets.
+
+Native load/action errors retain their status. Page render failures produce a
+sanitized 500. Missing or failed boundaries preserve the existing shell fallback;
+JSON/API responses continue to use their error envelope.
 
 ## Measured budgets (`examples/something`, 73KB bundle)
 
@@ -201,7 +210,6 @@ test script does not currently invoke the command as a separate CI job.
 
 ## Current limits and architecture
 
-* Per-directory `+error` inheritance is unimplemented (single global).
 * No React/Vue adapters in core — `core` lists `.svelte` because
 Swelte is Svelte.
 * No async in the qjs renderer — streaming SSR is a non-goal.
