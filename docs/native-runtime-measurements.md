@@ -23,9 +23,9 @@ UTF-8 delta and done frame. The producer deliberately waits 200ms between them.
 The harness raises the rate limit to 100000 requests/minute for its own child;
 the default 120/minute would measure admission rejection during this workload.
 
-## Recorded sample, 2026-11-14
+## Recorded sample
 
-[Raw report](../fixtures/dogfood/measurements/2026-11-14-linux-x64.json).
+Raw reports are retained in `fixtures/dogfood/measurements/`.
 Linux x64, Intel i9-12900 (24 logical CPUs), bundled V 0.5.2 7647ce1,
 Svelte 5.57.3, Vite 6.4.5, TypeScript 5.9.3. Client: Node 22.14.0 fetch.
 The fixture binary uses the test runner's default V compilation without `-prod`.
@@ -43,7 +43,5 @@ Startup through first HTML: 26.08ms. Ready RSS: 30.11MiB; sampled peak RSS: 64.4
 | 32 | 17.99 / 32.20 | 3.52 / 4.29 | 203.97 / 205.07 |
 
 These values describe this machine and fixture run. They establish neither
-production capacity nor a performance improvement over another stack. The
-repeatable Swelte fixture workload completes DF-17; production deployment
-dependencies, real application/provider/database traffic, and equivalent
-comparison workloads are outside this framework roadmap.
+production capacity nor a performance improvement over another stack. Production deployment dependencies, real application/provider/database
+traffic, and equivalent comparison workloads require separate measurements.

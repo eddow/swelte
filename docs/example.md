@@ -98,10 +98,8 @@ node engine/core/dist/cli.js dev --port 5174 --backend 8131 --root examples/some
   `swelte_matcher_slug` fn and the client `__swelteMatcherFns.slug` used by
   `matchSegs`); same-dir `users/[id]` vs `users/[id=integer]` correctly
   rejected as same-dynamic-shape build error, hence the integer leaf ships
-  under `members/`; fixed 2026-11-02 (`collectPrerenderEntries` called
-  `routeFor` without the matcher set, so every custom matcher failed the
-  build as `unknown matcher 'slug' (known: integer)` — now loads
-  `loadMatchers(root)` into the crawl, pinned in `route-helpers.test.ts`).
+  under `members/`. Prerender entry collection loads the custom matcher set
+  through `loadMatchers(root)`, covered by `route-helpers.test.ts`.
   `Examples/something` build green with both matcher leaves (match/no-match
   read off the generated `server_gen.v` `swelte_matcher_*` arms +
   `routes.js` `__swelteMatcherFns`; no `v` binary in this env for a live
@@ -180,11 +178,9 @@ node engine/core/dist/cli.js dev --port 5174 --backend 8131 --root examples/some
   `dist/sw.js` with `SW_PRECACHE ["/", "/assets/index-<hash>.js",
   "/assets/app_lib-<hash>.wasm"]` + `dist/index.html` carries the
   `serviceWorker.register("/sw.js")` snippet (auto mode); default rebuild
-  drops both (no `sw.js`, no snippet). Fixed 2026-11-02: the wasm emit
-  and the SW emit share one `generateBundle` hook — SW ran first so the
-  bundle scan missed the late wasm emit; now the hashed
-  `app_lib-*.wasm` name from `this.getFileName(ref)` is pushed into
-  precache explicitly. Live `curl /sw.js → 200 application/javascript`
+  drops both (no `sw.js`, no snippet). The wasm emit and SW emit share
+  one `generateBundle` hook. The hashed `app_lib-*.wasm` name from
+  `this.getFileName(ref)` is included in the precache explicitly. Live `curl /sw.js → 200 application/javascript`
   not run here (no `v` binary) — the static-first exact-file arm in
   `server.v` (`dist + path` exists → serve with `application/javascript`
   for `.js`, ahead of Accept routing) is the serving path. `svelte.config.js`
@@ -199,13 +195,9 @@ node engine/core/dist/cli.js dev --port 5174 --backend 8131 --root examples/some
   no redirect (`/router/` → 200); `X-Swelte-Version` absent unless
   `SWELTE_VERSION` set (`=9.9.9` → header present); `POST
   ?_method=DELETE` without `SWELTE_METHOD_OVERRIDE=1` → normal dispatch
-  (override OFF by default). Fixed 2026-11-02: the `swelte build` CLI
-  silently no-opped (`import { swelte }` vs default export — generate
-  never ran, exit 0); now falls back to the default export and fails
-  loudly. Also fixed: `@[reroute]` inject assigned immutable `path` —
-  template now declares `mut path`, and the `renderHarness` anchor
-  matches it (previously emitted the "anchor missing" fallback, so
-  `/old` 404'd instead of rewriting to `/router`).
+  (override OFF by default). The `swelte build` CLI resolves the plugin's
+  named or default export and reports generation errors. The harness uses a
+  mutable path so `@[reroute]` can rewrite `/old` to `/router`.
 - SvelteKit remainder closed (item 15): 15a `use:enhance` —
   `/router/enhance` leaf (`enhance_echo ?echo` POST arm returns the
   payload as JSON; live curl proves the arm) + plain `<form
@@ -219,9 +211,7 @@ node engine/core/dist/cli.js dev --port 5174 --backend 8131 --root examples/some
   correctly skipped: no page → no HTML), root `dist/index.html` stays
   the shell. 15c ISR — `SWELTE_ISR="/router=60"` → `GET /router` HTML
   200 carries `Cache-Control: public, max-age=0, s-maxage=60` +
-  `X-Swelte-Revalidate: 60`; JSON API untouched; fixed 2026-11-02 (the
-  stamp sat below the SSR/static/shell early returns so it never fired —
-  moved above them). 15e offline — `offline: { fallback: true }` writes
+  `X-Swelte-Revalidate: 60`; JSON API responses retain their own cache behavior. 15e offline — `offline: { fallback: true }` writes
   `dist/offline.html` (best-effort from first crawled page). All three
   throwaway knobs reverted after assert (`svelte.config.js` clean).
   15d targets + 15f export proved earlier (see above).
@@ -231,7 +221,7 @@ node engine/core/dist/cli.js dev --port 5174 --backend 8131 --root examples/some
   `.swelte/server.v` (startup once before `veb.run`, reroute in
   `before_request` after the path split, before
   trailingSlash/CORS/static/dispatch). Scheduled ticks (`@[cron]`) are a
-  `@swelte/plus/jobs` concern (see `specs/future.md` item 1) — core emits
+  `@swelte/plus/jobs` concern — core emits
   no tick loops without the owning plugin.
   No `v` binary in this env for a live curl — proven by the generated
   harness arms: `generate-errors.test.ts` pins startup/reroute/error

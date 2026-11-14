@@ -1,7 +1,7 @@
 # Spec: `.v` imports — `#routes/` server RPC vs `#lib/` isomorphic WASM
 
 Status: design reference (§1–§5 built) + decisions log (§6). §6 records
-all 2026-10-29 decisions including the verb-vs-rpc handler split
+the decisions including the verb-vs-rpc handler split
 (verb handlers: `SwelteRequest` in, response out; `@[rpc]` fns:
 one args-struct).
 `../rpc.md`+`../types.md`+`../errors.md` describe the built behavior;
@@ -76,7 +76,7 @@ Rules (`routeFor`, once in `vite.ts`, reused by V dispatcher gen):
 * Every routed `.v` must have either a `.svelte` partner (page) or
   live under `api/` (headless JSON). Orphan `routes/*.v` without a
   partner outside `api/` is a build warning (future: error).
-* Dynamic segments (built 2026-10-30): `[id]` matches one
+* Dynamic segments: `[id]` matches one
   non-empty segment, `[...rest]` matches the remainder (must be the
   last segment, may be empty). Matched values flow into
   `SwelteRequest.params`; static routes win over dynamic, fewer params
@@ -106,18 +106,18 @@ Rules (`routeFor`, once in `vite.ts`, reused by V dispatcher gen):
   appears in the V dispatcher or the dev proxy.
 * Same V source must compile both ways: `v` native (unused on server
   for now, but kept importable) and `v -b wasm` (browser).
-  Constraint decided 2026-10-29 (warn in dev, error at build):
+  Constraint (warn in dev, error at build):
   `#lib/` (non-`server`) may import only the portable subset —
   `strings`, `math`, `encoding/*`, `crypto/*`, `json`, `json2`.
   Anything else (`os`, `net`, `db`, `time`, …) is rejected.
   Escape hatch: `#lib/backend/` allows everything (backend-only,
-  never compiled to WASM — see §7. No `.ts`/`.js`/`.svelte` under `backend/`: backend runs purely on V (decided 2026-10-29). The subset expands on demand
+  never compiled to WASM — see §7. No `.ts`/`.js`/`.svelte` under `backend/`: backend runs purely on V. The subset expands on demand
   when a real `#lib/` fn needs a module: add the module, not a
   per-file exemption list.
 * One WASM blob per `.v` file (cache granularity, matches the
   one-file-one-module mental model). Shared `#lib` helpers without
   attributes are bundled into each importer (static link), not split.
-* Runs on the importing thread (plain `async` call). Decided 2026-10-29:
+* Runs on the importing thread (plain `async` call). Execution stays on the
   main thread, no Worker opt-in flag for now — revisit only with measured
   jank. Never a shared cross-module bus.
 
@@ -127,7 +127,7 @@ WASM. One language, one file, two targets.
 
 ## 3. Attributes
 
-### Server (`#routes/`) — decided 2026-10-29
+### Server (`#routes/`)
 
 Each verb attribute IS the HTTP verb. One default fn per verb per file.
 `@[rpc]` fns are the only named functions: many per file,
@@ -216,7 +216,7 @@ export function login(args) {
 `rpc` -> `POST base {fn,args}` JSON; `get` -> `GET base?fn=&...args`;
 `post` -> form `POST base?fn=`. Rejects with `SwelteRpcError`.
 
-### `#lib/*.v` -> WASM stub (dual pipeline, built 2026-10-30)
+### `#lib/*.v` -> WASM stub (dual pipeline)
 
 Runtime `.swelte/generated/lib/<mod>.js` (same shape both modes —
 the bridge masks the difference, importers never change):
@@ -277,7 +277,7 @@ Plus: `.swelte/v-shim.d.ts` (one `declare module '#routes/x.v'` /
 `'#lib/y.v'` per known file, type bodies inlined — no relative
 re-export, TS2686), `config()` aliases
 `{ #routes -> src/routes, #lib -> src/lib }`, `.swelte/types/**`
-projection (`time.Time->number` (unix epoch, decided 2026-10-29), `!T` strips + fallible,
+projection (`time.Time->number` (unix epoch), `!T` strips + fallible,
 unknown -> `unknown` + warning; `time`/`os`-only types in `#lib/`
 warn louder). User tsconfig holds the STABLE wildcards (written once):
 `#routes/*.v -> ./.swelte/types/routes/*.d.ts`,
@@ -287,7 +287,7 @@ from extended configs, so no generated fragment — wildcards only).
 `generate()` runs on `configResolved` + `buildStart`, re-runs on
 `.v` add/change/unlink. All warnings carry file+line.
 
-## 5. Server side (V dispatcher) — built (2026-10-29)
+## 5. Server side (V dispatcher) — built
 
 Only `#routes/` participates. `generate()` emits `routes/`
 (`module routes`: one file per routes file + `server_gen.v` with
@@ -300,7 +300,7 @@ bad JSON -> 400; `!T` -> 400; mismatch -> 405).
 Envelope: `../errors.md`. Dev proxy: `../errors.md` SPA-first rule.
 See `../rpc.md` (built). Static-vlib deferral: `SwelteRequest` stays emitted into `routes/server_gen.v` until the route shape freezes.
 
-## 6. Decisions (2026-10-29, all built or recorded)
+## 6. Decisions (built or recorded)
 
 * `time.Time` wire format: unix int (`json.encode(time)` as-is, zero V-side work), TS projects `number` (epoch seconds). No drift: wire and projection agree. `../types.md` updated.
 * Notation follows current SvelteKit: `#lib` (hash), not `$lib`.

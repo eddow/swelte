@@ -35,11 +35,8 @@ Internal docs to modify Swelte (design rationale, decisions, ephemeral notes):
 
 ## Specs
 
-Contracts, framework capability probes, and future work. Fixture coverage
-applies to the specific Swelte behavior asserted; it is not an application
-migration claim:
+- `specs/future.md` — remaining framework proposals
+- `specs/dogfood-roadmap.md` — concise report of completed dogfood work and its regression coverage
 
-- `specs/dogfood-roadmap.md` — Swelte implementation and verification tracker; dogfood fixtures probe framework behavior
-- `specs/page-lifecycle-contract.md` — load/state/hydration and action contract; Swelte implementation and regression status live in the roadmap
-- `specs/micro.md` — historical application-specific inventory; audit context only, not Swelte scope
-- `specs/future.md` — Beyond SvelteKit (jobs done in `@swelte/plus`; channels/SWR/images/outbox/hardening/agent-native next)
+The delivered load/state/hydration and action contract is documented in
+[page-lifecycle.md](page-lifecycle.md).

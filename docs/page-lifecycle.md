@@ -1,19 +1,18 @@
 # Page lifecycle and action contract
 
-DF-02 / DF-03 decisions, 2026-11-08. This is the implementation contract for
-the dogfooding roadmap, not a claim that the behavior below is already shipped.
-Gate 1 implements and validates it before it moves into user documentation.
+Swelte defines a shared lifecycle for page loads, SSR, hydration, navigation,
+refresh and form actions.
 
 ## Compatibility boundary
 
 Keep the existing flat component props and `@swelte/core` store API available.
-Add opt-in `swelte.compat: 'sveltekit'` for migrated components expecting
+Use opt-in `swelte.compat: 'sveltekit'` for migrated components expecting
 `{ data, form }`, a reactive `$app/state` object and `$app/forms` adaptation.
 Default compatibility mode is off; no existing component silently changes
 from flat props to a nested `data` prop. This adapts the required surface only;
 it does not imply general SvelteKit server/runtime compatibility.
 
-The canonical reactive page object will also be available as `#app/state`.
+The canonical reactive page object is also available as `#app/state`.
 Legacy `@swelte/core` page stores and `$app/stores` remain subscribable views of
 the same browser lifecycle. `$app/state` retains its legacy store export unless
 compatibility is enabled. SSR shims must provide equivalent request-local
@@ -107,7 +106,7 @@ hash across goto/history; popstate must use the full browser URL. Handle a load
 redirect explicitly and publish errors with their status. Avoid publishing a
 stale response when a later navigation/refresh has already completed.
 
-Add an awaited router refresh operation that re-runs the current load URL and
+The awaited router refresh operation re-runs the current load URL and
 updates mounted props without creating a history entry. Preserve component
 instances/local state when route and wrapper identity are unchanged. Connect
 `invalidateAll()` to that operation; tagged invalidation refreshes affected

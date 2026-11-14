@@ -279,7 +279,7 @@ export const chunk = 'eager' | 'lazy' // default: 'inherit' (follow global mode)
   runs first in `before_request` — before `trailingSlash`
   normalization, CSRF/CORS/static/dispatch
   (`''` = no-op). Scheduled ticks (`@[cron]`) are NOT core — they live in
-  `@swelte/plus/jobs` (see [`plus.md`](plus.md), `specs/future.md` item 1).
+  `@swelte/plus/jobs` (see [`plus.md`](plus.md)).
   Without a plugin that claims an attr, it is an unknown-attr
   build error. With the plugin (`plugins: [jobsPlugin]`), the qualifier is
   the duration literal plus an optional `,retry=n` suffix: `@[cron('60s')]`,

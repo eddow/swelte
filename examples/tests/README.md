@@ -18,7 +18,7 @@ with 1/10th the surface.
   + `add_test.v` native V unit (`swelte test` runs it).
 - `src/app.v` — `@[error]` sanitizer (`safe:` prefix) + `@[reroute]`
   (`/old-parity` → `/`).
-- Parity fixtures (`docs/specs/future.md` §2, one route per item):
+- Parity fixtures (one route per capability):
   `load-cookie` (envelope headers+cookies), `load-status` (404 envelope),
   `load-redirect` (303+Location envelope), `load-filter`
   (`serializedHeaders: [x-keep]`), `typed` (typed 403 vs plain 400),

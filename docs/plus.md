@@ -2,8 +2,8 @@
 
 Optional package. Core stays parity-only (byte-identical output without
 plugins); plus owns attrs core never names. Today: `jobs` (scheduled
-`@[cron]` ticks — [future.md](specs/future.md) item 1) + `db` (embedded
-SQLite/KV — [future.md](specs/future.md) item 2).
+`@[cron]` ticks) + `db` (embedded
+SQLite/KV).
 
 ```sh
 npm install @swelte/plus
@@ -106,7 +106,7 @@ Zero ticks → empty fragments: harness byte-identical to parity output.
 - Single-instance best-effort: two containers = two schedulers (no
   distributed lock).
 - No persistence yet: tick log is console-only; cross-restart catchup is
-  future work (see [future.md](specs/future.md) item 1).
+  future work (see [remaining work](specs/future.md)).
 - No cron-expression parser in v1 — duration literal only.
 
 ## Helpers

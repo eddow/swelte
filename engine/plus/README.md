@@ -31,5 +31,5 @@ export default defineConfig({
   subscribes and streams live hub messages. Harness owns the subscription
   (auto-reap on disconnect); single-instance best-effort like cron.
 
-Full docs: `docs/plus.md`, `docs/cli.md` (`swelte migrate`), `docs/specs/future.md` items 1–2.
+Full docs: `docs/plus.md`, `docs/cli.md` (`swelte migrate`).
 V lesson: DDL/DML need `exec_none` (`!= 101`); `exec()` only steps row queries.

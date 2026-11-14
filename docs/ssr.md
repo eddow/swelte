@@ -158,7 +158,7 @@ This is an implementation scope restriction, not a native-runtime requirement.
 Per-directory boundaries would need ancestor selection and consistent wrapper,
 status and fallback behavior in SSR and client navigation.
 
-## Measured budgets (2026-10-31, `examples/something`, 73KB bundle)
+## Measured budgets (`examples/something`, 73KB bundle)
 
 * `renderRoute('/')` in-process (Node, same bundle the binary embeds):
 200 renders in 2.4ms total → **~0.012ms/render**. Pure string
