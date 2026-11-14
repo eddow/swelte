@@ -17,6 +17,7 @@
     "test:install": "node scripts/test-install.mjs",
     "test:dogfood": "node scripts/test-dogfood.mjs",
     "test:postgres": "node scripts/test-postgres.mjs",
+    "measure:dogfood": "node scripts/measure-dogfood.mjs",
     "version:sync": "node scripts/sync-version.mjs",
     "version:patch": "node scripts/sync-version.mjs patch",
     "version:minor": "node scripts/sync-version.mjs minor",

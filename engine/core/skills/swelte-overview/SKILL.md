@@ -46,6 +46,12 @@ routes and `src/app.v` hooks can use ordinary V imports (`import backend`).
 The PostgreSQL recipe and disposable integration test live in
 `fixtures/postgres` (`npm run test:postgres`).
 
+Native process lifecycle also reuses V's `veb.Server.shutdown`. Swelte wires
+signals, admitted-work drain and bounded `@[shutdown]` cleanup; plugin jobs
+start after successful `@[startup]`. App-owned workers must stop/join before
+shared resources close. `@[report]` adapts native errors/request IDs to the
+app's logger; it does not export original JS stacks. See `docs/lifecycle.md`.
+
 ## Commands
 
 ```sh

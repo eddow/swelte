@@ -9,7 +9,7 @@ pub:
 pub fn prepare(input SwelteRequest) !SwelteRequest {
 	if input.query['deny'] == '1' { return swelte_redirect_error('/?login=1', 303) }
 	mut req := input
-	req.locals['locale'] = req.query['lang'] or { 'en' }
+	req.locals['locale'] = req.params['lang'] or { req.query['lang'] or { 'en' } }
 	req.locals['prepared'] = 'yes'
 	return req
 }

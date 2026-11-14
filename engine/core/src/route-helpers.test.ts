@@ -432,6 +432,35 @@ describe('route helpers', () => {
 		assert.ok(!crawl.routes.includes('/admin/users'), JSON.stringify(crawl))
 	})
 
+	it('prerender follows physical group ancestry and expands encoded sibling entries', async () => {
+		const { mkdtempSync, mkdirSync, writeFileSync, rmSync } = await import('node:fs')
+		const { tmpdir } = await import('node:os')
+		const root = mkdtempSync(join(tmpdir(), 'swelte-pregroup-'))
+		const routes = join(root, 'src/routes')
+		const article = join(routes, '(content)', '[lang]', 'article', '[slug]')
+		try {
+			mkdirSync(article, { recursive: true })
+			mkdirSync(join(routes, '(content)', 'private'), { recursive: true })
+			writeFileSync(join(root, 'package.json'), '{"name":"t","type":"module"}')
+			writeFileSync(join(routes, '(content)', '+route.svelte'), '<main />')
+			writeFileSync(join(routes, '(content)', '+route.ts'), 'export const prerender = false')
+			writeFileSync(join(routes, '(content)', 'private', '+page.svelte'), '<p>private</p>')
+			writeFileSync(join(article, '+page.svelte'), '<h1>article</h1>')
+			writeFileSync(join(article, '+page.ts'), 'export const prerender = true')
+			writeFileSync(
+				join(article, 'entries.js'),
+				`export function entries() {
+				return [{lang: 'fr', slug: 'café #1'}, {lang: 'en', slug: 'a/b'}]
+			}`
+			)
+			const crawl = await collectPrerenderEntries(root, 'src/routes', 'all')
+			assert.ok(!crawl.routes.includes('/private'), JSON.stringify(crawl))
+			assert.deepEqual(crawl.expanded, ['/en/article/a%2Fb', '/fr/article/caf%C3%A9%20%231'])
+		} finally {
+			rmSync(root, { recursive: true, force: true })
+		}
+	})
+
 	it('P2: collectPrerenderEntries awaits async entries() incl. paginated loops', async () => {
 		const { mkdtempSync, mkdirSync, writeFileSync } = await import('node:fs')
 		const { tmpdir } = await import('node:os')

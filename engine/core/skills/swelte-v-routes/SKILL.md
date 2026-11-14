@@ -21,9 +21,11 @@ Every `.v` file is an ES module. Every `pub fn` with an attribute is a named exp
 | `#lib/` | `@[rpc]` | local WASM call | none (direct dispatch) |
 | `src/matchers.v` | `@[matcher]` | param matcher, both sides | `(s string) bool`, non-fallible, portable subset only; `integer` builtin |
 | `src/app.v` | `@[startup]` | once before `veb.run` | `() void|!void`, zero/one fn, no qualifier, no params; throw aborts boot |
+| `src/app.v` | `@[shutdown]` | once after tracked work drains | `() void|!void`; bounded by `SWELTE_SHUTDOWN_TIMEOUT_MS`; startup failure skips it |
+| `src/app.v` | `@[report]` | private server telemetry | `(event SwelteReport) void|!void`; original native causes, generated request IDs; callback failure cannot replace responses |
 | `src/app.v` | `@[reroute]` | host/path rewrite pre-dispatch | `(host string, path string) string`, `''` = no-op; zero/one fn, no qualifier |
 
-Rules: verbs stack (`@[get; post]`), one default per verb per file, qualifiers unique per verb per file. Never stack `@[sse]`/`@[ws]` with a verb/rpc/sse/ws on one fn (one transport per fn). `@[ws]` never stacks and takes no qualifier (one socket per file). `@[load]` never stacked, no qualifier. Dynamic segments: `[id]` any segment, `[id=matcher]` constrained (`integer` builtin = digits, `Params: number`; custom `@[matcher]` fns in `src/matchers.v`, `Params: string`), `[[slug]]` last-segment optional, `[...rest]` catch-all last. `src/matchers.v` / `src/app.v` are never routed and never importable from browser code; `@[matcher]`/`@[startup]`/`@[reroute]` in `src/routes/*` is a build error.
+Rules: verbs stack (`@[get; post]`), one default per verb per file, qualifiers unique per verb per file. Never stack `@[sse]`/`@[ws]` with a verb/rpc/sse/ws on one fn (one transport per fn). `@[ws]` never stacks and takes no qualifier (one socket per file). `@[load]` never stacked, no qualifier. Dynamic segments: `[id]` any segment, `[id=matcher]` constrained (`integer` builtin = digits, `Params: number`; custom `@[matcher]` fns in `src/matchers.v`, `Params: string`), `[[slug]]` last-segment optional, `[...rest]` catch-all last. `src/matchers.v` / `src/app.v` are never routed and never importable from browser code; `@[matcher]`/`@[startup]`/`@[shutdown]`/`@[report]`/`@[reroute]` in `src/routes/*` is a build error.
 
 ## Handler shapes
 
@@ -84,6 +86,14 @@ pub fn delete_account(req SwelteRequest) !string {
 - `files: Record<string,string>` holds uploaded **filenames** only — bytes are parsed then discarded (never persisted, never projected).
 - `@[sse]` list mode returns `[]string` (harness streams each); emit mode takes trailing `emit fn (string) bool` + returns void — each `emit(e)` flushes one frame NOW (`if !emit(e) { return }` on disconnect). Room mode (needs `@swelte/plus/db`) takes trailing `sub fn (string) chan string` + `emit fn (string) bool` — harness injects a room-subscribe closure; `backend.emit(room, msg)` fans out cross-request. TS stub is `AsyncGenerator<string>` in all shapes.
 - `@[ws]` (needs `@swelte/plus/db`) takes `(req SwelteRequest, sub fn (string) chan string, recv chan string, emit fn (string) bool)` + returns void — hub messages stream out via `emit`, client frames stream back via `recv`. TS stub is a URL builder (`__swelteWsUrl`) — the browser opens a native `WebSocket` itself.
+
+For channels on bundled V 0.5.2, bind array payloads before sending inside
+`select` (`packet := [event]`, then `ch <- packet`); array literals there can
+send an empty array. A `select` with `else` does not reliably observe closed
+receives. Use an explicit buffered completion notification when polling.
+Stream callbacks should capture owned heap resources rather than request
+contexts whose lifetime ends at takeover. See `docs/lifecycle.md` for drain,
+resource ownership, private reporting and room cleanup.
 
 ## Type table (V → TS)
 
