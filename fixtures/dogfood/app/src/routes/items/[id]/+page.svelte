@@ -1,6 +1,6 @@
 <script lang="ts">
-  import { page } from '$app/state'
-  let { data } = $props()
+import { page } from '$app/state'
+let { data } = $props()
 </script>
 
 <svelte:head><title>Item {data.id}</title></svelte:head>

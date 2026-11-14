@@ -1,12 +1,12 @@
 <script lang="ts">
-  import { page } from '$app/state'
-  let { data } = $props()
+import { page } from '$app/state'
+let { data } = $props()
 </script>
 
 <svelte:head>
-  <title>{data.title}</title>
-  <meta name="article-locale" content={data.locale} />
-  <link rel="canonical" href={data.canonical} />
+	<title>{data.title}</title>
+	<meta name="article-locale" content={data.locale}>
+	<link rel="canonical" href={data.canonical}>
 </svelte:head>
 <h1 id="article">{data.title}</h1>
 <p id="article-path">{page.url.pathname}</p>

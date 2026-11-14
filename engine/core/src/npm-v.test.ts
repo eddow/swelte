@@ -1,14 +1,9 @@
 import assert from 'node:assert/strict'
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, it } from 'node:test'
-import { mkdtempSync } from 'node:fs'
-import {
-	materializeNpmV,
-	npmVNamespace,
-	parseNpmVSpecifier,
-} from './vite/npm-v.js'
+import { materializeNpmV, npmVNamespace, parseNpmVSpecifier } from './vite/npm-v.js'
 
 function fixture(target: 'universal' | 'server' = 'universal'): string {
 	const root = mkdtempSync(join(tmpdir(), 'swelte-npm-v-'))
@@ -117,10 +112,7 @@ describe('npm V packages', () => {
 		}
 		plugin.configResolved({ root })
 		await plugin.buildStart()
-		assert.equal(
-			existsSync(join(root, '.swelte', 'npm_acme_validation', 'phone', 'api.v')),
-			true
-		)
+		assert.equal(existsSync(join(root, '.swelte', 'npm_acme_validation', 'phone', 'api.v')), true)
 		await assert.rejects(
 			() =>
 				plugin.resolveId.call(
@@ -190,7 +182,10 @@ pub fn use_phone(args UsePhoneArgs) string {
 			/declare module '@acme\/validation\/v\/phone\.v'/
 		)
 		assert.match(
-			readFileSync(join(root, '.swelte', 'types', 'npm', 'npm_acme_validation', 'phone.d.ts'), 'utf8'),
+			readFileSync(
+				join(root, '.swelte', 'types', 'npm', 'npm_acme_validation', 'phone.d.ts'),
+				'utf8'
+			),
 			/export function normalize/
 		)
 		assert.match(

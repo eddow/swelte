@@ -12,7 +12,13 @@ export interface SearchEntry {
 }
 
 export const searchIndex: SearchEntry[] = [
- { href: '/guide/lifecycle', label: 'Page lifecycle', group: 'Guide', keywords: 'load state hydration refresh invalidation navigation middleware startup shutdown report prerender compatibility dogfood remaining' },
+	{
+		href: '/guide/lifecycle',
+		label: 'Page lifecycle',
+		group: 'Guide',
+		keywords:
+			'load state hydration refresh invalidation navigation middleware startup shutdown report prerender compatibility dogfood remaining',
+	},
 	{
 		href: '/',
 		label: 'Overview',
@@ -48,7 +54,8 @@ export const searchIndex: SearchEntry[] = [
 		href: '/guide/forms',
 		label: 'Forms',
 		group: 'Guide',
-		keywords: 'forms named actions ?/save actionQuery compat cancellation multipart verbs qualifiers ?q no-js 303 fail isfail deserialize enhance applyaction',
+		keywords:
+			'forms named actions ?/save actionQuery compat cancellation multipart verbs qualifiers ?q no-js 303 fail isfail deserialize enhance applyaction',
 	},
 	{
 		href: '/guide/errors',

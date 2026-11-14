@@ -40,7 +40,8 @@ import { codeHtml } from '#lib/snippets.gen.js'
 	Browser <code>GET /</code> → <code>Hand.before_request</code> → <code>swelte_page_props()</code>
 	(load cascade) → embedded QuickJS <code>renderRoute(path, props)</code> → HTML at
 	<code>&lt;!--ssr-body--&gt;</code>
-	+ <code>data-swelte-ssr="1"</code>. Default renderer fallback serves the SPA shell. Strict mode rejects unexpected fallback with HTTP 500.
+	+ <code>data-swelte-ssr="1"</code>. Default renderer fallback serves the SPA shell. Strict mode
+	rejects unexpected fallback with HTTP 500.
 </p>
 
 <h2 class="text-2xl font-bold mt-8"><code class="text-lg">@&#91;load&#93</code> cascade</h2>
@@ -79,24 +80,31 @@ import { codeHtml } from '#lib/snippets.gen.js'
 	<span class="badge badge-error">no top-level stub calls</span>
 </div>
 <p class="text-sm opacity-70 mt-2">
-	QuickJS is pure-sync; <code>load()</code> stays in V. Browser-only SDK calls become render-time throw-stubs; page state uses a request-local SSR shim.
+	QuickJS is pure-sync; <code>load()</code> stays in V. Browser-only SDK calls become render-time
+	throw-stubs; page state uses a request-local SSR shim.
 </p>
 <h2 class="text-2xl font-bold mt-8">State, isolation and strict rendering</h2>
-<p class="opacity-80 mt-2">SSR renders one nested Svelte tree with per-level load data,
-context and head output. Page state is local to the request. Hydration uses the serialized
-initial envelope without refetching initial data. Set <code>SWELTE_SSR_STRICT=1</code>
-to reject unexpected renderer fallback; load watchdog timeouts return 504.
-Original QuickJS exception details require <code>SWELTE_SSR_DIAGNOSTICS=1</code>;
-ordinary client responses stay sanitized.</p>
+<p class="opacity-80 mt-2">
+	SSR renders one nested Svelte tree with per-level load data, context and head output. Page state
+	is local to the request. Hydration uses the serialized initial envelope without refetching initial
+	data. Set <code>SWELTE_SSR_STRICT=1</code>
+	to reject unexpected renderer fallback; load watchdog timeouts return 504. Original QuickJS
+	exception details require <code>SWELTE_SSR_DIAGNOSTICS=1</code>; ordinary client responses stay
+	sanitized.
+</p>
 <h2 class="text-2xl font-bold mt-8">Packages and verification</h2>
-<p class="opacity-80 mt-2">The SSR bundle resolves installed Svelte/TypeScript/runes modules,
-package-private imports and CommonJS dependencies. <code>swelte-ssr check</code> probes the
-sidecar, Hand backend and embedded production binary when their artifacts exist, then shuts
-down its probe processes. <code>swelte-ssr dev</code> owns the development sidecar;
-production embeds QuickJS and needs no Node runtime.</p>
-<p class="opacity-70 mt-2">The measurements above describe a small example workload, not a
-production capacity guarantee. The native dogfood measurement harness records startup,
-memory, streaming latency and concurrency with explicit workload limits.</p>
+<p class="opacity-80 mt-2">
+	The SSR bundle resolves installed Svelte/TypeScript/runes modules, package-private imports and
+	CommonJS dependencies. <code>swelte-ssr check</code> probes the sidecar, Hand backend and embedded
+	production binary when their artifacts exist, then shuts down its probe processes.
+	<code>swelte-ssr dev</code> owns the development sidecar; production embeds QuickJS and needs no
+	Node runtime.
+</p>
+<p class="opacity-70 mt-2">
+	The measurements above describe a small example workload, not a production capacity guarantee. The
+	native dogfood measurement harness records startup, memory, streaming latency and concurrency with
+	explicit workload limits.
+</p>
 <DocsNav
 	next={{ href: '/guide/cli', label: 'CLI' }}
 	related={[{ href: '/guide/config', label: 'Config' }]}

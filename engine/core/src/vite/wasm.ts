@@ -183,7 +183,9 @@ export function compileLibWasm(
 				.filter((a: string) => a && !/^(rpc|get|post|put|delete|patch|sse)\b/.test(a))
 			return keep.length > 0 ? `@[${keep.join('; ')}] ` : ''
 		})
-	const imports = [...body.matchAll(/^\s*import\s+(.+)$/gm)].map((match) => `import ${match[1].trim()}`)
+	const imports = [...body.matchAll(/^\s*import\s+(.+)$/gm)].map(
+		(match) => `import ${match[1].trim()}`
+	)
 	const compiled = [
 		`module main
 

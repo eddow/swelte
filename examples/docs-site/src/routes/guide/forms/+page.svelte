@@ -28,7 +28,8 @@ import { codeHtml } from '#lib/snippets.gen.js'
 <h2 class="text-2xl font-bold mt-8">No-JS</h2>
 <p class="opacity-80 mt-2">
 	Browser navigations (<code>Accept: text/html</code>) bypass JSON: success → <code>303</code> +
-	<code>Location</code>, failure → the target page rendered with form data and its failure status. Fetch keeps JSON.
+	<code>Location</code>, failure → the target page rendered with form data and its failure status.
+	Fetch keeps JSON.
 	<code>GET</code>
 	loads may independently redirect through their load envelope.
 </p>
@@ -54,18 +55,24 @@ import { codeHtml } from '#lib/snippets.gen.js'
 	standalone.
 </p>
 <h2 class="text-2xl font-bold mt-8">Named actions and compatibility</h2>
-<p class="opacity-80 mt-2">Set <code>swelte.actionQuery: 'named'</code> to use
-<code>?/save</code>. Named actions preserve search parameters such as <code>q</code>;
-<code>?/save&amp;q=hello</code> redirects to <code>?q=hello</code> on no-JS success.
-Legacy mode retains <code>?q=save</code> and <code>?save</code>.
-<code>swelte.compat: 'sveltekit'</code> selects named actions by default and supplies
-nested data/form props, reactive <code>$app/state</code> and the <code>$app/forms</code> adapter.</p>
+<p class="opacity-80 mt-2">
+	Set <code>swelte.actionQuery: 'named'</code> to use
+	<code>?/save</code>. Named actions preserve search parameters such as <code>q</code>;
+	<code>?/save&amp;q=hello</code>
+	redirects to <code>?q=hello</code> on no-JS success. Legacy mode retains <code>?q=save</code> and
+	<code>?save</code>.
+	<code>swelte.compat: 'sveltekit'</code>
+	selects named actions by default and supplies nested data/form props, reactive
+	<code>$app/state</code> and the <code>$app/forms</code> adapter.
+</p>
 <h2 class="text-2xl font-bold mt-8">Submission lifecycle</h2>
-<p class="opacity-80 mt-2">Enhancement prevents native submission synchronously.
-Cancellation stops submission; submitter overrides and multipart file bytes are retained.
-Failures stay inline. Success can reset the form and awaits the current page's load refresh,
-preserving component state. Cross-page submissions do not overwrite unrelated form state.
-The native callback API remains available; the compatibility adapter supplies result and update fields.</p>
+<p class="opacity-80 mt-2">
+	Enhancement prevents native submission synchronously. Cancellation stops submission; submitter
+	overrides and multipart file bytes are retained. Failures stay inline. Success can reset the form
+	and awaits the current page's load refresh, preserving component state. Cross-page submissions do
+	not overwrite unrelated form state. The native callback API remains available; the compatibility
+	adapter supplies result and update fields.
+</p>
 <DocsNav
 	next={{ href: '/guide/errors', label: 'Errors' }}
 	related={[{ href: '/guide/rpc', label: 'RPC & routes' }]}

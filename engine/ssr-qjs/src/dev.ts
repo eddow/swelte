@@ -6,7 +6,7 @@
 // HMR: watches the render.js file (mtime); re-imports on change, no
 // V restart. Timeout on any render -> caller falls back to SPA shell.
 
-import { existsSync, statSync, watch, type FSWatcher } from 'node:fs'
+import { existsSync, type FSWatcher, statSync, watch } from 'node:fs'
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
 import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'

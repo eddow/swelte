@@ -55,12 +55,14 @@ import { codeHtml } from '#lib/snippets.gen.js'
 </p>
 
 <h2 class="text-2xl font-bold mt-8">PostgreSQL through V</h2>
-<p class="opacity-80 mt-2">The Plus plugin provides SQLite/KV. V also supplies
-<code>db.pg</code>, ORM support, pooling, parameterized queries and transactions.
-Use those facilities from native backend modules with the required libpq dependencies.
-Initialize shared resources during startup and close them after shutdown draining.
-The disposable PostgreSQL fixture probes transaction, migration, locking and failure cleanup;
-application schemas and migration policy remain application-owned.</p>
+<p class="opacity-80 mt-2">
+	The Plus plugin provides SQLite/KV. V also supplies
+	<code>db.pg</code>, ORM support, pooling, parameterized queries and transactions. Use those
+	facilities from native backend modules with the required libpq dependencies. Initialize shared
+	resources during startup and close them after shutdown draining. The disposable PostgreSQL fixture
+	probes transaction, migration, locking and failure cleanup; application schemas and migration
+	policy remain application-owned.
+</p>
 <DocsNav
 	next={{ href: '/plus/realtime', label: 'Realtime' }}
 	related={[{ href: '/plus/jobs', label: 'Jobs' }]}
