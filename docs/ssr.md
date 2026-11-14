@@ -90,6 +90,11 @@ Strict mode turns unexpected renderer fallback into HTTP 500; default mode
 retains the existing fallback behavior. Load watchdog timeouts are HTTP 504;
 they bound the response wait and do not terminate the native load thread.
 
+Set `SWELTE_SSR_DIAGNOSTICS=1` to include original QuickJS exception details in
+native diagnostic output while investigating a server-side failure. Keep it
+disabled for ordinary operation: client responses and the `@[report]` hook do
+not expose original JavaScript stacks.
+
 Body output grows from 64 KiB to at most 1 MiB; head output grows from 8 KiB
 to at most 64 KiB (each buffer reserves one byte for NUL). Larger head/body
 output fails explicitly instead of truncating HTML or dropping head metadata.
@@ -186,6 +191,13 @@ no `<!--ssr-body-->` leftover, JSON bypass intact):
 
 plus exactly one artifact in `dist/ssr/` and a 20× repeat-render
 (no crash, stable timing). Verified green.
+
+`swelte-ssr check` is a runnable gate for local or CI use. Its child V
+processes run in isolated process groups so their compiled server children
+are stopped too; a subprocess regression test verifies the CLI exits after
+the sidecar-only gate. The command can skip Hand or embedded-production
+probes when the corresponding build artifacts are absent. This repository's
+test script does not currently invoke the command as a separate CI job.
 
 ## Current limits and architecture
 

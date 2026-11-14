@@ -1,23 +1,37 @@
 # Installed native/UI package fixture
 
-Run `npm run test:dogfood` from the repository root. Requires the managed V
-toolchain, a native C compiler and SQLite development headers/library. Uses
-local npm pack/install; it does not publish or require provider/database secrets.
+The fixture is test material for Swelte, not an application to finish. Its
+routes and package are intentionally synthetic; only the capability asserted
+by each test matters. Run `npm run test:dogfood` from the repository root. It
+requires the managed V toolchain, a native C compiler, and the toolchain's
+SQLite amalgamation for the `@swelte/plus/db` fixture plugin. If it is absent,
+install it with V's `vlib/db/sqlite/install_thirdparty_sqlite.vsh` script. The
+fixture uses local npm pack/install; it does not publish or require
+provider/database secrets.
 
-The test installs an ai1-shaped tarball with a Svelte component, a universal V
-export and a server-only V module using interfaces, callbacks, channels, nested
-modules, SHA-256 and SQLite. It checks generated TS declarations and browser
-import rejection, builds the browser assets and native QuickJS server, then
-asserts JSON and server-rendered HTML with an empty runtime PATH.
+The test installs a synthetic library tarball with a Svelte component, a
+universal V export and a server-only V module using interfaces, callbacks,
+channels, nested modules and SHA-256. It checks generated TS declarations and
+browser import rejection, builds the browser assets and native QuickJS server,
+then asserts JSON and server-rendered HTML with an empty runtime PATH.
 
-SQLite is only a native-link dependency for this packaging fixture. It does not
-validate or replace PostgreSQL, migrations, pooling or application persistence.
-This is not the full ai1 port. The command prints the tested toolchain versions;
+The PostgreSQL probe is separate and uses V's existing `db.pg`; this sample
+library does not implement or replace an ORM. It does not copy or port another
+repository's product library. The command prints tested toolchain versions;
 Vite 6 remains the supported pilot baseline, without claiming Vite 8 support.
 
-`ai1/src/lib` follows the library schema in `docs/libraries.md`: real
-`svelte-package` output and declarations, raw native V exports, and author-only
+The synthetic `sample-lib/src/lib` follows the library schema in
+`docs/libraries.md`: real `svelte-package` output and declarations, raw native V exports, and author-only
 `src/routes` excluded from the tarball.
+
+For editor type resolution in the checked-in fixture, run
+`npm run prepare:dogfood` from the repository root after installing the root
+dependencies and building the engine packages. It builds the sample library's
+declarations and installs the consumer's local `file:../sample-lib` dependency.
+`contract.ts` and the Svelte page then resolve the actual package exports.
+The test runner excludes local generated output when copying fixtures and
+replaces this local dependency with a freshly packed tarball, so its installed
+package assertions still exercise the published layout.
 
 Run `npm run test:dogfood -- --browser` to verify hydration retains SSR DOM,
 wrapper context, reactive locale/query state, inline failures and refreshes
@@ -46,5 +60,8 @@ Run `npm run test:postgres -- --browser` with PostgreSQL client commands on
 PATH and a local role allowed to create databases. Standard `PGHOST`, `PGPORT`,
 `PGUSER` and authentication settings apply. It creates and drops only its own
 randomly named database; it never applies migrations to an existing app DB.
-Install libpq development files as well as SQLite development files to build.
-See `fixtures/postgres/README.md` for the app-owned database integration.
+The managed V toolchain must have its SQLite amalgamation installed, and the
+native build needs libpq development files. These are dependencies of the
+fixture plugins; Swelte does not build a PostgreSQL or SQLite ORM.
+See `fixtures/postgres/README.md` for the isolated PostgreSQL behavior tested
+for Swelte's native build integration.

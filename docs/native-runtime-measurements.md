@@ -29,8 +29,9 @@ the default 120/minute would measure admission rejection during this workload.
 Linux x64, Intel i9-12900 (24 logical CPUs), bundled V 0.5.2 7647ce1,
 Svelte 5.57.3, Vite 6.4.5, TypeScript 5.9.3. Client: Node 22.14.0 fetch.
 The fixture binary uses the test runner's default V compilation without `-prod`.
-Its installed dependency exercises SQLite/native linking and its reporting hook
-writes files; cron remains enabled. This is a short loopback functional workload,
+Its installed synthetic dependency exercises native V module packaging; the
+Plus database plugin links the toolchain's SQLite amalgamation, its reporting
+hook writes files, and cron remains enabled. This is a short loopback functional workload,
 without TLS, a real provider, PostgreSQL traffic, or a comparison server.
 
 Startup through first HTML: 26.08ms. Ready RSS: 30.11MiB; sampled peak RSS: 64.40MiB.
@@ -42,7 +43,7 @@ Startup through first HTML: 26.08ms. Ready RSS: 30.11MiB; sampled peak RSS: 64.4
 | 32 | 17.99 / 32.20 | 3.52 / 4.29 | 203.97 / 205.07 |
 
 These values describe this machine and fixture run. They establish neither
-production capacity nor a performance improvement over another stack. DF-17
-still requires production build/deployment dependencies and representative
-application/provider/database workloads, longer concurrency/cleanup runs and
-an equivalent comparison workload before comparative claims.
+production capacity nor a performance improvement over another stack. The
+repeatable Swelte fixture workload completes DF-17; production deployment
+dependencies, real application/provider/database traffic, and equivalent
+comparison workloads are outside this framework roadmap.

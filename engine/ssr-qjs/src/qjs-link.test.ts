@@ -66,7 +66,37 @@ static void *rotate(void *arg) {
     return NULL;
 }
 
+static void diagnostics(void) {
+    int handle = swelte_qjs_new_runtime();
+    assert(handle);
+    char head[64], body[256];
+    struct { char text[32]; char guard; } detail;
+    detail.guard = 42;
+    memset(detail.text, 'X', sizeof(detail.text));
+    int nh = 0, nb = 0;
+    const char *source = "export function renderRoute(){throw Error('private cause with a deliberately long detail')}";
+    int rc = swelte_qjs_render_report(handle, source, strlen(source), "/", 1, "{}", 2,
+        head, sizeof(head), &nh, body, sizeof(body), &nb, 1000, 16,
+        detail.text, sizeof(detail.text));
+    assert(rc == -1);
+    assert(strstr(detail.text, "private cause"));
+    assert(detail.text[31] == 0 && detail.guard == 42);
+    source = "export function renderRoute(){globalThis.__swelteSsrPage={renderError:'caught private cause'};return {head:'',body:'safe'}}";
+    rc = swelte_qjs_render_report(handle, source, strlen(source), "/", 1, "{}", 2,
+        head, sizeof(head), &nh, body, sizeof(body), &nb, 1000, 16,
+        detail.text, sizeof(detail.text));
+    assert(rc == 0 && strcmp(body, "safe") == 0);
+    assert(strcmp(detail.text, "caught private cause") == 0);
+    source = "export function renderRoute(){return {head:'',body:'ok'}}";
+    rc = swelte_qjs_render_report(handle, source, strlen(source), "/", 1, "{}", 2,
+        head, sizeof(head), &nh, body, sizeof(body), &nb, 1000, 16,
+        detail.text, sizeof(detail.text));
+    assert(rc == 0 && detail.text[0] == 0 && detail.guard == 42);
+    swelte_qjs_free_runtime(handle);
+}
+
 int main(void) {
+    diagnostics();
     assert(render("export function renderRoute(){return {head:'',body:'ok'}}", 1000, 16) == 0);
     assert(render("export function renderRoute(){throw Error('private detail')}", 1000, 16) == -1);
     assert(render("export function renderRoute(){while(true){}}", 10, 16) == -5);

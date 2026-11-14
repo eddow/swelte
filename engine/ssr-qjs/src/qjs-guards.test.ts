@@ -28,6 +28,16 @@ describe('item 17 — QJS-compat guards (file+line)', () => {
 		assert.doesNotThrow(() =>
 			assertQjsCompatible('c.svelte', '<button onclick={() => fetch("/x")}>x</button>')
 		)
+		assert.doesNotThrow(() =>
+			assertQjsCompatible(
+				'd.svelte',
+				'<button onclick={async () => { await fetch("/x") }}>x</button>'
+			)
+		)
+		assert.throws(
+			() => assertQjsCompatible('e.svelte', '<button onclick={(() => fetch("/x"))()}>x</button>'),
+			/top-level fetch/
+		)
 	})
 
 	it('top-level await rejected in .svelte; await inside async fn allowed', () => {
@@ -38,6 +48,26 @@ describe('item 17 — QJS-compat guards (file+line)', () => {
 		assert.doesNotThrow(() =>
 			assertQjsCompatible('b.svelte', '<script>async function f(){ await foo() }</script>')
 		)
+		assert.doesNotThrow(() =>
+			assertQjsCompatible('c.svelte', '<button onclick={async () => { await foo() }}>x</button>')
+		)
+		assert.throws(() => assertQjsCompatible('d.svelte', '<p>{await foo()}</p>'), /d\.svelte:1/)
+	})
+
+	it('class/object methods remain deferred after statements; static effects and IIFEs run at setup', () => {
+		for (const source of [
+			'class ChatView { async answer() { let sending = true; try { await fetch("/answer") } finally { sending = false } } }',
+			'const client = { async load() { const state = {}; state.ready = true; return fetch("/models") } }',
+			'<script lang="ts">class View { async load() { let ready: boolean = true; await fetch("/x") } }</script>',
+		])
+			assert.doesNotThrow(() => assertQjsCompatible('view.svelte', source))
+		for (const source of [
+			'class View { static { fetch("/x") } }',
+			'class View { static result = fetch("/x") }',
+			'const result = (() => fetch("/x"))()',
+			'if (true) { const ready = true; fetch("/x") }',
+		])
+			assert.throws(() => assertQjsCompatible('view.svelte.js', source), /top-level fetch/)
 	})
 
 	it('node: imports/requires/dynamic-import rejected; comment string is fine', () => {

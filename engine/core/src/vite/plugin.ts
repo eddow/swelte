@@ -330,6 +330,10 @@ export function swelte(options: SweltePluginOptions = {}): Plugin {
 								'\t_ = props_json',
 								"\treturn '', false",
 								'}',
+								'pub fn swelte_qjs_render_detailed(route string, props_json string) (string, bool, string) {',
+								'\thtml, ok := swelte_qjs_render_page(route, props_json)',
+								"\treturn html, ok, 'renderer unavailable'",
+								'}',
 								'',
 							].join('\n')
 						)
@@ -1142,6 +1146,10 @@ ${list(st.fields, (fld) => `\t${fld.name}${fld.optional ? '?' : ''}: ${fld.tstyp
 								'\t_ = props_json',
 								"\treturn '', false",
 								'}',
+								'pub fn swelte_qjs_render_detailed(route string, props_json string) (string, bool, string) {',
+								'\thtml, ok := swelte_qjs_render_page(route, props_json)',
+								"\treturn html, ok, 'renderer unavailable'",
+								'}',
 								'',
 							].join('\n')
 						)
@@ -1895,7 +1903,6 @@ export declare const dev: boolean
 			// language server loads vite.config.ts with cwd elsewhere.
 			const root = (userConfig && (userConfig as { root?: string }).root) || process.cwd()
 			const routesAbs = resolve(root, routesDir)
-			const libAbs = resolve(root, libDir)
 			// Chunking build config: `single` leaves Vite defaults; `layout`/`route`
 			// group the generated dynamic imports by chunk key (`.swelte/` +
 			// `chunks.json`, written by generate() before the bundle runs) so
@@ -1920,7 +1927,6 @@ export declare const dev: boolean
 				resolve: {
 					alias: [
 						{ find: '#routes', replacement: routesAbs },
-						{ find: '#lib', replacement: libAbs },
 						{ find: '#app/paths', replacement: join(resolve(root, outDir), 'paths.js') },
 						{ find: '#app/state', replacement: join(resolve(root, outDir), 'app/state.svelte.js') },
 						{
@@ -2000,6 +2006,14 @@ export declare const dev: boolean
 		},
 		async resolveId(source, importer, _opts) {
 			if (!importer) return null
+			if ((source === '#lib' || source.startsWith('#lib/')) && !source.endsWith('.v')) {
+				// Private package imports resolve in the dependency's own
+				// package scope. The host alias applies only to app sources.
+				if (importer.replace(/\\/g, '/').includes('/node_modules/')) return null
+				const root = activeRoot || serverRoot() || process.cwd()
+				const sub = source === '#lib' ? '' : source.slice('#lib/'.length)
+				return this.resolve(resolve(root, libDir, sub), importer, { skipSelf: true })
+			}
 			const npmVRef = parseNpmVSpecifier(source)
 			if (npmVRef) {
 				if (npmVBySpecifier.size === 0) {

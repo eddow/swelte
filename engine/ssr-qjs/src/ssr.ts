@@ -13,6 +13,8 @@
 //   (QJS-compat: pure-sync renderer; fetch inside handlers is fine)
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { dirname, isAbsolute, join, posix, resolve, sep } from 'node:path'
+import { parse as parseSvelte } from 'svelte/compiler'
+import ts from 'typescript'
 
 /** posix-normalize a relative import against a `./`-relative module key. */
 export function posixNormalize(fromKey: string, id: string): string {
@@ -210,6 +212,7 @@ export function stripForScan(
  * a handler is allowed (it never runs during SSR) — only a top-level call
  * would fire during render, so only that is rejected here. */
 export function assertQjsCompatible(file: string, src: string): void {
+	const deferred = deferredScopes(file, src)
 	const { code, lineOf } = stripForScan(src)
 	const at = (idx: number) => `${file}:${lineOf(idx)}`
 	for (const m of code.matchAll(/\bfrom\s+['"]node:/g)) {
@@ -223,7 +226,7 @@ export function assertQjsCompatible(file: string, src: string): void {
 		)
 	}
 	for (const m of code.matchAll(/(^|[^A-Za-z0-9_$])fetch\s*\(/gm)) {
-		if (isTopLevelCall(code, (m.index ?? 0) + m[0].length)) {
+		if (!deferred((m.index ?? 0) + m[0].length - 1)) {
 			throw new Error(
 				`[swelte:ssr-qjs] ${at(m.index ?? 0)}: top-level fetch() is forbidden in SSR components (QuickJS-compat: JS stays pure-sync, load() lives in V; fetch inside handlers is fine)`
 			)
@@ -234,7 +237,7 @@ export function assertQjsCompatible(file: string, src: string): void {
 	if (file.endsWith('.svelte')) {
 		for (const m of code.matchAll(/\bawait\s+/g)) {
 			const idStart = m.index ?? 0
-			if (isTopLevelAwait(code, idStart)) {
+			if (!deferred(idStart)) {
 				throw new Error(
 					`[swelte:ssr-qjs] ${at(idStart)}: top-level await is forbidden in SSR render.js (QuickJS-compat: pure-sync renderer)`
 				)
@@ -243,73 +246,80 @@ export function assertQjsCompatible(file: string, src: string): void {
 	}
 }
 
-/** True when the `fetch` call ending at `callEnd` sits at module top level
- * (not nested in any function body). Assumes comments/strings stripped.
- * Backward brace walk from the call: `}`/`{` and `)`/`(` adjust depth.
- * A `{` that closes to depth 0 *before* reaching the statement start
- * means the call is inside a block — then check whether that block
- * belongs to a function/arrow (search the 200 chars before it for
- * `function`, `=>`, or ` class `). Plain `{ if… }` blocks without a
- * function opener still count as top-level (they run during SSR). */
-function isTopLevelCall(code: string, callEnd: number): boolean {
-	// Find enclosing block openers by walking back with depth.
-	let depth = 0
-	for (let j = callEnd - 1; j >= 0; j--) {
-		const c = code[j]
-		if (c === '}' || c === ')') depth++
-		else if (c === '{' || c === '(') {
-			if (depth > 0) {
-				depth--
-				continue
-			}
-			// depth 0 opener at j: does a function/arrow own this block?
-			const before = code.slice(Math.max(0, j - 200), j)
-			if (/\bfunction\b|=>|\bclass\b/.test(before.split(';').pop() ?? '')) return false
-			// Plain block (if/for/bare): keep walking outward.
-			continue
-		} else if (c === ';' && depth === 0) {
-			// Statement boundary without crossing a block: check the head.
-			const head = code.slice(j + 1, callEnd)
-			if (/\bfunction\b|\bclass\b/.test(head)) return false
-			return !/=>/.test(head)
-		}
-		if (j === 0) {
-			const head = code.slice(0, callEnd)
-			if (/\bfunction\b|\bclass\b/.test(head)) return false
-			return !/=>/.test(head)
-		}
-	}
-	return true
-}
+/** Locate actual deferred function bodies. A brace/semicolon heuristic cannot
+ * distinguish a class method containing multiple statements from module setup.
+ * Parse each Svelte script with the existing TypeScript build dependency while
+ * retaining source offsets. Static blocks and field initializers are not method
+ * bodies. This is a syntactic guard, not whole-program effect analysis; native
+ * QJS still has no fetch/Node globals if user code invokes a handler during SSR.
+ */
 
-/** True when `await` at `idx` is not inside a function body (module TLA).
- * Same backward-walk as isTopLevelCall: block openers checked for a
- * function/arrow owner, statement heads for `function`/`class`/`=>`. */
-function isTopLevelAwait(code: string, idx: number): boolean {
-	let depth = 0
-	for (let j = idx - 1; j >= 0; j--) {
-		const c = code[j]
-		if (c === '}' || c === ')') depth++
-		else if (c === '{' || c === '(') {
-			if (depth > 0) {
-				depth--
-				continue
+function deferredScopes(file: string, src: string): (index: number) => boolean {
+	const outsideScripts = src.replace(/<script\b[^>]*>[\s\S]*?<\/script>/g, '')
+	const hasMarkup = /<\/?[A-Za-z][\w:.-]*(?:\s|\/?>)/.test(outsideScripts)
+	if (file.endsWith('.svelte') && hasMarkup) {
+		const ast = parseSvelte(src, { modern: true }) as unknown as Record<string, unknown>
+		const ranges: [number, number][] = []
+		const visit = (node: unknown, parent?: Record<string, unknown>): void => {
+			if (!node || typeof node !== 'object') return
+			if (Array.isArray(node)) {
+				for (const child of node) visit(child, parent)
+				return
 			}
-			const before = code.slice(Math.max(0, j - 200), j)
-			if (/\bfunction\b|=>|\bclass\b/.test(before.split(';').pop() ?? '')) return false
-			continue
-		} else if (c === ';' && depth === 0) {
-			const head = code.slice(j + 1, idx)
-			if (/\bfunction\b|\bclass\b/.test(head)) return false
-			return !/=>/.test(head)
+			const current = node as Record<string, unknown>
+			const type = current.type
+			const body = current.body as Record<string, unknown> | undefined
+			const functionLike =
+				type === 'FunctionDeclaration' ||
+				type === 'FunctionExpression' ||
+				type === 'ArrowFunctionExpression'
+			const immediate = parent?.type === 'CallExpression' && parent.callee === current
+			if (
+				functionLike &&
+				!immediate &&
+				typeof body?.start === 'number' &&
+				typeof body?.end === 'number'
+			) {
+				ranges.push([body.start, body.end])
+			}
+			for (const [key, value] of Object.entries(current)) {
+				if (key === 'parent' || key === 'loc' || key === 'start' || key === 'end') continue
+				if (Array.isArray(value)) for (const child of value) visit(child, current)
+				else if (value && typeof value === 'object') visit(value, current)
+			}
 		}
-		if (j === 0) {
-			const head = code.slice(0, idx)
-			if (/\bfunction\b|\bclass\b/.test(head)) return false
-			return !/=>/.test(head)
-		}
+		visit(ast)
+		return (index) => ranges.some(([start, end]) => index >= start && index < end)
 	}
-	return true
+	const scripts = [...src.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script>/g)]
+	const chunks = scripts.length
+		? scripts.map((match) => ({
+				source: match[1],
+				offset: match.index! + match[0].indexOf('>') + 1,
+			}))
+		: [{ source: src, offset: 0 }]
+	const ranges: [number, number][] = []
+	for (const { source, offset } of chunks) {
+		const ast = ts.createSourceFile(
+			'render.ts',
+			source,
+			ts.ScriptTarget.Latest,
+			true,
+			!scripts.length && source.trimStart().startsWith('<') ? ts.ScriptKind.TSX : ts.ScriptKind.TS
+		)
+		const visit = (node: ts.Node): void => {
+			if (ts.isFunctionLike(node) && 'body' in node && node.body) {
+				let expression: ts.Node = node
+				while (ts.isParenthesizedExpression(expression.parent)) expression = expression.parent
+				const immediate =
+					ts.isCallExpression(expression.parent) && expression.parent.expression === expression
+				if (!immediate) ranges.push([node.body.getStart(ast) + offset, node.body.end + offset])
+			}
+			ts.forEachChild(node, visit)
+		}
+		visit(ast)
+	}
+	return (index) => ranges.some(([start, end]) => index >= start && index < end)
 }
 
 /** node: externals only (bundle backstop; the full compat scan runs per
@@ -493,7 +503,7 @@ export function stubSdkImports(code: string, relFile: string): string {
  * router or stores (imports above are render-time throw-stubs / dropped).
  * Calls nested in handlers (`onclick`), lifecycle (`onMount`), or
  * `<svelte:boundary>` client fragments are fine — they never run in SSR.
- * Same brace-walk as isTopLevelCall, but tracks imported local names
+ * Uses syntactic function scopes and tracks imported local names
  * (incl. `as` aliases) instead of a fixed `fetch(` spelling. */
 export async function assertNoSdkTopLevelCalls(
 	_absFile: string,
@@ -527,13 +537,15 @@ export async function assertNoSdkTopLevelCalls(
 	const scripts = [...src.matchAll(/<script[^>]*>([\s\S]*?)<\/script>/g)]
 		.map((m) => m[1])
 		.join('\n')
-	const { code, lineOf } = stripForScan(scripts === '' ? src : scripts)
+	const source = scripts === '' ? src : scripts
+	const deferred = deferredScopes(`${relFile}.js`, source)
+	const { code, lineOf } = stripForScan(source)
 	const at = (idx: number) => `${relFile}:${lineOf(idx)}`
 	for (const m of code.matchAll(/\b([A-Za-z_$][A-Za-z0-9_$]*)\s*\(/g)) {
 		const nm = m[1] as string
 		if (!sdkNames.has(nm)) continue
 		const callEnd = (m.index ?? 0) + m[0].length
-		if (!isTopLevelCall(code, callEnd)) continue
+		if (deferred(callEnd - 1)) continue
 		throw new Error(
 			`[swelte:ssr-qjs] ${at(m.index ?? 0)}: top-level stub call (${nm}) is forbidden in SSR components (QJS-compat: stub SDK calls only inside handlers/onMount — never at setup top level)`
 		)
@@ -637,6 +649,11 @@ export async function bundleSsr(
 	bundleLibDir = 'src/lib'
 ): Promise<string> {
 	const { rollup } = (await import('rollup')) as typeof import('rollup')
+	// The plugin's dual-package declaration is interpreted differently by
+	// NodeNext (tests) and bundler resolution. Its ESM default is a factory.
+	const commonjs = (await import('@rollup/plugin-commonjs')).default as unknown as (options: {
+		ignoreTryCatch: boolean
+	}) => import('rollup').Plugin
 	// svelte resolves from the adapter's own install (peer dep), falling
 	// back to cwd — the fixture dir may not have node_modules.
 	const { createRequire } = await import('node:module')
@@ -684,6 +701,7 @@ export async function bundleSsr(
 		name: 'swelte-ssr-resolve',
 		async resolveId(id: string, importer: string | undefined) {
 			if (modules.has(id)) return id
+			if (id.startsWith('\0')) return null
 			// Exact-ID `$app`/`#app` stubs only (see resolveSdkShim): inline
 			// the server-shaped source (no disk read — the browser bundle
 			// resolves the real files via Vite aliases independently).
@@ -716,6 +734,10 @@ export async function bundleSsr(
 			// bundles the real source. Mirrors the client's `#lib → src/lib`
 			// alias (non-enumerable `swelte` key keeps it out of svelte()).
 			if (id === '#lib' || id.startsWith('#lib/')) {
+				// An installed library's package.json imports belong to that
+				// package. Never redirect its private #lib alias into the host.
+				if (importer && sourceFile(importer).replace(/\\/g, '/').includes('/node_modules/'))
+					return await resolvePackage(id, sourceFile(importer))
 				return (
 					(await registerLibModule(modules, bundleRoot || process.cwd(), bundleLibDir, id)) ?? null
 				)
@@ -744,25 +766,10 @@ export async function bundleSsr(
 			)
 				return join(shimDir, 'svelte-render-context.js')
 			if (id === 'svelte') {
-				// A2 lifecycle shim (SvelteKit parity): bare `svelte` re-exports
-				// the client runtime, but `onMount`/`beforeUpdate`/`afterUpdate`
-				// are server `noop`s — the client impls throw
-				// `lifecycle_outside_component` during sync `render()` (no
-				// client `component_context` server-side), while svelte's own
-				// package map (`default` → `src/index-server.js`) documents
-				// them as noops. Explicit named exports shadow the star
-				// re-export per ESM semantics. Upstream files for review on
-				// svelte upgrades: `src/index-client.js` (throwing impls),
-				// `src/index-server.js` (noop impls).
-				const clientAbs = join(svelteRoot, 'src/index-client.js')
-				const key = '\0swelte-svelte-lifecycle'
-				if (!modules.has(key)) {
-					modules.set(
-						key,
-						`export * from ${JSON.stringify(clientAbs)};\nexport { getContext, setContext, hasContext, getAllContexts } from ${JSON.stringify(join(svelteRoot, 'src/internal/server/context.js'))};\nexport function onMount() {}\nexport function beforeUpdate() {}\nexport function afterUpdate() {}\n`
-					)
-				}
-				return key
+				// Use the canonical server exports, including onDestroy and
+				// createContext. Mixing client lifecycle with server context
+				// breaks installed UI components during synchronous rendering.
+				return join(svelteRoot, 'src/index-server.js')
 			}
 			if (id.startsWith('svelte/')) {
 				const sub = id.replace(/^svelte\/?/, '')
@@ -799,7 +806,7 @@ export async function bundleSsr(
 				const full = resolve(dirname(importer), id)
 				for (const cand of [full, `${full}.js`, `${full}.svelte`]) {
 					if (modules.has(cand)) return cand
-					if (existsSync(cand)) return cand
+					if (existsSync(cand) && statSync(cand).isFile()) return cand
 				}
 				// Compiled-module keys are `./`-relative posix paths, keyed
 				// off the importer when it is one of them; the loader then
@@ -835,7 +842,7 @@ export async function bundleSsr(
 	}
 	const bundle = await rollup({
 		input: entry,
-		plugins: [plugin],
+		plugins: [plugin, commonjs({ ignoreTryCatch: false })],
 		onwarn(warning) {
 			if (warning.code === 'UNRESOLVED_IMPORT') {
 				throw new Error(`[swelte:ssr-qjs] unresolved SSR import: ${warning.message}`)
@@ -1209,7 +1216,7 @@ export function renderRoute(route, props_json) {
       }
       return run(PAGES[abs], props, route);
     } catch (e) {
-      if (globalThis.__swelteSsrPage) globalThis.__swelteSsrPage.renderError = String(e?.stack ?? e);
+      if (globalThis.__swelteSsrPage) globalThis.__swelteSsrPage.renderError = (String(e) + (e?.stack ? '\\n' + e.stack : '')).slice(0, 8191);
       props = { status: 500, message: 'render failed' };
     }
   }
@@ -1221,7 +1228,7 @@ export function renderRoute(route, props_json) {
     }
     catch (e) { /* fall through */ }
   }
-  return { head: '', body: '<!--swelte:ssr:' + route + '-->' };
+  return { head: '', body: globalThis.__swelteSsrPage?.renderError ? '<div data-swelte-render-error="1"></div>' : '<!--swelte:ssr:' + route + '-->' };
 }
 `
 	const entryAbs = join(root, '.swelte', 'ssr-entry.js')

@@ -76,6 +76,18 @@ int swelte_qjs_render_head_body(int rt_handle, const char *mod_src, int mod_len,
                                 int *head_len_out, char *body_buf, int body_cap,
                                 int *body_len_out, int timeout_ms, unsigned mem_cap_mb);
 
+// Same render, with a private caller-owned diagnostic buffer. Contains the
+// original JS exception/stack (or a caught render error), never HTML. At most
+// diagnostic_cap-1 bytes, NUL terminated; cleared on every invocation. The
+// caller decides whether to forward it to server-only reporting. No global
+// error slot: concurrent requests cannot consume each other's diagnostics.
+int swelte_qjs_render_report(int rt_handle, const char *mod_src, int mod_len,
+                            const char *route, int route_len, const char *props,
+                            int props_len, char *head_buf, int head_cap,
+                            int *head_len_out, char *body_buf, int body_cap,
+                            int *body_len_out, int timeout_ms, unsigned mem_cap_mb,
+                            char *diagnostic_buf, int diagnostic_cap);
+
 #ifdef __cplusplus
 }
 #endif

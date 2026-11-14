@@ -1,13 +1,12 @@
 module home
 
-import npm_swelte_dogfood_ai1.runner
+import npm_swelte_dogfood_sample_lib.runner
 import time
 import os
 
 pub struct Probe {
 pub:
 	message string
-	database int
 	digest string
 }
 
@@ -28,7 +27,7 @@ fn snapshot() !Probe {
 		if err.msg() != 'subscriber cancelled' {
 			return err
 		}
-		return Probe{message, runner.database_probe()!, runner.digest('hello')}
+		return Probe{message, runner.digest('hello')}
 	}
 	return error('expected subscriber cancellation')
 }

@@ -3,16 +3,19 @@
 import assert from 'node:assert/strict'
 import { spawn, execFileSync } from 'node:child_process'
 import { once } from 'node:events'
-import { mkdirSync, readFileSync, realpathSync, statSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, realpathSync, statSync, writeFileSync } from 'node:fs'
 import { createServer } from 'node:net'
 import { arch, cpus, platform, release } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { performance } from 'node:perf_hooks'
 
-const [appArg, outputArg] = process.argv.slice(2)
-if (!appArg) throw new Error('usage: node scripts/measure-dogfood.mjs <built fixture app> [report.json]')
+const stress = process.argv.includes('--stress')
+const [appArg, outputArg] = process.argv.slice(2).filter(arg => arg !== '--stress')
+if (!appArg) throw new Error('usage: node scripts/measure-dogfood.mjs <built fixture app> [report.json] [--stress]')
 const app = resolve(appArg)
 const binary = join(app, platform() === 'win32' ? 'server.exe' : 'server')
+const buildFile = join(app, '.swelte/dogfood-build.json')
+const build = existsSync(buildFile) ? JSON.parse(readFileSync(buildFile, 'utf8')) : null
 const output = resolve(outputArg ?? join(app, 'native-measurements.json'))
 assert.ok(statSync(binary).isFile(), 'build a retained test:dogfood fixture first (--keep)')
 const probe = createServer()
@@ -24,7 +27,7 @@ const url = `http://127.0.0.1:${port}/`
 const started = performance.now()
 const server = spawn(binary, [], {
   cwd: app,
-  env: { ...process.env, PATH: '', PORT: String(port), SWELTE_DIST: join(app, 'dist'), SWELTE_SSR: '1', SWELTE_SSR_STRICT: '1', SWELTE_RATE_LIMIT: '100000' },
+  env: { ...process.env, PATH: '', PORT: String(port), SWELTE_DIST: join(app, 'dist'), SWELTE_SSR: '1', SWELTE_SSR_STRICT: '1', SWELTE_RATE_LIMIT: '100000', SWELTE_SSE_HEARTBEAT_MS: '100' },
   stdio: ['ignore', 'pipe', 'pipe'],
 })
 const exited = once(server, 'exit')
@@ -87,6 +90,37 @@ async function batch(kind, concurrency, requests) {
   const elapsedMs = performance.now() - start
   return { kind, concurrency, requests, elapsedMs: Number(elapsedMs.toFixed(3)), requestsPerSecond: Number((requests * 1000 / elapsedMs).toFixed(3)), completionMs: summary(durations), ...(firstEvents.length ? { firstEventMs: summary(firstEvents) } : {}), memory: memory() }
 }
+async function roomCleanup(concurrency, round) {
+  const room = `measurement-room-${round}`
+  const listeners = async () => {
+    const response = await fetch(`${url}listeners?name=${room}`, { signal: AbortSignal.timeout(5000) })
+    assert.equal(response.status, 200)
+    return Number(await response.text())
+  }
+  const streams = await Promise.all(Array.from({ length: concurrency }, async () => {
+    const response = await fetch(`${url}room?name=${room}`, { headers: { accept: 'text/event-stream' }, signal: AbortSignal.timeout(15000) })
+    assert.equal(response.status, 200)
+    const reader = response.body.getReader()
+    let body = ''
+    while (!body.includes('subscribed')) {
+      const { value, done } = await reader.read()
+      assert.equal(done, false)
+      body += new TextDecoder().decode(value)
+    }
+    return reader
+  }))
+  // Each handler subscribes twice; both IDs must be reclaimed.
+  assert.equal(await listeners(), concurrency * 2)
+  await Promise.all(streams.map(reader => reader.cancel()))
+  const deadline = Date.now() + 5000
+  for (;;) {
+    const remaining = await listeners()
+    if (remaining === 0) break
+    assert.ok(Date.now() < deadline, `room leaked ${remaining} subscriptions`)
+    await new Promise(resolveWait => setTimeout(resolveWait, 25))
+  }
+  return { concurrentSubscribers: concurrency, subscriptionsReleased: concurrency * 2 }
+}
 let report
 try {
   for (;;) {
@@ -101,9 +135,15 @@ try {
   const readyMemory = memory()
   for (let i = 0; i < 8; i++) await html(i)
   const results = []
-  for (const concurrency of [1, 8, 32]) {
-    results.push(await batch('html', concurrency, 64))
-    results.push(await batch('stream', concurrency, 32))
+  const cleanup = []
+  const rounds = stress ? 10 : 1
+  for (let round = 1; round <= rounds; round++) {
+    for (const concurrency of [1, 8, 32]) {
+      results.push({ round, ...await batch('html', concurrency, 64) })
+      results.push({ round, ...await batch('stream', concurrency, 32) })
+    }
+    if (stress) cleanup.push({ round, ...await roomCleanup(32, round) })
+    console.log(`measurement: round ${round}/${rounds} passed`)
   }
   let nativeDependencies = null
   if (platform() === 'linux') nativeDependencies = execFileSync('ldd', [binary], { encoding: 'utf8' }).trim().split('\n').map(line => line.trim())
@@ -111,7 +151,8 @@ try {
     measuredAt: new Date().toISOString(),
     scope: 'Loopback fixture only; Node drives requests outside the native server. No application-scale or comparative performance claim.',
     system: { platform: platform(), release: release(), arch: arch(), cpu: cpus()[0]?.model, logicalCpus: cpus().length },
-    workload: { html: 'Guarded root load, installed native/UI dependency, locale metadata and strict embedded QuickJS SSR', stream: 'Native POST SSE: fragmented UTF-8 delta, 200ms producer delay, done event', warmupHtmlRequests: 8, rateLimitPerMinute: 100000, concurrency: [1, 8, 32], note: 'Includes fixture reporting/file I/O and cron. HTTP client connection reuse is Node fetch default; no TLS or provider/DB workload. Retained fixture uses the test runner V compilation without -prod optimization.' },
+    build,
+    workload: { html: 'Guarded root load, installed native/UI dependency, locale metadata and strict embedded QuickJS SSR', stream: 'Native POST SSE: fragmented UTF-8 delta, 200ms producer delay, done event', rounds, roomCleanup: cleanup, warmupHtmlRequests: 8, rateLimitPerMinute: 100000, sseHeartbeatMs: 100, concurrency: [1, 8, 32], note: 'Includes fixture reporting/file I/O and cron. HTTP client connection reuse is Node fetch default; no TLS or provider/DB workload. Build optimization and versions are recorded when fixture metadata exists.' },
     runtimePathEmpty: true, binaryBytes: statSync(binary).size,
     startupToFirstHtmlMs: Number(startupToFirstHtmlMs.toFixed(3)),
     readyMemory, sampledPeakRssKiB, finalMemory: memory(), nativeDependencies, results,

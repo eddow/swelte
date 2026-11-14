@@ -6,7 +6,7 @@
 // HMR: watches the render.js file (mtime); re-imports on change, no
 // V restart. Timeout on any render -> caller falls back to SPA shell.
 
-import { existsSync, statSync, watch } from 'node:fs'
+import { existsSync, statSync, watch, type FSWatcher } from 'node:fs'
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
 import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -15,6 +15,8 @@ export interface SsrDevOptions {
 	root: string
 	renderFile: string
 	port: number
+	/** Source directories whose Svelte edits invalidate the cached renderer. */
+	watchDirs?: string[]
 	/** Per-render budget in ms (default 50, 0 = none). Races the bundle call. */
 	renderTimeoutMs?: number
 	/** Max JSON body in bytes (default 1MB). Larger → 413, never buffered. */
@@ -44,14 +46,21 @@ export async function startSsrDevServer(opts: SsrDevOptions) {
 		}
 	}
 
-	try {
-		watch(resolve(root), { recursive: true }, (_ev, file) => {
-			if (typeof file === 'string' && file.endsWith('.svelte')) {
-				mtime = 0
-			}
-		}).unref?.()
-	} catch {
-		/* best-effort */
+	const watchers: FSWatcher[] = []
+	for (const dir of opts.watchDirs ?? ['src/routes', 'src/lib']) {
+		const watchRoot = resolve(root, dir)
+		if (!existsSync(watchRoot)) continue
+		try {
+			const watcher = watch(watchRoot, { recursive: true }, (_ev, file) => {
+				if (typeof file === 'string' && file.endsWith('.svelte')) {
+					mtime = 0
+				}
+			})
+			watcher.unref()
+			watchers.push(watcher)
+		} catch {
+			/* best-effort */
+		}
 	}
 
 	const renderTimeoutMs = opts.renderTimeoutMs ?? 50
@@ -129,7 +138,10 @@ export async function startSsrDevServer(opts: SsrDevOptions) {
 		port: opts.port,
 		url: `http://127.0.0.1:${opts.port}`,
 		async close() {
-			await new Promise<void>((r) => server.close(() => r()))
+			for (const watcher of watchers) watcher.close()
+			const closed = new Promise<void>((r) => server.close(() => r()))
+			server.closeAllConnections()
+			await closed
 		},
 	}
 }

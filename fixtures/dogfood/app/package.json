@@ -2,5 +2,8 @@
   "name": "swelte-dogfood-consumer",
   "version": "0.0.0",
   "private": true,
-  "type": "module"
+  "type": "module",
+  "dependencies": {
+    "@swelte-dogfood/sample-lib": "file:../sample-lib"
+  }
 }

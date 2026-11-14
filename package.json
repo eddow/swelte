@@ -16,6 +16,7 @@
     "test:examples": "npm run test:full --workspace=examples/tests",
     "test:install": "node scripts/test-install.mjs",
     "test:dogfood": "node scripts/test-dogfood.mjs",
+    "prepare:dogfood": "npm run build:lib --prefix fixtures/dogfood/sample-lib && npm install --prefix fixtures/dogfood/app --ignore-scripts --offline --no-audit --no-fund --package-lock=false",
     "test:postgres": "node scripts/test-postgres.mjs",
     "measure:dogfood": "node scripts/measure-dogfood.mjs",
     "version:sync": "node scripts/sync-version.mjs",

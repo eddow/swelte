@@ -1,10 +1,12 @@
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
 import { once } from 'node:events'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 
-export async function checkStrictSsr(binary, app, runtimeEnv, port) {
+export async function checkStrictSsr(binary, app, runtimeEnv, port, reports = false) {
   let log = ''
-  const server = spawn(binary, [], { cwd: app, env: { ...runtimeEnv, PORT: String(port), SWELTE_SSR_STRICT: '1' }, stdio: ['ignore', 'pipe', 'pipe'] })
+  const server = spawn(binary, [], { cwd: app, env: { ...runtimeEnv, PORT: String(port), SWELTE_SSR_STRICT: '1', SWELTE_SSR_DIAGNOSTICS: '1' }, stdio: ['ignore', 'pipe', 'pipe'] })
   server.stdout.on('data', bytes => { log = (log + bytes).slice(-16000) })
   server.stderr.on('data', bytes => { log = (log + bytes).slice(-16000) })
   try {
@@ -27,6 +29,18 @@ export async function checkStrictSsr(binary, app, runtimeEnv, port) {
     }
     assert.match(log, /reason=timeout/)
     assert.match(log, /reason=output-limit/)
+    if (reports) {
+      await Promise.all([['render-fail', 'private renderer failure'], ['universal-fail', 'private universal failure']].map(async ([query, cause]) => {
+        const response = await request(query)
+        assert.equal(response.status, 500)
+        assert.doesNotMatch(await response.text(), /private/)
+        const report = JSON.parse(readFileSync(join(app, `report-${response.headers.get('x-swelte-request-id')}-ssr-error`), 'utf8'))
+        assert.ok(report.message.includes(cause), report.message)
+        assert.ok(report.message.includes('at '), 'original stack should reach the private hook')
+        assert.equal(report.path, '/')
+      }))
+      assert.doesNotMatch(log, /private renderer|private universal/)
+    }
     const head = await request('ssr-head')
     assert.equal(head.status, 200)
     assert.equal((await head.text()).match(/name="head-proof" content="(x+)"/)?.[1].length, 10000)

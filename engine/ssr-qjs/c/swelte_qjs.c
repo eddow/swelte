@@ -237,7 +237,7 @@ static int swelte_qjs_render_inner(int rt_handle, const char *mod_src, int mod_l
                                    int props_len, char *out_buf, int out_cap,
                                    int timeout_ms, unsigned mem_cap_mb,
                                    int want_head, char *head_buf, int head_cap,
-                                   int *head_len_out);
+                                   int *head_len_out, char *diagnostic_buf, int diagnostic_cap);
 
 int swelte_qjs_render(int rt_handle, const char *mod_src, int mod_len,
                       const char *route, int route_len, const char *props,
@@ -245,7 +245,39 @@ int swelte_qjs_render(int rt_handle, const char *mod_src, int mod_len,
                       int timeout_ms, unsigned mem_cap_mb) {
     return swelte_qjs_render_inner(rt_handle, mod_src, mod_len, route, route_len,
                                    props, props_len, out_buf, out_cap,
-                                   timeout_ms, mem_cap_mb, 0, NULL, 0, NULL);
+                                   timeout_ms, mem_cap_mb, 0, NULL, 0, NULL, NULL, 0);
+}
+
+// Conversion stays under the render interrupt budget. JS may throw arbitrary
+// objects with user-defined string/stack accessors. Never disable the budget
+// to collect an error, and skip conversion entirely after interruption.
+static void swelte_qjs_copy_diagnostic(JSContext *ctx, JSValueConst value,
+                                      char *buf, int cap) {
+    if (!buf || cap < 2 || JS_IsUndefined(value) || JS_IsNull(value)) return;
+    JSValue stack = JS_IsObject(value) ? JS_GetPropertyStr(ctx, value, "stack") : JS_UNDEFINED;
+    size_t len = 0;
+    const char *text = JS_ToCStringLen(ctx, &len, value);
+    size_t count = 0;
+    if (text) {
+        count = len < (size_t)(cap - 1) ? len : (size_t)(cap - 1);
+        while (count < len && count > 0 && ((unsigned char)text[count] & 0xc0) == 0x80) count--;
+        memcpy(buf, text, count);
+        buf[count] = 0;
+        JS_FreeCString(ctx, text);
+    }
+    if (count < (size_t)(cap - 2) && !JS_IsException(stack) && !JS_IsUndefined(stack)) {
+        text = JS_ToCStringLen(ctx, &len, stack);
+        if (text) {
+            buf[count++] = '\n';
+            size_t remaining = (size_t)(cap - 1) - count;
+            size_t extra = len < remaining ? len : remaining;
+            while (extra < len && extra > 0 && ((unsigned char)text[extra] & 0xc0) == 0x80) extra--;
+            memcpy(buf + count, text, extra);
+            buf[count + extra] = 0;
+            JS_FreeCString(ctx, text);
+        }
+    }
+    JS_FreeValue(ctx, stack);
 }
 
 /* Shared render core. When want_head is set, also extracts `ret.head`
@@ -257,7 +289,8 @@ static int swelte_qjs_render_inner(int rt_handle, const char *mod_src, int mod_l
                                    int props_len, char *out_buf, int out_cap,
                                    int timeout_ms, unsigned mem_cap_mb,
                                    int want_head, char *head_buf, int head_cap,
-                                   int *head_len_out) {
+                                   int *head_len_out, char *diagnostic_buf, int diagnostic_cap) {
+    if (diagnostic_buf && diagnostic_cap > 0) diagnostic_buf[0] = 0;
     if (head_len_out)
         *head_len_out = 0;
     if (head_cap > 0 && head_buf)
@@ -453,6 +486,19 @@ static int swelte_qjs_render_inner(int rt_handle, const char *mod_src, int mod_l
         JS_FreeCString(ctx, bs);
         rc = (int)blen;
     }
+    if (diagnostic_buf && diagnostic_cap > 1) {
+        // Svelte composition catches render errors to render a sanitized
+        // +error component; its private per-render context retains the cause.
+        JSValue global = JS_GetGlobalObject(ctx);
+        JSValue page = JS_GetPropertyStr(ctx, global, "__swelteSsrPage");
+        if (JS_IsObject(page)) {
+            JSValue error = JS_GetPropertyStr(ctx, page, "renderError");
+            swelte_qjs_copy_diagnostic(ctx, error, diagnostic_buf, diagnostic_cap);
+            JS_FreeValue(ctx, error);
+        }
+        JS_FreeValue(ctx, page);
+        JS_FreeValue(ctx, global);
+    }
 done:
     if (budget.interrupted) {
         rc = -5;
@@ -461,6 +507,7 @@ done:
         const char *message = JS_ToCString(ctx, exception);
         if (message && strstr(message, "out of memory")) rc = -6;
         if (message) JS_FreeCString(ctx, message);
+        if (rc != -6) swelte_qjs_copy_diagnostic(ctx, exception, diagnostic_buf, diagnostic_cap);
         JS_FreeValue(ctx, exception);
     }
     free(rdup);
@@ -477,6 +524,17 @@ int swelte_qjs_render_head_body(int rt_handle, const char *mod_src, int mod_len,
                                 int props_len, char *head_buf, int head_cap,
                                 int *head_len_out, char *body_buf, int body_cap,
                                 int *body_len_out, int timeout_ms, unsigned mem_cap_mb) {
+    return swelte_qjs_render_report(rt_handle, mod_src, mod_len, route, route_len,
+        props, props_len, head_buf, head_cap, head_len_out, body_buf, body_cap,
+        body_len_out, timeout_ms, mem_cap_mb, NULL, 0);
+}
+
+int swelte_qjs_render_report(int rt_handle, const char *mod_src, int mod_len,
+                            const char *route, int route_len, const char *props,
+                            int props_len, char *head_buf, int head_cap,
+                            int *head_len_out, char *body_buf, int body_cap,
+                            int *body_len_out, int timeout_ms, unsigned mem_cap_mb,
+                            char *diagnostic_buf, int diagnostic_cap) {
     if (head_len_out)
         *head_len_out = 0;
     if (body_len_out)
@@ -484,7 +542,7 @@ int swelte_qjs_render_head_body(int rt_handle, const char *mod_src, int mod_len,
     int rc = swelte_qjs_render_inner(rt_handle, mod_src, mod_len, route, route_len,
                                      props, props_len, body_buf, body_cap,
                                      timeout_ms, mem_cap_mb,
-                                     1, head_buf, head_cap, head_len_out);
+                                     1, head_buf, head_cap, head_len_out, diagnostic_buf, diagnostic_cap);
     if (rc < 0)
         return rc;
     /* Inner returns body needed length; the dual-buffer contract returns

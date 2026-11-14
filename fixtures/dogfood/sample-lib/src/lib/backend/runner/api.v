@@ -1,8 +1,7 @@
 module runner
 
 import crypto.sha256
-import db.sqlite
-import npm_swelte_dogfood_ai1.runner.formatting
+import npm_swelte_dogfood_sample_lib.runner.formatting
 
 // Native interfaces and callbacks are not browser RPC signatures.
 pub interface Store {
@@ -32,14 +31,6 @@ pub fn run(store Store, input string, emit fn (string) bool) !string {
 		return error('subscriber cancelled')
 	}
 	return message
-}
-
-// A real native database link, not a PostgreSQL integration substitute.
-pub fn database_probe() !int {
-	mut db := sqlite.connect(':memory:')!
-	defer { db.close() or {} }
-	row := db.exec_one('select 7')!
-	return row.vals[0].int()
 }
 
 pub fn digest(value string) string {

@@ -20,7 +20,8 @@ export interface SsrDevRunOptions {
 export async function runSsrDev(opts: SsrDevRunOptions = {}): Promise<void> {
 	const root = resolve(String(opts.root ?? process.cwd()))
 	const { loadConfig, loadProjectSwelteOptions } = await import('@swelte/core/config')
-	const outDir = String(opts.outDir ?? (await loadConfig(root)).outDir ?? '.swelte')
+	const config = await loadConfig(root)
+	const outDir = String(opts.outDir ?? config.outDir ?? '.swelte')
 	const { startSsrDevServer, renderFileFor } = await import('./dev.js')
 	const { emitRenderJs } = await import('./ssr.js')
 	const { readFileSync } = await import('node:fs')
@@ -43,7 +44,12 @@ export async function runSsrDev(opts: SsrDevRunOptions = {}): Promise<void> {
 	await emitRenderJs(manifest, { root, prod: false })
 	const renderFile = renderFileFor(root, outDir, false)
 	const ssrPort = opts.ssrPort ?? 8132
-	const sidecar = await startSsrDevServer({ root, renderFile, port: ssrPort })
+	const sidecar = await startSsrDevServer({
+		root,
+		renderFile,
+		port: ssrPort,
+		watchDirs: [config.routesDir, config.libDir],
+	})
 	console.log(`swelte-ssr dev: sidecar ${sidecar.url} (dev-only; prod embeds via qjsc)`)
 	process.env.SWELTE_SSR_URL = sidecar.url
 	const { runDev } = (await import('@swelte/core/cli')) as unknown as {
@@ -192,7 +198,9 @@ async function withProdBinary(
 		cwd: root,
 		env: { ...process.env, PORT: String(port), SWELTE_DIST: 'dist', SWELTE_SSR: '1' },
 		stdio: ['ignore', 'pipe', 'pipe'],
+		detached: process.platform !== 'win32',
 	})
+	const closed = new Promise<void>((resolveClose) => child.once('close', resolveClose))
 	let out = ''
 	child.stderr?.on('data', (d: Buffer) => {
 		out += d.toString()
@@ -215,17 +223,27 @@ async function withProdBinary(
 		}
 		await fn(`http://127.0.0.1:${port}`)
 	} finally {
-		try {
-			child.kill('SIGTERM')
-		} catch {
-			/* ignore */
+		const signalTree = (signal: NodeJS.Signals) => {
+			try {
+				if (process.platform !== 'win32' && child.pid) process.kill(-child.pid, signal)
+				else child.kill(signal)
+			} catch {
+				/* process tree already exited */
+			}
 		}
-		await new Promise((r) => setTimeout(r, 800))
-		try {
-			child.kill('SIGKILL')
-		} catch {
-			/* ignore */
-		}
+		signalTree('SIGTERM')
+		let timer: NodeJS.Timeout | undefined
+		const graceful = await Promise.race([
+			closed.then(() => true),
+			new Promise<boolean>((resolveTimeout) => {
+				timer = setTimeout(() => resolveTimeout(false), 800)
+			}),
+		])
+		if (timer) clearTimeout(timer)
+		if (!graceful) signalTree('SIGKILL')
+		await closed
+		child.stdout?.destroy()
+		child.stderr?.destroy()
 	}
 }
 
@@ -349,7 +367,11 @@ export async function runSsrCheck(
 							SWELTE_SSR_URL: sidecar.url,
 						}),
 						stdio: ['ignore', 'pipe', 'pipe'],
+						detached: process.platform !== 'win32',
 					})
+					const backendClosed = new Promise<void>((resolveClose) =>
+						backend.once('close', resolveClose)
+					)
 					try {
 						const t0 = Date.now()
 						for (;;) {
@@ -363,17 +385,25 @@ export async function runSsrCheck(
 						}
 						await assertSsrHtml(`http://127.0.0.1:${freePort}`, 'sidecar-via-Hand', opts.throwRoute)
 					} finally {
-						try {
-							backend.kill('SIGTERM')
-						} catch {
-							/* ignore */
+						const signalTree = (signal: NodeJS.Signals) => {
+							try {
+								if (process.platform !== 'win32' && backend.pid) process.kill(-backend.pid, signal)
+								else backend.kill(signal)
+							} catch {
+								/* process tree already exited */
+							}
 						}
-						await new Promise((r) => setTimeout(r, 800))
-						try {
-							backend.kill('SIGKILL')
-						} catch {
-							/* ignore */
-						}
+						signalTree('SIGTERM')
+						let timer: NodeJS.Timeout | undefined
+						const graceful = await Promise.race([
+							backendClosed.then(() => true),
+							new Promise<boolean>((resolveTimeout) => {
+								timer = setTimeout(() => resolveTimeout(false), 800)
+							}),
+						])
+						if (timer) clearTimeout(timer)
+						if (!graceful) signalTree('SIGKILL')
+						await backendClosed
 					}
 				} else {
 					console.log('ssr check: toolchain import unavailable — skipping Hand half')

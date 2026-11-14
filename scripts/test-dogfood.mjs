@@ -6,12 +6,13 @@ import { once } from 'node:events'
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { createServer } from 'node:net'
-import { dirname, join, resolve } from 'node:path'
+import { basename, dirname, join, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const require = createRequire(import.meta.url)
 const keep = process.argv.includes('--keep')
+const production = process.argv.includes('--prod')
 const originalCwd = process.cwd()
 // The compiler's automatic remote bug reporter is inappropriate for fixtures.
 process.env.V_C_ERROR_BUG_REPORT_DISABLED = '1'
@@ -36,6 +37,13 @@ function run(command, args, cwd = root, env = process.env) {
   } catch (error) {
     throw new Error(`${command} ${args.join(' ')} failed\n${error.stdout ?? ''}${error.stderr ?? error.message}`)
   }
+}
+
+function copyFixture(source, destination) {
+  cpSync(source, destination, {
+    recursive: true,
+    filter: path => !['node_modules', 'dist', '.swelte', '.svelte-kit'].includes(basename(path)),
+  })
 }
 
 async function availablePort() {
@@ -82,13 +90,13 @@ try {
   const fixture = join(root, 'fixtures/dogfood')
   const app = join(scratch, 'app')
   const library = join(scratch, 'library')
-  cpSync(join(fixture, 'app'), app, { recursive: true })
+  copyFixture(join(fixture, 'app'), app)
   const postgres = process.argv.includes('--postgres')
   if (postgres) {
     if (!process.env.DATABASE_URL) throw new Error('--postgres requires a disposable DATABASE_URL; use npm run test:postgres')
-    cpSync(join(root, 'fixtures/postgres/app'), app, { recursive: true })
+    copyFixture(join(root, 'fixtures/postgres/app'), app)
   }
-  cpSync(join(fixture, 'ai1'), library, { recursive: true })
+  copyFixture(join(fixture, 'sample-lib'), library)
   const packager = join(dirname(require.resolve('@sveltejs/package/package.json')), 'svelte-package.js')
   run(process.execPath, [packager], library, env)
   const { collectLibDiagnostics } = await import(pathToFileURL(join(root, 'engine/core/dist/gen/diagnostics.js')))
@@ -98,10 +106,10 @@ try {
   const tarball = join(scratch, packed.filename)
   const pkgFile = join(app, 'package.json')
   const pkg = JSON.parse(readFileSync(pkgFile, 'utf8'))
-  pkg.dependencies = { '@swelte-dogfood/ai1': `file:${tarball}` }
+  pkg.dependencies = { '@swelte-dogfood/sample-lib': `file:${tarball}` }
   writeFileSync(pkgFile, `${JSON.stringify(pkg, null, 2)}\n`)
   run('npm', ['install', '--ignore-scripts', '--offline', '--no-audit', '--no-fund', '--package-lock=false'], app)
-  const installed = join(app, 'node_modules/@swelte-dogfood/ai1')
+  const installed = join(app, 'node_modules/@swelte-dogfood/sample-lib')
   assert.ok(existsSync(join(installed, 'src/lib/backend/runner/formatting/formatting.v')))
   assert.ok(existsSync(join(installed, 'dist/Panel.svelte.d.ts')))
   assert.ok(!existsSync(join(installed, 'src/routes')))
@@ -110,7 +118,7 @@ try {
   // cwd matches normal CLI builds; all package imports use installed exports.
   process.chdir(app)
   const invalidEntry = join(app, 'browser-invalid.ts')
-  writeFileSync(invalidEntry, 'import { run } from "@swelte-dogfood/ai1/v/runner.v"; console.log(run);\n')
+  writeFileSync(invalidEntry, 'import { run } from "@swelte-dogfood/sample-lib/v/runner.v"; console.log(run);\n')
   await assert.rejects(
     () => build({
       root: app, configFile: false, logLevel: 'silent', plugins: [swelte({ plugins: fixturePlugins })],
@@ -131,7 +139,8 @@ try {
   buildQjsProd({ root: app, renderJs })
   const binary = join(app, process.platform === 'win32' ? 'server.exe' : 'server')
   console.log('dogfood: linking native server with installed V modules and QuickJS')
-  run(v, ['-enable-globals', '-cc', resolveCC(), '-path', `${join(app, '.swelte')}|@vlib|@vmodules`, '-o', binary, join(app, '.swelte')], app, env)
+  run(v, [...(production ? ['-prod'] : []), '-enable-globals', '-cc', resolveCC(), '-path', `${join(app, '.swelte')}|@vlib|@vmodules`, '-o', binary, join(app, '.swelte')], app, env)
+  writeFileSync(join(app, '.swelte/dogfood-build.json'), JSON.stringify({ optimization: production ? 'prod' : 'default', v: vVersion(v), svelte: require('svelte/package.json').version, vite: viteVersion, typescript: require('typescript/package.json').version, renderBundleBytes: readFileSync(renderJs).length }, null, 2))
 
   const port = await availablePort()
   // No Node executable or sidecar can be found through the runtime PATH.
@@ -151,7 +160,7 @@ try {
   const json = await waitForServer(url)
   assert.equal(json.status, 200, await json.clone().text())
   assert.deepEqual(await json.json(), {
-    message: 'saved:HELLO', database: 7,
+    message: 'saved:HELLO',
     digest: '2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824',
   })
   const html = await fetch(url, { headers: { accept: 'text/html' }, signal: AbortSignal.timeout(5000) })
@@ -228,13 +237,17 @@ try {
   const failedState = JSON.parse(failedHtml.match(/id="__swelte_page">(.*?)<\/script>/s)[1])
   assert.equal(failedState.error.status, 500)
   assert.equal(failedState.error.message, 'render failed')
+  if (!postgres) {
+    const report = JSON.parse(readFileSync(join(app, `report-${renderFailure.headers.get('x-swelte-request-id')}-ssr-error`), 'utf8'))
+    assert.equal(report.message, 'render failed', 'original JS diagnostics must be opt-in')
+  }
   const timedOut = await fetch(`${url}?q=timeout`, { headers: { 'X-Swelte-Load': '1', accept: 'application/json' } })
   assert.equal(timedOut.status, 504)
   assert.equal((await timedOut.json()).error.status, 504)
   const { checkStreams } = await import('./dogfood-stream.mjs')
   await checkStreams(url, app)
   const { checkStrictSsr } = await import('./dogfood-ssr.mjs')
-  await checkStrictSsr(binary, app, runtimeEnv, await availablePort())
+  await checkStrictSsr(binary, app, runtimeEnv, await availablePort(), !postgres)
   const { checkShutdown } = await import('./dogfood-shutdown.mjs')
   await checkShutdown(binary, scratch, runtimeEnv, availablePort, postgres)
   if (postgres) {

@@ -90,8 +90,11 @@ package installation does not make an asynchronous or Node backend QJS-safe.
 - Design envelope: ~50ms timeout → SPA fallback, ~16MB cap.
 - `SWELTE_SSR_STRICT=1` makes unexpected native fallback a 500. Diagnostics
   report route/reason (`timeout`, `memory-limit`, `output-limit`, etc.) without
-  props or raw exception bodies. Head/body buffers grow to 64 KiB/1 MiB;
-  overflow fails explicitly. Strict browser hydration also rejects fallback.
+  props or raw exception bodies. `SWELTE_SSR_DIAGNOSTICS=1` opts original
+  QuickJS exception details into native diagnostics for investigation; clients
+  and the `@[report]` hook never receive JS stacks. Head/body buffers grow to
+  64 KiB/1 MiB; overflow fails explicitly. Strict browser hydration also
+  rejects fallback.
 
 ## Sources
 
@@ -103,4 +106,4 @@ Stable — all built including per-route `ssr=false`-lite:
 - `docs/config.md` — per-route `ssr=false`-lite (`export const ssr = false` → manifest flag → `Hand` skips rendering, serves SPA shell; async universal `load` stays client-only)
 - `docs/coming-from-sveltekit.md` — `ssr=false`-lite rendering row
 
-- `docs/ssr.md` — ownership, request path, cascade, contract, budgets, gate (also covers the open hardening work: dev auto-sidecar UX, gate-as-CI)
+- `docs/ssr.md` — ownership, request path, cascade, contract, budgets, and verified SSR behavior

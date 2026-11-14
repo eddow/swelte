@@ -1091,6 +1091,11 @@ fn swelte_ssr_enabled() bool {
 }
 
 fn swelte_render_page(route string, props_json string) (string, bool) {
+	html, ok, _ := swelte_render_detailed(route, props_json)
+	return html, ok
+}
+
+fn swelte_render_detailed(route string, props_json string) (string, bool, string) {
 	// Embedded QJS first (prod): the adapter's bridge (routes module)
 	// compiles in when `swelte build` ran with @swelte/ssr-qjs; core-only
 	// builds compile against generate()'s stub (same symbol, returns
@@ -1100,29 +1105,29 @@ fn swelte_render_page(route string, props_json string) (string, bool) {
 	// `<!--ssr-head-body-->` marker (or body alone when no <svelte:head>);
 	// the sidecar returns the {html, head} envelope. Both split below.
 	if os.getenv_opt('SWELTE_SSR') or { '' } == '1' {
-		return routes.swelte_qjs_render_page(route, props_json)
+		return routes.swelte_qjs_render_detailed(route, props_json)
 	}
 	url := os.getenv_opt('SWELTE_SSR_URL') or { '' }
 	if url == '' {
 		_ = route
 		_ = props_json
-		return '', false
+		return '', false, 'renderer unavailable'
 	}
 	// Dev sidecar (node): POST { route, props } -> { html, head }.
 	// Any failure (down, timeout, 5xx) → not-ok → SPA/static fallback.
 	body := '{"route":' + swelte_json_str(route) + ',"props":' + props_json + '}'
-	mut resp := http.post_json(url, body) or { return '', false }
+	mut resp := http.post_json(url, body) or { return '', false, 'sidecar unavailable' }
 	if resp.status_code != 200 {
-		return '', false
+		return '', false, 'sidecar failed'
 	}
 	// Envelope: {"html":"...","head":"..."}. Both flow into the shell via
 	// the ssr-body / ssr-head placeholder fill below.
 	html := swelte_json_field(resp.body, 'html')
 	if html == '' {
-		return '', false
+		return '', false, 'sidecar returned empty HTML'
 	}
 	head := swelte_json_field(resp.body, 'head')
-	return head + '<!--ssr-head-body-->' + html, true
+	return head + '<!--ssr-head-body-->' + html, true, ''
 }
 
 // Split the bridge/sidecar `head + marker + body` form into the
@@ -1311,12 +1316,12 @@ fn swelte_serve_page_form(mut ctx Ctx, path string, query map[string]string, hea
 	dist := os.getenv_opt('SWELTE_DIST') or { '' }
 	mut shell := swelte_shell_for(dist, path)
 	if swelte_ssr_enabled() && !routes.swelte_no_ssr(path) {
-		joined, ok := swelte_render_page(if error_json != 'null' { '/+error' } else { path }, payload)
+		joined, ok, detail := swelte_render_detailed(if error_json != 'null' { '/+error' } else { path }, payload)
 		if ok {
 			head := swelte_page_head_split(joined)
 			body, _ := swelte_split_head_body(joined, true)
 			if body.contains('data-swelte-render-error="1"') {
-				swelte_request_report(&ctx, 'ssr-error', 500, 'render failed')
+				swelte_request_report(&ctx, 'ssr-error', 500, if detail == '' { 'render failed' } else { detail })
 				eprintln('[swelte:ssr] route=' + path + ' reason=render-error')
 				ctx.res.set_status(.internal_server_error)
 				if (os.getenv_opt('SWELTE_SSR_STRICT') or { '' }) == '1' { return ctx.send_response_to_client('text/plain', 'swelte: expected SSR render failed') }
@@ -1328,10 +1333,12 @@ fn swelte_serve_page_form(mut ctx Ctx, path string, query map[string]string, hea
 				payload = json2.encode(failure)
 			}
 			shell = swelte_fill_ssr(shell, head, body)
-		} else if (os.getenv_opt('SWELTE_SSR_STRICT') or { '' }) == '1' {
-			swelte_request_report(&ctx, 'ssr-error', 500, 'renderer unavailable or budget exceeded')
-			ctx.res.set_status(.internal_server_error)
-			return ctx.send_response_to_client('text/plain', 'swelte: expected SSR render failed')
+		} else {
+			swelte_request_report(&ctx, 'ssr-error', 500, if detail == '' { 'renderer unavailable or budget exceeded' } else { detail })
+			if (os.getenv_opt('SWELTE_SSR_STRICT') or { '' }) == '1' {
+				ctx.res.set_status(.internal_server_error)
+				return ctx.send_response_to_client('text/plain', 'swelte: expected SSR render failed')
+			}
 		}
 	}
 	state := '<script type="application/json" id="__swelte_page">' + swelte_script_json(payload) + '</script>'

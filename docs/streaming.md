@@ -43,8 +43,9 @@ long-lived. App-owned upstream waits must still observe cancellation.
 Application libraries can accept injected write/cancel callbacks without
 importing generated routes. Decide whether a subscriber disconnect cancels an
 underlying run in the application; a durable run may outlive one subscriber.
-Existing GET `@[sse]` and WS APIs remain separate conveniences. The framework
-does not provide an ai1 provider adapter, durable RunStore or shutdown drain.
+Existing GET `@[sse]` and WS APIs remain separate conveniences. Swelte provides
+generic stream transport and lifecycle behavior; providers, durable run stores,
+and domain-level shutdown policy belong to the consuming application/library.
 
 `npm run test:dogfood` exercises native SSE/WS guards/metadata, POST byte
 streaming, split UTF-8, pre/post-header failures and disconnect/idle cleanup.

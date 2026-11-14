@@ -162,5 +162,6 @@ their default update must not overwrite unrelated current-page form data.
 
 No-JS validation re-runs the target page's guarded load and renders that page
 with failure status/form data. A generic error paragraph alone is not the page
-form contract. All framework tests retain corresponding downstream behavior
-scenarios for filters, notes, contact actions and inline errors.
+form contract. Synthetic framework fixtures probe query/filter retention,
+mutation result shapes, and inline errors. Product workflows belong to the
+applications that consume Swelte.

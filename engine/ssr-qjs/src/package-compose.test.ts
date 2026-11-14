@@ -79,6 +79,39 @@ it('fails composition for unresolved dependencies instead of emitting a QJS fall
 	)
 })
 
+it('keeps package-private #lib imports, directory entries and CommonJS dependencies local', async (t) => {
+	const { root, put } = fixture()
+	t.after(() => rmSync(root, { recursive: true, force: true }))
+	put('src/lib/label.js', 'export const label = "WRONG HOST"')
+	put(
+		'node_modules/@dogfood/ui/package.json',
+		JSON.stringify({
+			name: '@dogfood/ui',
+			type: 'module',
+			exports: { './Panel.svelte': './Panel.svelte' },
+			imports: { '#lib/*': './private/*' },
+		})
+	)
+	put(
+		'node_modules/@dogfood/ui/Panel.svelte',
+		`<script>
+		import { label } from '#lib/label.js';
+		import { suffix } from './nested';
+		import legacy from './legacy.cjs';
+	</script><h1>{label}:{suffix}:{legacy()}</h1>`
+	)
+	put('node_modules/@dogfood/ui/private/label.js', 'export const label = "PACKAGE"')
+	put('node_modules/@dogfood/ui/nested/index.js', 'export const suffix = "DIRECTORY"')
+	put(
+		'node_modules/@dogfood/ui/legacy.cjs',
+		'module.exports = function () { return require("./value.cjs") }'
+	)
+	put('node_modules/@dogfood/ui/value.cjs', 'module.exports = "COMMONJS"')
+	put('render.mjs', await composeRenderJs(manifest, { root }))
+	const { renderRoute } = await import(pathToFileURL(join(root, 'render.mjs')).href)
+	assert.match(renderRoute('/', '{}').body, /PACKAGE:DIRECTORY:COMMONJS/)
+})
+
 it('applies SSR source guards to components loaded from dependencies', async (t) => {
 	const { root, put } = fixture()
 	t.after(() => rmSync(root, { recursive: true, force: true }))
@@ -87,4 +120,28 @@ it('applies SSR source guards to components loaded from dependencies', async (t)
 		'<script>fetch("/provider");</script><p>invalid setup</p>'
 	)
 	await assert.rejects(() => composeRenderJs(manifest, { root }), /top-level fetch/)
+})
+
+it('uses server lifecycle and marks render errors even without a global error component', async (t) => {
+	const { root, put } = fixture()
+	t.after(() => rmSync(root, { recursive: true, force: true }))
+	put(
+		'node_modules/@dogfood/ui/Panel.svelte',
+		`<script>
+		import { createContext, onDestroy } from 'svelte';
+		const [get, set] = createContext(); set('server context'); const value = get();
+		onDestroy(() => { globalThis.__dogfoodDestroyed = value; });
+	</script><h1>server lifecycle</h1>`
+	)
+	put('render.mjs', await composeRenderJs(manifest, { root }))
+	const good = await import(pathToFileURL(join(root, 'render.mjs')).href)
+	assert.match(good.renderRoute('/', '{}').body, /server lifecycle/)
+	assert.equal((globalThis as { __dogfoodDestroyed?: string }).__dogfoodDestroyed, 'server context')
+	delete (globalThis as { __dogfoodDestroyed?: string }).__dogfoodDestroyed
+	put('node_modules/@dogfood/ui/Panel.svelte', '<script>throw new Error("private cause")</script>')
+	put('bad.mjs', await composeRenderJs(manifest, { root }))
+	const bad = await import(pathToFileURL(join(root, 'bad.mjs')).href)
+	const result = bad.renderRoute('/', '{}')
+	assert.match(result.body, /data-swelte-render-error="1"/)
+	assert.doesNotMatch(result.body, /private cause/)
 })

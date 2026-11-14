@@ -297,6 +297,7 @@ import os
 fn C.swelte_qjs_new_runtime() int
 fn C.swelte_qjs_free_runtime(int)
 fn C.swelte_qjs_render_head_body(int, &char, int, &char, int, &char, int, &char, int, &int, &char, int, &int, int, u32) int
+fn C.swelte_qjs_render_report(int, &char, int, &char, int, &char, int, &char, int, &int, &char, int, &int, int, u32, &char, int) int
 
 struct SwelteQjsCached {
 	mtime f64
@@ -333,6 +334,11 @@ pub fn swelte_qjs_load_bundle() string {
 // any failure (no bundle, throw, timeout, OOM, too-big) → ('', false)
 // → Hand falls back to SPA/static (never blank/JSON for navigations).
 pub fn swelte_qjs_render_page(route string, props_json string) (string, bool) {
+	html, ok, _ := swelte_qjs_render_detailed(route, props_json)
+	return html, ok
+}
+
+pub fn swelte_qjs_render_detailed(route string, props_json string) (string, bool, string) {
 	src := swelte_qjs_load_bundle()
 	if src == '' || src.len <= 0 || src.len > 16 * 1024 * 1024 {
 		return swelte_qjs_failure(route, 'bundle-unavailable')
@@ -343,6 +349,10 @@ pub fn swelte_qjs_render_page(route string, props_json string) (string, bool) {
 	// discard head metadata or return truncated HTML.
 	mut hbuf := []u8{len: 8192}
 	mut buf := []u8{len: 65536}
+	// Original JS error text is private and opt-in. A request owns its buffer;
+	// never store diagnostics in a global or thread-local last-error slot.
+	diagnostics := (os.getenv_opt('SWELTE_SSR_DIAGNOSTICS') or { '' }) == '1'
+	mut detail := []u8{len: if diagnostics { 8192 } else { 1 }}
 	mut rt := C.swelte_qjs_new_runtime()
 	if rt == 0 {
 		return swelte_qjs_failure(route, 'runtime-unavailable')
@@ -352,14 +362,14 @@ pub fn swelte_qjs_render_page(route string, props_json string) (string, bool) {
 	mut need_b := 0
 	mut rc := 0
 	unsafe {
-		rc = C.swelte_qjs_render_head_body(rt, src.str, src.len, route.str, route.len, props_json.str, props_json.len, &char(&hbuf[0]), hbuf.len, &need_h, &char(&buf[0]), buf.len, &need_b, swelte_qjs_timeout_ms(), swelte_qjs_mem_cap_mb())
+		rc = C.swelte_qjs_render_report(rt, src.str, src.len, route.str, route.len, props_json.str, props_json.len, &char(&hbuf[0]), hbuf.len, &need_h, &char(&buf[0]), buf.len, &need_b, swelte_qjs_timeout_ms(), swelte_qjs_mem_cap_mb(), &char(&detail[0]), detail.len)
 	}
 	if rc == -4 {
 		// Rendered but empty: keep the SPA shell (don't escalate to +error).
-		return '', true
+		return '', true, ''
 	}
 	if rc < 0 {
-		return swelte_qjs_failure(route, swelte_qjs_reason(rc))
+		return swelte_qjs_failure_detail(route, swelte_qjs_reason(rc), detail)
 	}
 	if need_b > buf.len - 1 || need_h > hbuf.len - 1 {
 		if need_b > 1048575 || need_h > 65535 {
@@ -370,20 +380,20 @@ pub fn swelte_qjs_render_page(route string, props_json string) (string, bool) {
 		need_h = 0
 		need_b = 0
 		unsafe {
-			rc = C.swelte_qjs_render_head_body(rt, src.str, src.len, route.str, route.len, props_json.str, props_json.len, &char(&hbuf[0]), hbuf.len, &need_h, &char(&big[0]), big.len, &need_b, swelte_qjs_timeout_ms(), swelte_qjs_mem_cap_mb())
+			rc = C.swelte_qjs_render_report(rt, src.str, src.len, route.str, route.len, props_json.str, props_json.len, &char(&hbuf[0]), hbuf.len, &need_h, &char(&big[0]), big.len, &need_b, swelte_qjs_timeout_ms(), swelte_qjs_mem_cap_mb(), &char(&detail[0]), detail.len)
 		}
 		if rc == -4 {
-			return '', true
+			return '', true, ''
 		}
-		if rc < 0 { return swelte_qjs_failure(route, swelte_qjs_reason(rc)) }
+		if rc < 0 { return swelte_qjs_failure_detail(route, swelte_qjs_reason(rc), detail) }
 		if need_b > big.len - 1 || need_h > hbuf.len - 1 {
 			return swelte_qjs_failure(route, 'output-limit')
 		}
 		s := swelte_qjs_join_head_body(hbuf, need_h, big, need_b)
-		return s, true
+		return s, true, swelte_qjs_detail(detail)
 	}
 	s := swelte_qjs_join_head_body(hbuf, need_h, buf, need_b)
-	return s, true
+	return s, true, swelte_qjs_detail(detail)
 }
 
 fn swelte_qjs_reason(code int) string {
@@ -396,10 +406,20 @@ fn swelte_qjs_reason(code int) string {
 	}
 }
 
-fn swelte_qjs_failure(route string, reason string) (string, bool) {
+fn swelte_qjs_detail(detail []u8) string {
+	return unsafe { (&char(&detail[0])).vstring() }.clone()
+}
+
+fn swelte_qjs_failure_detail(route string, reason string, detail []u8) (string, bool, string) {
+	_, _, generic := swelte_qjs_failure(route, reason)
+	original := swelte_qjs_detail(detail)
+	return '', false, if original == '' { generic } else { generic + ': ' + original }
+}
+
+fn swelte_qjs_failure(route string, reason string) (string, bool, string) {
 	safe_route := route.replace('\\r', '').replace('\\n', '')
 	eprintln('[swelte:ssr] route=' + safe_route + ' reason=' + reason)
-	return '', false
+	return '', false, reason
 }
 
 // Join head+body with an unambiguous separator (ssr-head-body marker)

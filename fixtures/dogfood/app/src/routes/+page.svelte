@@ -1,5 +1,5 @@
 <script lang="ts">
-  import Panel from '@swelte-dogfood/ai1/Panel.svelte'
+  import Panel from '@swelte-dogfood/sample-lib/Panel.svelte'
   import { getContext } from 'svelte'
   import { enhance } from '$app/forms'
   import { page } from '$app/state'

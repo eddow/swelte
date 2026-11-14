@@ -88,7 +88,7 @@ export async function checkStreams(url, app) {
   })
   const response = await post()
   assert.equal(response.status, 200)
-  assert.equal(response.headers.get('x-ai1-run-id'), 'fixture-run')
+  assert.equal(response.headers.get('x-dogfood-run-id'), 'fixture-run')
   assert.equal(response.headers.get('x-dogfood-guard'), 'yes')
   assert.equal(response.headers.getSetCookie().length, 2)
   const reader = response.body.getReader()

@@ -1,5 +1,5 @@
 {
-  "name": "@swelte-dogfood/ai1",
+  "name": "@swelte-dogfood/sample-lib",
   "version": "0.0.0",
   "private": true,
   "type": "module",

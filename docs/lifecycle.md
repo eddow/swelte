@@ -90,8 +90,8 @@ Request events measure request handling, through headers/takeover for streams;
 they are not full subscriber/run duration measurements. Producer failures after
 headers cannot change the HTTP status. SSR hooks report renderer failures;
 native bridge logs provide timeout/memory/output reason codes. Original JS
-stacks are not exported through this hook. Libraries such as ai1 retain their
-own run/job context and can compose it with the request ID.
+stacks are not exported through this hook. Native libraries can retain their
+own job context and associate it with the request ID where useful.
 
 `npm run test:dogfood -- --browser` verifies lifecycle ordering, repeated signals,
 drain and deadline behavior, idle/repeated room cleanup, reporting isolation and

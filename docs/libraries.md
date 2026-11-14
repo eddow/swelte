@@ -145,6 +145,6 @@ built `dist/` for JS/Svelte and raw `src/lib/**/*.v` for V) while
 2. ~~`swelte init` asks app-vs-lib~~ DONE — interactive kind pick
    (`--lib` / `--kind lib` / `--template lib` skip it), `templates/lib/`
    overlay, `build` + `build:lib` scripts (`docs/cli.md#swelte-init`).
-3. DONE — `fixtures/dogfood/ai1` uses `src/lib` + author-only `src/routes`.
+3. DONE — `fixtures/dogfood/sample-lib` uses `src/lib` + author-only `src/routes`.
    The dogfood script builds with `svelte-package`, checks the library schema,
    packs/installs the tarball and asserts no `src/routes` files were published.
