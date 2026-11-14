@@ -43,7 +43,7 @@ import DocsNav from '#lib/DocsNav.svelte'
 					+ <code>+page.ts</code> (or flat <code>about.v</code> + <code>about.ts</code>)
 				</td>
 				<td>
-					Server <code>@&#91;load]</code> = initial paint; universal sibling = sync view-model
+					Server <code>@&#91;load]</code> = page load cascade; universal sibling = sync view-model
 					transform (async only when <code>ssr=false</code>). <code>.svelte</code>/<code>.v</code>
 					pair by mod path — no cross-pairing.
 				</td>
@@ -106,7 +106,7 @@ import DocsNav from '#lib/DocsNav.svelte'
 <ul class="list-disc list-inside opacity-80 space-y-1 mt-2 text-sm">
 	<li>
 		<code>@&#91;load]</code>
-		is server-only, HTML-navigation initial paint. Interaction data comes from stubs (<code
+		runs server-side for HTML, navigation and refresh. Interaction data also comes from stubs (<code
 			>@&#91;get]</code
 		>/<code>@&#91;rpc]</code>). Components must not call stubs at top level during SSR (build error)
 		— move load-time data into
@@ -123,7 +123,7 @@ import DocsNav from '#lib/DocsNav.svelte'
 	<li>
 		Cache tags: <code>depends(...tags)</code> registers tags;
 		<code>invalidate(...tags)</code>
-		/ <code>invalidateAll()</code> clear cached loads (client-side).
+		/ <code>invalidateAll()</code> refresh affected active loads and resolve after page state is committed.
 	</li>
 	<li>
 		Load envelope: <code>SwelteLoadResult&#123; status, headers, cookies, body &#125;</code> opts
@@ -194,7 +194,7 @@ import DocsNav from '#lib/DocsNav.svelte'
 <h2 class="text-2xl font-bold mt-8">Rendering</h2>
 <ul class="list-disc list-inside opacity-80 space-y-1 mt-2 text-sm">
 	<li>
-		SSR is runtime-only (embedded QuickJS / sidecar), 50ms + 16MB budgets, SPA fallback. SSG is
+		SSR is runtime-only (embedded QuickJS / sidecar), 50ms + 16MB budgets, optional strict failures instead of SPA fallback. SSG is
 		additive (<code>prerender.entries</code>).
 	</li>
 	<li>
@@ -236,11 +236,17 @@ import DocsNav from '#lib/DocsNav.svelte'
 	<li>
 		Aliases are <code>#routes / #lib</code> (hash style).
 		<code>$app/stores|state|navigation</code>
-		re-export the Swelte router; no
-		<code>$app/forms</code>, no <code>$env/*</code>.
+		adapt Swelte state and navigation. Compatibility mode also supplies
+		<code>$app/forms</code>; <code>$env/*</code> is unsupported.
 	</li>
 	<li>Single artifact: <code>dist/server</code> + <code>dist/</code>. No Node at runtime.</li>
 </ul>
+<h2 class="text-2xl font-bold mt-8">Opt-in page compatibility</h2>
+<p class="opacity-80 mt-2"><code>swelte.compat: 'sveltekit'</code> enables nested data/form props,
+request-local SSR page state, reactive <code>$app/state</code>, and the forms callback adapter.
+<code>swelte.actionQuery</code> selects named or legacy actions independently.
+See <a href="/guide/lifecycle" class="link">page lifecycle</a> and
+<a href="/guide/forms" class="link">forms</a> for hydration, invalidation and mutation behavior.</p>
 <DocsNav
 	next={{ href: '/versus', label: 'Versus' }}
 	related={[{ href: '/guide/rpc', label: 'RPC & routes' }]}

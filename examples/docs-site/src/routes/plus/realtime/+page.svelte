@@ -61,6 +61,12 @@ import { codeHtml } from '#lib/snippets.gen.js'
 	<Code snippet={codeHtml['plus-sockets-client']} dense title="browser: new WebSocket(url)" />
 </div>
 
+<h2 class="text-2xl font-bold mt-8">Native POST streaming and cleanup</h2>
+<p class="opacity-80 mt-2"><code>swelte_stream(headers, producer)</code> writes native POST
+response bytes with bounded buffering. Producers can frame SSE events and deliver them
+before completion. Request guards also cover streams and socket takeover. Disconnects,
+slow-reader timeouts and idle SSE checks release subscribers; graceful shutdown drains
+active work before running cleanup hooks. Replay and durable message storage belong to the application.</p>
 <DocsNav
 	next={{ href: '/from-sveltekit', label: 'From SvelteKit' }}
 	related={[{ href: '/plus/db', label: 'Database' }]}

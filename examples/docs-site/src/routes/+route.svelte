@@ -17,14 +17,8 @@ let query = $state('')
 let open = $state(false)
 let active = $state(0)
 let currentPath = $state('')
-// Active left-nav link: `currentPath` is client-only state (SSR renders no
-// active link, hydration fills it in). We deliberately do NOT use the `$page`
-// store à la SvelteKit: in the QJS SSR bundle every `@swelte/core` import is
-// a render-time throw-stub (`page() called during SSR render` — see
-// engine/ssr-qjs/src/ssr.ts `stubSdkImports`), and `$page.url` compiles to a
-// call on that stub, 500ing every SSR render. The `window.location` +
-// `popstate`/click tracking below only runs in `onMount` (a server noop),
-// so SSR never touches it.
+// This layout tracks active links in the browser. Swelte also supports
+// request-local SSR page state; see the page lifecycle guide.
 // SSR-safe: searchDocs is plain client data (static index, no RPC).
 // Evaluate lazily only in the browser render — the server bundle
 // renders the shell (query starts empty) and hydrates interactivity.
@@ -104,6 +98,7 @@ const groups: { title: string; links: { href: string; label: string }[] }[] = [
 		links: [
 			{ href: '/guide/rpc', label: 'RPC & routes' },
 			{ href: '/guide/types', label: 'Types' },
+			{ href: '/guide/lifecycle', label: 'Page lifecycle' },
 			{ href: '/guide/forms', label: 'Forms' },
 			{ href: '/guide/errors', label: 'Errors' },
 			{ href: '/guide/config', label: 'Config' },
@@ -299,7 +294,7 @@ const groups: { title: string; links: { href: string; label: string }[] }[] = [
 			{/each}
 			<div class="divider"></div>
 			<div class="px-2 text-xs opacity-60">
-				<p>Source of truth lives in <code>docs/*.md</code>.</p>
+				<p>Reference documentation: <code>docs/*.md</code>.</p>
 				<p>This site renders it — same content, browseable.</p>
 			</div>
 		</aside>
