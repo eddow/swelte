@@ -1,6 +1,6 @@
 {
   "name": "@swelte/plus",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "Swelte beyond-SvelteKit plugins — jobs (cron) + db (embedded SQLite) (V+TS).",
   "type": "module",
   "main": "./dist/index.js",
@@ -25,7 +25,7 @@
     "prepublishOnly": "npm run build"
   },
   "dependencies": {
-    "@swelte/core": "^0.1.4"
+    "@swelte/core": "^0.1.5"
   },
   "peerDependencies": {
     "svelte": "^5.0.0",

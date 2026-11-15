@@ -44,6 +44,9 @@ jobs:
           registry-url: https://registry.npmjs.org/
           cache: npm
 
+      - name: Update npm for OIDC support
+        run: npm install -g npm@latest
+
       - name: Install dependencies
         run: npm ci
 
@@ -59,9 +62,7 @@ jobs:
 
       - name: Publish engine packages
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-          # npm CLI still requires('punycode') transitively (DEP0040);
-          # unrelated to engine/** — silence it to keep logs clean.
+          # NODE_AUTH_TOKEN removed — OIDC handles authentication automatically
           NODE_NO_WARNINGS: 1
         run: |
           set -euo pipefail
@@ -71,7 +72,6 @@ jobs:
           if [ "$DRY_RUN" = "true" ]; then
             ARGS+=(--dry-run)
           fi
-          # Dependency order matters: vvm ← core ← (mcp, plus, ssr-qjs)
           for pkg in @swelte/vvm @swelte/core @swelte/mcp @swelte/plus @swelte/ssr-qjs; do
             echo "::group::npm publish $pkg (tag: $TAG)"
             npm publish --workspace="$pkg" "${ARGS[@]}"
