@@ -15,9 +15,8 @@ import { codeHtml } from '#lib/snippets.gen.js'
 <h1 class="text-4xl font-bold mt-2">Errors</h1>
 <p class="py-4 opacity-80">
 	API failures use JSON; HTML page failures render an error boundary.
-	<code>SwelteRpcError(status, body, base, fn)</code> replaces thrown <code>error()</code>/<code
-		>json()</code
-	>
+	<code>SwelteRpcError(status, body, base, fn)</code>
+	replaces thrown <code>error()</code>/<code>json()</code>
 	helpers.
 </p>
 

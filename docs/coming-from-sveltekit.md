@@ -9,7 +9,7 @@ that bites during migration. Only built behavior is documented here.
 
 | SvelteKit | Swelte | Notes |
 |---|---|---|
-| `+page.svelte` | `+page.svelte` **or** `about.svelte` (same URL) | Same component model, two spellings: `about.svelte` ⇔ `about/+page.svelte` (both → `/about`; `src/routes/+page.svelte` ⇔ `/`). See leaf duality below. |
+| `+page.svelte` | `+page.svelte` **or** `about.svelte` (same URL) — lowercase only: `Streamed.svelte` is a component, never a route | Same component model, two spellings: `about.svelte` ⇔ `about/+page.svelte` (both → `/about`; `src/routes/+page.svelte` ⇔ `/`). Uc-first stems (`Streamed.svelte`) are plain Svelte components — importable (`import Streamed from './Streamed.svelte'`), claim no URL, emit no dispatch. See leaf duality below. |
 | `+page.ts` / `+page.server.ts` | `+page.v` (`@[load]`) + `+page.ts` (universal) — or flat `about.v` + `about.ts` | Same duality as the `.svelte`: `about.v` ⇔ `about/+page.v`, `about.ts` ⇔ `about/+page.ts` (one triple per URL — mixing `foo.*` + `foo/+page.*` is a build error). Server-only `load` = HTML-navigation initial paint (`parent T` param replaces `parent()`); universal sibling `load({ params, props, url })` = sync view-model transform inside `renderRoute` (typed TS — ssr-qjs transpiles via `transpileSiblingLoad`, the mirror of the `.svelte` `generate: 'server'` step; async only when `ssr=false`). |
 | `+layout.svelte` | `+route.svelte` | Wrapper per subtree (nav + chrome), Svelte 5 `children` Snippet + `{@render children?.()}` outlet (not slots). SPA mount nests automatically; SSR `renderRoute` composes the chain server-side; client `hydrateSwelteRoute` hydrates the whole chain in place (SSR DOM adopted, leaf interactive; mismatch falls back to mount). |
 | `+layout.ts` | `+route.ts` | Sibling of `+route.svelte`: carries `ssr`/`csr` / universal `load` / `prerender` / `limits` for the wrapper level (leaf wins, else nearest explicit wrapper) and `export const chunk` (subtree pin — see `config.md` §Chunking). The cut itself reads the `.svelte`; the `.ts` only pins. |
@@ -47,6 +47,12 @@ src/routes/+page.svelte (+ .v / .ts)                        →  / (root)
   dynamic segments, per-route helpers) or must sit inside a `+route` guard's
   directory — wrapping covers `foo/+page.*` and `foo/**/*`, never the flat
   sibling `foo.*` (so a guarded page must be the folder leaf).
+* Uc-first `.svelte` stems are components, never routes (mirrors Svelte's
+  `<Streamed/>`-is-a-component rule): `router/live/Streamed.svelte` is
+  imported by `router/live/+page.svelte`, claims no URL, and emits no
+  dispatch file. This is also what keeps generated V fn names snake_case —
+  a routed `Streamed.svelte` would emit `swelte_router_live_Streamed_*`,
+  which V rejects.
 * Chunking consequence (`config.md` §Chunking): only the nested spelling
   mounts `about/+route.svelte`, so `about.svelte` lands in the parent
   `layout` chunk while `about/+page.svelte` lands in `layout:about`.
@@ -58,6 +64,8 @@ src/routes/+page.svelte (+ .v / .ts)                        →  / (root)
 
 * **The route IS the file path:** `src/routes/api/greet.v` → `/api/greet`.
   Only wrappers use `+` (`+route.v`/`+route.svelte`, `+page.v`, `+error.svelte`).
+  Bare lowercase `.svelte` is a leaf (`about.svelte` → `/about`); bare
+  Uc-first `.svelte` is a component (`Streamed.svelte` — no URL).
 * **Route groups `(group)`** — disk-only folders, stripped from URL.
   No layout-reset magic beyond the strip; wrapping stays explicit.
 * **Optional `[[slug]]`** — last-segment only, zero-or-one.

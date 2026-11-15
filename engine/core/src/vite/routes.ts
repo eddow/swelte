@@ -33,6 +33,13 @@ export function svelteModKind(mod: string): 'page' | 'wrapper' | 'error' | 'plai
 	if (base === '+route') return 'wrapper'
 	if (base === '+error') return 'error'
 	if (base.startsWith('+')) return null
+	// Uc-first stem = Svelte component, never a route: mirrors the Svelte
+	// rule that `<Streamed/>` is a component and `<streamed/>` an element.
+	// `router/live/Streamed.svelte` is importable but claims no URL — the
+	// dispatch loop, double-claim scan, and (via svelteRouteFor → null) the
+	// manifest/router/SSR entries all skip it through this one gate.
+	// Lowercase stays routable: `about.svelte` ⇔ `about/+page.svelte` → `/about`.
+	if (/^[A-Z]/.test(base)) return null
 	return 'plain'
 }
 
@@ -47,7 +54,8 @@ export function stripRouteGroups(mod: string): string {
 }
 
 /** URL pattern for a `.svelte` mod (mirrors routeFor leaf/dir rules).
- * Returns null for wrappers (+route) and unknown +-files. */
+ * Returns null for wrappers (+route), unknown +-files, error files, and
+ * Uc-first component files (`Streamed` — importable, never a route). */
 export function svelteRouteFor(mod: string): string | null {
 	const kind = svelteModKind(mod)
 	if (kind === null || kind === 'wrapper' || kind === 'error') return null

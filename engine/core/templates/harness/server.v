@@ -179,6 +179,7 @@ mut:
 	entries []SwelteSubscription
 }
 
+// [swelte] room-subscribe-start
 fn swelte_room_subscribe(room string, registry &SwelteSubscriptions) chan string {
 	mut subs := unsafe { &SwelteSubscriptions(registry) }
 	ch := chan string{cap: 1}
@@ -188,6 +189,7 @@ fn swelte_room_subscribe(room string, registry &SwelteSubscriptions) chan string
 	// [swelte] room-subscribe
 	return ch
 }
+// [swelte] room-subscribe-end
 
 fn swelte_room_release(registry &SwelteSubscriptions) {
 	mut subs := unsafe { &SwelteSubscriptions(registry) }

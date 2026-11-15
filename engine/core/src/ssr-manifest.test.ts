@@ -105,6 +105,18 @@ describe('collectSvelteManifest (tmp routes)', () => {
 		assert.equal(svelteRouteFor('files/[...rest]/+page'), '/files/[...rest]')
 	})
 
+	it('Uc-first stems are components: no URL, no manifest entry', () => {
+		const routesAbs = tmpRoutes({
+			'router/live/+page.svelte': '<h1>l</h1>',
+			'router/live/Streamed.svelte': '<p>helper</p>',
+			'Widget.svelte': '<p>root helper</p>',
+			'lower.svelte': '<p>real leaf</p>',
+		})
+		const { entries } = collectSvelteManifest(routesAbs, 'src/routes', new Set())
+		const sveltes = entries.map((e: SvelteRouteEntry) => e.svelte).sort()
+		assert.deepEqual(sveltes, ['lower.svelte', 'router/live/+page.svelte'])
+	})
+
 	it('.js sibling accepted (plain-JS: raw-bundled into sync render.js, skipped by tsc --strict)', () => {
 		const routesAbs = tmpRoutes({
 			'router/+page.svelte': '<h1>r</h1>',

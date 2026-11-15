@@ -150,7 +150,13 @@ import DocsNav from '#lib/DocsNav.svelte'
 <ul class="list-disc list-inside opacity-80 space-y-1 mt-2">
 	<li>
 		A <code>+page.svelte</code> with no <code>+page.v</code> still renders (static shell/SPA + SSR);
-		the leaf <code>.v</code> only claims the URL for API/RPC/load arms.
+		the leaf <code>.v</code> only claims the URL for API/RPC/load arms. Bare lowercase
+		<code>.svelte</code>
+		is a leaf (<code>about.svelte</code>
+		→ <code>/about</code>); bare Uc-first <code>.svelte</code> is a component (<code
+			>Streamed.svelte</code
+		>
+		— importable, claims no URL).
 	</li>
 	<li>Route groups <code>(group)</code> — disk-only, stripped from URL.</li>
 	<li>

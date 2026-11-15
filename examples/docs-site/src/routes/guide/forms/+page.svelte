@@ -63,7 +63,8 @@ import { codeHtml } from '#lib/snippets.gen.js'
 	<code>?save</code>.
 	<code>swelte.compat: 'sveltekit'</code>
 	selects named actions by default and supplies nested data/form props, reactive
-	<code>$app/state</code> and the <code>$app/forms</code> adapter.
+	<code>$app/state</code>
+	and the <code>$app/forms</code> adapter.
 </p>
 <h2 class="text-2xl font-bold mt-8">Submission lifecycle</h2>
 <p class="opacity-80 mt-2">

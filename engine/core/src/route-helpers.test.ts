@@ -86,6 +86,15 @@ describe('route helpers', () => {
 		assert.equal(svelteModKind('admin/+page@'), null)
 		assert.equal(svelteModKind('about@'), 'plain')
 		assert.equal(svelteRouteFor('about@'), '/about@')
+		// Uc-first stem = Svelte component, never a route (mirrors the
+		// component/element case rule): importable, claims no URL.
+		assert.equal(svelteModKind('router/live/Streamed'), null)
+		assert.equal(svelteModKind('Widget'), null)
+		assert.equal(svelteRouteFor('router/live/Streamed'), null)
+		assert.equal(svelteRouteFor('Widget'), null)
+		// Lowercase stems stay routable; +page/index spellings unaffected.
+		assert.equal(svelteModKind('router/live/streamed'), 'plain')
+		assert.equal(svelteRouteFor('router/live/streamed'), '/router/live/streamed')
 	})
 
 	it('roadmap §1.1 route groups strip from URL, keep on disk', () => {

@@ -249,7 +249,8 @@ Rules:
 * `about.svelte` ⇔ `about/+page.svelte` (same `/about`), but only the
   nested spelling mounts `about/+route.svelte` — so they land in
   different `layout` chunks. One URL = one spelling (`doubleClaimCheck`
-  build error otherwise).
+  build error otherwise). Uc-first stems are components, never routes
+  (`Streamed.svelte` — no chunk, no URL; imported by the page that uses it).
 * `src/app.css` stays in the entry chunk; `+error` + the matcher table
   stay eager (needed synchronously on 404/no-match); `#lib` and the
   Svelte runtime stay in Vite's default shared chunks.

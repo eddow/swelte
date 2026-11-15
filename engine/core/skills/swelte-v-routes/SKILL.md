@@ -108,6 +108,9 @@ Unknown `@[rpc]` fn → 404 + `available` fns. Missing `"fn"` → 400. Bad JSON 
 - `#lib/` code compiles to WASM: pure synchronous logic only. No `fetch`, no `async`, no sockets/fs in isomorphic `#lib/` files. Backend-only code goes in `backend/` subdirs or `*_backend.v` (build error from browser code).
 - `+route.v` declares no `@[rpc]`/verb endpoints of its own.
 - Folder-root double-claim (`foo.v` + `foo/+page.v`, either extension) is a build error.
+- Uc-first `.svelte` stems are components, never routes (`Streamed.svelte` is
+  importable, claims no URL — mirrors Svelte's component/element case rule).
+  Lowercase stays routable (`about.svelte` ⇔ `about/+page.svelte`).
 
 ## Sources
 

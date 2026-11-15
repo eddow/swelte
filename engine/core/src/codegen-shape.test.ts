@@ -1149,6 +1149,10 @@ describe('item 11 — codegen golden project (sample-overlay variant + routes.js
 		const srv = readFileSync(join(root, '.swelte', 'server.v'), 'utf8')
 		assert.ok(srv.includes('import backend'), 'harness imports the hub module')
 		assert.ok(srv.includes('swelte_sse_room_for'), 'produce drives room mode')
+		assert.ok(
+			srv.includes('fn swelte_room_subscribe('),
+			'room mode keeps the subscribe helper (has callers)'
+		)
 		// Client stub is unchanged (AsyncGenerator over query args).
 		const stub = readFileSync(
 			join(root, '.swelte', 'generated', 'routes', 'api', 'rooms.js'),
@@ -1167,6 +1171,31 @@ describe('item 11 — codegen golden project (sample-overlay variant + routes.js
 		assert.ok(disp.includes('pub fn swelte_sse_is_room(prefix string) bool'))
 		const srv = readFileSync(join(root, '.swelte', 'server.v'), 'utf8')
 		assert.ok(!srv.includes('import backend'), 'no hub import without room fns')
+		assert.ok(
+			!srv.includes('fn swelte_room_subscribe('),
+			'no-room harness drops the callerless helper (V unused-fn notice)'
+		)
+		assert.ok(
+			srv.includes('fn swelte_room_release('),
+			'release helper stays: SSE defers still call it'
+		)
+	})
+
+	it('Uc-first .svelte colocated with a page is a component, not a route', async () => {
+		const root = scaffold()
+		mkdirSync(join(root, 'src', 'routes', 'router', 'live'), { recursive: true })
+		writeFileSync(join(root, 'src', 'routes', 'router', 'live', '+page.svelte'), '<h1>l</h1>')
+		// Plain component imported by the page: claims no URL, emits no
+		// dispatch file (used to become router_live_Streamed.v and fail
+		// V's snake_case fn-name check).
+		writeFileSync(join(root, 'src', 'routes', 'router', 'live', 'Streamed.svelte'), '<p>helper</p>')
+		await generate(root)
+		const routes = tree(root, '.swelte/routes')
+		assert.ok(!routes.some((f) => f.includes('Streamed')), 'no route file for the component')
+		assert.ok(
+			routes.some((f) => f === 'router_live__page.v'),
+			'the +page leaf still dispatches'
+		)
 	})
 
 	it('@[ws]: (sub, recv, emit) tail routes to ws_open + harness import', async () => {

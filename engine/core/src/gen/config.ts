@@ -495,6 +495,22 @@ export function renderHarness(
 		const emitHead = '\tif routes.swelte_sse_is_emit(job.prefix) {'
 		if (src.includes(anchor)) src = src.replace(anchor, emitHead)
 		else src += '\n// [swelte] room-mode anchor missing — harness template changed.\n'
+		// No room/WS routes: the only caller of swelte_room_subscribe (the
+		// room-mode `sub` closure + the WS `sub` closure) is stripped with
+		// the WS section below, so drop the helper itself — V reports an
+		// unused private fn as a notice and no attribute silences it
+		// (probed @[unused]/@[used] on V 0.5.2). swelte_room_release stays:
+		// the SSE produce/write defers still call it, so it never warns.
+		const subStart = src.indexOf('// [swelte] room-subscribe-start\n')
+		const subEnd = src.indexOf('// [swelte] room-subscribe-end')
+		if (subStart >= 0 && subEnd > subStart) {
+			src =
+				src.slice(0, subStart) +
+				'// [swelte] room-subscribe (stripped: no room/@[ws] routes, no callers)\n' +
+				src.slice(subEnd + '// [swelte] room-subscribe-end'.length)
+		} else {
+			src += '\n// [swelte] room-subscribe anchors missing — harness template changed.\n'
+		}
 		// No room/WS routes: drop the whole WS section (handshake + pump
 		// reference backend.* with no import). Dispatch is unaffected:
 		// generated swelte_ws_route returns '' with no @[ws] routes.
