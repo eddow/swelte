@@ -13,9 +13,10 @@
 // qualifier suffix (1..5, fallible `!void` only, 5s linear backoff,
 // blocking that tick's arm). Outcomes go to the console
 // (`eprintln('[swelte:cron] tick=.. status=..')`) — no log file by design.
-// Future: persistent tick log, cross-restart catchup.
+// Optional durable mode uses a dedicated SQLite schedule and transaction lock.
 import { readFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { defineSweltePlugin, parseVFile, type SweltePlugin } from '@swelte/core/vite'
 
 /** Duration literal for `@[cron]`: digits + s|m|h, nonzero (`'60s'`, `'5m'`, `'1h'`). */
@@ -127,7 +128,10 @@ function indent(body: string): string {
  *  `status=catchup` are logged. Non-fallible + no-retry ticks emit today's
  *  shape (byte-identical). Zero ticks → empty fragments (byte-identical
  *  harness when absent). */
-export function cronHarness(crons: JobsCronDef[]): { main: string; mainInner: string } {
+export function cronHarness(
+	crons: JobsCronDef[],
+	durable = false
+): { main: string; mainInner: string; imports?: string } {
 	if (crons.length === 0) return { main: '', mainInner: '' }
 	let defs = ''
 	const everies: number[] = []
@@ -147,41 +151,46 @@ export function cronHarness(crons: JobsCronDef[]): { main: string; mainInner: st
 		let fire: string
 		if (retry > 0) {
 			// Blocking retry loop: fallible call inside `or {}`. V var names
-			// are tick-scoped (`__a_N`/`__ok_N`); `err` is the `or`-block var.
-			fire = `mut __a_${n} := 0
-			mut __ok_${n} := false
-			for __a_${n} <= ${retry} {
+			// are tick-scoped (`swelte_attempt_N`/`swelte_recovered_N`); `err` is the `or`-block var.
+			fire = `mut swelte_attempt_${n} := 0
+			mut swelte_recovered_${n} := false
+			for swelte_attempt_${n} <= ${retry} {
 				swelte_cron_${n}() or {
 					swelte_report(SwelteReport{phase: 'job-error', path: 'cron/${c.name}', status: 500, message: err.msg()})
-					if __a_${n} == ${retry} {
+					if swelte_attempt_${n} == ${retry} {
 						eprintln('[swelte:cron] ${tag} status=dead attempt=${retry} reason=failed')
 					} else {
-						eprintln('[swelte:cron] ${tag} status=retry attempt=' + __a_${n}.str() + ' reason=failed')
-						if !swelte_wait_active((__a_${n} + 1) * ${PLUS_CRON_RETRY_STEP_S} * 1000, state) { return }
+						eprintln('[swelte:cron] ${tag} status=retry attempt=' + swelte_attempt_${n}.str() + ' reason=failed')
+						if !swelte_wait_active((swelte_attempt_${n} + 1) * ${PLUS_CRON_RETRY_STEP_S} * 1000, state) { return }
 					}
-					__a_${n}++
+					swelte_attempt_${n}++
 					continue
 				}
-				if __a_${n} > 0 {
-					eprintln('[swelte:cron] ${tag} status=ok attempt=' + __a_${n}.str())
+				if swelte_attempt_${n} > 0 {
+					eprintln('[swelte:cron] ${tag} status=ok attempt=' + swelte_attempt_${n}.str())
 				}
-				__ok_${n} = true
+				swelte_recovered_${n} = true
 				break
 			}
-			_ = __ok_${n}`
+			${durable ? `swelte_succeeded_${n} = swelte_recovered_${n}` : `_ = swelte_recovered_${n}`}`
 		} else if (c.fallible) {
-			fire = `swelte_cron_${n}() or { swelte_report(SwelteReport{phase: 'job-error', path: 'cron/${c.name}', status: 500, message: err.msg()}); eprintln('[swelte:cron] ${tag} status=error reason=failed') }`
+			fire = `swelte_cron_${n}() or { ${durable ? `swelte_succeeded_${n} = false; ` : ''}swelte_report(SwelteReport{phase: 'job-error', path: 'cron/${c.name}', status: 500, message: err.msg()}); eprintln('[swelte:cron] ${tag} status=error reason=failed') }`
 		} else {
 			fire = `swelte_cron_${n}()`
 		}
 		arms.push(
-			`		if now >= next[${n - 1}] {
+			`		if ${durable ? `sweltejobs.claim(mut jobs_db, '${c.name}', ${c.seconds}) or { eprintln('[swelte:cron] durable claim failed: ' + err.msg()); false }` : `now >= next[${n - 1}]`} {
 			if state.is_stopping() { return }
-			if now - next[${n - 1}] >= ${c.seconds * 2} {
+			${
+				durable
+					? ''
+					: `if now - next[${n - 1}] >= ${c.seconds * 2} {
 				eprintln('[swelte:cron] ${tag} status=catchup lag=' + (now - next[${n - 1}]).str() + 's')
+			}`
 			}
+			${durable ? `mut swelte_succeeded_${n} := true` : ''}
 			${indent(fire)}
-			next[${n - 1}] = time.now().unix() + ${c.seconds}
+			${durable ? `sweltejobs.complete(mut jobs_db, '${c.name}', ${c.seconds}, if swelte_succeeded_${n} { 'ok' } else { 'failed' }) or { jobs_db.exec_none('ROLLBACK'); eprintln('[swelte:cron] durable completion failed: ' + err.msg()) }` : `next[${n - 1}] = time.now().unix() + ${c.seconds}`}
 		}`
 		)
 	}
@@ -190,18 +199,28 @@ export function cronHarness(crons: JobsCronDef[]): { main: string; mainInner: st
 	// Scheduler fn is top-level (V forbids nested fns); only the spawn
 	// lives inside `main`. `main` gains the trailing newline back so the
 	// harness splice `${frag.main}\nfn main()` stays well-formed.
-	const sched = `fn swelte_cron_run(lifecycle &SwelteLifecycle) {
+	const sched = `fn swelte_cron_run(lifecycle &SwelteLifecycle${durable ? ', database sqlite.DB' : ''}) {
+	${
+		durable
+			? `mut jobs_db := database
+	defer { jobs_db.exec_none('ROLLBACK'); jobs_db.close() or {} }`
+			: ''
+	}
 	mut state := unsafe { &SwelteLifecycle(lifecycle) }
 	defer { state.end() }
-	mut next := [${inits}]
+	${durable ? '' : `mut next := [${inits}]`}
 	for {
-		mut now := time.now().unix()
-		mut wait := next[0] - now
-		for d in next {
+		${durable ? '' : 'mut now := time.now().unix()'}
+		mut wait := ${durable ? 1 : 'next[0] - now'}
+		${
+			durable
+				? ''
+				: `for d in next {
 			if d - now < wait { wait = d - now }
+		}`
 		}
 		if wait > 0 && !swelte_wait_active(wait * 1000, state) { return }
-		now = time.now().unix()
+		${durable ? '' : 'now = time.now().unix()'}
 ${arms}
 	}
 }
@@ -211,8 +230,16 @@ ${arms}
 // No watchdog: long-lived by design. Missed ticks coalesce (no pile-up),
 // with a status=catchup console notice when lag >= 2 intervals.
 // Outcomes log to the console ([swelte:cron] tick=.. status=..) — no file.
-	if app.lifecycle.begin() { spawn swelte_cron_run(app.lifecycle) }`
-	return { main, mainInner }
+	${
+		durable
+			? `jobs_path := os.getenv_opt('SWELTE_JOBS_PATH') or { 'data/jobs.db' }
+	durable_jobs := sweltejobs.open(jobs_path) or { panic('durable jobs: ' + err.msg()) }`
+			: ''
+	}
+	if app.lifecycle.begin() { spawn swelte_cron_run(app.lifecycle${durable ? ', durable_jobs' : ''}) }`
+	return durable
+		? { main, mainInner, imports: 'import db.sqlite\nimport sweltejobs' }
+		: { main, mainInner }
 }
 
 /** Read + validate `src/app.v` `@[cron]` fns (sync — matches the core contract). */
@@ -254,28 +281,40 @@ export function readJobsCrons(root: string, srcDir = 'src'): JobsCronDef[] {
 	return out
 }
 
-export const jobsPlugin: SweltePlugin = defineSweltePlugin({
-	name: 'jobs',
-	attrs: ['cron'],
-	configKey: 'jobs',
-	// Core calls validate() only for fns in route files; `@[cron]` lives in
-	// `src/app.v` (parsed by loadAppHooks below). Any cron reaching validate
-	// is misplaced — reject it here (core's own-file guard is core-attr-only).
-	validate: (rel, fn) => {
-		if (fn.attr !== 'cron') return
-		if (!/(^|\/)src\/app\.v$/.test(rel) && !/(^|\/)app\.v$/.test(rel))
-			throw new Error(
-				`[swelte] ${rel}: @[cron] ${fn.name} is only allowed in src/app.v (one-or-more fns, qualifier is the duration literal).`
-			)
-		validateCronFn(rel, fn as unknown as CronFnShape)
-	},
-	loadAppHooks: (root, srcDir = 'src') => {
-		try {
-			const crons = readJobsCrons(root, srcDir)
-			if (crons.length === 0) return {}
-			return { fragment: cronHarness(crons) }
-		} catch (e) {
-			return { errors: [(e as Error).message] }
-		}
-	},
-})
+export function createJobsPlugin(options: { durable?: boolean } = {}): SweltePlugin {
+	return defineSweltePlugin({
+		name: 'jobs',
+		attrs: ['cron'],
+		configKey: 'jobs',
+		includes: options.durable
+			? () => [
+					{
+						module: 'sweltejobs',
+						absDir: join(dirname(fileURLToPath(import.meta.url)), '../vlib/sweltejobs'),
+					},
+				]
+			: undefined,
+		// Core calls validate() only for fns in route files; `@[cron]` lives in
+		// `src/app.v` (parsed by loadAppHooks below). Any cron reaching validate
+		// is misplaced — reject it here (core's own-file guard is core-attr-only).
+		validate: (rel, fn) => {
+			if (fn.attr !== 'cron') return
+			if (!/(^|\/)src\/app\.v$/.test(rel) && !/(^|\/)app\.v$/.test(rel))
+				throw new Error(
+					`[swelte] ${rel}: @[cron] ${fn.name} is only allowed in src/app.v (one-or-more fns, qualifier is the duration literal).`
+				)
+			validateCronFn(rel, fn as unknown as CronFnShape)
+		},
+		loadAppHooks: (root, srcDir = 'src') => {
+			try {
+				const crons = readJobsCrons(root, srcDir)
+				if (crons.length === 0) return {}
+				return { fragment: cronHarness(crons, options.durable === true) }
+			} catch (e) {
+				return { errors: [(e as Error).message] }
+			}
+		},
+	})
+}
+
+export const jobsPlugin = createJobsPlugin()

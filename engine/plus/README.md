@@ -20,6 +20,8 @@ export default defineConfig({
 
 - **jobs** — `@[cron('60s')]` / `@[cron('5m,retry=3')]` in `src/app.v`.
   Single scheduler thread at boot (no CLI/SSH), console tick log.
+  `createJobsPlugin({ durable: true })` adds SQLite schedule persistence,
+  restart catchup and coordination across processes sharing `SWELTE_JOBS_PATH`.
 - **db** — `swelte migrate` via `SWELTE_PLUGINS=@swelte/plus/db`.
   Scaffolds `src/lib/backend/db.v` (shared conn + `kv_get/kv_set/kv_del`)
   + `db/migrations/001_swelte_kv.sql`; applies pendings in order,

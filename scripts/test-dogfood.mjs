@@ -135,6 +135,8 @@ try {
     build: { outDir: 'dist' },
   })
   const manifest = JSON.parse(readFileSync(join(app, '.swelte/ssr-manifest.json'), 'utf8'))
+  const { loadConfig } = await import(pathToFileURL(join(root, 'engine/core/dist/gen/config.js')))
+  writeFileSync(join(app, 'dist/isr.json'), JSON.stringify((await loadConfig(app)).isr))
   const renderJs = await emitRenderJs(manifest, { root: app, prod: true })
   buildQjsProd({ root: app, renderJs })
   const binary = join(app, process.platform === 'win32' ? 'server.exe' : 'server')
@@ -145,7 +147,7 @@ try {
   const port = await availablePort()
   // No Node executable or sidecar can be found through the runtime PATH.
   const runtimeEnv = {
-    PATH: '', PORT: String(port), SWELTE_DIST: join(app, 'dist'), SWELTE_SSR: '1', SWELTE_STREAM_IDLE_MS: '500', SWELTE_SSE_HEARTBEAT_MS: '100', SWELTE_HANDLER_TIMEOUT_MS: '1000',
+    PATH: '', PORT: String(port), SWELTE_RATE_LIMIT: '1000', SWELTE_DIST: join(app, 'dist'), SWELTE_SSR: '1', SWELTE_STREAM_IDLE_MS: '500', SWELTE_SSE_HEARTBEAT_MS: '100', SWELTE_HANDLER_TIMEOUT_MS: '1000',
     ...(postgres ? { DATABASE_URL: process.env.DATABASE_URL, ...Object.fromEntries(Object.entries(process.env).filter(([key]) => key.startsWith('PG'))) } : {}),
   }
   server = spawn(binary, [], {
@@ -250,6 +252,8 @@ try {
   const timedOut = await fetch(`${url}?q=timeout`, { headers: { 'X-Swelte-Load': '1', accept: 'application/json' } })
   assert.equal(timedOut.status, 504)
   assert.equal((await timedOut.json()).error.status, 504)
+  const { checkIsr } = await import('./dogfood-isr.mjs')
+  await checkIsr(url, app)
   const { checkStreams } = await import('./dogfood-stream.mjs')
   await checkStreams(url, app)
   const { checkStrictSsr } = await import('./dogfood-ssr.mjs')
@@ -287,7 +291,7 @@ try {
   staticHost = await checkPrerender(root, app, binary)
   if (process.argv.includes('--browser')) {
     const { checkBrowser } = await import('./dogfood-browser.mjs')
-    await checkBrowser(url, scratch, staticHost.url)
+    await checkBrowser(url, scratch, staticHost.url, app)
   }
   console.log('PASS: installed native/UI package, browser build, native JSON and QuickJS HTML with empty runtime PATH')
 } finally {

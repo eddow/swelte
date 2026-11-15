@@ -12,8 +12,9 @@
 // artifacts only). WASM untouched (always `-os browser`); QJS needs the
 // per-OS-ARCH `libqjs-<os>-<arch>.a` (built by the same zig wrapper).
 import { execFileSync } from 'node:child_process'
-import { existsSync, readdirSync, statSync, writeFileSync } from 'node:fs'
+import { cpSync, existsSync, mkdirSync, readdirSync, statSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
+import { buildImages } from './images.js'
 import type { Ctx } from './types.js'
 
 // Deploy-target shims (docs (built) item 4): packaging only, no
@@ -157,7 +158,7 @@ export async function runBuild(ctx: Ctx): Promise<void> {
 	if (!process.env.SWELTE_METHOD_OVERRIDE && cfg.methodOverride)
 		process.env.SWELTE_METHOD_OVERRIDE = '1'
 	if (!process.env.SWELTE_VERSION && cfg.version !== '') process.env.SWELTE_VERSION = cfg.version
-	// ISR lite: freeze the `isr` map into SWELTE_ISR for the prerender
+	// Freeze the `isr` map into SWELTE_ISR for the prerender
 	// crawl + smoke probe env (the V binary reads it per request).
 	if (!process.env.SWELTE_ISR && Object.keys(cfg.isr).length > 0)
 		process.env.SWELTE_ISR = Object.entries(cfg.isr)
@@ -205,6 +206,7 @@ export async function runBuild(ctx: Ctx): Promise<void> {
 	// above emits .swelte/dev/<mod>.wasm per file (mtime-guarded); the
 	// prod bundle compiles in generateBundle during vite build below.
 	for (const line of listDevWasm(root)) ctx.log(line)
+	const imageManifest = buildImages(root, cfg.images, cfg.outDir, cfg.base)
 	// 3. vite build FIRST (it wipes dist/, incl. any binary inside it).
 	// (Adapter generateBundle emits dist/ssr/render.js + the QJS bridge
 	// here when the project uses @swelte/ssr-qjs — the smoke in step 5
@@ -218,6 +220,17 @@ export async function runBuild(ctx: Ctx): Promise<void> {
 		)
 	}
 	ctx.log('vite build: ok')
+	if (Object.keys(cfg.isr).length)
+		writeFileSync(join(root, cfg.distDir, 'isr.json'), JSON.stringify(cfg.isr))
+	if (cfg.images.length) {
+		mkdirSync(join(root, cfg.distDir, 'images'), { recursive: true })
+		for (const variants of Object.values(imageManifest))
+			for (const variant of variants) {
+				const file = variant.src.split('/').at(-1)!
+				cpSync(join(root, cfg.outDir, '.images', file), join(root, cfg.distDir, 'images', file))
+			}
+		writeFileSync(join(root, cfg.distDir, 'images', 'manifest.json'), JSON.stringify(imageManifest))
+	}
 	// 3b. QJS prod link, second generate pass (adapter-owned): the bridge
 	// (routes/swelte_qjs_bridge.v) did not exist during step 1 (it is
 	// emitted by generateBundle above) — regenerate so server_gen.v +

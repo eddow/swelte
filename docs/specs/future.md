@@ -1,13 +1,23 @@
-# Remaining framework work
+# Framework follow-up status
 
-These are future capabilities, not prerequisites for the completed
+All items in this batch are implemented. Their public contracts and limits live
+in the user documentation:
+
+- **Background ISR regeneration:** public native page cache, stale reads,
+  background rendering and atomic replacement; failed regeneration retains the
+  previous HTML. See [configuration](../config.md).
+- **Native image processing:** host-side V resizing and WebP encoding, generated
+  metadata and published assets. See [images](../images.md).
+- **Offline outbox:** explicit IndexedDB mutation queue, Background Sync,
+  persistent retries and retained failures. See [outbox](../outbox.md).
+- **Durable scheduled jobs:** SQLite schedule persistence, coalesced restart
+  catchup and coordination across processes sharing the scheduler file.
+  See [durable schedules](../plus.md#durable-schedules).
+
+SSR source guard precision and nested error boundaries were delivered earlier;
+see [SSR](../ssr.md). These capabilities remain independent of the completed
 [dogfood work](dogfood-roadmap.md).
 
-- **Background ISR regeneration:** current ISR support emits cache headers.
-  Implement background rendering and atomic replacement of generated HTML.
-- **Native image processing:** add a build-time V pipeline for resizing and
-  WebP output, with an explicit asset contract.
-- **Offline outbox:** add a persistent replay queue and background-sync behavior
-  to the network-first service worker, including retry and failure semantics.
-- **Durable scheduled jobs:** Plus cron ticks are best-effort and process-local.
-  Persistence, restart catchup and coordination across instances remain open.
+Regression coverage includes the core, SSR and Plus unit suites,
+`npm run test:images`, `npm run test:jobs`, and
+`node scripts/test-dogfood.mjs --browser`.

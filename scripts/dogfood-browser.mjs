@@ -20,7 +20,7 @@ function browserExecutable() {
   throw new Error('Set SWELTE_TEST_BROWSER to a Chromium executable for --browser')
 }
 
-export async function checkBrowser(url, scratch, staticUrl) {
+export async function checkBrowser(url, scratch, staticUrl, app) {
   const browser = spawn(browserExecutable(), [
     '--headless=new', '--no-sandbox', '--disable-dev-shm-usage', '--disable-gpu',
     '--remote-debugging-port=0', `--user-data-dir=${join(scratch, 'browser')}`, 'about:blank',
@@ -185,6 +185,8 @@ export async function checkBrowser(url, scratch, staticUrl) {
     await wait('document.getElementById("item-error")?.textContent === "Item 403: item denied"', 'client nested load error')
     assert.equal(await evaluate('document.getElementById("layout-locale").textContent'), 'ro:')
     assert.deepEqual(exceptions, [])
+    const { checkOutbox } = await import('./dogfood-outbox.mjs')
+    await checkOutbox({ url, app, command, evaluate, wait })
     await command('Page.addScriptToEvaluateOnNewDocument', { source: `
       const corrupt = new MutationObserver(() => {
         const root = document.querySelector('#app > [data-swelte-ssr]');

@@ -42,7 +42,8 @@ import { codeHtml } from '#lib/snippets.gen.js'
 	then applies <code>db/migrations/*.sql</code> in order (tracked in
 	<code>_swelte_migrations</code>, idempotent). App tables are your own SQL; the
 	<code>swelte_kv</code>
-	table is the primitive SWR regen / outbox build on.
+	table is available for app-owned key/value data. ISR owns its HTML cache; the browser outbox uses
+	IndexedDB. Durable jobs use a separate scheduler SQLite file.
 </p>
 
 <h2 class="text-2xl font-bold mt-8">Gotcha: exec vs exec_none</h2>

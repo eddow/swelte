@@ -33,9 +33,9 @@ import { codeHtml } from '#lib/snippets.gen.js'
 	<code>backend.emit(room, msg)</code>
 	(returns the delivered count); a room-mode
 	<code>@[sse]</code>
-	fn subscribes and streams live hub messages. Single-instance best-effort (same tier as cron);
-	backpressure-safe (cap-1 buffer, slow subscribers drop, publishers never stall); harness-owned
-	subscriptions (auto-reaped on disconnect — return from the fn to leave).
+	fn subscribes and streams live hub messages. Single-instance best-effort (same tier as default
+	process-local cron); backpressure-safe (cap-1 buffer, slow subscribers drop, publishers never
+	stall); harness-owned subscriptions (auto-reaped on disconnect — return from the fn to leave).
 </p>
 <div class="mt-2">
 	<Code snippet={codeHtml['plus-rooms']} dense title="rooms: emit + room SSE" />

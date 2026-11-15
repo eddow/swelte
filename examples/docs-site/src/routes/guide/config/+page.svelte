@@ -14,11 +14,9 @@ import { codeHtml } from '#lib/snippets.gen.js'
 
 <h1 class="text-4xl font-bold mt-2">Config + env</h1>
 <p class="py-4 opacity-80">
-	Single rule everywhere:
-	<strong
-		>env wins when set; config is the fallback; unset/invalid/zero/negative means built-in
-		default.</strong
-	>
+	Put app options in the <code>swelte</code> key. Runtime environment variables override their
+	corresponding config values; unset runtime knobs use config or built-in defaults. Image and outbox
+	contracts are validated, and invalid options fail the build.
 </p>
 
 <h2 class="text-2xl font-bold">
@@ -47,11 +45,31 @@ import { codeHtml } from '#lib/snippets.gen.js'
 				</li>
 				<li>
 					<code>isr: &#123; '/blog': 60 &#125;</code>
-					→ <code>Cache-Control s-maxage</code> + <code>X-Swelte-Revalidate</code>
+					→ public HTML caching, background regeneration and atomic replacement (<a
+						class="link"
+						href="/guide/isr"
+						>ISR guide</a
+					>)
 				</li>
 				<li>
 					<code>offline.fallback</code>
 					— opt-in service worker + precache (<a class="link" href="/guide/offline">offline guide</a
+					>)
+				</li>
+				<li>
+					<code>images</code>
+					— native build-time PNG/JPEG resizing and WebP variants (<a
+						class="link"
+						href="/guide/images"
+						>image guide</a
+					>)
+				</li>
+				<li>
+					<code>serviceWorker.outbox</code>
+					— explicit persistent mutations, retries and Background Sync (<a
+						class="link"
+						href="/guide/offline"
+						>outbox guide</a
 					>)
 				</li>
 				<li>per-route <code>ssr = false</code> — SPA shell, async universal load client-side</li>

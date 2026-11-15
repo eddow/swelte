@@ -1,3 +1,4 @@
+import { type OutboxOptions, outboxSource } from './outbox.js'
 /** Service worker scope (additive offline shell). Hand-rolled template —
  *  no workbox dep. Keep the surface small: precache shell + immutable
  *  hashed assets, network-first API, SPA-shell fallback for navigations.
@@ -6,6 +7,7 @@ export function renderServiceWorker(opts: {
 	version: string
 	precache: string[]
 	base?: string
+	outbox?: OutboxOptions | null
 }): string {
 	const version = JSON.stringify(opts.version || 'dev')
 	const base = JSON.stringify(opts.base ?? '')
@@ -14,8 +16,10 @@ export function renderServiceWorker(opts: {
 const SW_VERSION = ${version};
 const SW_BASE = ${base};
 const SW_PRECACHE = ${precache};
-const SW_CACHE = 'swelte-' + SW_VERSION;
+const SW_CACHE_PREFIX = 'swelte-' + encodeURIComponent(self.registration.scope) + '-';
+const SW_CACHE = SW_CACHE_PREFIX + SW_VERSION;
 const withBase = (p) => SW_BASE + p;
+${outboxSource(opts.outbox ?? null)}
 self.addEventListener('install', (event) => {
   event.waitUntil(
     caches.open(SW_CACHE).then((cache) => cache.addAll(SW_PRECACHE.map(withBase))).then(() => self.skipWaiting()),
@@ -23,7 +27,7 @@ self.addEventListener('install', (event) => {
 });
 self.addEventListener('activate', (event) => {
   event.waitUntil(
-    caches.keys().then((keys) => Promise.all(keys.filter((k) => k !== SW_CACHE).map((k) => caches.delete(k)))).then(() => self.clients.claim()),
+    caches.keys().then((keys) => Promise.all(keys.filter((k) => k.startsWith(SW_CACHE_PREFIX) && k !== SW_CACHE).map((k) => caches.delete(k)))).then(() => self.clients.claim()),
   );
 });
 self.addEventListener('fetch', (event) => {

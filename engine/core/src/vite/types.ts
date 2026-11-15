@@ -30,10 +30,14 @@ export interface SweltePluginOptions {
 	/** App version stamp. Defaults to package.json version. Env SWELTE_VERSION wins. */
 	version?: string
 	/** Opt-in service worker. Default off. Env SWELTE_SW=1 forces on. */
-	serviceWorker?: { enabled?: boolean; register?: 'auto' | 'manual' }
+	serviceWorker?: {
+		enabled?: boolean
+		register?: 'auto' | 'manual'
+		outbox?: import('./outbox.js').OutboxOptions | null
+	}
 	/** Prerender/SSG crawl: 'off' (default) | { entries: 'static'|'all'|'off', concurrency }. */
 	prerender?: { entries?: 'static' | 'all' | 'off'; concurrency?: number }
-	/** ISR lite: path-prefix to seconds, stamp Cache-Control headers. */
+	/** Public native HTML cache: path-prefix to TTL seconds. */
 	isr?: Record<string, number>
 	/** Offline fallback page: 'off' (default) | 'offline.html' | custom path. */
 	offline?: { fallback?: boolean | string }

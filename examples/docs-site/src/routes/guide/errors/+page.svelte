@@ -14,8 +14,10 @@ import { codeHtml } from '#lib/snippets.gen.js'
 
 <h1 class="text-4xl font-bold mt-2">Errors</h1>
 <p class="py-4 opacity-80">
-	Every 4xx from the V backend is JSON. <code>SwelteRpcError(status, body, base, fn)</code> replaces
-	thrown <code>error()</code>/<code>json()</code>
+	API failures use JSON; HTML page failures render an error boundary.
+	<code>SwelteRpcError(status, body, base, fn)</code> replaces thrown <code>error()</code>/<code
+		>json()</code
+	>
 	helpers.
 </p>
 
@@ -74,6 +76,27 @@ import { codeHtml } from '#lib/snippets.gen.js'
 		means default, never “off”.</span
 	>
 </div>
+
+<h2 class="text-2xl font-bold mt-8">Nested page error boundaries</h2>
+<p class="opacity-80 mt-2">
+	Place <code>+error.svelte</code> in any route directory, with
+	<code>&#123; status?, message? &#125;</code>
+	props. SSR, hydration, navigation and action errors select the nearest physical ancestor,
+	including route groups.
+</p>
+<div class="mt-2"><Code snippet={codeHtml['errors-boundaries']} dense title="src/routes" /></div>
+<p class="opacity-80 mt-2">
+	The selected boundary replaces its directory's wrapper and page, retaining wrappers strictly above
+	it and their successful native load data. Failed universal loads are not rerun while rendering an
+	error. A broken boundary or retained wrapper falls back to the next ancestor. SSR records its
+	choice so hydration adopts the same tree.
+</p>
+<p class="opacity-80 mt-2">
+	Unknown URLs use matching ungrouped directory scopes, including dynamic segments, then root.
+	Grouped scopes require a matched page. Error components are imported eagerly, independently of
+	page chunking and layout resets. Load/action errors retain their status; page render failures
+	produce a sanitized 500. Missing or failed boundaries preserve the shell fallback.
+</p>
 
 <h2 class="text-2xl font-bold mt-8">SPA-first proxy</h2>
 <p class="opacity-80 mt-2 text-sm">

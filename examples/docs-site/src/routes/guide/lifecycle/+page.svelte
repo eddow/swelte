@@ -25,9 +25,9 @@ import DocsNav from '#lib/DocsNav.svelte'
 <p class="opacity-80 mt-2">
 	Navigation loads before committing UI and preserves query strings, hashes and history. Redirects
 	and errors are explicit outcomes. Stale results cannot replace a newer navigation.
-	<code>invalidateAll()</code> awaits a load refresh and committed props; tagged invalidation
-	refreshes affected active loads. Refresh preserves mounted component state when route and wrapper
-	identities remain unchanged.
+	<code>invalidateAll()</code>
+	awaits a load refresh and committed props; tagged invalidation refreshes affected active loads.
+	Refresh preserves mounted component state when route and wrapper identities remain unchanged.
 </p>
 <h2 class="text-2xl font-bold mt-8">Native lifecycle and reporting</h2>
 <p class="opacity-80 mt-2">
@@ -39,9 +39,19 @@ import DocsNav from '#lib/DocsNav.svelte'
 <p class="opacity-80 mt-2">
 	Prerendering supports grouped/dynamic entries, encoded parameters, inherited opt-outs and
 	canonical/head output. Redirects, error pages and fallback shells are excluded. Hydrated state
-	uses the hosting URL. SSR has one global error component; per-directory error inheritance remains
-	future work. Background ISR regeneration, a native image pipeline, an offline outbox and durable
-	scheduled jobs are also future work.
+	uses the hosting URL. Nested error boundaries select the nearest physical ancestor, retain
+	wrappers above that boundary and fall back to a parent if rendering fails.
+</p>
+<h2 class="text-2xl font-bold mt-8">Caching, assets and durable work</h2>
+<p class="opacity-80 mt-2">
+	<a class="link" href="/guide/isr">Native ISR</a>
+	serves public cached HTML during background regeneration and replaces it atomically.
+	<a class="link" href="/guide/images">Build-time images</a>
+	resize PNG/JPEG sources into WebP variants. The
+	<a class="link" href="/guide/offline">offline outbox</a>
+	persists explicit mutations with retries and Background Sync.
+	<a class="link" href="/plus/jobs">Durable jobs</a>
+	persist schedules and coordinate processes sharing one SQLite file.
 </p>
 <DocsNav
 	next={{ href: '/guide/forms', label: 'Forms' }}

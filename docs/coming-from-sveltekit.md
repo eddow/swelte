@@ -162,9 +162,14 @@ src/routes/+page.svelte (+ .v / .ts)                        →  / (root)
   see `config.md` §Service worker. Offline fallback page
   (`offline.fallback`) precached when the prerender pass wrote it;
   API/SSE stay network-only.
-* ISR-lite: `swelte.isr` (`{ '/blog': 60 }` → `SWELTE_ISR`) stamps
-  `Cache-Control: public, max-age=0, s-maxage=N` +
-  `X-Swelte-Revalidate` on matching GET HTML. Headers only.
+* ISR: `swelte.isr` (`{ '/blog': 60 }`) enables public native HTML caching,
+  background regeneration and atomic replacement. Anonymous queryless pages
+  serve stale HTML during refresh; errors keep the prior entry. See `config.md`.
+* `swelte.images` builds PNG/JPEG resize/WebP variants through a host V tool;
+  `#app/images` exposes the typed metadata. See `images.md`.
+* Explicit offline mutations use `serviceWorker.outbox`, IndexedDB and
+  Background Sync, with stable idempotency keys and retry/failure policy.
+  See `outbox.md`.
 * Deploy targets: `--target` / `swelte.target` (`auto`|`static`|`node`|
   `edge`) — packaging-only shims (`dist/.swelte-static`,
   `dist/Dockerfile.swelte`, `dist/_headers`). Single artifact holds.

@@ -5,6 +5,8 @@ import { existsSync, readFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import type { SvelteConfig as SvelteBaseConfig } from '@sveltejs/vite-plugin-svelte'
+import { type ImageOptions, normalizeImages } from '../commands/images.js'
+import { normalizeOutbox, type OutboxOptions } from '../vite/outbox.js'
 
 export interface SwelteOptions {
 	compat?: 'none' | 'sveltekit'
@@ -35,17 +37,18 @@ export interface SwelteOptions {
 	 *  additive `dist/sw.js` (hand-rolled, no workbox dep) and injects a
 	 *  same-origin registration snippet; `manual` emits the file but skips
 	 *  the snippet so the app registers itself. Env `SWELTE_SW=1` forces on. */
-	serviceWorker?: { enabled?: boolean; register?: 'auto' | 'manual' }
+	serviceWorker?: { enabled?: boolean; register?: 'auto' | 'manual'; outbox?: OutboxOptions | null }
 	/** Prerender/SSG crawl (SvelteKit `entries` + `prerender` lite). Default off.
 	 *  `entries?: 'static' | 'all'` — `static` crawls only static routes
 	 *  (no `[param]`), `all` also executes sibling `entries.ts` exports for
 	 *  dynamic segments. `concurrency` bounds the crawl. Additive
 	 *  `dist/*.html` only - runtime/SPA-first defaults never change. */
 	prerender?: SweltePrerenderOptions
-	/** ISR lite: `[path]: seconds` map stamping `Cache-Control:
-	 *  public, max-age=0, s-maxage=N` + `X-Swelte-Revalidate` on matching
-	 *  GET HTML responses. Additive headers only. */
+	/** Public queryless page cache: path-prefix to TTL in seconds. Native
+	 *  SSR regenerates in the background and atomically replaces cached HTML. */
 	isr?: Record<string, number>
+	/** Host-native PNG/JPEG resizing to WebP, compiled only during builds. */
+	images?: ImageOptions[]
 	/** Deploy-target shims (packaging only, no Node runtime). `static`
 	 *  asserts no `dist/server` consumer is needed... (see normalize). */
 	target?: 'auto' | 'static' | 'node' | 'edge'
@@ -168,6 +171,7 @@ function normalize(raw: SwelteOptions | null | undefined): ResolvedSwelteOptions
 		serviceWorker: normalizeServiceWorker(r.serviceWorker),
 		prerender: normalizePrerender(r.prerender),
 		isr: normalizeIsr(r.isr),
+		images: normalizeImages(r.images),
 		target: normalizeTarget(r.target),
 		targetOs: normalizeTargetOs(r.targetOs),
 		targetArch: normalizeTargetArch(r.targetArch),
@@ -255,6 +259,7 @@ function normalizeServiceWorker(
 	return {
 		enabled: r.enabled === true,
 		register: r.register === 'manual' ? 'manual' : 'auto',
+		outbox: normalizeOutbox((raw as { outbox?: unknown } | undefined)?.outbox),
 	}
 }
 

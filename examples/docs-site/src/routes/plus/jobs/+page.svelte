@@ -116,12 +116,12 @@ import { codeHtml } from '#lib/snippets.gen.js'
 	</table>
 </div>
 
-<h2 class="text-2xl font-bold mt-8">How it works</h2>
+<h2 class="text-2xl font-bold mt-8">Default process-local scheduling</h2>
 <ul class="list-disc list-inside opacity-80 space-y-1 mt-2">
 	<li>
 		<code>loadAppHooks</code>
 		reads <code>src/app.v</code>, validates every <code>@[cron]</code> fn, and emits two fragments
-		into the V harness (before <code>mut app := &amp;App&#123;&#125;</code>).
+		into the V harness. Jobs start after app startup succeeds and remain lifecycle-tracked.
 	</li>
 	<li>
 		<code>main</code>: top-level <code>swelte_cron_N</code> fns (user bodies verbatim, so fallible
@@ -143,12 +143,46 @@ import { codeHtml } from '#lib/snippets.gen.js'
 	<li>Zero ticks → empty fragments: harness byte-identical to parity output.</li>
 </ul>
 
-<h2 class="text-2xl font-bold mt-8">Limits (by design)</h2>
-<ul class="list-disc list-inside opacity-80 space-y-1 mt-2">
-	<li>Single-instance best-effort: two containers = two schedulers (no distributed lock).</li>
-	<li>No persistence yet: tick log is console-only; cross-restart catchup is future work.</li>
-	<li>No cron-expression parser in v1 — duration literal only.</li>
+<h2 class="text-2xl font-bold mt-8">Durable schedules</h2>
+<div class="mt-2"><Code snippet={codeHtml['plus-durable']} dense title="vite.config.ts" /></div>
+<p class="opacity-80 mt-2">
+	The factory keeps the same <code>@[cron]</code> functions while persisting their schedules in
+	SQLite. <code>SWELTE_JOBS_PATH</code> selects a dedicated file (default
+	<code>data/jobs.db</code>), independent of <code>dbPlugin</code> and app data. SQLite development
+	files are needed at build time.
+</p>
+<p class="opacity-80 mt-2">
+	A function name is its persistent identity. First registration schedules it one interval ahead;
+	workers poll once a second. An exclusive SQLite transaction spans each due job and its retries,
+	serializing cooperating processes. Completion commits <code>next_run</code>, <code>last_run</code>
+	and <code>last_status</code> (<code>ok</code>
+	or <code>failed</code>) to <code>swelte_jobs</code>. Overdue intervals coalesce into one run after
+	restart.
+</p>
+<p class="opacity-80 mt-2">
+	Process death releases the lock and rolls back the deadline, making the run due again. External
+	side effects can commit before a crash, so bodies must be idempotent. Execution is at least once;
+	a crash restarts the retry policy. A long body or backoff holds the scheduler database writer lock
+	and delays its other jobs. Jobs must not access that scheduler database themselves.
+</p>
+<ul class="list-disc list-inside opacity-80 space-y-2 mt-2">
+	<li>
+		All cooperating processes must share the same SQLite file, job names and intervals on a
+		local/shared-host filesystem. Independent files or network filesystems do not provide this
+		coordination.
+	</li>
+	<li>
+		Renaming a function creates a new schedule. Interval changes apply after its next run. Removed
+		functions are not executed, even if their rows remain.
+	</li>
+	<li>Shutdown stops scheduling and releases the connection/transaction as tracked work exits.</li>
+	<li>
+		Default <code>jobsPlugin</code> remains process-local best effort: two containers run two
+		schedulers.
+	</li>
+	<li>Duration qualifiers are supported; cron expressions are not parsed.</li>
 </ul>
+
 <DocsNav
 	next={{ href: '/plus/db', label: 'Database' }}
 	related={[{ href: '/guide/mcp', label: 'Agents' }]}

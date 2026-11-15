@@ -101,13 +101,47 @@ console diagnostics use generic reasons. See [lifecycle](lifecycle.md).
 
 Zero ticks → empty fragments: harness byte-identical to parity output.
 
-## Limits (by design)
+## Durable schedules
 
-- Single-instance best-effort: two containers = two schedulers (no
-  distributed lock).
-- No persistence yet: tick log is console-only; cross-restart catchup is
-  future work (see [remaining work](specs/future.md)).
-- No cron-expression parser in v1 — duration literal only.
+Use the factory to opt in, keeping the same `@[cron]` functions:
+
+```ts
+import { createJobsPlugin } from '@swelte/plus'
+const jobs = createJobsPlugin({ durable: true })
+// Include jobs in swelte({ plugins: [jobs, ...] }).
+```
+
+`SWELTE_JOBS_PATH` selects a separate SQLite file (default `data/jobs.db`).
+All cooperating instances must use that same file and the same job names and
+intervals. It is independent of `dbPlugin` and the application's data database.
+The jobs plugin stages its own native module; SQLite development dependencies
+are needed to build a durable worker.
+
+A job name is its persistent identity. First registration schedules it one
+interval ahead. Each worker polls once a second. An exclusive SQLite transaction
+spans a due job and its retries, so cooperating processes serialize execution.
+Successful or exhausted execution commits `next_run = completion + interval`,
+`last_run`, and `last_status` (`ok` or `failed`) to `swelte_jobs`. Overdue intervals
+coalesce into one run on restart; no catchup burst is created. Renaming a function
+creates a new schedule; changing its interval takes effect after its next run.
+Removed functions are no longer executed even if their rows remain in the file.
+
+Process death releases the lock and rolls back the deadline, making that run due
+again. Bodies must be idempotent: external side effects can commit before a
+worker dies, so execution is at least once. Retries within a live run use the
+existing bounded policy; a crash restarts that policy. The transaction holds the
+jobs database writer lock for the body/backoff duration. Long jobs therefore delay
+other jobs in this database. Jobs must not access the scheduler database themselves.
+Use an ordinary local/shared-host SQLite filesystem, not a network filesystem or
+independent copies on separate hosts.
+
+The scheduler remains lifecycle-tracked, stops scheduling during shutdown and
+releases the connection/transaction on exit. `npm run test:jobs` runs the actual
+generated native harness against two processes, kills the owning worker mid-run,
+and verifies lock recovery, committed state and restart catchup.
+
+Default `jobsPlugin` remains process-local best effort (two containers run two
+schedulers). Duration qualifiers are supported; cron expressions are not parsed.
 
 ## Helpers
 
@@ -141,7 +175,8 @@ Single SQLite file (WAL mode, `SWELTE_DB_PATH` env else `data/app.db`).
 then applies `db/migrations/*.sql` in filename order (tracked in
 `_swelte_migrations`, idempotent re-runs). Migrations are raw SQL;
 app tables are yours. The `swelte_kv` table doubles as the primitive for
-SWR regen state / offline outbox (future items 5/7).
+Framework ISR and the browser outbox have their own persistence contracts; see
+[configuration](config.md) and [outbox](outbox.md).
 
 Rules:
 

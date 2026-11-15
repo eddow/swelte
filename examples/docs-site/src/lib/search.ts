@@ -61,7 +61,8 @@ export const searchIndex: SearchEntry[] = [
 		href: '/guide/errors',
 		label: 'Errors',
 		group: 'Guide',
-		keywords: 'errors envelope swelterpcerror spa-first 404 shell json dispatch',
+		keywords:
+			'errors nested boundaries inheritance groups +error wrapper fallback envelope swelterpcerror spa-first 404 shell json dispatch',
 	},
 	{
 		href: '/guide/config',
@@ -71,18 +72,32 @@ export const searchIndex: SearchEntry[] = [
 			'config env svelte.config.js swelte key knobs prerender entries csr layout limits serializedheaders isr offline service worker ssr csp csrf locals cookies head options goto preloaddata preloadcode pushstate replacestate snapshot updated data-sveltekit',
 	},
 	{
-		href: '/guide/offline',
-		label: 'Offline',
+		href: '/guide/isr',
+		label: 'ISR',
 		group: 'Guide',
 		keywords:
-			'offline service worker sw.js precache register auto manual cache network api sse fallback',
+			'isr background regeneration atomic stale revalidation public cache ttl s-maxage cache-control disk html SWELTE_ISR',
+	},
+	{
+		href: '/guide/images',
+		label: 'Images',
+		group: 'Guide',
+		keywords:
+			'images native resize resizing webp png jpeg alpha srcset libwebp asset metadata #app/images build widths quality',
+	},
+	{
+		href: '/guide/offline',
+		label: 'Offline & outbox',
+		group: 'Guide',
+		keywords:
+			'offline outbox enqueueOffline flushOutbox listOutbox retryOutbox discardOutbox indexeddb background sync idempotency retry credentials failure service worker sw.js precache register auto manual cache network api sse fallback',
 	},
 	{
 		href: '/guide/ssr',
 		label: 'SSR',
 		group: 'Guide',
 		keywords:
-			'ssr quickjs render load cascade error props budgets guards render.js sidecar preview',
+			'ssr quickjs render load cascade nested error boundaries prose markup guards await fetch props budgets render.js sidecar preview',
 	},
 	{
 		href: '/guide/cli',
@@ -103,7 +118,7 @@ export const searchIndex: SearchEntry[] = [
 		label: 'Jobs',
 		group: 'Plus',
 		keywords:
-			'plus jobs cron scheduler retry dead-letter tick log scheduled tasks app.v jobsplugin backoff blocking catchup',
+			'plus jobs durable sqlite coordination restart catchup SWELTE_JOBS_PATH createJobsPlugin cron scheduler retry dead-letter tick log scheduled tasks app.v jobsplugin backoff blocking catchup',
 	},
 	{
 		href: '/plus/db',

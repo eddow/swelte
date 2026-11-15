@@ -145,3 +145,21 @@ it('uses server lifecycle and marks render errors even without a global error co
 	assert.match(result.body, /data-swelte-render-error="1"/)
 	assert.doesNotMatch(result.body, /private cause/)
 })
+
+it('bundles generated image metadata from a custom output directory', async (t) => {
+	const { root, put } = fixture()
+	t.after(() => rmSync(root, { recursive: true, force: true }))
+	put('svelte.config.js', "export default { swelte: { outDir: '.generated' } }")
+	put(
+		'.generated/images.js',
+		'export default { "photo.png": [{ src: "/base/images/photo-320.webp", width: 320, height: 160, format: "webp" }] }'
+	)
+	put(
+		'src/routes/+page.svelte',
+		'<script>import images from "#app/images";</script><img src={images["photo.png"][0].src} width={images["photo.png"][0].width} alt="Photo" />'
+	)
+	const code = await composeRenderJs(manifest, { root })
+	put('render-images.mjs', code)
+	const { renderRoute } = await import(pathToFileURL(join(root, 'render-images.mjs')).href)
+	assert.match(renderRoute('/', '{}').body, /src="\/base\/images\/photo-320.webp" width="320"/)
+})

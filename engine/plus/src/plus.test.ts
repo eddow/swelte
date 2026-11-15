@@ -211,10 +211,10 @@ describe('jobs cron (moved from core generate-errors.test.ts)', () => {
 		])
 		assert.ok(main.includes('fn swelte_cron_1() !void {'))
 		// Retry loop scaffolding (tick-scoped vars, bound 3).
-		assert.ok(main.includes('mut __a_1 := 0'))
-		assert.ok(main.includes('for __a_1 <= 3 {'))
+		assert.ok(main.includes('mut swelte_attempt_1 := 0'))
+		assert.ok(main.includes('for swelte_attempt_1 <= 3 {'))
 		// 5s linear backoff: attempt k sleeps (k+1)*5s.
-		assert.ok(main.includes('swelte_wait_active((__a_1 + 1) * 5 * 1000, state)'))
+		assert.ok(main.includes('swelte_wait_active((swelte_attempt_1 + 1) * 5 * 1000, state)'))
 		// Console outcomes: retry notices, dead-letter, recovery ok.
 		assert.ok(main.includes('tick=flaky status=retry attempt='))
 		assert.ok(main.includes('tick=flaky status=dead attempt=3 reason=failed'))

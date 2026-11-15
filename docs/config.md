@@ -28,7 +28,8 @@ export default defineConfig({
     version: '',             // '' = package.json version
     serviceWorker: { enabled: false, register: 'auto' }, // opt-in SW → additive dist/sw.js
     prerender: { entries: 'off', concurrency: 4 }, // 'off' | 'static' | 'all' → entries.json + dist/*.html
-    isr: {},                  // { '/blog': 60 } → Cache-Control s-maxage + X-Swelte-Revalidate
+    images: [],               // native PNG/JPEG resize + WebP variants (see images.md)
+    isr: {},                  // { '/blog': 60 } → public page cache + background regeneration
     target: 'auto',           // 'auto' | 'static' | 'node' | 'edge' — packaging only
     targetOs: '',             // '' (host) | 'linux' | 'macos' | 'windows' — `v -o -os` cross (build-only; CLI --target-os wins, $SWELTE_TARGET_OS middle, package.json swelte key fallback)
     targetArch: '',           // '' (host) | 'amd64' | 'arm64' — `v -o -arch` cross (same precedence via --target-arch / $SWELTE_TARGET_ARCH)
@@ -103,11 +104,32 @@ the route even under global cover, `true`/`'auto'` includes it even under
 keeps all routes). Bad values are file+line build errors. `.v`-only
 routes follow the global mode (no sibling carrier).
 
-`isr: { '/blog': 60 }` freezes to `SWELTE_ISR=/blog=60` for the crawl env
-(`Hand` reads it per request): matching GET HTML 200s stamp
-`Cache-Control: public, max-age=0, s-maxage=N` +
-`X-Swelte-Revalidate: N` (longest prefix wins). Headers only — no
-background revalidation, runtime default unchanged.
+`isr: { '/blog': 60 }` opts matching pages into a public native HTML cache.
+`swelte build` writes the policy to `dist/isr.json`; `SWELTE_ISR=/blog=60`
+overrides it at runtime. Longest path-prefix match wins.
+
+Anonymous, queryless HTML GETs can use the cache when SSR is enabled. Cookies,
+Authorization, JSON/navigation-data requests, query strings and `ssr=false`
+bypass it. Opt in only pages whose anonymous content is public and independent
+of request-specific headers. Regeneration uses a fresh loopback request with no
+credentials and the normal guards/loads. Responses with cookies, explicit
+private/no-store cache policy, custom Vary, redirects, errors or an unrendered
+shell are not published.
+
+A cold miss renders normally while scheduling background generation. Fresh
+entries serve immediately; stale entries serve the previous HTML while a single
+regeneration per key runs (up to four concurrent regenerations per process).
+Success atomically replaces the cached HTML; failure keeps the previous entry.
+Cache files live in `dist/.swelte-isr`, keyed by host, path and shell, so a shell
+change cannot serve references to obsolete assets. The directory must be writable.
+A shared directory permits atomic readers across processes; regeneration
+single-flight is process-local. Lifecycle shutdown tracks background work.
+
+Cache hits expose `X-Swelte-Cache: HIT|STALE`, `Age`, and public
+`Cache-Control` with `s-maxage` and `stale-while-revalidate`. The cache stores the
+HTML body; load-specific response headers are not replayed on hits. Existing
+noncached response behavior remains unchanged. This runtime cache does not
+rewrite the root SPA shell or application-owned static files.
 
 Per-route rendering flags (SvelteKit `ssr`/`csr` page options): `export
 const ssr = false` opts the route out of SSR (SPA shell); `export const
@@ -176,6 +198,9 @@ writes `dist/<fallback>` from the first crawled page (best-effort, never
 overwrites) and — when the SW is enabled — precaches it. Shell +
 immutable assets stay cached, API/SSE network-only (unchanged).
 
+See [offline outbox](outbox.md) for explicit persistent mutations and Background Sync,
+and [build-time images](images.md) for native PNG/JPEG-to-WebP assets.
+
 ## Env vars (what the V `Hand` actually reads)
 
 | Var | Default | Effect |
@@ -193,7 +218,7 @@ immutable assets stay cached, API/SSE network-only (unchanged).
 | `SWELTE_HANDLER_TIMEOUT_MS` | `10000` | Handler budget via `spawn` + `select`. Over → `500` (server stays up; timed-out thread still runs to completion in the background). |
 | `SWELTE_SSE_MAX_EVENTS` | `10000` | Caps runaway SSE streams. |
 | `SWELTE_SSR` / `SWELTE_SSR_URL` | unset | `1` = embedded QuickJS; URL = sidecar proxy. Unset = SPA/static + JSON always. `preview` auto-sets `SWELTE_SSR=1` when the QJS bridge artifact exists. See `ssr.md`. |
-| `SWELTE_ISR` | unset | `prefix=seconds,...` (frozen by `swelte build` from `swelte.isr`). Longest prefix wins; matching GET HTML 200s stamp `Cache-Control: public, max-age=0, s-maxage=N` + `X-Swelte-Revalidate`. Headers only. |
+| `SWELTE_ISR` | unset | `prefix=seconds,...` (frozen by `swelte build` from `swelte.isr`). Longest prefix wins; matching GET HTML 200s stamp `Cache-Control: public, max-age=0, s-maxage=N` + `X-Swelte-Revalidate`. Native public cache and background regeneration; env overrides `dist/isr.json`. |
 | `SWELTE_SW` | unset (off) | `1` = force the opt-in service worker emit (`dist/sw.js` + registration snippet) without touching `svelte.config.js`. See `config.md` §Service worker. |
 | `SWELTE_V_BACKEND_URL` | unset | Dev RPC proxy target for Vite (injected by `swelte dev`). Unset = no proxy. |
 | `SWELTE_CLIENT` | unset | `1` = `check` typechecks the client stubs too (default: server-only). |

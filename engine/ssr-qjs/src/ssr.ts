@@ -739,7 +739,14 @@ export async function bundleSsr(
 			// resolves the real files via Vite aliases independently).
 			// Unknown IDs (`#app/secret`, `$env/*`) return null → build error.
 			if (id.startsWith('$app/') || id.startsWith('#app/')) {
-				const src = resolveSdkShim(id, importer ?? '')
+				const imageRoot = bundleRoot || process.cwd()
+				const imageConfig =
+					id === '#app/images'
+						? await (await import('@swelte/core/config')).loadConfig(imageRoot)
+						: null
+				const src = imageConfig
+					? readFileSync(join(imageRoot, imageConfig.outDir, 'images.js'), 'utf8')
+					: resolveSdkShim(id, importer ?? '')
 				if (src !== null) {
 					const key = `\0swelte-sdk-shim:${id}`
 					if (!modules.has(key)) modules.set(key, src)

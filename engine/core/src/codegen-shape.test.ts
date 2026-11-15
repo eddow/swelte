@@ -41,7 +41,8 @@ describeSw('service worker (opt-in, additive)', () => {
 
 	itSw('renderServiceWorker: caches shell + hashed assets, never API/JSON/SSE', () => {
 		const src = renderSw({ version: '1.2.3', precache: ['/', '/assets/index-ABC.js'], base: '' })
-		assertSw.ok(src.includes(`'swelte-' + SW_VERSION`))
+		assertSw.ok(src.includes('SW_CACHE_PREFIX + SW_VERSION'))
+		assertSw.ok(src.includes('encodeURIComponent(self.registration.scope)'))
 		assertSw.ok(src.includes('["/","/assets/index-ABC.js"]'))
 		assertSw.ok(src.includes('application/json'))
 		assertSw.ok(src.includes('text/event-stream'))

@@ -18,6 +18,7 @@ pub fn prepare(input SwelteRequest) !SwelteRequest {
 pub fn decorate(req SwelteRequest, input SwelteResponse) !SwelteResponse {
 	mut res := input
 	res.headers['X-Dogfood-Guard'] = req.locals['prepared'] or { 'missing' }
+	if req.path == '/isr' { return res }
 	res.cookies << SwelteCookie{name: 'first', value: '1', path: '/'}
 	res.cookies << SwelteCookie{name: 'second', value: '2', path: '/'}
 	return res

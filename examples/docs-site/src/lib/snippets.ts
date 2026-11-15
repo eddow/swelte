@@ -168,10 +168,10 @@ pub fn sweep() !void {
 	'plus-console': {
 		lang: 'bash',
 		code: `[swelte:cron] tick=tick status=catchup lag=130s   # wake-up behind >= 2 intervals, fires once
-[swelte:cron] tick=sweep status=retry attempt=0 err=<msg>
-[swelte:cron] tick=sweep status=retry attempt=1 err=<msg>
+[swelte:cron] tick=sweep status=retry attempt=0 reason=failed
+[swelte:cron] tick=sweep status=retry attempt=1 reason=failed
 [swelte:cron] tick=sweep status=ok attempt=2       # recovered
-[swelte:cron] tick=sweep status=dead attempt=3 err=<msg>  # exhausted`,
+[swelte:cron] tick=sweep status=dead attempt=3 reason=failed  # exhausted`,
 	},
 	'plus-db': {
 		lang: 'v',
@@ -298,5 +298,33 @@ pub fn ws_rooms(req SwelteRequest, sub fn (string) chan string, recv chan string
 \t\t}
 \t})
 </script>`,
+	},
+	'images-config': {
+		lang: 'js',
+		code: "export default {\n  swelte: {\n    images: [{ src: 'assets/hero.png', widths: [320, 640, 1280], quality: 80 }]\n  }\n}",
+	},
+	'images-component': {
+		lang: 'svelte',
+		code: "<script>\n  import images from '#app/images'\n  const variants = images['assets/hero.png']\n  const largest = variants[variants.length - 1]\n</script>\n\n<img src={largest.src}\n  srcset={variants.map(image => `${image.src} ${image.width}w`).join(', ')}\n  width={largest.width} height={largest.height} alt=\"Mountain sunrise\" />",
+	},
+	'isr-config': {
+		lang: 'js',
+		code: "export default {\n  swelte: { isr: { '/blog': 60 } }\n}\n// swelte build writes dist/isr.json.\n// Runtime override: SWELTE_ISR=/blog=60",
+	},
+	'outbox-config': {
+		lang: 'js',
+		code: "export default {\n  swelte: {\n    serviceWorker: {\n      enabled: true,\n      outbox: { paths: ['/api/save'], maxAttempts: 5, maxAgeMs: 86400000 }\n    }\n  }\n}",
+	},
+	'outbox-client': {
+		lang: 'ts',
+		code: "import { enqueueOffline, flushOutbox, listOutbox, retryOutbox, discardOutbox } from '@swelte/core'\n\n// Call from a browser handler, after the service worker takes control.\nconst id = await enqueueOffline('/api/save', {\n  method: 'POST',\n  headers: { 'Content-Type': 'application/json' },\n  body: JSON.stringify({ title: 'Draft' })\n})\nawait flushOutbox()\nconst pending = await listOutbox()\n// retryOutbox(id) resets the budget, keeping the Idempotency-Key.\n// discardOutbox(id) explicitly removes the entry.",
+	},
+	'plus-durable': {
+		lang: 'ts',
+		code: "import { swelte } from '@swelte/ssr-qjs'\nimport { createJobsPlugin } from '@swelte/plus'\n\nconst jobs = createJobsPlugin({ durable: true })\n// Include this alongside your Svelte Vite plugin:\nswelte({ plugins: [jobs] })\n// SWELTE_JOBS_PATH=data/jobs.db (default)",
+	},
+	'errors-boundaries': {
+		lang: 'bash',
+		code: 'src/routes/+error.svelte             # root fallback\nsrc/routes/+route.svelte             # retained by admin boundary\nsrc/routes/admin/+error.svelte       # nearest admin boundary\nsrc/routes/admin/+route.svelte       # replaced by admin boundary\nsrc/routes/admin/users/+page.svelte  # failing page',
 	},
 }

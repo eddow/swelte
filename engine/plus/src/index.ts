@@ -18,6 +18,7 @@ export {
 } from './db.js'
 export type { JobsCronDef } from './jobs.js'
 export {
+	createJobsPlugin,
 	jobsPlugin,
 	PLUS_CRON_MAX_RETRY,
 	PLUS_CRON_RETRY_STEP_S,

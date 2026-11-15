@@ -1,6 +1,7 @@
 module main
 
 import net
+import crypto.sha256
 import net.http
 import net.http.mime
 import net.urllib
@@ -17,6 +18,7 @@ import veb.sse
 #include "@SWELTE_HARNESS_DIR@/swelte_shutdown.h"
 fn C.swelte_install_stop_signals() int
 fn C.swelte_received_stop() int
+fn C.swelte_atomic_replace(&char, &char) int
 
 @[heap]
 struct SwelteLifecycle {
@@ -28,6 +30,7 @@ mut:
 	deadline i64
 	connections map[int]&net.TcpConn
 	instance string = time.now().unix_nano().str()
+	isr_busy map[string]bool
 	sequence u64
 	stop chan bool = chan bool{}
 	finished chan bool = chan bool{cap: 1}
@@ -213,10 +216,16 @@ const swelte_default_rate_limit = 120
 const swelte_default_rate_window_ms = i64(60 * 1000)
 const swelte_default_handler_timeout_ms = i64(10 * 1000)
 
-// ISR lite header table: `SWELTE_ISR` = `prefix=seconds,...` (build-time
+// Public ISR policy: `SWELTE_ISR` = `prefix=seconds,...` (build-time
 // env from the `isr` config). Longest prefix wins; 0 = no match.
 fn swelte_isr_seconds(path string) int {
-	raw := os.getenv_opt('SWELTE_ISR') or { return 0 }
+	mut raw := os.getenv('SWELTE_ISR')
+	if raw == '' {
+		dist := os.getenv('SWELTE_DIST')
+		settings_json := os.read_file(dist + '/isr.json') or { '{}' }
+		settings := json.decode(map[string]int, settings_json) or { map[string]int{} }
+		raw = settings.keys().map(it + '=' + settings[it].str()).join(',')
+	}
 	if raw == '' {
 		return 0
 	}
@@ -736,6 +745,26 @@ fn (mut app App) before_request(mut ctx Ctx) veb.Result {
 	page_accept := headers['Accept'] or { headers['accept'] or { '' } }
 	page_load := (headers['X-Swelte-Load'] or { headers['x-swelte-load'] or { '' } }) == '1'
 	page_prefix, _ := routes.swelte_load_route(path)
+	// ISR is public and canonical: personalized/query/data requests bypass it.
+	if ctx.req.method == .get && page_prefix != '' && page_accept.contains('text/html') && !page_accept.contains('application/json') && !page_load && !ctx.req.url.contains('?') && cookies.len == 0 && (headers['Authorization'] or { headers['authorization'] or { '' } }) == '' && (headers['X-Swelte-Isr'] or { headers['x-swelte-isr'] or { '' } }) != app.lifecycle.instance {
+		seconds := swelte_isr_seconds(path)
+		dist := os.getenv('SWELTE_DIST')
+		if seconds > 0 && dist != '' && swelte_ssr_enabled() && !routes.swelte_no_ssr(path) {
+			host := headers['Host'] or { headers['host'] or { 'localhost' } }
+			key := sha256.hexhash(host + path + swelte_shell_for(dist, path))
+			file := dist + '/.swelte-isr/' + key + '.html'
+			if html := os.read_file(file) {
+				age := time.now().unix() - os.file_last_mod_unix(file)
+				if age >= seconds { swelte_isr_schedule(app.lifecycle, path, host, file) }
+				ctx.res.header.set_custom('Cache-Control', 'public, max-age=0, s-maxage=' + seconds.str() + ', stale-while-revalidate=' + seconds.str()) or {}
+				ctx.res.header.set_custom('Age', age.str()) or {}
+				ctx.res.header.set_custom('X-Swelte-Cache', if age >= seconds { 'STALE' } else { 'HIT' }) or {}
+				ctx.res.set_status(.ok)
+				return ctx.send_response_to_client('text/html; charset=utf-8', html)
+			}
+			swelte_isr_schedule(app.lifecycle, path, host, file)
+		}
+	}
 	if ctx.req.method == .get && page_prefix != '' && (page_load || page_accept.contains('text/html')) {
 		return swelte_serve_page(mut ctx, path, query, headers, cookies, page_load)
 	}
@@ -755,11 +784,11 @@ fn (mut app App) before_request(mut ctx Ctx) veb.Result {
 	// otherwise every default same-origin POST 403s when SWELTE_CORS_ORIGIN
 	// is unset. Mirrors the CSRF host check above.
 	dist := os.getenv_opt('SWELTE_DIST') or { '' }
-	// ISR lite (item 15c): stamp early — before the SSR/static/shell early
+	// Cache metadata for non-page/static paths: stamp early — before the SSR/static/shell early
 	// returns below — so every GET HTML 200 serve path carries the headers,
 	// not just the API-envelope path at the bottom. `set_custom`
 	// accumulates; later `send_response_to_client` calls flush all headers
-	// set so far. Headers only — no background revalidation.
+	// set so far. Page caching/regeneration happens above.
 	// (`wants_html`/`wants_json` are declared further down; the Accept test
 	// is inlined here so the stamp stays above the early returns.)
 	if ctx.req.method == .get && status == 200 {
@@ -1343,6 +1372,14 @@ fn swelte_serve_page_form(mut ctx Ctx, path string, query map[string]string, hea
 	}
 	state := '<script type="application/json" id="__swelte_page">' + swelte_script_json(payload) + '</script>'
 	shell = if shell.contains('</body>') { shell.replace('</body>', state + '</body>') } else { shell + state }
+	if loaded.status == 200 && form_status == 0 && loaded.cookies.len == 0 && swelte_isr_seconds(path) > 0 {
+		mut public := true
+		for key, value in loaded.headers {
+			if key.to_lower() == 'cache-control' && (value.to_lower().contains('private') || value.to_lower().contains('no-store')) { public = false }
+			if key.to_lower() == 'vary' { public = false }
+		}
+		if public { ctx.res.header.set_custom('X-Swelte-Isr-Public', '1') or {} }
+	}
 	return ctx.send_response_to_client('text/html; charset=utf-8', shell)
 }
 
@@ -1722,4 +1759,34 @@ fn main() {
 		remaining * time.millisecond { eprintln('[swelte:shutdown] status=timeout phase=hook'); exit(1) }
 	}
 	eprintln('[swelte:shutdown] status=complete')
+}
+
+// A loopback render follows ordinary guards/loads with no request credentials.
+// The per-instance marker only prevents recursion; it never bypasses guards.
+fn swelte_isr_schedule(lifecycle &SwelteLifecycle, path string, host string, file string) {
+	mut state := unsafe { &SwelteLifecycle(lifecycle) }
+	state.mu.lock()
+	if state.stopping || state.isr_busy[file] || state.isr_busy.len >= 4 { state.mu.unlock(); return }
+	state.isr_busy[file] = true
+	state.active++
+	state.mu.unlock()
+	spawn swelte_isr_regenerate(lifecycle, path, host, file)
+}
+
+fn swelte_isr_regenerate(lifecycle &SwelteLifecycle, path string, host string, file string) {
+	mut state := unsafe { &SwelteLifecycle(lifecycle) }
+	defer { state.mu.lock(); state.isr_busy.delete(file); state.mu.unlock(); state.end() }
+	mut header := http.new_header(key: .accept, value: 'text/html')
+	header.set(.host, host)
+	header.add_custom('X-Swelte-Isr', state.instance) or { return }
+	port := os.getenv_opt('PORT') or { '8131' }
+	response := http.fetch(url: 'http://127.0.0.1:' + port + path, header: header, allow_redirect: false, max_retries: 1, read_timeout: swelte_handler_timeout_ms() * time.millisecond, stop_receiving_limit: 4 * 1024 * 1024) or {
+		eprintln('[swelte:isr] route=' + path + ' reason=render-failed'); return
+	}
+	if response.status_code != 200 || response.body.len >= 4 * 1024 * 1024 || !response.body.trim_space().ends_with('</html>') || (response.header.get_custom('X-Swelte-Isr-Public') or { '' }) != '1' || response.header.contains(.set_cookie) || !response.body.contains('data-swelte-ssr="1"') || response.body.contains('data-swelte-render-error="1"') || response.body.contains('<!--ssr-body-->') { eprintln('[swelte:isr] route=' + path + ' reason=uncacheable status=' + response.status_code.str()); return }
+	os.mkdir_all(os.dir(file)) or { return }
+	temporary := file + '.' + state.instance + '.tmp'
+	defer { os.rm(temporary) or {} }
+	os.write_file(temporary, response.body) or { return }
+	if C.swelte_atomic_replace(temporary.str, file.str) != 0 { eprintln('[swelte:isr] route=' + path + ' reason=replace-failed') }
 }

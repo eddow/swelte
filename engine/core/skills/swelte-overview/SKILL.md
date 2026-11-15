@@ -52,6 +52,15 @@ start after successful `@[startup]`. App-owned workers must stop/join before
 shared resources close. `@[report]` adapts native errors/request IDs to the
 app's logger; it does not export original JS stacks. See `docs/lifecycle.md`.
 
+`swelte.images` builds local PNG/JPEG resize/WebP variants with a host V tool
+and libwebp development files; `#app/images` exposes metadata to client/SSR.
+Public native ISR caches anonymous queryless pages and atomically replaces stale
+HTML in the background. `serviceWorker.outbox` opts endpoints into explicit
+IndexedDB/Background Sync delivery via `enqueueOffline`; endpoints deduplicate
+`Idempotency-Key`. Plus `createJobsPlugin({ durable: true })` persists schedules
+and coordinates processes sharing `SWELTE_JOBS_PATH` (separate SQLite file).
+See `docs/images.md`, `docs/outbox.md`, `docs/config.md`, and `docs/plus.md`.
+
 ## Commands
 
 ```sh
@@ -65,7 +74,7 @@ npx swelte check    # diagnostics without side effects (text|json)
 ```
 
 `swelte dev` resolves V itself (system `v`, else `@swelte/vvm` toolchain).
-`vite.config.ts` wires `swelte({ vBackendUrl })` (all other knobs live in the `svelte.config.js` `swelte` key: `routesDir`, `libDir`, `outDir`, `distDir`, `port`, `corsOrigin`, `trailingSlash`, `base`, `assets`, `csp`, `csrf`, `methodOverride`, `version`, `serviceWorker`, `prerender`, `isr`, `target`, `offline`).
+`vite.config.ts` wires `swelte({ vBackendUrl })` (all other knobs live in the `svelte.config.js` `swelte` key: `routesDir`, `libDir`, `outDir`, `distDir`, `port`, `corsOrigin`, `trailingSlash`, `base`, `assets`, `csp`, `csrf`, `methodOverride`, `version`, `serviceWorker`, `prerender`, `isr`, `target`, `offline`, `images`).
 
 ## SPA-first proxy rule
 

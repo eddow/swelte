@@ -15,7 +15,8 @@ import { codeHtml } from '#lib/snippets.gen.js'
 <h1 class="text-4xl font-bold mt-2">SSR</h1>
 <p class="py-4 opacity-80">
 	One <code>render.js</code> per app, all routes inside. Data comes from <code>@&#91;load&#93</code>
-	per request — never baked in. Default is SPA/static + JSON; SSR is runtime-only and measured.
+	per render; prerender and ISR can retain the resulting HTML. Default is SPA/static + JSON; SSR is
+	optional.
 </p>
 
 <div class="alert alert-info mt-2">
@@ -49,8 +50,10 @@ import { codeHtml } from '#lib/snippets.gen.js'
 	<Code snippet={codeHtml['ssr-load']} dense />
 </div>
 <p class="text-sm opacity-70 mt-2">
-	Root-first threading, one JSON encode at the edge. Throw → <code>+error</code> props (single
-	global <code>+error.svelte</code>, <code>&#123; status?, message? &#125;</code>).
+	Root-first threading, one JSON encode at the edge. Throw → the nearest directory
+	<code>+error.svelte</code>, with <code>&#123; status?, message? &#125;</code> props. Physical
+	ancestry includes route groups; a broken boundary falls back to its parent. See
+	<a class="link" href="/guide/errors">error boundaries</a>.
 </p>
 
 <h2 class="text-2xl font-bold mt-8">Measured budgets</h2>
@@ -81,7 +84,9 @@ import { codeHtml } from '#lib/snippets.gen.js'
 </div>
 <p class="text-sm opacity-70 mt-2">
 	QuickJS is pure-sync; <code>load()</code> stays in V. Browser-only SDK calls become render-time
-	throw-stubs; page state uses a request-local SSR shim.
+	throw-stubs; page state uses a request-local SSR shim. Guards inspect executable syntax, ignoring
+	prose, literal markup, CSS, comments and string contents. Template interpolation and markup
+	expressions are checked; deferred event handlers remain allowed.
 </p>
 <h2 class="text-2xl font-bold mt-8">State, isolation and strict rendering</h2>
 <p class="opacity-80 mt-2">
@@ -97,8 +102,8 @@ import { codeHtml } from '#lib/snippets.gen.js'
 	The SSR bundle resolves installed Svelte/TypeScript/runes modules, package-private imports and
 	CommonJS dependencies. <code>swelte-ssr check</code> probes the sidecar, Hand backend and embedded
 	production binary when their artifacts exist, then shuts down its probe processes.
-	<code>swelte-ssr dev</code> owns the development sidecar; production embeds QuickJS and needs no
-	Node runtime.
+	<code>swelte-ssr dev</code>
+	owns the development sidecar; production embeds QuickJS and needs no Node runtime.
 </p>
 <p class="opacity-70 mt-2">
 	The measurements above describe a small example workload, not a production capacity guarantee. The

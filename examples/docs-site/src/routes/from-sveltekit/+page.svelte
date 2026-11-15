@@ -74,9 +74,11 @@ import DocsNav from '#lib/DocsNav.svelte'
 			</tr>
 			<tr>
 				<td><code>+error.svelte</code> (per-dir)</td>
-				<td>single global <code>+error.svelte</code></td>
+				<td>inherited directory <code>+error.svelte</code></td>
 				<td>
-					By design — <code>&#123; status?, message? &#125;</code>, renders server- and client-side.
+					Nearest physical ancestor, including route groups; retains wrappers strictly above its
+					directory. Props <code>&#123; status?, message? &#125;</code>, matching SSR/client
+					selection and parent fallback.
 				</td>
 			</tr>
 			<tr>
@@ -210,11 +212,12 @@ import DocsNav from '#lib/DocsNav.svelte'
 		wrapper, else global <code>prerender.entries</code>).
 	</li>
 	<li>
-		Service worker opt-in + offline fallback page; API/SSE stay network-only. ISR-lite stamps
-		<code>Cache-Control: public, max-age=0, s-maxage=N</code>
-		+
-		<code>X-Swelte-Revalidate</code>
-		(headers only, no background regen).
+		Service worker opt-in + offline fallback; ordinary API/SSE requests stay network-only. Explicit
+		mutations can use the <a class="link" href="/guide/offline">persistent offline outbox</a>.
+		<a class="link" href="/guide/isr">Native ISR</a>
+		caches public HTML and regenerates it in the background with atomic replacement.
+		<a class="link" href="/guide/images">Build-time images</a>
+		produce resized WebP variants and <code>#app/images</code> metadata.
 	</li>
 	<li>
 		<code>serializedHeaders = [...]</code>
@@ -230,9 +233,9 @@ import DocsNav from '#lib/DocsNav.svelte'
 <h2 class="text-2xl font-bold mt-8">Errors & platform</h2>
 <ul class="list-disc list-inside opacity-80 space-y-1 mt-2 text-sm">
 	<li>
-		Single global <code>+error.svelte</code> (<code>&#123; status?, message? &#125;</code>), renders
-		server- and client-side. <code>handleFetch(hook)</code> intercepts stub fetches (auth
-		headers/retries).
+		Directory <code>+error.svelte</code> boundaries inherit through physical ancestry, with matching
+		server/client selection and parent fallback. <code>handleFetch(hook)</code> intercepts stub
+		fetches (auth headers/retries).
 	</li>
 	<li>
 		Aliases are <code>#routes / #lib</code> (hash style).
@@ -249,7 +252,8 @@ import DocsNav from '#lib/DocsNav.svelte'
 	and the forms callback adapter.
 	<code>swelte.actionQuery</code>
 	selects named or legacy actions independently. See
-	<a href="/guide/lifecycle" class="link">page lifecycle</a> and
+	<a href="/guide/lifecycle" class="link">page lifecycle</a>
+	and
 	<a href="/guide/forms" class="link">forms</a>
 	for hydration, invalidation and mutation behavior.
 </p>

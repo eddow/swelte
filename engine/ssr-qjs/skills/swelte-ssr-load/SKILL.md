@@ -76,6 +76,12 @@ Assert translated body/head and hydrate actual static files; HTTP 200 alone
 can be an unrendered shell. Canonicals need the application's public origin,
 while `$app/state.url` rebases to the browser hosting URL. See `docs/config.md`.
 
+Native ISR (`swelte.isr`) caches only public anonymous queryless HTML GETs.
+Background loopback rendering uses ordinary guards/loads, publishes only complete
+successful SSR, and atomically replaces cached HTML. Stale/error responses retain
+the prior entry; credentials/data requests bypass caching. See `docs/config.md`.
+`#app/images` resolves generated build-time image metadata in both SSR and client.
+
 ## Installed UI dependencies
 
 The SSR bundler resolves installed ESM/Svelte package exports and compiles

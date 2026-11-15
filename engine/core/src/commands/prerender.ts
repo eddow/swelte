@@ -6,10 +6,8 @@
 // `dist/<route>/index.html` (root `/` keeps the `dist/index.html` shell —
 // never overwritten with prerendered bytes; the shell stays the SPA
 // fallback). JSON probes and error pages are skipped, never written.
-// ISR lite: `isr` path-prefix map stamps `Cache-Control:
-// public, max-age=0, s-maxage=N` + `X-Swelte-Revalidate: <seconds>` into
-// the in-memory header table — headers only, no background revalidation,
-// runtime default unchanged.
+// ISR response headers inform target shims. The native runtime separately
+// regenerates its public-page cache; prerender ownership stays additive.
 import { type ChildProcess, spawn } from 'node:child_process'
 import { once } from 'node:events'
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
