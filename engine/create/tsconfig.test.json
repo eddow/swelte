@@ -1,0 +1,15 @@
+// Node-only scaffolder tests (same note as tsconfig.json about `types`).
+{
+	"extends": "../../tsconfig.base.json",
+	"compilerOptions": {
+		"outDir": "dist-test",
+		"rootDir": "src",
+		"types": ["node"],
+		"noEmit": false,
+		"declaration": false,
+		"declarationMap": false,
+		"sourceMap": false
+	},
+	"include": ["src/**/*.test.ts", "src/**/*.ts"]
+}
+

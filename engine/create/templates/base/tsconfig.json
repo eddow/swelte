@@ -9,6 +9,7 @@
     "checkJs": false,
     "esModuleInterop": true,
     "forceConsistentCasingInFileNames": true,
+    "noEmit": true,
     "types": ["vite/client", "svelte"],
     "paths": {
       "#routes/*.v": ["./.swelte/types/routes/*.d.ts"],

@@ -79,7 +79,7 @@ before wiring a new `@[load]` to a component.
 
 ## Installing skills
 
-Automatic. Scaffolded projects (`swelte init`) carry a `postinstall` hook:
+Automatic. Scaffolded projects (`npm create @swelte`) carry a `postinstall` hook:
 
 ```json
 {

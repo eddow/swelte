@@ -12,9 +12,9 @@
 import { readFileSync, writeFileSync } from 'node:fs'
 
 const ROOT = 'package.json'
-const PACKAGES = ['engine/core', 'engine/vvm', 'engine/ssr-qjs', 'engine/mcp', 'engine/plus']
+const PACKAGES = ['engine/core', 'engine/vvm', 'engine/ssr-qjs', 'engine/mcp', 'engine/plus', 'engine/create']
 const EXAMPLES = ['examples/tests', 'examples/something', 'examples/docs-site']
-const TEMPLATE = 'engine/core/templates/base'
+const TEMPLATE = 'engine/create/templates/base'
 // Shared pins aligned on core (single truth for the whole repo).
 const PIN_KEYS = ['svelte', 'vite', '@sveltejs/vite-plugin-svelte', 'typescript', '@types/node']
 

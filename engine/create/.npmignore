@@ -1,0 +1,3 @@
+# npm uses `files` whitelist in package.json; this file only silences
+# the \"No .npmignore, using .gitignore fallback\" warning and makes
+# intent explicit. Nothing to exclude beyond what `files` already limits.

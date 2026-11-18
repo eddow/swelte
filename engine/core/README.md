@@ -32,12 +32,14 @@ Single `swelte` bin, subcommands (all implemented):
 swelte dev [--port N] [--backend N] [--root dir]
 swelte build [--root dir] [--output path] [--port N] [--target auto|static|node|edge]
 swelte preview [--port N] [--root dir] [--binary path]
-swelte init [<dir>] [--sample | --empty] [--template empty|sample] [--root dir] [--dir name]
 swelte check [--root dir] [--format text|json]
 swelte test [--root dir] [--update-snapshot | -u]
 swelte export [--root dir] [--out snapshot/]
 swelte --help | --version
 ```
+
+New projects: `npm create @swelte [<dir>] [...]` (`@swelte/create`
+scaffolder). `swelte init` is a deprecated forwarder to it.
 
 Notes:
 - `build` smoke-probes `/` always; the `/api/greet` API probe runs only

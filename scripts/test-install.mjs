@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-// test-install.mjs — smoke-test the published init path in an isolated tmp dir.
-// Packs engine/* to real tarballs, scaffolds via `swelte init` with deps
+// test-install.mjs — smoke-test the published create path in an isolated tmp dir.
+// Packs engine/* to real tarballs, scaffolds via `npm create @swelte` (engine/create bin) with deps
 // rewritten to file: tarballs (same template bytes, local resolution, no
 // registry, no publish needed), then `npm install` twice (SPA + SSR) with
 // warnings and errors promoted to failures.
@@ -74,9 +74,10 @@ function run(cmd, args, opts = {}) {
 const VERSION = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8')).version
 console.log(`packing engine/* @ ${VERSION} ...`)
 
-// Core's dist must exist for the CLI + templates to pack.
+// Create's dist must exist for the bin + templates to pack; core's dist must
+// exist for the published CLI the scaffolded apps call.
 run(process.execPath, ['-e', '1'], { stdio: 'ignore' }) // sanity: node works scrubbed
-execSync('npm run build --workspace=@swelte/core', {
+execSync('npm run build --workspace=@swelte/create && npm run build --workspace=@swelte/core', {
 	cwd: ROOT,
 	env: ENV,
 	stdio: 'ignore',
@@ -85,7 +86,7 @@ execSync('npm run build --workspace=@swelte/core', {
 
 const PACK = join(TMP, 'packs')
 mkdirSync(PACK, { recursive: true })
-for (const pkg of ['core', 'vvm', 'ssr-qjs', 'mcp', 'plus']) {
+for (const pkg of ['core', 'vvm', 'ssr-qjs', 'mcp', 'plus', 'create']) {
 	const out = run('npm', ['pack', `--workspace=engine/${pkg}`, '--pack-destination', PACK, '--silent'])
 		.trim()
 		.split('\n')
@@ -100,9 +101,9 @@ async function installCase(name, initArgs) {
 	const dir = join(TMP, name)
 	console.log(`--- case: ${name} (${initArgs.join(' ')}) ---`)
 	try {
-		run(process.execPath, [join(ROOT, 'engine', 'core', 'bin', 'swelte.js'), 'init', dir, ...initArgs])
+		run(process.execPath, [join(ROOT, 'engine', 'create', 'bin', 'create.js'), dir, ...initArgs])
 	} catch {
-		fail(`init ${name}`)
+		fail(`create ${name}`)
 	}
 	// Rewrite every @swelte/* dep to its packed tarball BEFORE the first
 	// install — a scaffolded `^0.2.0` range may not exist on the registry

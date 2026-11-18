@@ -2,8 +2,9 @@
 
 Built behavior. Every command resolves the V toolchain itself
 (system `v`, else `@swelte/vvm` — no manual install). Subcommand list
-is closed: `dev` / `build` / `preview` / `test` / `check` / `init` /
-`export` (+ `--help` / `--version`). Plugins extend it via `SWELTE_PLUGINS`
+is closed: `dev` / `build` / `preview` / `test` / `check` /
+`export` (+ `--help` / `--version`), plus a deprecated `init`
+forwarder to `npm create @swelte` (`@swelte/create`). Plugins extend it via `SWELTE_PLUGINS`
 (comma/space-separated specifiers — e.g. `SWELTE_PLUGINS=@swelte/plus/db`
 adds `swelte migrate`). No aliases — the documented
 `--target` is the deploy-target shim; `--target-os` is the cross-build
@@ -111,7 +112,14 @@ the library schema (`docs/libraries.md`): `swelte.v.exports` rules
 (shared validator with the consumer path), `exports`/`files` coverage,
 and the no-`src/routes`-leak rule — all as `lib-*` warnings.
 
-## `swelte init [<dir>] [--sample | --empty | --lib] [--template empty|sample|lib] [--kind app|lib] [--ssr] [--root dir] [--dir name]`
+## `swelte init [<dir>] [options]` — DEPRECATED
+
+Forwards to `@swelte/create` when installed; otherwise errors with the
+install hint. Use **`npm create @swelte [<dir>]`** instead:
+
+```
+npm create @swelte [<dir>] [--sample | --empty | --lib] [--template empty|sample|lib] [--kind app|lib] [--ssr|--no-ssr] [--yes|-y|--no-interactive] [--root dir] [--dir name]
+```
 
 Scaffold a project. `--sample` (default): the `something` example
 shape. `--lib` / `--kind lib` / `--template lib`: a library instead —
@@ -126,9 +134,18 @@ NEVER scaffolded — `dev`/`build` derive them into `.swelte/`.
 
 SSR is opt-in (default: SPA-only): `--ssr` adds `@swelte/ssr-qjs`
 (SSR via embedded QuickJS) and swaps the `swelte` import in
-`vite.config.ts` from `@swelte/core/vite` to `@swelte/ssr-qjs`.
-Interactive `init` asks (default No — SPA unless you say yes; add it
-later any time with `npm install @swelte/ssr-qjs` + the import swap).
+`vite.config.ts` from `@swelte/core/vite` to `@swelte/ssr-qjs`
+(`--no-ssr` forces SPA without asking). The base template ships
+conventional empty dirs: `src/lib/` + `assets/`, each with an explainer
+`README.md` (isomorphic V lib vs `backend/` boundary; `swelte.images`
+build inputs — never bundled, never copied to `dist/`; use Vite's
+default `public/` for verbatim-served files). Interactive (TTY) runs a
+`@clack/prompts` wizard: project directory (when `<dir>` omitted) →
+kind select (App / Library) → sample confirm (apps only) → SSR
+confirm (default No — add it later any time with `npm install
+@swelte/ssr-qjs` + the import swap). Non-interactive (piped stdin,
+`CI=1`, `--yes`/`--no-interactive`) skips all prompts and uses flag
+defaults (app, empty, SPA); Ctrl-C cancels cleanly.
 
 ## `swelte migrate [--root dir] [--db path]` (plugin: `@swelte/plus/db`)
 

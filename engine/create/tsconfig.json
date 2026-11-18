@@ -1,0 +1,14 @@
+// Node-only scaffolder (never bundled for the browser): make the Node.js
+// ambient types explicit so editors resolve `node:*` imports even when the
+// workspace hoists @types/node to the repo root.
+{
+	"extends": "../../tsconfig.base.json",
+	"compilerOptions": {
+		"outDir": "dist",
+		"rootDir": "src",
+		"types": ["node"]
+	},
+	"include": ["src"],
+	"exclude": ["src/**/*.test.ts"]
+}
+

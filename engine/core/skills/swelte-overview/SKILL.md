@@ -21,7 +21,7 @@ Libraries keep the same split one level up (`docs/libraries.md`): `src/lib`
 is the published surface (built `dist/` for JS/Svelte via `svelte-package`,
 raw `src/lib/**/*.v` for V via `swelte.v.exports`), `src/routes` is the
 local dogfood/test/demo (never published, never routed in consumers).
-`swelte init` asks app-vs-lib (`--lib` / `--kind lib` / `--template lib`
+`npm create @swelte` asks app-vs-lib (`--lib` / `--kind lib` / `--template lib`
 skip the prompt); libraries get `"build"` (dogfood, same as apps) plus
 `"build:lib": "svelte-package && swelte check --lib"`. `swelte check --lib`
 validates the schema as `lib-*` warnings.
@@ -64,7 +64,7 @@ See `docs/images.md`, `docs/outbox.md`, `docs/config.md`, and `docs/plus.md`.
 ## Commands
 
 ```sh
-npx @swelte/core init myapp && cd myapp
+npm create @swelte myapp && cd myapp
 npm install
 npx swelte dev      # Vite :5174 + V backend :8131, one command
 npx swelte build    # typecheck + dist/server + vite build + smoke probe

@@ -45,10 +45,19 @@ export function parseArgs(cmd: Command, argv: string[]): { opts: Ctx['opts']; re
 		if (tok.startsWith('--')) {
 			const eq = tok.indexOf('=')
 			const key = eq >= 0 ? tok.slice(2, eq) : tok.slice(2)
-			const def = defs.get(key)
+			const rawVal = eq >= 0 ? tok.slice(eq + 1) : undefined
+			const def = defs.get(key) ?? (key.startsWith('no-') ? defs.get(key.slice(3)) : undefined)
 			if (!def) throw new Error(`unknown option --${key}`)
 			if (def.value === 'boolean' || !def.value) {
-				opts[def.name] = parseBoolFlag(eq >= 0 ? tok.slice(eq + 1) : undefined)
+				// `--no-<flag>` negates a boolean (unless an explicit `=value` says otherwise).
+				if (!def.value || def.value === 'boolean') {
+					if (key.startsWith('no-') && rawVal === undefined) {
+						opts[def.name] = false
+						i++
+						continue
+					}
+				}
+				opts[def.name] = parseBoolFlag(rawVal)
 				i++
 			} else {
 				const raw = eq >= 0 ? tok.slice(eq + 1) : argv[++i]

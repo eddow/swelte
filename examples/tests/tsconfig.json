@@ -5,6 +5,7 @@
     "module": "ESNext",
     "allowJs": true,
     "checkJs": false,
+    "noEmit": true,
     "types": [
       "vite/client",
       "svelte"

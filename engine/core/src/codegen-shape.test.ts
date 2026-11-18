@@ -577,13 +577,13 @@ describe('codegen shape snapshots (fetch/SSE/dispatcher)', () => {
 
 describe('item 11 — codegen golden project (sample-overlay variant + routes.js)', () => {
 	function sampleFiles(root: string): void {
-		// dist-test/codegen-shape.test.js -> dist-test/../templates == dist/templates (published)
-		// or src/../templates when run from source tree; try candidates in order.
+		// The sample overlay lives in @swelte/create now; core no longer ships
+		// it. dist-test/codegen-shape.test.js -> ../../../create/templates.
 		const here = new URL('.', import.meta.url).pathname
 		const cands = [
+			join(here, '..', '..', 'create', 'templates', 'sample', 'src'),
 			join(here, '..', 'templates', 'sample', 'src'),
 			join(here, '..', '..', 'src', '..', 'templates', 'sample', 'src'),
-			'/home/fmdm/dev/swelte/engine/core/templates/sample/src',
 		]
 		const tpl = cands.find((c) => {
 			try {

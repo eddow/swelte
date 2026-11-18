@@ -52,7 +52,7 @@ invention:
   `exports` (`"."` + `"./<path>"` for each public Svelte/TS entry).
 - `files` includes `dist` (built output). It never includes `src/routes`.
 
-The `"build:lib"` script (`swelte init --lib` scaffolds it) is the ad-hoc
+The `"build:lib"` script (`npm create @swelte --lib` scaffolds it) is the ad-hoc
 equivalent of the app's `"build": "swelte build"` — same command shape,
 different target:
 
@@ -142,9 +142,10 @@ built `dist/` for JS/Svelte and raw `src/lib/**/*.v` for V) while
    library-schema validation (export/source/entry checks via the shared
    validator + `exports`/`files` coverage + no-`src/routes`-leak), no side
    effects.
-2. ~~`swelte init` asks app-vs-lib~~ DONE — interactive kind pick
-   (`--lib` / `--kind lib` / `--template lib` skip it), `templates/lib/`
-   overlay, `build` + `build:lib` scripts (`docs/cli.md#swelte-init`).
+2. ~~scaffolder asks app-vs-lib~~ DONE — `npm create @swelte` interactive
+   kind pick (`--lib` / `--kind lib` / `--template lib` skip it),
+   `templates/lib/` overlay, `build` + `build:lib` scripts
+   (`docs/cli.md#swelte-init-deprecated`).
 3. DONE — `fixtures/dogfood/sample-lib` uses `src/lib` + author-only `src/routes`.
    The dogfood script builds with `svelte-package`, checks the library schema,
    packs/installs the tarball and asserts no `src/routes` files were published.

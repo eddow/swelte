@@ -2,7 +2,6 @@ import { VERSION } from '../version.js'
 import { runBuild } from './build.js'
 import { runDev } from './dev.js'
 import { runExport } from './export.js'
-import { runInit } from './init.js'
 import { runPreview } from './preview.js'
 import { runTest } from './test.js'
 import type { ArgDef, Command, Ctx } from './types.js'
@@ -71,8 +70,7 @@ const previewCmd: Command = {
 
 const initCmd: Command = {
 	name: 'init',
-	summary:
-		'Scaffold a new Swelte project in <dir> (default my-swelte-app). App (routes served) or lib (src/lib published, src/routes dogfood); empty skeleton unless --sample; SPA-only unless --ssr.',
+	summary: 'DEPRECATED: use `npm create @swelte` (@swelte/create). Forwards to it when installed.',
 	args: [
 		{ name: 'root', help: 'Parent dir for the scaffold', value: 'string' },
 		{ name: 'dir', help: 'Target directory name', value: 'string' },
@@ -90,13 +88,41 @@ const initCmd: Command = {
 			value: 'boolean',
 		},
 		{
+			name: 'no-interactive',
+			help: 'Never prompt: use flag defaults (same as CI/non-TTY)',
+			value: 'boolean',
+		},
+		{
+			name: 'yes',
+			short: 'y',
+			help: 'Alias for --no-interactive (accept defaults)',
+			value: 'boolean',
+		},
+		{
 			name: 'ssr',
-			help: 'Include SSR via @swelte/ssr-qjs (else SPA-only; no prompt)',
+			help: 'Include SSR via @swelte/ssr-qjs (else SPA-only; --no-ssr forces SPA)',
 			value: 'boolean',
 		},
 	],
 	async run(ctx: Ctx) {
-		await runInit(ctx)
+		ctx.error('`swelte init` moved to `npm create @swelte` (@swelte/create) — forwarding.')
+		try {
+			const mod = (await import(/* @vite-ignore */ '@swelte/create/scaffold')) as Record<
+				string,
+				unknown
+			>
+			const runCreate = mod.runCreate as (
+				opts: Record<string, unknown>,
+				rest: string[],
+				log: (m: string) => void
+			) => Promise<void>
+			if (typeof runCreate !== 'function') throw new Error('no runCreate export')
+			await runCreate({ ...ctx.opts }, ctx.rest, (m) => ctx.log(m))
+		} catch {
+			throw new Error(
+				'install the scaffolder (`npm install -g @swelte/create`) or run `npm create @swelte`'
+			)
+		}
 	},
 }
 

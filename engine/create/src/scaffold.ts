@@ -1,124 +1,126 @@
-// `swelte init <dir>`: scaffold a new Swelte project — app or library.
+// `npm create @swelte <dir>`: scaffold a new Swelte project — app or library.
 // `templates/base/` is the empty skeleton (SPA-only: `@swelte/core/vite`);
 // `templates/sample/src/` overlays the demo routes/lib on top (`--sample`,
-// or interactive pick). `--lib` (or interactive kind pick) scaffolds a
+// or interactive confirm). `--lib` (or interactive kind select) scaffolds a
 // library instead: same base, plus `templates/lib/` overlay (public
 // `src/lib` sample + `src/routes` dogfood demo, `build` + `build:lib`
-// scripts, `swelte.v.exports` starter). `--ssr` (interactive opt-in,
+// scripts, `swelte.v.exports` starter). `--ssr` (interactive confirm,
 // default No) adds the `@swelte/ssr-qjs` engine (SSR via embedded
-// QuickJS; SPA otherwise).
+// QuickJS; SPA otherwise; `--no-ssr` forces SPA).
+// Interactive prompts (TTY only) go through `./prompts.js`
+// (@clack/prompts wizard: dir → kind → sample → ssr); piped stdin, CI,
+// `--yes`/`--no-interactive` skip them and use flag defaults.
 // Only `__NAME__` (+ `__SWELTE_VERSION__` in package.json) is replaced.
 // Generated files (server harness, client entry, routers) are NEVER
 // scaffolded — `dev`/`build` derive them into `.swelte/`.
 // src/app.ts is the optional user-owned setup hook; the engine-owned
 // .swelte/entry-main.ts imports it (plus src/app.css when present), and the
 // plugin's transformIndexHtml points the script tag at .swelte/entry-main.ts.
-import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
+
+import {
+	cpSync,
+	existsSync,
+	mkdirSync,
+	readdirSync,
+	readFileSync,
+	rmSync,
+	writeFileSync,
+} from 'node:fs'
+import { createRequire } from 'node:module'
 import { dirname, join, resolve } from 'node:path'
-import * as readline from 'node:readline'
 import { fileURLToPath } from 'node:url'
-import { VERSION } from '../version.js'
-import type { Ctx } from './types.js'
+import {
+	intro,
+	isInteractive,
+	outro,
+	promptDirName,
+	promptKind,
+	promptSample,
+	promptSsr,
+} from './prompts.js'
+
+// Single truth: this package's version (synced with the monorepo by
+// scripts/sync-version.mjs). Templates pin @swelte/* to it.
+const require = createRequire(import.meta.url)
+export const VERSION: string = require('../package.json').version
+
+export interface CreateOpts {
+	root?: string
+	dir?: string
+	sample?: boolean
+	empty?: boolean
+	template?: string
+	kind?: string
+	lib?: boolean
+	ssr?: boolean
+	yes?: boolean
+	'no-interactive'?: boolean
+	[key: string]: string | number | boolean | undefined
+}
 
 function templatesRoot(): string {
 	const here = dirname(fileURLToPath(import.meta.url))
-	const candidates = [join(here, '..', '..', 'templates'), join(here, '..', 'templates')]
+	const candidates = [join(here, '..', 'templates'), join(here, '..', '..', 'templates')]
 	for (const c of candidates) {
 		if (existsSync(join(c, 'base', 'svelte.config.js'))) return c
 	}
-	throw new Error('swelte templates/ not found (reinstall @swelte/core)')
+	throw new Error('create-@swelte templates/ not found (reinstall @swelte/create)')
 }
 
-async function ask(question: string, pipedYes: (line: string) => boolean): Promise<boolean> {
-	// Piped stdin (echo y | ...) or non-TTY: can't prompt, default no.
-	if (!process.stdin.isTTY) {
-		// Still drain a piped 'y' answer if present (scripted use).
-		// Stdin may already be consumed (two prompts): treat as no.
-		try {
-			if (process.stdin.readableEnded) return false
-			const chunks: Buffer[] = []
-			for await (const chunk of process.stdin) chunks.push(chunk as Buffer)
-			const piped = Buffer.concat(chunks).toString().trim()
-			if (/^[yY]/.test(piped)) return pipedYes(piped)
-		} catch {
-			/* fall through to no */
-		}
-		return false
+export async function runCreate(
+	opts: CreateOpts,
+	rest: string[],
+	log: (msg: string) => void = (m) => console.log(`create-@swelte: ${m}`)
+): Promise<void> {
+	const interactive = isInteractive(opts)
+	let target = rest[0] ?? String(opts.dir ?? '')
+	if (!target && interactive) {
+		intro('create-@swelte')
+		target = await promptDirName('my-swelte-app')
+	} else {
+		target ||= 'my-swelte-app'
+		if (interactive) intro('create-@swelte')
 	}
-	const rl = readline.createInterface({ input: process.stdin, output: process.stdout })
-	try {
-		const answer = await new Promise<string>((resolveQ) => {
-			rl.question(question, resolveQ)
-		})
-		return /^[yY]/.test(answer.trim())
-	} finally {
-		rl.close()
-	}
-}
-
-async function askKind(): Promise<'app' | 'lib'> {
-	// SvelteKit-style: the first question is what you are building.
-	// Piped/non-TTY: can't prompt, default app (same as before).
-	if (!process.stdin.isTTY) return 'app'
-	const rl = readline.createInterface({ input: process.stdin, output: process.stdout })
-	try {
-		const answer = await new Promise<string>((resolveQ) => {
-			rl.question(
-				'Project kind: app (routes served) or lib (src/lib published, src/routes dogfood)? [app/lib] ',
-				resolveQ
-			)
-		})
-		return /^l/i.test(answer.trim()) ? 'lib' : 'app'
-	} finally {
-		rl.close()
-	}
-}
-
-async function askSample(): Promise<boolean> {
-	return ask(
-		'Include sample routes (demo api/admin/files/users)? [y/N] ',
-		(piped) => piped.length <= 1
-	)
-}
-
-async function askSsr(): Promise<boolean> {
-	// Opt-in, default No: SSR engine is `npm install @swelte/ssr-qjs` + swap
-	// the `swelte` import in vite.config.ts — tell the user, then ask.
-	return ask(
-		'Enable SSR via @swelte/ssr-qjs (else SPA-only; install later with `npm install @swelte/ssr-qjs`)? [y/N] ',
-		() => false
-	)
-}
-
-export async function runInit(ctx: Ctx): Promise<void> {
-	const target = ctx.rest[0] ?? String(ctx.opts.dir ?? 'my-swelte-app')
-	const root = resolve(String(ctx.opts.root ?? process.cwd()), target)
+	const root = resolve(String(opts.root ?? process.cwd()), target)
 	if (existsSync(root) && readdirSync(root).length > 0) {
 		throw new Error(`target ${root} exists and is not empty (pass an empty dir)`)
 	}
 	// Kind first: a library's src/routes is the dogfood demo, never the app
 	// sample — so libs skip the sample question entirely.
 	const wantLib =
-		ctx.opts.lib === true || ctx.opts.kind === 'lib' || ctx.opts.template === 'lib'
+		opts.lib === true || opts.kind === 'lib' || opts.template === 'lib'
 			? true
-			: ctx.opts.kind === 'app' || ctx.opts.lib === false
+			: opts.kind === 'app' || opts.lib === false
 				? false
-				: await askKind().then((k) => k === 'lib')
+				: interactive
+					? (await promptKind()) === 'lib'
+					: false
 	const wantSample = wantLib
 		? false
-		: ctx.opts.sample === true || ctx.opts.template === 'sample'
+		: opts.sample === true || opts.template === 'sample'
 			? true
-			: ctx.opts.empty === true || ctx.opts.template === 'empty'
+			: opts.empty === true || opts.template === 'empty'
 				? false
-				: await askSample()
-	// SSR is opt-in (default No): --ssr adds the engine; interactively asked.
-	// Piped stdin can't answer twice (sample drains it), so only --ssr opts
-	// in non-TTY; plain `echo y |` keeps SPA (same as before).
-	const wantSsr = ctx.opts.ssr === true ? true : process.stdin.isTTY ? await askSsr() : false
+				: interactive
+					? await promptSample()
+					: false
+	// SSR is opt-in (default No): --ssr adds the engine, --no-ssr forces
+	// SPA; otherwise ask interactively, default SPA in scripts/CI.
+	const wantSsr =
+		opts.ssr === true ? true : opts.ssr === false ? false : interactive ? await promptSsr() : false
 	mkdirSync(root, { recursive: true })
 	const name = target.split('/').filter(Boolean).pop() ?? 'my-swelte-app'
 	const templates = templatesRoot()
 	cpSync(join(templates, 'base'), root, { recursive: true })
+	// npm strips dotfiles (templates/base/.gitignore) from the packed
+	// tarball, so the repo stores it as `gitignore` and we rename on copy.
+	// Every scaffolded project must ignore its build outputs from day one.
+	// (The blanket cpSync above copied `gitignore` verbatim — remove that
+	// stray so the project holds exactly one ignore file, `.gitignore`.)
+	const gitignoreTpl = join(templates, 'base', 'gitignore')
+	rmSync(join(root, 'gitignore'), { force: true })
+	if (!existsSync(join(root, '.gitignore')) && existsSync(gitignoreTpl))
+		cpSync(gitignoreTpl, join(root, '.gitignore'))
 	if (wantSample) cpSync(join(templates, 'sample', 'src'), join(root, 'src'), { recursive: true })
 	if (wantLib) {
 		// Library overlay: public src/lib sample + src/routes dogfood demo on
@@ -186,12 +188,19 @@ export async function runInit(ctx: Ctx): Promise<void> {
 		}
 		writeFileSync(abs, text)
 	}
-	ctx.log(
+	log(
 		`scaffolded ${wantLib ? 'lib' : wantSample ? 'sample' : 'empty'}${wantSsr ? ' +ssr' : ''} project at ${root}`
 	)
-	ctx.log(
-		wantLib
-			? `next: cd ${root} && npm install && swelte dev (dogfood demo) / npm run build:lib (publish)`
-			: `next: cd ${root} && npm install && swelte dev`
-	)
+	if (interactive)
+		outro(
+			wantLib
+				? `next: cd ${target} && npm install && swelte dev (dogfood demo) / npm run build:lib (publish)`
+				: `next: cd ${target} && npm install && swelte dev`
+		)
+	else
+		log(
+			wantLib
+				? `next: cd ${root} && npm install && swelte dev (dogfood demo) / npm run build:lib (publish)`
+				: `next: cd ${root} && npm install && swelte dev`
+		)
 }

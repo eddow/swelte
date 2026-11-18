@@ -64,7 +64,9 @@ import DocsNav from '#lib/DocsNav.svelte'
 	</div>
 	<div class="collapse collapse-arrow">
 		<input type="radio" name="cli-acc">
-		<div class="collapse-title font-mono text-sm">swelte preview / export / check / init</div>
+		<div class="collapse-title font-mono text-sm">
+			swelte preview / export / check (+ npm create @swelte)
+		</div>
 		<div class="collapse-content text-sm opacity-80">
 			<ul class="list-disc list-inside space-y-1">
 				<li><code>preview</code> — serve the built binary, Vite-less prod run</li>
@@ -79,9 +81,11 @@ import DocsNav from '#lib/DocsNav.svelte'
 					shape, same as MCP <code>check</code>)
 				</li>
 				<li>
-					<code>init</code>
-					— scaffold (<code>--sample</code>
-					/ <code>--empty</code>); routers never scaffolded
+					<code>npm create @swelte</code>
+					— scaffold app or lib (<code>--sample</code>
+					/ <code>--empty</code> / <code>--lib</code> / <code>--ssr</code>); routers never
+					scaffolded (<code>swelte init</code>
+					is a deprecated forwarder)
 				</li>
 			</ul>
 		</div>
