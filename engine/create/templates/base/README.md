@@ -37,8 +37,12 @@ host-native output).
 **replaces this block** with the target's recipe:
 
 ```sh
-swelte deploy init --target vercel   # Dockerfile.vercel + .dockerignore + .vercelignore
-swelte deploy init --target docker   # Dockerfile + .dockerignore
+swelte deploy init --target vercel    # Dockerfile.vercel + .vercelignore
+swelte deploy init --target docker    # plain Dockerfile
+swelte deploy init --target fly       # + fly.toml
+swelte deploy init --target railway   # + railway.json
+swelte deploy init --target render    # + render.yaml
+swelte deploy init --target static    # dist/.swelte-static, no Dockerfile
 swelte deploy status                  # drift check (CI)
 ```
 

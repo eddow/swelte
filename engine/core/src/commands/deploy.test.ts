@@ -165,10 +165,81 @@ describe('swelte deploy: config automater (setup only)', () => {
 			rmSync(root, { recursive: true, force: true })
 		}
 	})
-	it('rejects unknown targets with a clear phased message', async () => {
+	it('rejects unknown targets with the supported list', async () => {
 		const root = mkdtempSync(join(tmpdir(), 'swelte-deploy-'))
 		try {
-			await assert.rejects(() => runDeploy(ctx(root, [], { target: 'fly' })), /fly\/railway/)
+			await assert.rejects(() => runDeploy(ctx(root, [], { target: 'heroku' })), /vercel \| docker/)
+		} finally {
+			rmSync(root, { recursive: true, force: true })
+		}
+	})
+	it('fly target writes Dockerfile + fly.toml with the platform contract', async () => {
+		const root = mkdtempSync(join(tmpdir(), 'swelte-deploy-'))
+		try {
+			writeFileSync(
+				join(root, 'package.json'),
+				JSON.stringify({ name: 't', dependencies: { '@swelte/ssr-qjs': '^0.1.5' } }, null, 2)
+			)
+			await runDeploy(ctx(root, ['init'], { target: 'fly' }))
+			assert.ok(existsSync(join(root, 'Dockerfile')))
+			const toml = readFileSync(join(root, 'fly.toml'), 'utf8')
+			assert.ok(toml.includes('app = "t"'))
+			assert.ok(toml.includes('internal_port = 8131'))
+			assert.ok(toml.includes('SWELTE_DIST'))
+			const readme = readFileSync(join(root, 'README.md'), 'utf8')
+			assert.ok(readme.includes('fly deploy'))
+			await runDeploy(ctx(root, ['status'], { target: 'fly' }))
+		} finally {
+			rmSync(root, { recursive: true, force: true })
+		}
+	})
+	it('railway target writes Dockerfile + railway.json (DOCKERFILE builder, $PORT)', async () => {
+		const root = mkdtempSync(join(tmpdir(), 'swelte-deploy-'))
+		try {
+			writeFileSync(join(root, 'package.json'), JSON.stringify({ name: 't' }, null, 2))
+			await runDeploy(ctx(root, ['init'], { target: 'railway' }))
+			assert.ok(existsSync(join(root, 'Dockerfile')))
+			const cfg = JSON.parse(
+				readFileSync(join(root, 'railway.json'), 'utf8').replace(/^\/\/.*$/gm, '')
+			) as { build: { builder: string; dockerfilePath: string } }
+			assert.equal(cfg.build.builder, 'DOCKERFILE')
+			assert.equal(cfg.build.dockerfilePath, 'Dockerfile')
+			const readme = readFileSync(join(root, 'README.md'), 'utf8')
+			assert.ok(readme.includes('railway up'))
+			await runDeploy(ctx(root, ['status'], { target: 'railway' }))
+		} finally {
+			rmSync(root, { recursive: true, force: true })
+		}
+	})
+	it('render target writes Dockerfile + render.yaml Blueprint', async () => {
+		const root = mkdtempSync(join(tmpdir(), 'swelte-deploy-'))
+		try {
+			writeFileSync(
+				join(root, 'package.json'),
+				JSON.stringify({ name: 't', dependencies: { '@swelte/ssr-qjs': '^0.1.5' } }, null, 2)
+			)
+			await runDeploy(ctx(root, ['init'], { target: 'render' }))
+			assert.ok(existsSync(join(root, 'Dockerfile')))
+			const yaml = readFileSync(join(root, 'render.yaml'), 'utf8')
+			assert.ok(yaml.includes('runtime: docker'))
+			assert.ok(yaml.includes('dockerfilePath: ./Dockerfile'))
+			assert.ok(yaml.includes('healthCheckPath: /'))
+			assert.ok(yaml.includes('SWELTE_SSR'))
+			const readme = readFileSync(join(root, 'README.md'), 'utf8')
+			assert.ok(readme.includes('git push'))
+			await runDeploy(ctx(root, ['status'], { target: 'render' }))
+		} finally {
+			rmSync(root, { recursive: true, force: true })
+		}
+	})
+	it('static target writes the shim, no Dockerfile', async () => {
+		const root = mkdtempSync(join(tmpdir(), 'swelte-deploy-'))
+		try {
+			writeFileSync(join(root, 'package.json'), JSON.stringify({ name: 't' }, null, 2))
+			await runDeploy(ctx(root, ['init'], { target: 'static' }))
+			assert.ok(!existsSync(join(root, 'Dockerfile')))
+			assert.ok(existsSync(join(root, 'dist', '.swelte-static')))
+			await runDeploy(ctx(root, ['status'], { target: 'static' }))
 		} finally {
 			rmSync(root, { recursive: true, force: true })
 		}

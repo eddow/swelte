@@ -142,7 +142,7 @@ const deployCmd: Command = {
 	summary:
 		'Generate deploy wrapper files (Dockerfile + ignores + package.json target) — setup only, never ships.',
 	args: [
-		{ name: 'target', help: 'Deploy target: vercel | docker (P0)', value: 'string' },
+		{ name: 'target', help: 'Deploy target: vercel | docker | fly | railway | render | static', value: 'string' },
 		{
 			name: 'dockerfile',
 			help: 'Dockerfile name (default Dockerfile.vercel for vercel, Dockerfile otherwise)',

@@ -6,20 +6,59 @@
 // patches package.json swelte.targetOs/targetArch (which @swelte/vvm
 // postinstall reads on `npm i` to prep zig).
 // Subcommands: `init` (default, writes) / `status` (read-only drift check).
-// P0 targets: `vercel` (Dockerfile.vercel + .dockerignore + .vercelignore),
-// `docker` (Dockerfile + .dockerignore). No new scripts are added:
-// exactly two builds exist — `build` (deploy target when declared, else
-// this machine) and `build:local` (always this machine) — and the ship
-// commands (`vercel deploy`, `docker build`) are one-liners documented in
-// the Dockerfile + README, not scripts.
+// Targets: `vercel` (Dockerfile.vercel + .dockerignore + .vercelignore),
+// `docker` (Dockerfile + .dockerignore), `fly` (Dockerfile + fly.toml),
+// `railway` (Dockerfile + railway.json), `render` (Dockerfile + render.yaml),
+// `static` (packaging-only: asserts `swelte build --target static`, no files).
+// No new scripts are added: exactly two builds exist — `build` (deploy
+// target when declared, else this machine) and `build:local` (always this
+// machine) — and the ship commands (`vercel deploy`, `docker build`,
+// `fly deploy`, ...) are one-liners documented in the Dockerfile + README,
+// not scripts.
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { basename, join, relative, resolve } from 'node:path'
 import type { Ctx } from './types.js'
 
-export type DeployTarget = 'vercel' | 'docker'
+export type DeployTarget = 'vercel' | 'docker' | 'fly' | 'railway' | 'render' | 'static'
 export type DeploySub = 'init' | 'status'
 
-const SUPPORTED: DeployTarget[] = ['vercel', 'docker']
+const SUPPORTED: DeployTarget[] = ['vercel', 'docker', 'fly', 'railway', 'render', 'static']
+
+/** Platform config file generated alongside the Dockerfile (none for docker/vercel). */
+export function targetConfigFile(target: DeployTarget): string | null {
+	switch (target) {
+		case 'fly':
+			return 'fly.toml'
+		case 'railway':
+			return 'railway.json'
+		case 'render':
+			return 'render.yaml'
+		default:
+			return null
+	}
+}
+
+/** One-line ship command for the README recipe + `next:` log. */
+export function targetShipCommand(
+	target: DeployTarget,
+	appName: string,
+	dockerfile: string
+): string {
+	switch (target) {
+		case 'vercel':
+			return 'vercel deploy --prod'
+		case 'docker':
+			return `docker build -t ${appName} . -f ${dockerfile}`
+		case 'fly':
+			return 'fly deploy'
+		case 'railway':
+			return 'railway up'
+		case 'render':
+			return 'git push  # Render auto-deploys the render.yaml Blueprint'
+		case 'static':
+			return 'swelte build --target static'
+	}
+}
 
 export interface FileDrift {
 	file: string
@@ -63,10 +102,15 @@ export function renderDockerfile(opts: {
 	// The recipe names `npm run build`: with a `swelte.targetOs/targetArch`
 	// declaration it cross-builds for the deploy target, else host-native.
 	const buildCmd = 'npm run build'
-	const head =
-		target === 'vercel'
-			? `# Manual Vercel prebuilt deploy for ${appName} (Swelte: V binary + ${distDir}/).\n# Vercel builds THIS file in the cloud from uploaded LOCAL ${distDir}/ output —\n# no Node, no V toolchain, no zig in the cloud. Build locally first:\n#\n#   ${buildCmd.padEnd(24)} # swelte build → linux/amd64 from package.json\n#   vercel deploy            # preview URL\n#   vercel deploy --prod     # production\n#\n`
-			: `# Prebuilt deploy for ${appName} (Swelte: V binary + ${distDir}/).\n# Build locally first (linux/amd64), then build this image:\n#\n#   ${buildCmd.padEnd(24)} # swelte build → linux/amd64 from package.json\n#   docker build -t ${appName} . -f ${dockerfile}\n#\n`
+	const heads: Record<DeployTarget, string> = {
+		vercel: `# Manual Vercel prebuilt deploy for ${appName} (Swelte: V binary + ${distDir}/).\n# Vercel builds THIS file in the cloud from uploaded LOCAL ${distDir}/ output —\n# no Node, no V toolchain, no zig in the cloud. Build locally first:\n#\n#   ${buildCmd.padEnd(24)} # swelte build → linux/amd64 from package.json\n#   vercel deploy            # preview URL\n#   vercel deploy --prod     # production\n#\n`,
+		docker: `# Prebuilt deploy for ${appName} (Swelte: V binary + ${distDir}/).\n# Build locally first (linux/amd64), then build this image:\n#\n#   ${buildCmd.padEnd(24)} # swelte build → linux/amd64 from package.json\n#   docker build -t ${appName} . -f ${dockerfile}\n#\n`,
+		fly: `# Fly.io prebuilt deploy for ${appName} (Swelte: V binary + ${distDir}/).\n# Build locally first (linux/amd64); fly builds THIS Dockerfile in its cloud\n# from the uploaded LOCAL ${distDir}/ output:\n#\n#   ${buildCmd.padEnd(24)} # swelte build → linux/amd64 from package.json\n#   fly deploy               # reads fly.toml, serves internal_port 8131\n#\n`,
+		railway: `# Railway prebuilt deploy for ${appName} (Swelte: V binary + ${distDir}/).\n# Build locally first (linux/amd64); Railway builds THIS Dockerfile from the\n# uploaded LOCAL ${distDir}/ output:\n#\n#   ${buildCmd.padEnd(24)} # swelte build → linux/amd64 from package.json\n#   railway up               # builder auto-detects the Dockerfile\n#\n`,
+		render: `# Render prebuilt deploy for ${appName} (Swelte: V binary + ${distDir}/).\n# Build locally first (linux/amd64); Render builds THIS Dockerfile in its\n# cloud from the uploaded LOCAL ${distDir}/ output (see render.yaml):\n#\n#   ${buildCmd.padEnd(24)} # swelte build → linux/amd64 from package.json\n#   git push                 # Render auto-deploys the Blueprint\n#\n`,
+		static: '',
+	}
+	const head = heads[target]
 	const mid = `# The \`swelte.targetOs/targetArch\` in package.json is the deploy target:\n# \`@swelte/vvm\` postinstall preps the machine on \`npm i\` (zig +\n# zig-cc-linux-amd64 wrapper), and plain \`swelte build\` reads it — no\n# flags needed. \`npm run build:local\` (\`swelte build --local\`) forces a\n# host-native build for local preview, ignoring the declaration.\n`
 	const vcfg =
 		target === 'vercel'
@@ -92,6 +136,87 @@ export function renderVercelignore(dockerfile: string): string {
 	return `# Vercel upload context: \`dist/\` is gitignored but MUST upload —\n# allowlist it explicitly alongside the project files Vercel needs.\n# Everything else falls back to Vercel's defaults (node_modules etc.\n# excluded automatically).\n# Auto-generated by \`swelte deploy init --target vercel\`. Re-run to refresh.\n!dist\n!dist/**\n!${dockerfile}\n!package.json\n`
 }
 
+/** Minimal fly.toml: app name is a placeholder the user replaces on
+ *  `fly launch` (which adopts/merges it); internals are the contract:
+ *  build the generated Dockerfile, serve internal_port 8131, stop idle
+ *  machines. The binary listens on $PORT (Fly sets it = internal_port). */
+export function renderFlyToml(opts: { appName: string; dockerfile: string }): string {
+	const { appName, dockerfile } = opts
+	const buildSection =
+		dockerfile === 'Dockerfile' ? '[build]' : `[build]\n  dockerfile = "${dockerfile}"`
+	return `# Fly.io app config for ${appName} (Swelte prebuilt: dist/server + dist/).
+# \`fly launch\` adopts this file (replace the placeholder name) or run
+# \`fly deploy\` directly with an existing app.
+# Auto-generated by \`swelte deploy init --target fly\`. Re-run to refresh.
+app = "${appName}"
+primary_region = "iad"
+
+${buildSection}
+
+[http_service]
+  internal_port = 8131
+  force_https = true
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 0
+
+[env]
+  SWELTE_DIST = "dist"
+`
+}
+
+/** Minimal railway.json: Dockerfile builder + restart policy.
+ *  (Railway auto-detects the Dockerfile; PORT is injected, healthchecks
+ *  hit it. Set Root Directory + generate a public domain in the dashboard.) */
+export function renderRailwayJson(opts: { dockerfile: string }): string {
+	const { dockerfile } = opts
+	return `// Railway service config (Swelte prebuilt: dist/server + dist/).
+// Builder auto-detects the Dockerfile; PORT is injected by Railway.
+// Dashboard: set Root Directory + generate a public domain (target = $PORT).
+// Auto-generated by \`swelte deploy init --target railway\`. Re-run to refresh.
+{
+	"$schema": "https://railway.com/railway.schema.json",
+	"build": {
+		"builder": "DOCKERFILE",
+		"dockerfilePath": "${dockerfile}"
+	},
+	"deploy": {
+		"restartPolicyType": "ON_FAILURE",
+		"restartPolicyMaxRetries": 3,
+		"healthcheckPath": "/",
+		"healthcheckTimeout": 30
+	}
+}
+`
+}
+
+/** Minimal render.yaml Blueprint: one Docker web service.
+ *  The Dockerfile builds in Render's cloud from the git context; the
+ *  service listens on $PORT (Render injects it, default 10000). */
+export function renderRenderYaml(opts: {
+	appName: string
+	dockerfile: string
+	distDir: string
+	ssr: boolean
+}): string {
+	const { appName, dockerfile, distDir, ssr } = opts
+	const ssrVars = ssr ? '\n      - key: SWELTE_SSR\n        value: 1' : ''
+	return `# Render Blueprint: one Docker web service for ${appName} (Swelte prebuilt).
+# The Dockerfile builds in Render's cloud; the binary serves $PORT (injected).
+# Auto-generated by \`swelte deploy init --target render\`. Re-run to refresh.
+services:
+  - type: web
+    name: ${appName}
+    runtime: docker
+    plan: starter
+    dockerfilePath: ./${dockerfile}
+    healthCheckPath: /
+    envVars:
+      - key: SWELTE_DIST
+        value: ${distDir}${ssrVars}
+`
+}
+
 /** Target recipe replacing the `<!-- swelte:deploy -->` block in README.md.
  *  The region is delimited by open + close markers (standard managed-region
  *  pattern) so user prose before/after is never touched. */
@@ -108,25 +233,55 @@ export function renderDeployReadmeBlock(opts: {
 				? `Dashboard → project → Settings: Root Directory \`${rootRel}\`, Dockerfile Path \`${dockerfile}\`.`
 				: `Dashboard → project → Settings: Dockerfile Path \`${dockerfile}\`.`
 			: ''
-	const lines =
-		target === 'vercel'
-			? [
-					'```sh',
-					'npm run build        # swelte build → linux/amd64 from package.json',
-					'vercel deploy            # preview URL',
-					'vercel deploy --prod     # production',
-					'```',
-					'',
-					`Vercel builds \`${dockerfile}\` in the cloud from the uploaded local \`dist/\``,
-					`output — no toolchain in the cloud. ${where}`,
-				]
-			: [
-					'```sh',
-					'npm run build        # swelte build → linux/amd64 from package.json',
-					`docker build -t ${appName} . -f ${dockerfile}`,
-					`docker run -e PORT=8131 -p 8131:8131 ${appName}`,
-					'```',
-				]
+	const buildLine = 'npm run build        # swelte build → linux/amd64 from package.json'
+	const recipes: Record<Exclude<DeployTarget, 'static'>, string[]> = {
+		vercel: [
+			'```sh',
+			buildLine,
+			'vercel deploy            # preview URL',
+			'vercel deploy --prod     # production',
+			'```',
+			'',
+			`Vercel builds \`${dockerfile}\` in the cloud from the uploaded local \`dist/\``,
+			`output — no toolchain in the cloud. ${where}`,
+		],
+		docker: [
+			'```sh',
+			buildLine,
+			`docker build -t ${appName} . -f ${dockerfile}`,
+			`docker run -e PORT=8131 -p 8131:8131 ${appName}`,
+			'```',
+		],
+		fly: [
+			'```sh',
+			buildLine,
+			'fly launch               # adopts fly.toml (replace the app name)',
+			'fly deploy               # ship dist/ + dist/server',
+			'```',
+			'',
+			'Fly builds the Dockerfile in its cloud from uploaded local `dist/`;',
+			'the binary serves `$PORT` (= `internal_port` 8131).',
+		],
+		railway: [
+			'```sh',
+			buildLine,
+			'railway up               # auto-detects the Dockerfile',
+			'```',
+			'',
+			'Set Root Directory + generate a public domain in the dashboard',
+			'(target = `$PORT`); `railway.json` pins the Dockerfile builder.',
+		],
+		render: [
+			'```sh',
+			buildLine,
+			'git push                 # Render auto-deploys the Blueprint',
+			'```',
+			'',
+			'Connect the repo once, Render builds the Dockerfile in its cloud;',
+			'the binary serves `$PORT` (injected). `render.yaml` declares the service.',
+		],
+	}
+	const lines = target === 'static' ? [] : recipes[target]
 	return ['<!-- swelte:deploy -->', '', ...lines, '', '<!-- /swelte:deploy -->', ''].join('\n')
 }
 
@@ -228,9 +383,7 @@ export async function runDeploy(ctx: Ctx): Promise<void> {
 			'vercel'
 	).toLowerCase()
 	if (!(SUPPORTED as string[]).includes(targetStr)) {
-		throw new Error(
-			`unsupported deploy target "${targetStr}" (P0: ${SUPPORTED.join(' | ')}; fly/railway/static phased, not yet generated)`
-		)
+		throw new Error(`unsupported deploy target "${targetStr}" (expected: ${SUPPORTED.join(' | ')})`)
 	}
 	const target = targetStr as DeployTarget
 	const { json: pkg } = readPkg(root)
@@ -253,6 +406,35 @@ export async function runDeploy(ctx: Ctx): Promise<void> {
 		String(ctx.opts['dry-run'] ?? ctx.opts.dryRun ?? '').toLowerCase() === 'true'
 	const force = ctx.opts.force === true || String(ctx.opts.force ?? '').toLowerCase() === 'true'
 	const check = ctx.opts.check === true || String(ctx.opts.check ?? '').toLowerCase() === 'true'
+	// `static` is packaging-only: no files, just assert the target shim.
+	// Everything else is Dockerfile + ignores (+ one platform config).
+	if (target === 'static') {
+		if (sub === 'status' || check) {
+			let shim = false
+			try {
+				shim = existsSync(join(root, distDir, '.swelte-static'))
+			} catch {
+				shim = false
+			}
+			ctx.log(`dist/.swelte-static: ${shim ? 'ok' : 'missing'}`)
+			if (!shim) {
+				throw new Error(
+					'deploy status: drift detected (run `swelte build --target static` first, then `swelte deploy init --target static`)'
+				)
+			}
+			ctx.log('deploy status: ok')
+			return
+		}
+		if (!dryRun) {
+			const { writeTargetShim } = await import('./build.js')
+			mkdirSync(join(root, distDir), { recursive: true })
+			writeTargetShim(root, distDir, 'static', {}, (m) => ctx.log(m))
+		} else {
+			ctx.log(`dist/.swelte-static: would write (dry-run)`)
+		}
+		ctx.log('next: deploy dist/ to any static host (CDN, GitHub Pages, S3)')
+		return
+	}
 	const files: { rel: string; content: string }[] = [
 		{
 			rel: dockerfile,
@@ -269,6 +451,16 @@ export async function runDeploy(ctx: Ctx): Promise<void> {
 	]
 	if (target === 'vercel')
 		files.push({ rel: '.vercelignore', content: renderVercelignore(dockerfile) })
+	const cfgFile = targetConfigFile(target)
+	if (cfgFile === 'fly.toml')
+		files.push({ rel: cfgFile, content: renderFlyToml({ appName, dockerfile }) })
+	else if (cfgFile === 'railway.json')
+		files.push({ rel: cfgFile, content: renderRailwayJson({ dockerfile }) })
+	else if (cfgFile === 'render.yaml')
+		files.push({
+			rel: cfgFile,
+			content: renderRenderYaml({ appName, dockerfile, distDir, ssr }),
+		})
 	const driftOf = (): FileDrift[] =>
 		files.map((f) => {
 			const p = join(root, f.rel)
@@ -343,5 +535,5 @@ export async function runDeploy(ctx: Ctx): Promise<void> {
 	}
 	if (target === 'vercel')
 		ctx.log('next: npm run build && vercel deploy (preview) / vercel deploy --prod')
-	else ctx.log(`next: npm run build && docker build -t ${appName} . -f ${dockerfile}`)
+	else ctx.log(`next: npm run build && ${targetShipCommand(target, appName, dockerfile)}`)
 }

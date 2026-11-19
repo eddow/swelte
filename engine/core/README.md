@@ -32,7 +32,7 @@ Single `swelte` bin, subcommands (all implemented):
 swelte dev [--port N] [--backend N] [--root dir]
 swelte build [--root dir] [--output path] [--port N] [--target auto|static|node|edge]
 swelte preview [--port N] [--root dir] [--binary path]
-swelte deploy [init|status] [--target vercel|docker] [--dockerfile name] [--force] [--dry-run] [--check] [--format text|json]
+swelte deploy [init|status] [--target vercel|docker|fly|railway|render|static] [--dockerfile name] [--force] [--dry-run] [--check] [--format text|json]
 swelte check [--root dir] [--format text|json]
 swelte test [--root dir] [--update-snapshot | -u]
 swelte export [--root dir] [--out snapshot/]

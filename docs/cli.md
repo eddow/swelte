@@ -100,10 +100,11 @@ picks them up without a V restart. `swelte dev` needs no plugin;
 `SWELTE_CLIENT=1` additionally typechecks the client stubs (default:
 server-only).
 
-## `swelte deploy [init|status] [--target vercel|docker]` — NEW
+## `swelte deploy [init|status] [--target vercel|docker|fly|railway|render|static]` — NEW
 
 Setup-only config automater (never ships): generates `Dockerfile[.vercel]` +
-`.dockerignore` (+ `.vercelignore` for vercel), patches
+`.dockerignore` (+ `.vercelignore` / `fly.toml` / `railway.json` /
+`render.yaml` per target; `static` writes `dist/.swelte-static`) + patches
 `package.json:swelte.targetOs/targetArch → linux/amd64`. `status`
 (`--format json` for agents) drift-checks without writes. Full contract:
 [deploy.md](deploy.md).
