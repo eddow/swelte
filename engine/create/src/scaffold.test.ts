@@ -19,6 +19,20 @@ describe('create-@swelte scaffolds (no prompt in tests)', () => {
 		assert.ok(!existsSync(join(parent, 'empty-app', 'src', 'routes', 'api')))
 	})
 
+	it('scaffold ships README + build:local script', async () => {
+		const parent = mkdtempSync(join(tmpdir(), 'swelte-init-'))
+		await run(parent, { empty: true, root: parent }, ['readme-app'])
+		const readme = readFileSync(join(parent, 'readme-app', 'README.md'), 'utf8')
+		assert.ok(readme.includes('<!-- swelte:deploy -->'))
+		assert.ok(readme.includes('<!-- /swelte:deploy -->'))
+		assert.ok(readme.includes('`dist/server`'))
+		const pkg = JSON.parse(readFileSync(join(parent, 'readme-app', 'package.json'), 'utf8'))
+		assert.equal(pkg.scripts.build, 'swelte build')
+		assert.equal(pkg.scripts['build:local'], 'swelte build --local')
+		assert.ok(!('build:deploy' in pkg.scripts) && !('preview:deploy' in pkg.scripts))
+		assert.ok(readme.includes('readme-app'))
+	})
+
 	it('scaffolded project holds exactly one ignore file (.gitignore, no stray gitignore)', async () => {
 		const parent = mkdtempSync(join(tmpdir(), 'swelte-init-'))
 		await run(parent, { empty: true, root: parent }, ['gi-app'])

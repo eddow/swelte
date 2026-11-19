@@ -2,7 +2,7 @@
 
 Built behavior. Every command resolves the V toolchain itself
 (system `v`, else `@swelte/vvm` — no manual install). Subcommand list
-is closed: `dev` / `build` / `preview` / `test` / `check` /
+is closed: `dev` / `build` / `preview` / `deploy` / `test` / `check` /
 `export` (+ `--help` / `--version`), plus a deprecated `init`
 forwarder to `npm create @swelte` (`@swelte/create`). Plugins extend it via `SWELTE_PLUGINS`
 (comma/space-separated specifiers — e.g. `SWELTE_PLUGINS=@swelte/plus/db`
@@ -87,6 +87,14 @@ so idle `dev` stays quiet (no phantom HMR), and the watcher ignores
 
 `SWELTE_CLIENT=1` additionally typechecks the client stubs (default:
 server-only).
+
+## `swelte deploy [init|status] [--target vercel|docker]` — NEW
+
+Setup-only config automater (never ships): generates `Dockerfile[.vercel]` +
+`.dockerignore` (+ `.vercelignore` for vercel), patches
+`package.json:swelte.targetOs/targetArch → linux/amd64`. `status`
+(`--format json` for agents) drift-checks without writes. Full contract:
+[deploy.md](deploy.md).
 
 ## `swelte preview [--port N] [--root dir] [--binary path]`
 

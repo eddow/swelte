@@ -8,9 +8,9 @@
     "examples/*"
   ],
   "scripts": {
-    "dev": "npm run dev --workspace=examples/something",
-    "build": "npm run build --workspace=examples/something",
-    "build:engine": "npm run build --workspace=@swelte/core",
+    "check": "npm run biome:check",
+    "build": "npm run build:engine",
+    "build:engine": "npm run build --workspace=@swelte/vvm --workspace=@swelte/core --workspace=@swelte/mcp --workspace=@swelte/plus --workspace=@swelte/ssr-qjs --workspace=@swelte/create --if-present",
     "test": "npm run test:unit && npm run test:install && npm run test:dogfood && npm run test:examples",
     "test:unit": "npm run test --workspace=@swelte/core",
     "test:examples": "npm run test:full --workspace=examples/tests",

@@ -19,7 +19,8 @@ Documentation for users of Swelte (all describe built behavior):
 - `streaming.md` — native POST byte streams, framing, cancellation and buffering
 - `lifecycle.md` — startup ordering, cooperative shutdown, resource drain and native reporting
 - `native-runtime-measurements.md` — repeatable native fixture workload and recorded measurement scope
-- `cli.md` — `dev`/`build`/`preview`/`test`/`check`/`export` (+ deprecated `init` forwarder), `--target`, contract snapshot (implemented)
+- `cli.md` — `dev`/`build`/`preview`/`deploy`/`test`/`check`/`export` (+ deprecated `init` forwarder), `--target`, contract snapshot (implemented)
+- `deploy.md` — `swelte deploy init|status`: setup-only deploy-config automater (vercel/docker P0), drift check (implemented)
 - `ssr.md` — SSR, built (ownership, request path, `@[load]` cascade, `+error` contract, measured budgets, gate)
 - `mcp.md` — Agents: MCP server + skills install (implemented)
 - `plus.md` — `@swelte/plus`: beyond-SvelteKit plugins, `jobs` (`@[cron]` ticks: wiring, retry, durable schedules and coordination)

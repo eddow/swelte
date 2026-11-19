@@ -26,7 +26,6 @@
     "prebuild": "npm run highlight",
     "build": "swelte build",
     "build:local": "swelte build --local",
-    "build:vercel": "swelte build",
     "dev": "swelte dev",
     "preview": "swelte preview"
   },

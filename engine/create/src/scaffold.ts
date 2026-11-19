@@ -135,6 +135,7 @@ export async function runCreate(
 	// exports entries, swelte.v.exports starter pointing at src/lib.
 	const placeholderFiles = [
 		'package.json',
+		'README.md',
 		'vite.config.ts',
 		'svelte.config.js',
 		'index.html',

@@ -1,5 +1,6 @@
 import { VERSION } from '../version.js'
 import { runBuild } from './build.js'
+import { runDeploy } from './deploy.js'
 import { runDev } from './dev.js'
 import { runExport } from './export.js'
 import { runPreview } from './preview.js'
@@ -126,6 +127,36 @@ const initCmd: Command = {
 	},
 }
 
+const deployCmd: Command = {
+	name: 'deploy',
+	summary:
+		'Generate deploy wrapper files (Dockerfile + ignores + package.json target) — setup only, never ships.',
+	args: [
+		{ name: 'target', help: 'Deploy target: vercel | docker (P0)', value: 'string' },
+		{
+			name: 'dockerfile',
+			help: 'Dockerfile name (default Dockerfile.vercel for vercel, Dockerfile otherwise)',
+			value: 'string',
+		},
+		{
+			name: 'force',
+			help: 'Overwrite package.json swelte.targetOs/targetArch when already set',
+			value: 'boolean',
+		},
+		{ name: 'dry-run', help: 'Preview writes without touching disk', value: 'boolean' },
+		{
+			name: 'check',
+			help: 'Verify-only: drift check without writes (like swelte check)',
+			value: 'boolean',
+		},
+		{ name: 'format', help: 'Output format: text | json (status)', value: 'string' },
+		{ name: 'root', help: 'Project root', value: 'string' },
+	],
+	async run(ctx: Ctx) {
+		await runDeploy(ctx)
+	},
+}
+
 const checkCmd: Command = {
 	name: 'check',
 	summary: 'Validate .v files: warnings as text or --format json (roadmap item 15).',
@@ -184,6 +215,7 @@ export const COMMANDS: Command[] = [
 	devCmd,
 	buildCmd,
 	previewCmd,
+	deployCmd,
 	initCmd,
 	checkCmd,
 	testCmd,

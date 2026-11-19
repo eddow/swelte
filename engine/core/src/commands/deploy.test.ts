@@ -1,0 +1,176 @@
+import assert from 'node:assert/strict'
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { describe, it } from 'node:test'
+import {
+	patchReadme,
+	renderDeployReadmeBlock,
+	renderDockerfile,
+	renderDockerignore,
+	renderVercelignore,
+	runDeploy,
+} from './deploy.js'
+
+const ctx = (
+	root: string,
+	rest: string[] = [],
+	opts: Record<string, string | number | boolean> = {}
+) => ({
+	argv: [] as string[],
+	opts: { root, ...opts } as Record<string, string | number | boolean>,
+	rest,
+	log: () => {},
+	error: () => {},
+})
+
+describe('swelte deploy: config automater (setup only)', () => {
+	it('renders SSR vs SPA Dockerfiles', () => {
+		const ssr = renderDockerfile({
+			target: 'vercel',
+			dockerfile: 'Dockerfile.vercel',
+			distDir: 'dist',
+			ssr: true,
+			appName: 'docs',
+			rootRel: 'examples/docs',
+		})
+		assert.ok(ssr.includes('SWELTE_SSR=1'))
+		assert.ok(ssr.includes('Dockerfile.vercel'))
+		assert.ok(ssr.includes('Root Directory: examples/docs'))
+		assert.ok(ssr.includes('FROM debian:stable-slim'))
+		const spa = renderDockerfile({
+			target: 'docker',
+			dockerfile: 'Dockerfile',
+			distDir: 'dist',
+			ssr: false,
+			appName: 'app',
+			rootRel: '.',
+		})
+		assert.ok(!spa.includes('SWELTE_SSR=1'))
+		assert.ok(spa.includes('docker build -t app'))
+		assert.ok(renderDockerignore('Dockerfile.vercel').includes('!Dockerfile.vercel'))
+		assert.ok(renderVercelignore('Dockerfile.vercel').includes('!package.json'))
+	})
+	it('init writes files + patches package.json, status ok, drift detected', async () => {
+		const root = mkdtempSync(join(tmpdir(), 'swelte-deploy-'))
+		try {
+			writeFileSync(
+				join(root, 'package.json'),
+				JSON.stringify(
+					{
+						name: 't',
+						scripts: { build: 'swelte build', 'build:local': 'swelte build --local' },
+						dependencies: { '@swelte/ssr-qjs': '^0.1.5' },
+					},
+					null,
+					2
+				)
+			)
+			await runDeploy(ctx(root, ['init'], { target: 'vercel' }))
+			assert.ok(existsSync(join(root, 'Dockerfile.vercel')))
+			assert.ok(existsSync(join(root, '.dockerignore')))
+			assert.ok(existsSync(join(root, '.vercelignore')))
+			const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')) as {
+				swelte: { targetOs: string }
+				scripts: Record<string, string>
+			}
+			assert.equal(pkg.swelte.targetOs, 'linux')
+			// no new scripts: exactly the two builds, untouched
+			assert.deepEqual(Object.keys(pkg.scripts).sort(), ['build', 'build:local'])
+			// README created with the managed deploy block
+			const readme = readFileSync(join(root, 'README.md'), 'utf8')
+			assert.ok(readme.includes('<!-- swelte:deploy -->'))
+			assert.ok(readme.includes('vercel deploy --prod'))
+			assert.ok(readme.includes('npm run build'))
+			await runDeploy(ctx(root, ['status'], { target: 'vercel' }))
+			writeFileSync(join(root, 'Dockerfile.vercel'), 'hand-edited\n')
+			await assert.rejects(() => runDeploy(ctx(root, ['status'], { target: 'vercel' })), /drift/)
+		} finally {
+			rmSync(root, { recursive: true, force: true })
+		}
+	})
+	it('docker target uses plain Dockerfile, no vercelignore', async () => {
+		const root = mkdtempSync(join(tmpdir(), 'swelte-deploy-'))
+		try {
+			writeFileSync(join(root, 'package.json'), JSON.stringify({ name: 't' }, null, 2))
+			await runDeploy(ctx(root, [], { target: 'docker' }))
+			assert.ok(existsSync(join(root, 'Dockerfile')))
+			assert.ok(!existsSync(join(root, '.vercelignore')))
+			const readme = readFileSync(join(root, 'README.md'), 'utf8')
+			assert.ok(readme.includes('docker build -t t'))
+			assert.ok(!readme.includes('vercel deploy'))
+		} finally {
+			rmSync(root, { recursive: true, force: true })
+		}
+	})
+	it('existing user scripts are never touched', async () => {
+		const root = mkdtempSync(join(tmpdir(), 'swelte-deploy-'))
+		try {
+			writeFileSync(
+				join(root, 'package.json'),
+				JSON.stringify({ name: 't', scripts: { build: 'custom-build', extra: 'x' } }, null, 2)
+			)
+			await runDeploy(ctx(root, ['init'], { target: 'vercel' }))
+			const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')) as {
+				scripts: Record<string, string>
+			}
+			assert.deepEqual(pkg.scripts, { build: 'custom-build', extra: 'x' })
+		} finally {
+			rmSync(root, { recursive: true, force: true })
+		}
+	})
+	it('README deploy block replaces the managed fence, keeps user prose', () => {
+		const block = renderDeployReadmeBlock({
+			target: 'vercel',
+			dockerfile: 'Dockerfile.vercel',
+			appName: 't',
+			rootRel: 'examples/t',
+		})
+		assert.ok(block.includes('vercel deploy --prod'))
+		assert.ok(block.includes('npm run build'))
+		assert.ok(block.includes('Root Directory `examples/t`'))
+		// standalone project: no Root Directory noise
+		const solo = renderDeployReadmeBlock({
+			target: 'vercel',
+			dockerfile: 'Dockerfile.vercel',
+			appName: 't',
+			rootRel: null,
+		})
+		assert.ok(!solo.includes('Root Directory'))
+		assert.ok(solo.includes('Dockerfile Path'))
+		// create
+		const root = mkdtempSync(join(tmpdir(), 'swelte-deploy-'))
+		try {
+			assert.equal(patchReadme(join(root, 'README.md'), block, false), 'created')
+			// idempotent
+			assert.equal(patchReadme(join(root, 'README.md'), block, false), 'unchanged')
+			// user prose before the marker survives a target switch
+			const docker = renderDeployReadmeBlock({
+				target: 'docker',
+				dockerfile: 'Dockerfile',
+				appName: 't',
+				rootRel: '.',
+			})
+			writeFileSync(join(root, 'README.md'), `# t\n\nMy prose.\n\n${block}\n`)
+			assert.equal(patchReadme(join(root, 'README.md'), docker, false), 'updated')
+			const next = readFileSync(join(root, 'README.md'), 'utf8')
+			assert.ok(next.includes('My prose.'))
+			assert.ok(next.includes('docker build -t t'))
+			assert.ok(!next.includes('vercel deploy'))
+			// missing marker appends under ## Deploy
+			writeFileSync(join(root, 'README.md'), '# t\n')
+			assert.equal(patchReadme(join(root, 'README.md'), docker, false), 'updated')
+			assert.ok(readFileSync(join(root, 'README.md'), 'utf8').includes('## Deploy'))
+		} finally {
+			rmSync(root, { recursive: true, force: true })
+		}
+	})
+	it('rejects unknown targets with a clear phased message', async () => {
+		const root = mkdtempSync(join(tmpdir(), 'swelte-deploy-'))
+		try {
+			await assert.rejects(() => runDeploy(ctx(root, [], { target: 'fly' })), /fly\/railway/)
+		} finally {
+			rmSync(root, { recursive: true, force: true })
+		}
+	})
+})

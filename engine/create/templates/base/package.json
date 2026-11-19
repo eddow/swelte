@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "swelte dev",
     "build": "swelte build",
+    "build:local": "swelte build --local",
     "preview": "swelte preview",
     "check": "swelte check",
     "postinstall": "npm-skills extract --skip-production --override"
