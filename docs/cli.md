@@ -10,7 +10,7 @@ adds `swelte migrate`). No aliases — the documented
 `--target` is the deploy-target shim; `--target-os` is the cross-build
 OS (build-only, see below).
 
-## `swelte dev [--port N] [--backend N] [--root dir]`
+## `swelte dev [--port N] [--backend N] [--root dir] [--ssr-port N] [--ssr|--no-ssr]`
 
 One command: V backend (`:backend`) + Vite (`:port`), HMR reload on
 `.v` change, Ctrl-C kills both. Runs `generate()` once pre-Vite so
@@ -20,6 +20,18 @@ passes the CSRF guard; config knobs forward to env (env wins when set).
 `generate()` is compare-then-write: unchanged output keeps its mtime,
 so idle `dev` stays quiet (no phantom HMR), and the watcher ignores
 `.swelte/` output — regenerating never re-triggers itself.
+
+SSR is automatic when the adapter is installed: `swelte dev` probes
+`@swelte/ssr-qjs` from the project root (no new dep for core, resolved
+via `createRequire` — uninstalling the adapter is the SPA opt-out).
+When found it emits `.swelte/dev/render.js`, boots the dev sidecar
+(default `:8132`, `--ssr-port` / `SWELTE_SSR_PORT` override), and hands
+its URL to the V backend as `SWELTE_SSR_URL` (explicit env always wins,
+e.g. an external renderer). `Hand` then proxies renders; without the
+adapter (or with `--no-ssr`) the URL stays unset and dev is SPA/static
++ JSON. `.svelte` edits re-emit `render.js` (debounced) so the sidecar
+picks them up without a V restart. `swelte dev` needs no plugin;
+`SWELTE_PLUGINS=@swelte/ssr-qjs` adds `swelte ssr-check` (the CI gate).
 
 ## `swelte build [--root dir] [--output path] [--port N] [--target auto|static|node|edge] [--target-os linux|macos|windows] [--target-arch amd64|arm64] [--local]`
 
@@ -65,7 +77,7 @@ so idle `dev` stays quiet (no phantom HMR), and the watcher ignores
 7. Artifacts only: assert `dist/server` + `dist/index.html` exist.
    No boot, no ports — build never listens (cross-built, sandboxed,
    or Windows binaries may not execute here; booting belongs to
-   `swelte preview` / the preview e2e / `swelte-ssr check`).
+   `swelte preview` / the preview e2e / `swelte ssr-check`).
    WASM is untouched by `--target-os/--target-arch` (always
    `-os browser`), and `dev`/`preview`/`test` stay host-native
    (the flags are build-only).

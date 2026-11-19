@@ -388,7 +388,7 @@ export async function runBuild(ctx: Ctx): Promise<void> {
 	// 5. Artifacts only — no boot, no ports. Build must never listen:
 	// cross-built (or sandboxed, or Windows) binaries may not execute here,
 	// and boot-probing belongs to dedicated procedures (`swelte preview`,
-	// the preview e2e, `swelte-ssr check` for the adapter path). Assert the
+	// the preview e2e, `swelte ssr-check` for the adapter path). Assert the
 	// artifacts exist instead.
 	if (!existsSync(outBinary)) throw new Error(`build artifact missing: ${outBinary}`)
 	if (!existsSync(join(root, cfg.distDir, 'index.html')))

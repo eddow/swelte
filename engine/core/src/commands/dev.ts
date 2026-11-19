@@ -158,6 +158,144 @@ export function projectKillPattern(root: string): string {
 	return basename(resolve(root))
 }
 
+export interface SsrSidecar {
+	url: string
+	close: () => Promise<void>
+}
+
+/** Probe for an installed SSR adapter without depending on it.
+ * Core stays engine-agnostic: when `@swelte/ssr-qjs` is resolvable from
+ * the project root, boot its dev sidecar (`.swelte/dev/render.js` over
+ * HTTP) and return its URL so the V backend (`SWELTE_SSR_URL`) can proxy
+ * renders. When absent/unresolvable (SPA-only project, or adapter not
+ * installed), return null — `swelte dev` works unchanged. Never throws. */
+export async function maybeStartSsrSidecar(
+	root: string,
+	opts: { ssrPort?: number; ssr?: boolean } = {},
+	log: (m: string) => void = () => {}
+): Promise<SsrSidecar | null> {
+	if (opts.ssr === false) return null
+	if (process.env.SWELTE_SSR_URL) return null
+	try {
+		const { createRequire } = await import('node:module')
+		const { pathToFileURL } = await import('node:url')
+		const req = createRequire(pathToFileURL(join(resolve(root), 'package.json')).href)
+		let devUrl: string
+		try {
+			devUrl = req.resolve('@swelte/ssr-qjs/dev')
+		} catch {
+			return null
+		}
+		const devMod = (await import(pathToFileURL(devUrl).href)) as {
+			startSsrDevServer: (o: {
+				root: string
+				renderFile: string
+				port: number
+				watchDirs?: string[]
+				renderTimeoutMs?: number
+			}) => Promise<{ url: string; close: () => Promise<void> }>
+			renderFileFor: (root: string, outDir: string, preferProd?: boolean) => string
+			defaultSsrDevPort?: () => number
+		}
+		const ssrMod = (await import(pathToFileURL(req.resolve('@swelte/ssr-qjs/ssr')).href)) as {
+			emitRenderJs: (
+				manifest: unknown,
+				o: { root: string; prod: boolean; routesDir?: string; libDir?: string }
+			) => Promise<string>
+		}
+		const { loadConfig } = await import('../gen/config.js')
+		const config = await loadConfig(root)
+		const outDir = String(config.outDir ?? '.swelte')
+		const mf = join(root, outDir, 'ssr-manifest.json')
+		let manifest: unknown = null
+		try {
+			manifest = JSON.parse(readFileSync(mf, 'utf8'))
+		} catch {
+			return null
+		}
+		if (!manifest) return null
+		const renderFile = await ssrMod.emitRenderJs(manifest, {
+			root,
+			prod: false,
+			routesDir: config.routesDir,
+			libDir: config.libDir,
+		})
+		const envPort = Number(process.env.SWELTE_SSR_PORT ?? 0)
+		const ssrPort =
+			opts.ssrPort ??
+			((Number.isFinite(envPort) && envPort > 0 ? envPort : 0) ||
+				devMod.defaultSsrDevPort?.() ||
+				8132)
+		const sidecar = await devMod.startSsrDevServer({
+			root,
+			renderFile,
+			port: ssrPort,
+			watchDirs: [config.routesDir, config.libDir],
+		})
+		// HMR for .svelte edits: Vite rebuilds client bundles, but the
+		// sidecar serves `.swelte/dev/render.js` — re-emit it on change
+		// (debounced) so the sidecar's mtime check picks it up.
+		try {
+			let timer: NodeJS.Timeout | null = null
+			const reemit = () => {
+				if (timer) clearTimeout(timer)
+				timer = setTimeout(() => {
+					void (async () => {
+						try {
+							const fresh = JSON.parse(readFileSync(mf, 'utf8'))
+							await ssrMod.emitRenderJs(fresh, {
+								root,
+								prod: false,
+								routesDir: config.routesDir,
+								libDir: config.libDir,
+							})
+						} catch {
+							/* best-effort HMR */
+						}
+					})()
+				}, 300)
+			}
+			for (const dir of [config.routesDir, config.libDir]) {
+				const abs = join(root, dir)
+				if (!existsSync(abs)) continue
+				try {
+					const w = watch(abs, { recursive: true }, (_ev, file) => {
+						if (typeof file === 'string' && file.endsWith('.svelte')) reemit()
+					})
+					w.unref?.()
+					// Track on the sidecar so close() below frees them.
+					;(sidecar as unknown as { __watchers?: unknown[] }).__watchers ??= []
+					;(sidecar as unknown as { __watchers: unknown[] }).__watchers.push(w)
+				} catch {
+					/* best-effort */
+				}
+			}
+		} catch {
+			/* best-effort */
+		}
+		log(`SSR sidecar ${sidecar.url} (@swelte/ssr-qjs dev-only; prod embeds via qjsc)`)
+		return {
+			url: sidecar.url,
+			close: async () => {
+				try {
+					for (const w of (sidecar as unknown as { __watchers?: { close?: () => void }[] })
+						.__watchers ?? [])
+						try {
+							w.close?.()
+						} catch {
+							/* ignore */
+						}
+				} catch {
+					/* ignore */
+				}
+				await sidecar.close().catch(() => {})
+			},
+		}
+	} catch (e) {
+		log(`SSR sidecar skipped: ${(e as Error).message}`)
+		return null
+	}
+}
 export function findViteConfig(root: string): string | null {
 	for (const f of ['vite.config.ts', 'vite.config.js', 'vite.config.mts', 'vite.config.mjs']) {
 		if (existsSync(join(root, f))) return f
@@ -332,15 +470,19 @@ export async function runDev(ctx: Ctx): Promise<void> {
 				SWELTE_CORS_ORIGIN: process.env.SWELTE_CORS_ORIGIN ?? `http://localhost:${port}`,
 				// Item pass-through: config knobs → backend env (env wins
 				// when already set, same rule as the §11 knobs).
+				...(!process.env.SWELTE_METHOD_OVERRIDE && cfg.methodOverride
+					? { SWELTE_METHOD_OVERRIDE: '1' }
+					: {}),
 				...(!process.env.SWELTE_TRAILING_SLASH && cfg.trailingSlash !== 'ignore'
 					? { SWELTE_TRAILING_SLASH: cfg.trailingSlash }
 					: {}),
 				...(!process.env.SWELTE_CSRF_CHECK_ORIGIN && cfg.csrf === 'enforce'
 					? { SWELTE_CSRF_CHECK_ORIGIN: '1' }
 					: {}),
-				...(!process.env.SWELTE_METHOD_OVERRIDE && cfg.methodOverride
-					? { SWELTE_METHOD_OVERRIDE: '1' }
-					: {}),
+				// SSR sidecar: Hand proxies renders when set, skips when not.
+				// maybeStartSsrSidecar below already preferred an explicit
+				// env value — only fill it in when we started the sidecar.
+				...(!process.env.SWELTE_SSR_URL && ssrSidecar ? { SWELTE_SSR_URL: ssrSidecar.url } : {}),
 				...(!process.env.SWELTE_VERSION && cfg.version !== ''
 					? { SWELTE_VERSION: cfg.version }
 					: {}),
@@ -381,9 +523,34 @@ export async function runDev(ctx: Ctx): Promise<void> {
 	} catch (e) {
 		ctx.log(`warning: pre-generate failed: ${(e as Error).message}`)
 	}
-	// Engine-agnostic: SWELTE_SSR_URL comes from the environment when the
-	// user (or an adapter wrapper) runs a renderer beside the V backend.
-	// Core starts nothing — static/SPA/JSON when unset.
+	// Engine-agnostic SSR: when `@swelte/ssr-qjs` is installed, boot its
+	// dev sidecar (`.swelte/dev/render.js` over HTTP) and hand the URL to
+	// the V backend via SWELTE_SSR_URL. Needs `.swelte/ssr-manifest.json`,
+	// so this runs AFTER the pre-generate above (manifest absent = SPA).
+	// SPA-only projects (or an explicit --no-ssr) skip this —
+	// static/SPA/JSON, unchanged. Explicit SWELTE_SSR_URL in the
+	// environment always wins (e.g. external renderer).
+	let ssrSidecar: SsrSidecar | null = null
+	try {
+		const ssrOpt =
+			ctx.opts.ssr === false || (ctx.opts as Record<string, unknown>)['no-ssr'] === true
+				? false
+				: undefined
+		const ssrPortRaw = ctx.opts['ssr-port']
+		ssrSidecar = await maybeStartSsrSidecar(
+			root,
+			{
+				...(typeof ssrPortRaw === 'number' && Number.isFinite(ssrPortRaw) && ssrPortRaw > 0
+					? { ssrPort: Math.floor(ssrPortRaw) }
+					: {}),
+				...(ssrOpt === false ? { ssr: false as const } : {}),
+			},
+			ctx.log
+		)
+		if (ssrSidecar) process.env.SWELTE_SSR_URL ??= ssrSidecar.url
+	} catch {
+		/* sidecar is best-effort — dev works without it */
+	}
 	spawnBackend()
 	const backendUp = await waitPort(backend, 30000)
 	if (!backendUp) {
@@ -494,6 +661,11 @@ export async function runDev(ctx: Ctx): Promise<void> {
 				}
 				killAll('TERM')
 				await killBackend()
+				try {
+					await ssrSidecar?.close()
+				} catch {
+					/* ignore */
+				}
 				setTimeout(() => {
 					killAll('KILL')
 					resolveDone()

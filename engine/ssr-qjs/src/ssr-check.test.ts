@@ -1,10 +1,8 @@
 import assert from 'node:assert/strict'
-import { spawn } from 'node:child_process'
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, it } from 'node:test'
-import { fileURLToPath } from 'node:url'
 import { runSsrCheck } from './cli.js'
 import { startSsrDevServer } from './dev.js'
 
@@ -26,34 +24,33 @@ function stubRender(marker = 'home'): string {
 }
 
 describe('item 24 — runSsrCheck halves (CI promotion)', () => {
-	it('the swelte-ssr check CLI exits after its sidecar gate', async () => {
+	it('the ssr-check plugin command runs its sidecar gate', async () => {
 		const root = mkdtempSync(join(tmpdir(), 'swelte-check-cli-'))
 		mkdirSync(join(root, '.swelte', 'dev'), { recursive: true })
 		writeFileSync(join(root, '.swelte', 'dev', 'render.js'), stubRender())
-		const bin = fileURLToPath(new URL('../bin/swelte-ssr.js', import.meta.url))
-		const child = spawn(process.execPath, [bin, 'check', '--root', root])
+		const { ssrPlugin } = await import('./vite.js')
+		const cmd = ssrPlugin.cli?.find((c) => c.name === 'ssr-check')
+		assert.ok(cmd, 'ssrPlugin exposes ssr-check')
 		let output = ''
-		child.stdout?.on('data', (chunk: Buffer) => (output += chunk.toString()))
-		child.stderr?.on('data', (chunk: Buffer) => (output += chunk.toString()))
-		const exited = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>(
-			(resolve) => {
-				child.once('close', (code, signal) => resolve({ code, signal }))
-			}
-		)
-		let timer: NodeJS.Timeout | undefined
-		const result = await Promise.race([
-			exited,
-			new Promise<null>((resolve) => {
-				timer = setTimeout(() => resolve(null), 5000)
-			}),
-		])
-		if (timer) clearTimeout(timer)
-		if (!result) {
-			child.kill('SIGKILL')
-			await exited
-			assert.fail(`swelte-ssr check did not exit after passing the gate:\n${output}`)
+		const orig = console.log
+		console.log = (...a: unknown[]) => {
+			output += a.map(String).join(' ')
 		}
-		assert.equal(result.code, 0, output)
+		try {
+			await cmd.run({
+				argv: [],
+				opts: { root },
+				rest: [],
+				log: (m: string) => {
+					output += m
+				},
+				error: (m: string) => {
+					output += m
+				},
+			})
+		} finally {
+			console.log = orig
+		}
 		assert.match(output, /500 props render ok/)
 	})
 

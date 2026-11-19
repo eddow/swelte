@@ -1,81 +1,10 @@
-// `swelte-ssr dev` / `swelte-ssr check`: adapter-owned lifecycle.
-// Boots the sidecar, then delegates to core's runDev / a prod-binary probe
-// with SWELTE_SSR_URL set. Core knows nothing about engines — this module
-// owns the sidecar process. Dev/CI-only: prod embeds the bundle at runtime
-// (bytecode-cached, no qjsc binary, no sidecar, no Node at runtime).
+// `swelte ssr-check`: adapter-owned CI gate (via SweltePlugin `ssrPlugin`).
+// `swelte dev` needs no adapter CLI: core auto-boots the dev sidecar when
+// this package is installed (`maybeStartSsrSidecar` in `@swelte/core`).
+// Prod embeds the bundle at runtime (bytecode-cached, no qjsc binary,
+// no sidecar, no Node at runtime).
 import { existsSync } from 'node:fs'
 import { join, resolve } from 'node:path'
-import type { SsrManifest } from './ssr.js'
-
-export interface SsrDevRunOptions {
-	root?: string
-	port?: number
-	backend?: number
-	ssrPort?: number
-	/** Project outDir (default '.swelte'); mirrors core's loadConfig. */
-	outDir?: string
-}
-
-/** Boot sidecar + Vite + V (core runDev) with SWELTE_SSR_URL wired. */
-export async function runSsrDev(opts: SsrDevRunOptions = {}): Promise<void> {
-	const root = resolve(String(opts.root ?? process.cwd()))
-	const { loadConfig, loadProjectSwelteOptions } = await import('@swelte/core/config')
-	const config = await loadConfig(root)
-	const outDir = String(opts.outDir ?? config.outDir ?? '.swelte')
-	const { startSsrDevServer, renderFileFor } = await import('./dev.js')
-	const { emitRenderJs } = await import('./ssr.js')
-	const { readFileSync } = await import('node:fs')
-	// Core generate first (manifest must exist).
-	const { swelte } = (await import('@swelte/core/vite')) as unknown as {
-		swelte: (o: Record<string, unknown>) => {
-			buildStart?: () => Promise<void> | void
-			configResolved?: (c: { root: string }) => void
-		}
-	}
-	const plug = swelte({ ...(await loadProjectSwelteOptions(root)) })
-	plug.configResolved?.({ root })
-	await plug.buildStart?.()
-	const mf = join(root, outDir, 'ssr-manifest.json')
-	let manifest: SsrManifest | null = null
-	if (existsSync(mf)) {
-		manifest = JSON.parse(readFileSync(mf, 'utf8'))
-	}
-	if (!manifest) throw new Error(`no ${outDir}/ssr-manifest.json — core generate failed?`)
-	await emitRenderJs(manifest, { root, prod: false })
-	const renderFile = renderFileFor(root, outDir, false)
-	const ssrPort = opts.ssrPort ?? 8132
-	const sidecar = await startSsrDevServer({
-		root,
-		renderFile,
-		port: ssrPort,
-		watchDirs: [config.routesDir, config.libDir],
-	})
-	console.log(`swelte-ssr dev: sidecar ${sidecar.url} (dev-only; prod embeds via qjsc)`)
-	process.env.SWELTE_SSR_URL = sidecar.url
-	const { runDev } = (await import('@swelte/core/cli')) as unknown as {
-		runDev: (ctx: {
-			opts: Record<string, unknown>
-			rest: string[]
-			log: (m: string) => void
-			error: (m: string) => void
-		}) => Promise<void>
-	}
-	const stop = () => {
-		void sidecar.close().catch(() => {})
-	}
-	process.once('SIGINT', stop)
-	process.once('SIGTERM', stop)
-	try {
-		await runDev({
-			opts: { root, port: opts.port ?? 5174, backend: opts.backend ?? 8131 },
-			rest: [],
-			log: (m: string) => console.log(`swelte dev: ${m}`),
-			error: (m: string) => console.error(`swelte dev: ${m}`),
-		})
-	} finally {
-		await sidecar.close().catch(() => {})
-	}
-}
 
 /** §5 gate as CI (adapter-owned, no V binary needed for the sidecar half).
  * Boots the sidecar + the built V binary (when present) and asserts:
@@ -93,7 +22,7 @@ export async function runSsrDev(opts: SsrDevRunOptions = {}): Promise<void> {
  * Core's `swelte build` smoke stays static/SPA + JSON — this is the
  * adapter's proof. Missing `+error.svelte` → SPA `index.html` 200 is
  * covered by the static fallback (back-compat, asserted in core smoke).
- * Used by CI and `swelte-ssr check`. */
+ * Used by CI and `swelte ssr-check` (via `SWELTE_PLUGINS`). */
 /** Probe one HTTP assertion against a live base URL. Throws on mismatch. */
 async function probeSsr(
 	base: string,
@@ -247,15 +176,15 @@ async function withProdBinary(
 	}
 }
 
-export async function runSsrCheck(
-	opts: {
-		root?: string
-		renderFile?: string
-		port?: number
-		outDir?: string
-		throwRoute?: string
-	} = {}
-): Promise<void> {
+export interface SsrCheckOptions {
+	root?: string
+	renderFile?: string
+	port?: number
+	outDir?: string
+	throwRoute?: string
+}
+
+export async function runSsrCheck(opts: SsrCheckOptions = {}): Promise<void> {
 	const root = resolve(String(opts.root ?? process.cwd()))
 	const { loadConfig } = await import('@swelte/core/config')
 	const outDir = String(opts.outDir ?? (await loadConfig(root)).outDir ?? '.swelte')

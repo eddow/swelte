@@ -5,20 +5,17 @@
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
-  "bin": {
-    "swelte-ssr": "bin/swelte-ssr.js"
-  },
   "exports": {
     ".": "./dist/index.js",
     "./vite": "./dist/vite.js",
     "./dev": "./dist/dev.js",
     "./cli": "./dist/cli.js",
-    "./qjs": "./dist/qjs.js"
+    "./qjs": "./dist/qjs.js",
+    "./ssr": "./dist/ssr.js"
   },
   "files": [
     "README.md",
     "dist",
-    "bin",
     "c",
     "shims",
     "LICENSE-MIT",

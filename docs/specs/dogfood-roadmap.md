@@ -33,7 +33,7 @@ belong to their owning repositories.
 
 Core, SSR and Plus tests cover framework contracts. `npm run test:dogfood -- --browser` exercises native and browser behavior; `--prod` selects optimized
 native compilation. `npm run test:postgres -- --browser` probes a disposable
-PostgreSQL database. `swelte-ssr check` checks built SSR artifacts and exits
+PostgreSQL database. `swelte ssr-check` checks built SSR artifacts and exits
 after shutting down its probe processes. The example suite covers build,
 preview, browser navigation and dev/HMR behavior.
 

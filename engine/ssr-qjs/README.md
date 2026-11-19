@@ -22,7 +22,7 @@ Core never imports `svelte/compiler`, `quickjs`, or a JS runtime.
 
 ```
 src/   compose (ssr.ts) · swelte() wrapper (vite.ts) · QJS link (qjs.ts)
-       dev sidecar (dev.ts) · runSsrDev / runSsrCheck (cli.ts)
+       dev sidecar (dev.ts) · runSsrCheck + ssrPlugin (cli.ts, vite.ts)
 c/     vendored QuickJS 2026-06-04 (see c/README.md) + swelte_qjs.* glue
 shims/ QJS-safe substitutes (2 svelte internals + SDK shim)
 ```

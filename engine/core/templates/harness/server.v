@@ -747,6 +747,18 @@ fn (mut app App) before_request(mut ctx Ctx) veb.Result {
 	page_accept := headers['Accept'] or { headers['accept'] or { '' } }
 	page_load := (headers['X-Swelte-Load'] or { headers['x-swelte-load'] or { '' } }) == '1'
 	page_prefix, _ := routes.swelte_load_route(path)
+	// Neutral agents (no Accept, `*/*`, or text/* without an explicit
+	// JSON/SDK/fetch signal) are navigations on page routes: browsers
+	// send `text/html`, but crawlers/AI readers send `*/*` or nothing —
+	// those must also get SSR HTML, not the verb-dispatch JSON probe
+	// (which made agents see only the page title + `"Swelte docs"`).
+	// Explicit JSON stays JSON: `application/json` Accept, `?q`/`?payload`
+	// probes, XHR `X-Requested-With`, the SDK load fetch, non-GET.
+	page_is_neutral := page_accept == '' || page_accept == '*/*' || (!page_accept.contains('application/json') && !page_accept.contains('json') && !page_accept.contains('text/event-stream') && (page_accept.contains('text/html') || page_accept.contains('text/') || page_accept.contains('*')))
+	page_is_fetch := page_load || (headers['X-Requested-With'] or { headers['x-requested-with'] or { '' } }) != '' || (headers['X-Swelte-Fetch'] or { headers['x-swelte-fetch'] or { '' } }) != ''
+	page_get_probe := ctx.req.url.contains('?q=') || ctx.req.url.contains('?payload=') || ctx.req.url.contains('&q=') || ctx.req.url.contains('&payload=')
+	page_wants_json := page_accept.contains('application/json') || page_accept.contains('+json')
+	page_is_nav := ctx.req.method == .get && page_prefix != '' && !page_is_fetch && !page_get_probe && !page_wants_json && (page_accept.contains('text/html') || page_is_neutral)
 	// ISR is public and canonical: personalized/query/data requests bypass it.
 	if ctx.req.method == .get && page_prefix != '' && page_accept.contains('text/html') && !page_accept.contains('application/json') && !page_load && !ctx.req.url.contains('?') && cookies.len == 0 && (headers['Authorization'] or { headers['authorization'] or { '' } }) == '' && (headers['X-Swelte-Isr'] or { headers['x-swelte-isr'] or { '' } }) != app.lifecycle.instance {
 		seconds := swelte_isr_seconds(path)
@@ -767,7 +779,7 @@ fn (mut app App) before_request(mut ctx Ctx) veb.Result {
 			swelte_isr_schedule(app.lifecycle, path, host, file)
 		}
 	}
-	if ctx.req.method == .get && page_prefix != '' && (page_load || page_accept.contains('text/html')) {
+	if page_is_nav {
 		return swelte_serve_page(mut ctx, path, query, headers, cookies, page_load)
 	}
 	// (swelte_call_route is sync — veb runs before_request on a worker;
@@ -821,20 +833,19 @@ fn (mut app App) before_request(mut ctx Ctx) veb.Result {
 	// SSR first (when enabled + HTML navigation): render → fill shell.
 	// On render miss/failure, fall through to no-JS/static/SPA below.
 	// (Static used to win here — SSR never ran when dist/ existed.)
-	// NOTE: `wants_html` without an explicit `text/html` (curl, health
-	// probes) is NOT an HTML navigation — those keep JSON/static behavior.
-	// Only a real browser Accept (contains text/html, no application/json)
-	// enters the SSR chain. This also preserves §12 no-JS form redirects.
+	// NOTE: `wants_html` covers real browsers AND neutral agents
+	// (no Accept / `*/*` / text/* on a page route — see `page_is_nav`
+	// above): those are navigations, not API probes, and enter the SSR
+	// chain. Explicit `application/json` stays JSON. This preserves §12
+	// no-JS form redirects (browser navigations, POST branch above).
 	mut cookies_out := set_cookies.clone()
 	// §12 No-JS forms: browser navigations (Accept: text/html, no JSON)
 	// get a redirect on success / server-rendered error page on failure
 	// instead of JSON. Fetch stubs (Accept: application/json) keep JSON.
-	// NOTE: the SSR chain below also gates on `text/html`. A page route hit
-	// via bare curl (no Accept, or */*) keeps the OLD behavior — JSON body
-	// for API-ish hits, static/SPA shell for pages — so probes and the
-	// `swelte build` smoke (curl without Accept) never see SSR bytes.
+	// Neutral agents join the navigation path (see note above) — probes
+	// keep JSON only when they explicitly ask for it.
 	accept := headers['Accept'] or { headers['accept'] or { '' } }
-	wants_html := accept.contains('text/html') && !accept.contains('application/json')
+	wants_html := (accept.contains('text/html') || page_is_nav) && !accept.contains('application/json')
 	wants_json := (headers['Accept'] or { headers['accept'] or { '' } }).contains('application/json')
 	for c in cookies_out {
 		ctx.res.header.add(.set_cookie, c.to_header())
@@ -1010,12 +1021,12 @@ fn (mut app App) before_request(mut ctx Ctx) veb.Result {
 	// This bypass runs BEFORE the wants_html error page so no-ssr
 	// routes never see the 404/error HTML — only the SPA shell.
 	// Fetch stubs keep JSON (Accept: application/json or ?q probes):
-	// only real navigations (HTML, no JSON, no event-stream) get the shell.
+	// only navigations (browser HTML or neutral agent Accept on a page
+	// route, no JSON, no event-stream) get the shell.
 	// SSE intent (bare `GET` + `Accept: text/event-stream`, no qualifier)
 	// also skips the shell — the dispatcher/SSE takeover owns that shape.
-	// Bare curl (no Accept at all) is a probe, not a navigation: it keeps
-	// the old status/body contract (404 JSON here), never the SPA shell.
-	// Only a real browser Accept (contains text/html) enters the shell.
+	// Explicit JSON probes (`application/json`, SDK fetches) keep the
+	// status/body contract — never the SPA shell.
 	mut is_sse := accept.contains('text/event-stream')
 	if routes.swelte_no_ssr(path) && ctx.req.method == .get && !wants_json && wants_html && !is_sse {
 		_, ct, sb := serve_static(dist, '/index.html')
@@ -1043,9 +1054,11 @@ fn (mut app App) before_request(mut ctx Ctx) veb.Result {
 	// breaks __swelteFetch JSON decoding (gets HTML instead). The
 	// `!wants_json` guard keeps RPC GETs (`/`, `/api/*`) on the dispatcher.
 	if dist != '' && ctx.req.method == .get && !wants_json && !path.starts_with('/api/') && (path == '/' || (status == 404 && body.contains('not found'))) {
-		// Probes (bare curl: Accept */* or missing) must see the dispatcher
-		// contract (JSON/statics), never the SPA shell — the shell is a
-		// document response for real navigations only.
+		// Explicit non-navigation probes (SSE intent, or neither HTML nor
+		// neutral-agent Accept and no JSON — e.g. `curl -H 'Accept: image/*'`)
+		// see the dispatcher contract (JSON/statics), never the SPA shell.
+		// Neutral agents on page routes have wants_html set (page_is_nav),
+		// so they correctly fall through to the shell below.
 		if !wants_html && !wants_json && !is_sse {
 			ctx.res.set_status(http.status_from_int(status))
 			mut probe_ct := out.res.headers['Content-Type'] or { out.res.headers['content-type'] or { '' } }

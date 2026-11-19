@@ -8,7 +8,7 @@ description: Swelte SSR and page-data loading — @[load] cascade, +route wrappe
 ## Ownership (locked)
 
 - `core` is engine-agnostic: manifest (`.swelte/ssr-manifest.json`), `Hand` SSR hook, marker injection, client entry, `loadPage` twin. Core never imports `svelte/compiler`, QuickJS, or a JS runtime; `build`/`dev`/`preview` never start an engine. `SWELTE_SSR_URL` is the only bridge — `Hand` proxies when set, skips when not. Default is SPA/static + JSON, always.
-- `@swelte/ssr-qjs` (default engine) owns the SSR compiler, vendored QuickJS prod embed, dev sidecar, `runSsrDev`/`runSsrCheck`.
+- `@swelte/ssr-qjs` (default engine) owns the SSR compiler, vendored QuickJS prod embed, dev sidecar, `runSsrCheck` + the `ssr-check` plugin command (`ssrPlugin`).
 
 ## Request path
 

@@ -16,6 +16,16 @@ const devCmd: Command = {
 		{ name: 'port', short: 'p', help: 'Vite port', value: 'number' },
 		{ name: 'backend', short: 'b', help: 'V backend port', value: 'number' },
 		{ name: 'root', help: 'Project root', value: 'string' },
+		{
+			name: 'ssr-port',
+			help: 'SSR sidecar port (only when @swelte/ssr-qjs is installed)',
+			value: 'number',
+		},
+		{
+			name: 'ssr',
+			help: 'Enable SSR sidecar when @swelte/ssr-qjs is installed (default: auto; --no-ssr forces SPA)',
+			value: 'boolean',
+		},
 	],
 	async run(ctx: Ctx) {
 		await runDev(ctx)

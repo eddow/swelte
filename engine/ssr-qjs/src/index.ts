@@ -7,8 +7,8 @@
 // (svelte/compiler for generate:'server', qjs at runtime). Core never
 // imports svelte/compiler, quickjs, or a JS runtime.
 export * from '@swelte/core'
-export type { SsrDevRunOptions } from './cli.js'
-export { runSsrCheck, runSsrDev } from './cli.js'
+export type { SsrCheckOptions } from './cli.js'
+export { runSsrCheck } from './cli.js'
 export type { SsrDevOptions } from './dev.js'
 export { defaultSsrDevPort, renderFileFor, startSsrDevServer } from './dev.js'
 export {
@@ -32,4 +32,4 @@ export {
 	type SsrManifest,
 	transpileSiblingLoad,
 } from './ssr.js'
-export { swelte } from './vite.js'
+export { ssrPlugin, swelte } from './vite.js'

@@ -6,6 +6,7 @@
 // Core remains completely clean — this module owns the dynamic imports
 // and build augmentation.
 
+import type { SweltePlugin } from '@swelte/core/vite'
 import { swelte as coreSwelte } from '@swelte/core/vite'
 import type { Plugin } from 'vite'
 
@@ -31,6 +32,49 @@ export interface SsrQjsOptions {
 	version?: string
 	/** V+TS plugins (core `SweltePlugin` contract, implemented by `@swelte/plus`). */
 	plugins?: import('@swelte/core/vite').SweltePlugin[]
+}
+
+/** SSR adapter as a Swelte plugin: exposes `swelte ssr-check` (the §5 CI
+ * gate) as a core CLI command when probed via `SWELTE_PLUGINS`. Same shape
+ * as `@swelte/plus/db`'s `migrate` — core stays dependency-free, the
+ * adapter owns the dynamic imports. `swelte dev` needs no plugin: it
+ * auto-boots the sidecar via `maybeStartSsrSidecar`. */
+export const ssrPlugin: SweltePlugin = {
+	name: 'ssr-qjs',
+	attrs: [],
+	cli: [
+		{
+			name: 'ssr-check',
+			summary:
+				'SSR gate: sidecar render + Hand proxy + prod binary + single dist/ssr artifact (adapters only).',
+			args: [
+				{ name: 'root', help: 'Project root', value: 'string' },
+				{ name: 'port', help: 'Sidecar probe port', value: 'number' },
+				{ name: 'out-dir', help: 'Project outDir', value: 'string' },
+				{ name: 'throw-route', help: 'Probe route for the 500 envelope', value: 'string' },
+			],
+			async run(ctx) {
+				const { resolve } = await import('node:path')
+				const { runSsrCheck } = await import('./cli.js')
+				const num = (v: unknown): number | undefined =>
+					typeof v === 'number' && Number.isFinite(v) ? v : undefined
+				await runSsrCheck({
+					root: resolve(String(ctx.opts.root ?? process.cwd())),
+					port: num(ctx.opts.port),
+					outDir:
+						typeof ctx.opts['out-dir'] === 'string'
+							? (ctx.opts['out-dir'] as string)
+							: typeof ctx.opts.outDir === 'string'
+								? (ctx.opts.outDir as string)
+								: undefined,
+					throwRoute:
+						typeof ctx.opts['throw-route'] === 'string'
+							? (ctx.opts['throw-route'] as string)
+							: undefined,
+				})
+			},
+		},
+	],
 }
 
 export function swelte(options: SsrQjsOptions = {}): Plugin[] {

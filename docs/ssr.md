@@ -18,7 +18,10 @@ record: what SSR does, how it runs, and the measured budgets.
   not. Default is SPA/static + JSON, always.
 * `@swelte/ssr-qjs` (optional engine — `npm install @swelte/ssr-qjs`) owns: the SSR compiler, the
   vendored QuickJS prod embed, the dev sidecar (Node HTTP, dev-only),
-  and its own lifecycle commands (`runSsrDev`, `runSsrCheck`).
+  and the CI gate (`runSsrCheck`). Dev needs no separate command:
+  `swelte dev` auto-boots the sidecar when the adapter is installed
+  (emits `.swelte/dev/render.js`, sets `SWELTE_SSR_URL` for `Hand`);
+  `SWELTE_PLUGINS=@swelte/ssr-qjs` adds `swelte ssr-check`.
 * Without the QJS package, core stays SPA/static + JSON: `swelte build` skips the bridge pass, `swelte preview` serves the shell, and `SWELTE_SSR=1` fails the V compile loudly (missing bridge symbol) instead of silently falling back.
 
 ## How it works
@@ -37,8 +40,9 @@ Two copies of the same bundle:
 * `dist/ssr/render.js` — **prod**. Read at runtime by the V binary
   (embedded QuickJS, `SWELTE_SSR=1`); exactly one artifact in
   `dist/ssr/`.
-* `.swelte/dev/render.js` — **dev**. Read by the `swelte-ssr dev`
-  sidecar (`SWELTE_SSR_URL`), so Svelte edits HMR without a V restart.
+* `.swelte/dev/render.js` — **dev**. Read by the sidecar
+  (`SWELTE_SSR_URL`, booted by `swelte dev` when the adapter is
+  installed), so Svelte edits HMR without a V restart.
 
 Guards (build errors with file+line): no `node:` imports, no
 `fetch(`, no top-level `await`, no top-level stub calls in
@@ -201,10 +205,11 @@ no `<!--ssr-body-->` leftover, JSON bypass intact):
 plus exactly one artifact in `dist/ssr/` and a 20× repeat-render
 (no crash, stable timing). Verified green.
 
-`swelte-ssr check` is a runnable gate for local or CI use. Its child V
-processes run in isolated process groups so their compiled server children
-are stopped too; a subprocess regression test verifies the CLI exits after
-the sidecar-only gate. The command can skip Hand or embedded-production
+`swelte ssr-check` (via `SWELTE_PLUGINS=@swelte/ssr-qjs`) is a runnable
+gate for local or CI use. Its child V processes run in isolated process
+groups so their compiled server children are stopped too; the
+`ssr-check` plugin test verifies the gate passes on a stub render.js.
+The command can skip Hand or embedded-production
 probes when the corresponding build artifacts are absent. This repository's
 test script does not currently invoke the command as a separate CI job.
 
