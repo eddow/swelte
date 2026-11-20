@@ -8,5 +8,6 @@ examples/*/server
 engine/core/templates/*/.swelte/
 engine/vvm/versions/
 engine/vvm/.active-version
+engine/vvm/.active-system-path
 .cline
 tmp/

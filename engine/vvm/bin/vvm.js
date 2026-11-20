@@ -7,16 +7,19 @@ import {
 	chmodSync,
 	createWriteStream,
 	existsSync,
+	lstatSync,
 	mkdirSync,
 	readdirSync,
 	readFileSync,
+	readlinkSync,
 	realpathSync,
 	renameSync,
 	rmSync,
+	symlinkSync,
 	writeFileSync,
 } from 'node:fs'
 import { createRequire } from 'node:module'
-import { tmpdir } from 'node:os'
+import { homedir, tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { pipeline } from 'node:stream/promises'
 import { fileURLToPath } from 'node:url'
@@ -78,18 +81,308 @@ export function activeVersion(root = VVM_ROOT) {
 }
 
 export function setActiveVersion(version, root = VVM_ROOT) {
-	writeFileSync(join(root, '.active-version'), `${version.replace(/^v/, '')}\n`)
+	const v = String(version).trim().toLowerCase() === 'system' ? 'system' : version.replace(/^v/, '')
+	writeFileSync(join(root, '.active-version'), `${v}\n`)
+}
+
+/** Path of the `.active-system-path` pin file (remembers the adopted system `v`). */
+export function activeSystemPathFile(root = VVM_ROOT) {
+	return join(root, '.active-system-path')
+}
+
+/** Pinned system `v` path (written by `use system`), or ''. */
+export function activeSystemPath(root = VVM_ROOT) {
+	const file = activeSystemPathFile(root)
+	if (!existsSync(file)) return ''
+	return readFileSync(file, 'utf8').trim()
+}
+
+function setActiveSystemPath(path, root = VVM_ROOT) {
+	writeFileSync(activeSystemPathFile(root), `${path}\n`)
+}
+
+/** Whether `p` points inside vvm's own managed tree (versions/, or this package). */
+function isVvmOwned(p, root = VVM_ROOT) {
+	try {
+		const real = realpathSync(resolve(String(p)))
+		const vdir = resolve(versionsDir(root))
+		if (real === vdir || real.startsWith(`${vdir}/`)) return true
+		const here = resolve(HERE, '..')
+		if (real === here || real.startsWith(`${here}/`)) return true
+	} catch {
+		return false
+	}
+	return false
+}
+
+/** Looks like the npm `v` bin-shim (`bin/v-shim.js` forwarder), not a real V toolchain. */
+function isNodeShim(p) {
+	try {
+		const body = readFileSync(resolve(String(p)), 'utf8')
+		return body.includes('v-shim') || body.includes('#!/usr/bin/env node')
+	} catch {
+		return false
+	}
+}
+
+/**
+ * System `v` on PATH — a *real* toolchain binary, never vvm's own link or
+ * shim (self-loop guard). Returns the absolute path or ''. Honors
+ * `VVM_SYSTEM_V` to point at an explicit binary (useful on Windows).
+ */
+export function systemVBinary({ root = VVM_ROOT, extraDir } = {}) {
+	const explicit = process.env.VVM_SYSTEM_V
+	const probe = process.platform === 'win32' ? 'where' : 'which'
+	const candidates = []
+	if (explicit) candidates.push(explicit)
+	// Our own link dir is honoured last: `use system` runs while the link
+	// still points at the managed toolchain (re-point only on explicit refresh).
+	const linkDir = resolve(process.env.VVM_LINK_DIR || defaultLinkDir())
+	const linkFile = join(linkDir, linkName())
+	let ownLinkTarget = ''
+	try {
+		const seen = linkResolution(linkFile)
+		if (seen.kind === 'symlink') ownLinkTarget = resolve(linkDir, seen.target)
+	} catch {
+		/* ignore — live probe below handles it */
+	}
+	const linkReal = (() => {
+		try {
+			return realpathSync(linkFile)
+		} catch {
+			return ''
+		}
+	})()
+	try {
+		const out = execFileSync(probe, ['v'], { stdio: ['ignore', 'pipe', 'ignore'] })
+			.toString()
+			.trim()
+		for (const line of out.split(/\r?\n/)) {
+			const p = line.trim()
+			if (p) candidates.push(p)
+		}
+	} catch {
+		/* no `v` on PATH */
+	}
+	if (extraDir)
+		candidates.push(join(resolve(extraDir), process.platform === 'win32' ? 'v.exe' : 'v'))
+	for (const c of candidates) {
+		try {
+			const abs = resolve(String(c))
+			if (!existsSync(abs)) continue
+			if (resolve(abs) === resolve(linkFile)) continue // our own link entry-point
+			let real = abs
+			try {
+				real = realpathSync(abs)
+			} catch {
+				/* unresolvable — compare literal below */
+			}
+			if (linkReal && real === linkReal) continue // resolves through our own link
+			if (ownLinkTarget && (real === ownLinkTarget || abs === ownLinkTarget)) continue
+			if (isVvmOwned(real, root) || isVvmOwned(abs, root)) continue // managed toolchain / this package
+			if (isNodeShim(real) || isNodeShim(abs)) continue // node_modules/.bin/v forwarder
+			// Must answer `v version` like a real V toolchain.
+			const out = execFileSync(real, ['version'], {
+				stdio: ['ignore', 'pipe', 'ignore'],
+			}).toString()
+			if (/V\s+\d+\.\d+\.\d+/i.test(out)) return real
+		} catch {
+			/* not a usable V — try next */
+		}
+	}
+	return ''
+}
+
+/** `X.Y.Z` reported by `<bin> version`, or ''. */
+export function systemVVersion(bin) {
+	try {
+		const out = execFileSync(bin, ['version'], { stdio: ['ignore', 'pipe', 'ignore'] }).toString()
+		const m = /V\s+(\d+\.\d+\.\d+)/i.exec(out)
+		return m ? m[1] : ''
+	} catch {
+		return ''
+	}
+}
+
+/** Info about the system V: `{ path, version }` (either may be ''). */
+export function systemVInfo(opts = {}) {
+	const path = systemVBinary(opts)
+	return { path, version: path ? systemVVersion(path) : '' }
+}
+
+/** Whether the system V is currently the active toolchain. */
+export function isSystemActive(root = VVM_ROOT) {
+	return activeVersion(root).trim().toLowerCase() === 'system'
 }
 
 export function resolveV(root = VVM_ROOT) {
+	if (isSystemActive(root)) {
+		// Pinned path first (survives PATH changes); live probe as fallback
+		// (follows system upgrades); '' when the system V is gone.
+		const pinned = activeSystemPath(root)
+		if (pinned) {
+			try {
+				if (existsSync(pinned)) return pinned
+			} catch {
+				/* fall through to live probe */
+			}
+		}
+		return systemVBinary({ root })
+	}
 	const active = activeVersion(root)
-	if (active) {
+	if (active && active.trim().toLowerCase() !== 'system') {
 		const bin = vBinary(versionDir(active, root))
 		if (existsSync(bin)) return bin
 	}
 	const installed = listInstalled(root)
 	if (installed.length > 0) return vBinary(versionDir(installed[installed.length - 1], root))
 	return ''
+}
+
+// --- System link (`vvm link`) -------------------------------------------
+// VSCode's V extension (and any bare `v` on PATH) needs a *global* V,
+// while vvm deliberately keeps toolchains inside node_modules. `vvm link`
+// bridges the two: it places a tiny `v` entry-point in a directory that
+// is already on PATH (default `~/.local/bin`), forwarding to the active
+// vvm-managed binary. Opt-in only — vvm never touches the system by
+// itself unless VVM_LINK=1 (or `postinstall --link`) says so.
+//
+// POSIX: a symlink (`~/.local/bin/v` -> `<vvm>/versions/vX.Y.Z/v`).
+// Verified: V resolves vlib through the symlink target, `v run` works.
+// Windows: a `v.cmd` shim (`@"<bin>" %*`) — symlinks need privileges.
+
+/** Default link dir: `~/.local/bin` (POSIX), `%LOCALAPPDATA%/vvm/bin` (win32). */
+export function defaultLinkDir() {
+	if (process.platform === 'win32')
+		return process.env.LOCALAPPDATA
+			? join(process.env.LOCALAPPDATA, 'vvm', 'bin')
+			: join(homedir(), 'vvm', 'bin')
+	return join(homedir(), '.local', 'bin')
+}
+
+/** Basename of the link entry (`v` / `v.cmd`). */
+export function linkName() {
+	return process.platform === 'win32' ? 'v.cmd' : 'v'
+}
+
+function linkResolution(linkFile) {
+	try {
+		if (!existsSync(linkFile) && !lstatSync(linkFile).isSymbolicLink()) return { kind: 'missing' }
+	} catch {
+		return { kind: 'missing' }
+	}
+	try {
+		if (lstatSync(linkFile).isSymbolicLink())
+			return { kind: 'symlink', target: readlinkSync(linkFile) }
+	} catch {
+		return { kind: 'missing' }
+	}
+	try {
+		const body = readFileSync(linkFile, 'utf8')
+		const m = /"([^"]+v(?:\.exe)?)"/.exec(body)
+		return { kind: 'file', target: m ? m[1] : '' }
+	} catch {
+		return { kind: 'file', target: '' }
+	}
+}
+
+/**
+ * Point `dir/v` at the active vvm binary (symlink on POSIX, `v.cmd` shim
+ * on Windows). Idempotent: re-running refreshes a stale link. Refuses to
+ * clobber a non-vvm `v` unless `force` is set. Returns the link path.
+ */
+export function linkSystemV({ dir, force = false, root = VVM_ROOT } = {}) {
+	const targetBin = resolveV(root)
+	if (!targetBin) throw new Error('no V installed (run: vvm install 0.5.2)')
+	const linkDir = resolve(dir || process.env.VVM_LINK_DIR || defaultLinkDir())
+	const linkFile = join(linkDir, linkName())
+	mkdirSync(linkDir, { recursive: true })
+	const seen = linkResolution(linkFile)
+	if (seen.kind !== 'missing') {
+		let pointsAt = ''
+		try {
+			pointsAt = seen.kind === 'symlink' ? resolve(linkDir, seen.target) : String(seen.target || '')
+		} catch {
+			/* unresolvable — treat as foreign */
+		}
+		if (resolve(pointsAt) === resolve(targetBin)) return linkFile // already good
+		if (!force && pointsAt !== '') {
+			// A vvm-looking link pointing elsewhere: refresh it (version switch).
+			const managed = linkDirOfVvm(pointsAt, root)
+			if (!managed)
+				throw new Error(`refusing to overwrite ${linkFile} (not a vvm link — use --force)`)
+		} else if (!force) {
+			throw new Error(`refusing to overwrite ${linkFile} (not a vvm link — use --force)`)
+		}
+		rmSync(linkFile, { force: true })
+	}
+	if (process.platform === 'win32') {
+		writeFileSync(linkFile, `@"${targetBin}" %*\r\n`)
+	} else {
+		try {
+			symlinkSync(targetBin, linkFile)
+		} catch (err) {
+			// ~/.local/bin on a FS that rejects symlinks: fall back to a sh shim.
+			if (err?.code !== 'EPERM' && err?.code !== 'EACCES' && err?.code !== 'EXDEV') throw err
+			writeFileSync(linkFile, `#!/bin/sh\nexec "${targetBin}" "$@"\n`)
+			try {
+				chmodSync(linkFile, 0o755)
+			} catch {
+				/* best effort */
+			}
+		}
+		try {
+			chmodSync(linkFile, 0o755)
+		} catch {
+			/* best effort (symlink chmod follows target on some platforms) */
+		}
+	}
+	return linkFile
+}
+
+/** Remove the system link created by `linkSystemV` (only if vvm-looking). */
+export function unlinkSystemV({ dir, force = false, root = VVM_ROOT } = {}) {
+	const linkDir = resolve(dir || process.env.VVM_LINK_DIR || defaultLinkDir())
+	const linkFile = join(linkDir, linkName())
+	const seen = linkResolution(linkFile)
+	if (seen.kind === 'missing') return ''
+	if (!force) {
+		const target =
+			seen.kind === 'symlink' ? resolve(linkDir, seen.target) : String(seen.target || '')
+		if (!linkDirOfVvm(target, root) && target !== resolveV(root))
+			throw new Error(`refusing to remove ${linkFile} (not a vvm link — use --force)`)
+	}
+	rmSync(linkFile, { force: true })
+	return linkFile
+}
+
+/** Current link state: `{ linkFile, target, ok }`.
+ *  `ok` means the link resolves to the *currently active* V and that
+ *  resolution is meaningful: for a managed active it must equal the
+ *  managed binary; for an active system V the link is stale by definition
+ *  (system is global already — anything the link points at is redundant). */
+export function linkStatus({ dir, root = VVM_ROOT } = {}) {
+	const linkDir = resolve(dir || process.env.VVM_LINK_DIR || defaultLinkDir())
+	const linkFile = join(linkDir, linkName())
+	const seen = linkResolution(linkFile)
+	if (seen.kind === 'missing') return { linkFile, target: '', ok: false }
+	const target = seen.kind === 'symlink' ? resolve(linkDir, seen.target) : String(seen.target || '')
+	if (target === '') return { linkFile, target, ok: false }
+	try {
+		if (isSystemActive(root)) return { linkFile, target, ok: false }
+		return { linkFile, target, ok: resolve(target) === resolve(resolveV(root)) }
+	} catch {
+		return { linkFile, target, ok: false }
+	}
+}
+
+function linkDirOfVvm(target, root) {
+	try {
+		const vvmVersions = resolve(versionsDir(root))
+		return resolve(target).startsWith(`${vvmVersions}/`)
+	} catch {
+		return false
+	}
 }
 
 // Aliases accepted anywhere a version is expected: latest (+ stable/lts/current),
@@ -454,17 +747,70 @@ function printHelp() {
 	console.log(`vvm ${VVM_VERSION} — V Version Manager
 Usage: vvm <command> [args]
 
-  install <version> [--force]   Download + extract V (e.g. vvm install 0.5.2, vvm install latest)
+  install <version> [--force] [--link]   Download + extract V (e.g. vvm install 0.5.2, vvm install latest)
+                              Never touches an already-installed system V.
   prepare [--target-os O] [--target-arch A] [--zig-version V] [--force]
                               Ensure zig + write zig-cc-<os>-<arch> wrapper(s).
                               No flags = derive from SWELTE_TARGET_OS/ARCH
                               or package.json swelte.targetOs/targetArch.
-  use <version>                 Set active version (writes .active-version)
-  ls | list                     List installed versions (* = active)
+  use <version>|system [--system]  Switch toolchain: managed version or the
+                              already-installed system V (never downloaded).
+                              Writes .active-version (+ .active-system-path pin).
+  ls | list                     List installed versions (* = active), incl. system V
+  uninstall <version>           Remove a managed version (never the active one, never system)
   which                         Print path of the active v binary
-  exec <version> -- <args...>   Run a one-off command with a given version
+  exec <version>|system -- <args...>  Run a one-off command with a given version
   current                       Print active version
+  link [--dir D] [--global] [--force]    Expose active V on PATH (default ${defaultLinkDir()}).
+                              VSCode's V extension needs a global 'v':
+                              this symlinks it to the vvm toolchain.
+                              No-op when active is system (already global).
+                              Opt-in: nothing links unless you run this
+                              (or set VVM_LINK=1 for auto-link on install/use).
+  unlink [--dir D] [--global] [--force]  Remove the 'v' entry-point from PATH
+  status                        Show active version + system link state
   help                          This help`)
+}
+
+function parseLinkArgs(rest) {
+	let dir = ''
+	let global = false
+	let force = false
+	for (let i = 0; i < rest.length; i++) {
+		const a = rest[i]
+		if (a === '--force' || a === '-f') force = true
+		else if (a === '--global' || a === '-g') global = true
+		else if (a === '--dir' || a === '--link-dir') dir = rest[++i] || ''
+		else if (a.startsWith('--dir=')) dir = a.slice('--dir='.length)
+		else if (a.startsWith('--link-dir=')) dir = a.slice('--link-dir='.length)
+	}
+	if (global) dir = process.platform === 'win32' ? defaultLinkDir() : '/usr/local/bin'
+	return { dir: dir || undefined, force }
+}
+
+function maybeAutoLink() {
+	// Opt-in auto-link: VVM_LINK=1 creates/refreshes the system link
+	// after install/use of a *managed* version. A pre-existing vvm link is
+	// refreshed too — but never toward `system` uninvited (system is global
+	// already; the refresh would clobber the managed link).
+	if (isSystemActive()) return process.env.VVM_LINK === '1'
+	if (process.env.VVM_LINK === '1') return true
+	try {
+		return linkStatus({}).target !== ''
+	} catch {
+		return false
+	}
+}
+
+function reportLink(linkFile) {
+	console.log(`vvm: linked ${linkFile} → ${resolveV()}`)
+	const pathDirs = String(process.env.PATH || '').split(process.platform === 'win32' ? ';' : ':')
+	if (!pathDirs.includes(dirname(linkFile))) {
+		console.log(
+			`vvm: note: ${dirname(linkFile)} is not on PATH — add it so 'v' resolves (VSCode reads PATH on launch)`
+		)
+		console.log(`  export PATH="${dirname(linkFile)}:$PATH"  # or: vvm link --dir <dir-on-PATH>`)
+	}
 }
 
 async function main(argv) {
@@ -482,6 +828,7 @@ async function main(argv) {
 		)
 		const force = rest.includes('--force') || rest.includes('-f')
 		await installVersion(version, { force })
+		if (rest.includes('--link') || maybeAutoLink()) reportLink(linkSystemV({}))
 		return
 	}
 	if (cmd === 'prepare') {
@@ -508,7 +855,39 @@ async function main(argv) {
 		return
 	}
 	if (cmd === 'use') {
-		let version = normalizeVersion(rest[0] || '')
+		const raw = String(rest[0] || '')
+		const wantSystem = raw.trim().toLowerCase() === 'system' || rest.includes('--system')
+		if (wantSystem) {
+			// Adopt the already-installed system V: never download, never copy —
+			// the toolchain stays where the user (or their OS package) put it.
+			const info = systemVInfo({})
+			if (!info.path) {
+				console.error('vvm use: no system `v` on PATH. Install V first, or: vvm install 0.5.2')
+				process.exit(1)
+			}
+			setActiveVersion('system')
+			setActiveSystemPath(info.path)
+			console.log(`vvm: now using system V ${info.version || '(unknown version)'} (${info.path})`)
+			if (rest.includes('--link')) {
+				try {
+					reportLink(linkSystemV({ force: true }))
+				} catch (err) {
+					console.error(`vvm: link refresh failed (${err.message})`)
+				}
+			} else {
+				try {
+					const st = linkStatus({})
+					if (st.target && !st.ok)
+						console.log(
+							`vvm: note: system link is stale (${st.linkFile} → ${st.target}) — run: vvm link --force`
+						)
+				} catch {
+					/* best-effort */
+				}
+			}
+			return
+		}
+		let version = normalizeVersion(raw)
 		if (!version) {
 			console.error('vvm use: missing version (e.g. vvm use 0.5.2)')
 			process.exit(1)
@@ -528,13 +907,27 @@ async function main(argv) {
 		}
 		setActiveVersion(version)
 		console.log(`vvm: now using ${version} (${bin})`)
+		if (rest.includes('--link') || maybeAutoLink()) reportLink(linkSystemV({}))
 		return
 	}
 	if (cmd === 'ls' || cmd === 'list') {
 		const installed = listInstalled()
 		const active = activeVersion()
+		const sysActive = active.trim().toLowerCase() === 'system'
 		if (installed.length === 0) console.log('(no versions installed — run: vvm install 0.5.2)')
-		for (const v of installed) console.log(`${v === active ? '*' : ' '} ${v}`)
+		for (const v of installed) console.log(`${!sysActive && v === active ? '*' : ' '} ${v}`)
+		// The already-installed system V is a first-class version:
+		// listed (never downloaded), usable via `vvm use system`.
+		const sys = systemVInfo({})
+		if (sys.path) {
+			const ver = sys.version ? ` (${sys.version} at ${sys.path})` : ` (at ${sys.path})`
+			console.log(`${sysActive ? '*' : ' '} system${ver}`)
+		} else if (sysActive) {
+			const pinned = activeSystemPath()
+			console.log(
+				`* system (missing${pinned ? ` — was ${pinned}` : ''} — reinstall V or: vvm use 0.5.2)`
+			)
+		}
 		return
 	}
 	if (cmd === 'current') {
@@ -544,7 +937,11 @@ async function main(argv) {
 	if (cmd === 'which') {
 		const bin = resolveV()
 		if (!bin) {
-			console.error('vvm which: no V installed (run: vvm install 0.5.2)')
+			if (isSystemActive())
+				console.error(
+					`vvm which: system V not found${activeSystemPath() ? ` (was ${activeSystemPath()})` : ''} — reinstall V or: vvm use 0.5.2`
+				)
+			else console.error('vvm which: no V installed (run: vvm install 0.5.2)')
 			process.exit(1)
 		}
 		console.log(bin)
@@ -552,11 +949,22 @@ async function main(argv) {
 	}
 	if (cmd === 'exec') {
 		const idx = rest.indexOf('--')
-		let version = normalizeVersion(idx === -1 ? rest[0] : rest.slice(0, idx)[0] || '')
-		if (version === 'latest') version = activeVersion() || listInstalled().slice(-1)[0] || ''
+		const rawExec = String(idx === -1 ? rest[0] : rest.slice(0, idx)[0] || '')
 		const args = idx === -1 ? [] : rest.slice(idx + 1)
+		if (rawExec.trim().toLowerCase() === 'system') {
+			// `exec system` runs the already-installed system V — never downloaded.
+			const bin = systemVBinary({})
+			if (!bin) {
+				console.error('vvm exec: no system `v` on PATH')
+				process.exit(1)
+			}
+			execFileSync(bin, args, { stdio: 'inherit' })
+			return
+		}
+		let version = normalizeVersion(rawExec)
+		if (version === 'latest') version = activeVersion() || listInstalled().slice(-1)[0] || ''
 		if (!version) {
-			console.error('vvm exec: usage: vvm exec <version> -- <args...>')
+			console.error('vvm exec: usage: vvm exec <version|system> -- <args...>')
 			process.exit(1)
 		}
 		const bin = vBinary(versionDir(version))
@@ -565,6 +973,98 @@ async function main(argv) {
 			process.exit(1)
 		}
 		execFileSync(bin, args, { stdio: 'inherit' })
+		return
+	}
+	if (cmd === 'uninstall' || cmd === 'rm' || cmd === 'remove') {
+		const version = normalizeVersion(rest.find((a) => !a.startsWith('-')) || '')
+		if (!version) {
+			console.error('vvm uninstall: missing version (e.g. vvm uninstall 0.5.2)')
+			process.exit(1)
+		}
+		if (version === 'system') {
+			// The system V lives outside vvm — it can be *deselected*, never removed.
+			console.error(
+				'vvm uninstall: `system` is not vvm-managed — nothing to remove (use: vvm use 0.5.2 to switch away)'
+			)
+			process.exit(1)
+		}
+		const active = activeVersion()
+		if (active.toLowerCase() === 'system') {
+			// System is active: every managed toolchain is just inactive files —
+			// allow removing any of them (you can always switch back with `use`).
+		} else if (active === version) {
+			console.error(
+				`vvm uninstall: refusing to remove the active version (${version}) — switch first (vvm use <other>|system)`
+			)
+			process.exit(1)
+		}
+		const dir = versionDir(version)
+		if (!existsSync(dir)) {
+			console.error(`vvm uninstall: ${version} not installed`)
+			process.exit(1)
+		}
+		rmSync(dir, { recursive: true, force: true })
+		console.log(`vvm: uninstalled ${version}`)
+		return
+	}
+	if (cmd === 'link') {
+		// Active is already the system V: it IS global — nothing to link.
+		if (isSystemActive()) {
+			const bin = resolveV()
+			console.log(
+				bin
+					? `vvm: already global — system V ${bin} is on PATH, nothing to link`
+					: 'vvm: system V not found — reinstall V first'
+			)
+			if (!bin) process.exit(1)
+			return
+		}
+		const { dir, force } = parseLinkArgs(rest)
+		try {
+			reportLink(linkSystemV({ dir, force }))
+		} catch (err) {
+			if (err?.code === 'EACCES' || err?.code === 'EPERM') {
+				console.error(
+					`vvm link: no write access to ${dir || defaultLinkDir()} — retry with sudo or pick a dir on PATH:`
+				)
+				console.error(`  sudo vvm link --global # /usr/local/bin (needs root)`)
+				console.error(`  vvm link --dir ~/.local/bin # no root needed (add to PATH)`)
+			} else console.error(`vvm link: ${err.message}`)
+			process.exit(1)
+		}
+		return
+	}
+	if (cmd === 'unlink') {
+		const { dir, force } = parseLinkArgs(rest)
+		try {
+			const removed = unlinkSystemV({ dir, force })
+			console.log(removed ? `vvm: removed ${removed}` : 'vvm: no link present')
+		} catch (err) {
+			console.error(`vvm unlink: ${err.message}`)
+			process.exit(1)
+		}
+		return
+	}
+	if (cmd === 'status') {
+		const active = activeVersion() || '(none)'
+		const bin = resolveV()
+		if (isSystemActive()) {
+			console.log(
+				`active: system${bin ? ` (${bin})` : ' (missing — reinstall V or: vvm use 0.5.2)'}`
+			)
+			const st = linkStatus({})
+			if (st.target)
+				console.log(
+					`link: ${st.linkFile} → ${st.target} (redundant — system V is global already; vvm unlink to remove)`
+				)
+			else console.log('link: none needed (system V is global already)')
+			return
+		}
+		console.log(`active: ${active}${bin ? ` (${bin})` : ''}`)
+		const st = linkStatus({})
+		if (!st.target) console.log(`link: none (run: vvm link — default ${st.linkFile})`)
+		else
+			console.log(`link: ${st.linkFile} → ${st.target}${st.ok ? '' : ' (STALE — run: vvm link)'}`)
 		return
 	}
 	console.error(`vvm: unknown command "${cmd}". Run: vvm help`)

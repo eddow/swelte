@@ -9,8 +9,7 @@ import { it } from 'node:test'
 import assert from 'node:assert/strict'
 import { get, headRaw, wsConnect } from './helpers.js'
 
-/** Parity battery (docs/specs/future.md §2): every shipped P0/P1/P2 item
- * with an HTTP-observable surface. Runs against build outputs (preview:
+/** HTTP parity checks for routing and response behavior. Runs against build outputs (preview:
  * direct + CLI) and the V backend in dev (Vite HTML != SSR HTML, so these
  * assert dispatch/envelope behavior, not SSR markers).
  *
@@ -119,7 +118,7 @@ export function defineParityContract(getState, label = 'parity') {
   })
 }
 
-/** SSR-level parity (docs/specs/future.md §2): asserts that need the SSR
+/** SSR parity checks that need the SSR
  * renderer (load envelope on HTML navigations, +error HTML, reroute
  * content, layout chrome, link options, HEAD framing). Runs against build
  * outputs ONLY (preview: direct + CLI) — never against the dev backend,

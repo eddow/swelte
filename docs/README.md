@@ -38,8 +38,5 @@ Internal docs to modify Swelte (design rationale, decisions, ephemeral notes):
 
 ## Specs
 
-- `specs/future.md` — delivery status for the framework follow-ups
-- `specs/dogfood-roadmap.md` — concise report of completed dogfood work and its regression coverage
-
-The delivered load/state/hydration and action contract is documented in
-[page-lifecycle.md](page-lifecycle.md).
+- [Framework roadmap](specs/future.md) — proposed work and acceptance criteria.
+- [Multimodal AI sessions](specs/ai.md) — typed media streams, schema management, provider adapters, tracing and programmatic tools.
