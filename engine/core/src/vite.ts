@@ -7,6 +7,32 @@
  *  `assertChunkHint`, `chunkKeyFor`, `readChunkHint`, `WrapperMw`.
  */
 
+export type { CronFnShape, JobsCronDef, PlusCronQualifier } from './backend/jobs-index.js'
+export {
+	builtinDbPlugin,
+	builtinJobsPlugin,
+	coreBackendVlibDir,
+	createBuiltinJobsPlugin,
+	createJobsPlugin,
+	cronHarness,
+	dbHelperTemplate,
+	dbInitialMigration,
+	dbPlugin,
+	jobsPlugin,
+	migrateCommand,
+	PLUS_CRON_MAX_RETRY,
+	PLUS_CRON_RETRY_STEP_S,
+	PLUS_DB_DEFAULT_PATH,
+	PLUS_DB_MIGRATIONS_TABLE,
+	plusCronParse,
+	plusCronSeconds,
+	plusDbPath,
+	plusDbVlibDir,
+	plusPendingMigrations,
+	readJobsCrons,
+	runMigrate,
+	validateCronFn,
+} from './backend/jobs-index.js'
 export type { SwelteConfig, SwelteOptions } from './gen/config.js'
 export { defineConfig } from './gen/config.js'
 export type { ErrorBoundary } from './vite/error-boundaries.js'

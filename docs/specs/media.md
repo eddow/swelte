@@ -17,6 +17,22 @@ Discover controls per endpoint so a component can offer a seek bar for a recordi
 
 For a remote control, correlate the request and response by command ID. Distinguish acceptance from completion when an operation takes time. Report rejection or an unknown outcome after disconnect, and expose observed state separately so the UI can show what the endpoint actually did. Adapters define units, valid ranges, deadlines and disconnect behavior for command inputs. Expired movement targets are discarded. Reconnect never implicitly replays movement commands. Control delivery must remain responsive under data backpressure.
 
+## Sources, sinks and connections in V
+
+A V application reads typed samples from a **source**, writes them to a **sink**, and owns the **connection** that moves samples between the two. A connection checks the track format when it opens and exposes completion, failure and cancellation. An explicit transform can convert incompatible formats. Play and record compose these operations. An endpoint with traffic in both directions exposes named ports with independent types and lifetimes.
+
+| Peer | Source as seen by V | Sink as seen by V |
+| --- | --- | --- |
+| Browser client | Microphone frames received from the browser | Audio or live preview frames sent to the browser |
+| External API | Transcript events or synthesized audio received from the service | Audio uploaded to the service |
+| File or object storage | Samples read from a finalized recording | Samples appended to a recording being written |
+
+Adapters own transport details, credentials and resource handles. For example, V can connect a browser microphone source to an API upload sink, then connect the API transcript source to a browser event sink. Finishing the microphone input closes the API upload gracefully while the transcript connection stays open for the final result. A separate storage writer can consume the same microphone frames. A server-only job can later open the recording as a source with no browser attached.
+
+A write acknowledges acceptance by the sink. Graceful completion drains accepted writes and lets the adapter report its final outcome, such as a committed storage object. Cancellation interrupts blocked reads and writes and releases resources owned by that connection. A storage adapter defines how it discards or marks an incomplete recording. The application decides whether a browser disconnect ends a request-owned connection or detaches a viewer from a longer-lived job.
+
+For fan-out, declare each branch's bounded queue and delivery requirement. A required archive branch applies backpressure or fails explicitly if the source cannot pause. A best-effort preview can drop eligible frames or detach a slow subscriber while recording continues. Start with a one-source, one-sink pipe and a file adapter. Use the browser/API/recording fixture to decide which fan-out helpers merit a public API.
+
 ## Tracks and assets
 
 | Content | Proposed contract |
@@ -40,3 +56,4 @@ Bound queues in bytes and expose queue depth and dropped-frame counts. A recordi
 2. **Voice-and-photo AI session.** Use the same playback operation when the user interrupts a generated reply. Delay provider cancellation and deliver an old audio chunk after the new turn starts. Verify immediate local silence and rejection of the stale chunk by the AI session. [Full session fixture](ai.md#first-end-to-end-fixture)
 3. **Video transport experiment.** Replay a known camera clip with synchronized audio and a timed sensor series. Slow the receiver and measure latency, synchronization error, queue size and dropped frames. Use the results to choose a transport and document its supported formats.
 4. **Sensor and motion simulator.** Stream measured positions into a live chart and record them. Pause the chart while sampling continues, then seek the recording and verify the simulator receives zero commands. Explicitly connect a target-position stream, issue Stop with a full data queue, and reconnect. Check the reported position, command outcome and absence of stale targets after reconnect.
+5. **V relay and recording.** Feed numbered browser audio frames to a fake transcription API and a file sink. Finish the upload and verify that the final transcript still reaches the browser. Replay the finalized file as a source and check frame order and count. Slow a best-effort viewer, then interrupt the required file writer and verify that its failure is observable and no partial recording is presented as complete.

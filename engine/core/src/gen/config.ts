@@ -410,7 +410,7 @@ export function templatesDir(fromUrl: string): string {
 /** Render the server harness: skeleton from templates/ + user hooks from
  *  `src/app.v` (`@[startup]` runs once in main, `@[reroute]` rewrites
  *  host/path in before_request, `@[error]` sanitizes error messages)
- *  plus plugin fragments (`fragments`, e.g. cron spawn loops from `@swelte/plus/jobs`).
+ *  plus harness fragments (`fragments`, e.g. builtin cron spawn loops).
  *  Absent hooks → byte-identical skeleton. */
 export function renderHarness(
 	_config: Required<SwelteOptions>,

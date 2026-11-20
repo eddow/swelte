@@ -1,7 +1,7 @@
 {
   "name": "@swelte/plus",
   "version": "0.1.5",
-  "description": "Swelte beyond-SvelteKit plugins — jobs (cron) + db (embedded SQLite) (V+TS).",
+  "description": "DEPRECATED \u2014 jobs scheduler + embedded backend moved into @swelte/core (empty re-export shim).",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -13,7 +13,6 @@
   "files": [
     "README.md",
     "dist",
-    "vlib",
     "LICENSE-MIT",
     "package.json"
   ],
@@ -37,7 +36,7 @@
   },
   "license": "MIT",
   "author": {
-    "name": "François Marie De Mey",
+    "name": "Fran\u00e7ois Marie De Mey",
     "email": "fmdm@emedware.dev",
     "url": "https://github.com/eddow"
   },

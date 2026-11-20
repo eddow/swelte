@@ -12,12 +12,16 @@ import { codeHtml } from '#lib/snippets.gen.js'
 	</ul>
 </div>
 
-<h1 class="text-4xl font-bold mt-2">Database (<code class="text-2xl">@swelte/plus</code>)</h1>
+<h1 class="text-4xl font-bold mt-2">
+	Database
+	<span class="text-sm font-normal opacity-60"
+		>(builtin — was <code>@swelte/plus</code>, now deprecated)</span
+	>
+</h1>
 <p class="py-4 opacity-80">
-	Embedded SQLite/KV — beyond-SvelteKit, optional package. A single SQLite file (WAL mode) lives
-	next to the binary. Core stays parity-only; plus owns the
+	Embedded SQLite/KV — core builtin. A single SQLite file (WAL mode) lives next to the binary;
 	<code>swelte migrate</code>
-	CLI.
+	is a core command.
 </p>
 
 <div class="alert alert-info text-sm">
@@ -28,7 +32,7 @@ import { codeHtml } from '#lib/snippets.gen.js'
 </div>
 
 <div class="mt-2">
-	<Code snippet={codeHtml['plus-install']} dense title="install" />
+	<Code snippet={codeHtml['plus-install']} dense title="builtin — no install" />
 </div>
 <div class="mt-2">
 	<Code snippet={codeHtml['plus-migrate']} dense title="swelte migrate" />
@@ -57,7 +61,7 @@ import { codeHtml } from '#lib/snippets.gen.js'
 
 <h2 class="text-2xl font-bold mt-8">PostgreSQL through V</h2>
 <p class="opacity-80 mt-2">
-	The Plus plugin provides SQLite/KV. V also supplies
+	Core's builtin backend provides SQLite/KV. V also supplies
 	<code>db.pg</code>, ORM support, pooling, parameterized queries and transactions. Use those
 	facilities from native backend modules with the required libpq dependencies. Initialize shared
 	resources during startup and close them after shutdown draining. The disposable PostgreSQL fixture

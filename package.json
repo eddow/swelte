@@ -27,7 +27,7 @@
     "biome": "biome check --write .",
     "biome:unsafe": "biome check --write . --unsafe",
     "test:images": "npm run build:engine && node scripts/test-images.mjs",
-    "test:jobs": "npm run build:engine && npm run build --workspace=@swelte/plus && node scripts/test-jobs.mjs"
+    "test:jobs": "npm run build:engine && node scripts/test-jobs.mjs"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.6.4",

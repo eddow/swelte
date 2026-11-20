@@ -1,7 +1,7 @@
 import { defineConfig } from 'vite';
 import { svelte } from '@sveltejs/vite-plugin-svelte';
 import { swelte } from '@swelte/ssr-qjs';
-import { jobsPlugin, dbPlugin } from '@swelte/plus';
+// jobs + backend are core builtins now — no plugin import needed.
 import svelteConfig from './svelte.config.js';
 
 const vBackendUrl =
@@ -24,9 +24,8 @@ export default defineConfig({
     // the unified config for any option not passed here.
     swelte({
       vBackendUrl,
-      // V+TS plugins (core contract, implemented by @swelte/plus):
-      // jobs owns `@[cron]`; db owns the backend hub (KV + SSE/WS rooms).
-      plugins: [jobsPlugin, dbPlugin],
+      // Third-party plugins only — jobs + backend are always builtin.
+      plugins: [],
     }),
   ],
 });

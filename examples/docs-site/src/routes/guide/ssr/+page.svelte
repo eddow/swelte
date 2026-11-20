@@ -100,11 +100,12 @@ import { codeHtml } from '#lib/snippets.gen.js'
 <h2 class="text-2xl font-bold mt-8">Packages and verification</h2>
 <p class="opacity-80 mt-2">
 	The SSR bundle resolves installed Svelte/TypeScript/runes modules, package-private imports and
-	CommonJS dependencies. <code>swelte ssr-check</code> (via <code>SWELTE_PLUGINS=@swelte/ssr-qjs</code>) probes the sidecar, Hand backend and embedded
+	CommonJS dependencies. <code>swelte ssr-check</code> (via
+	<code>SWELTE_PLUGINS=@swelte/ssr-qjs</code>) probes the sidecar, Hand backend and embedded
 	production binary when their artifacts exist, then shuts down its probe processes.
 	<code>swelte dev</code>
-	boots the development sidecar automatically when the adapter is installed;
-	production embeds QuickJS and needs no Node runtime.
+	boots the development sidecar automatically when the adapter is installed; production embeds
+	QuickJS and needs no Node runtime.
 </p>
 <p class="opacity-70 mt-2">
 	The measurements above describe a small example workload, not a production capacity guarantee. The

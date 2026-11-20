@@ -164,7 +164,7 @@ export async function runBuild(ctx: Ctx): Promise<void> {
 		process.env.SWELTE_ISR = Object.entries(cfg.isr)
 			.map(([k, v]) => `${k}=${v}`)
 			.join(',')
-	// Project plugins (e.g. @swelte/plus db/jobs) live in vite.config.ts,
+	// Project plugins (third-party; builtin jobs+backend need no entry) live in vite.config.ts,
 	// which the CLI never loads — recover them so generate() sees the
 	// same options as `vite build` (else backend-hub build errors).
 	const projectSwelteOpts = await loadProjectSwelteOptions(root)

@@ -3,9 +3,24 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync } fr
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { dirname, join, resolve, sep } from 'node:path'
 import type { Plugin } from 'vite'
+import { builtinDbPlugin, builtinJobsPlugin, coreBackendVlibDir } from '../backend/jobs-index.js'
 import { loadConfig, renderAppDts, renderClientEntry, renderHarness } from '../gen/config.js'
 import { isBackendMod, SWELTE_GEN_CORE_DIRS } from '../gen/paths.js'
 import { resolveV } from '../toolchain.js'
+import type { SweltePlugin } from '../vite/types.js'
+
+/** First registration wins (by plugin `name`): builtin jobs+backend come
+ *  first and yield to an explicit user instance of the same name — e.g.
+ *  `createJobsPlugin({ durable: true })` overrides the builtin default. */
+function dedupPlugins(all: SweltePlugin[]): SweltePlugin[] {
+	const seen = new Set<string>()
+	return all.filter((pl) => {
+		if (seen.has(pl.name)) return false
+		seen.add(pl.name)
+		return true
+	})
+}
+
 import { stageBackendModules } from './backend.js'
 import { emitClientRouter } from './client-router.js'
 import { collectErrorBoundaries } from './error-boundaries.js'
@@ -115,12 +130,16 @@ export function swelte(options: SweltePluginOptions = {}): Plugin {
 		options.chunking === 'single' || options.chunking === 'layout' || options.chunking === 'route'
 			? options.chunking
 			: 'layout'
-	// V+TS plugins (core contract `SweltePlugin`; `@swelte/plus` is one
-	// collection — third-party plugins implement the same interface).
-	// Default [] = parity-only output, byte-identical to today. Plugin attrs
-	// (extraAttrs) parse with bodies through parseVFile; core ignores
-	// plugin-claimed fns everywhere except plugin validate() dispatch.
-	const plugins = options.plugins ?? []
+	// V+TS plugins (core contract `SweltePlugin`; third-party plugins
+	// implement it for their own attrs). Builtin jobs+backend are ALWAYS
+	// registered below, ahead of user plugins of the same name (first
+	// registration wins: explicit user instances — e.g.
+	// `createJobsPlugin({ durable: true })` from `@swelte/core/jobs` — keep
+	// working and override the builtin default).
+	// Usage-gated emission: zero `@[cron]` ticks emit empty fragments
+	// (byte-identical harness), and the backend V module copies only when
+	// room-SSE/WS fns need it — an unused builtin changes nothing.
+	const plugins = dedupPlugins([builtinJobsPlugin, builtinDbPlugin, ...(options.plugins ?? [])])
 	const extraAttrs = [...new Set(plugins.flatMap((p) => p.attrs))]
 	// Resolved per-generate() against the Vite root (never at construction:
 	// outDir is relative and the cwd at plugin-construction time is not the
@@ -347,10 +366,44 @@ export function swelte(options: SweltePluginOptions = {}): Plugin {
 					/* ignore — main pass retries below */
 				}
 				try {
-					// Never clobber the marker from a plugin-less run: dev's
-					// pre-generate calls swelte({}) (no dbPlugin), which would
-					// rewrite ["backend"] → [] and confuse the -enable-globals
-					// detector on the next boot.
+					// Early copy before the route loop throws: generate() must
+					// leave a compilable .swelte/ even on shape errors (dev
+					// pre-generate needs the V backend to boot). Builtins are
+					// always registered, so this always runs.
+					// Usage gate for the builtin `backend` include (room-SSE/WS
+					// only): scan route files for the hub shapes before copying.
+					let earlyNeedsBackend = false
+					try {
+						const earlyRoutesAbs = resolve(root, routesDir)
+						if (existsSync(earlyRoutesAbs)) {
+							for (const f of listVFiles(earlyRoutesAbs)) {
+								let esrc = ''
+								try {
+									esrc = readFileSync(f, 'utf8')
+								} catch {
+									continue
+								}
+								const efns = parseVFile(esrc, extraAttrs)
+								const isRoom = efns.some(
+									(fn) =>
+										fn.attr === 'sse' &&
+										fn.params.length >= 2 &&
+										/^fn\s*\(\s*string\s*\)\s*chan\s+string$/.test(
+											fn.params[fn.params.length - 2].vtype.trim()
+										) &&
+										/^fn\s*\(\s*string\s*\)(\s*bool)?$/.test(
+											fn.params[fn.params.length - 1].vtype.trim()
+										)
+								)
+								if (isRoom || efns.some((fn) => fn.attr === 'ws')) {
+									earlyNeedsBackend = true
+									break
+								}
+							}
+						}
+					} catch {
+						/* scan failed — fall through without backend */
+					}
 					if (plugins.length > 0) {
 						const earlyWanted = new Set<string>()
 						for (const pp of plugins) {
@@ -363,6 +416,10 @@ export function swelte(options: SweltePluginOptions = {}): Plugin {
 							for (const inc of earlyIncs) {
 								if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(inc.module)) continue
 								if (inc.module === 'routes' || inc.module === 'main') continue
+								// Builtin `backend` is usage-gated (room-SSE/WS only):
+								// skip the early copy when no route file needs the hub.
+								// The late copy below applies the same gate.
+								if (inc.module === 'backend' && pp.name === 'db' && !earlyNeedsBackend) continue
 								let earlyFiles: string[] = []
 								try {
 									earlyFiles = readdirSync(inc.absDir).filter((f) => f.endsWith('.v'))
@@ -396,9 +453,11 @@ export function swelte(options: SweltePluginOptions = {}): Plugin {
 				matchers = loadMatchers(root)
 				const knownMatchers = new Set(matchers.keys())
 				// Lifecycle hooks (`src/app.v`, core attrs `@[startup]`/`@[reroute]`/`@[error]`).
-				// Missing file → no-op hooks (harness byte-identical). Plugins own
-				// their attrs via loadAppHooks: collected here, errors thrown like
-				// core shape errors, fragments merged into the harness fragments.
+				// Missing file → no-op hooks (harness byte-identical). Builtin
+				// jobs + third-party attrs arrive via loadAppHooks: collected
+				// here, errors thrown like core shape errors, fragments merged
+				// into the harness fragments. Zero `@[cron]` ticks emit empty
+				// fragments (byte-identical harness).
 				const hooks = loadServerHooks(root)
 				const appHookFragments: { imports?: string; main?: string; mainInner?: string }[] =
 					hooks.imports ? [{ imports: hooks.imports }] : []
@@ -974,12 +1033,10 @@ ${list(st.fields, (fld) => `\t${fld.name}${fld.optional ? '?' : ''}: ${fld.tstyp
 									`[swelte] ${routesDir}/${rel} has the same dynamic shape as ${routesDir}/${d.mod}.v (${shB}) — rename one file.`
 								)
 						}
-						// SSE room mode (future.md #4): trailing `sub fn (string)` +
+						// SSE room mode: trailing `sub fn (string)` +
 						// `emit fn (string) bool` — the harness injects the room
 						// subscribe closure. Track file-level room-ness for the
-						// harness `import backend` decision below. Without a backend
-						// include the harness cannot compile hub state — build error
-						// naming the fix (install @swelte/plus/db).
+						// harness `import backend` decision (builtin core include).
 						const isRoomSseFile = fns.some(
 							(fn) =>
 								fn.attr === 'sse' &&
@@ -992,29 +1049,16 @@ ${list(st.fields, (fld) => `\t${fld.name}${fld.optional ? '?' : ''}: ${fld.tstyp
 								)
 						)
 						if (isRoomSseFile) {
+							// Room-mode SSE fans out via the builtin backend hub
+							// (`import backend` — copied by the core backend include).
 							hasRoomSse = true
-							const hasBackend = plugins.some((pl) =>
-								(pl.includes?.() ?? []).some((inc) => inc.module === 'backend')
-							)
-							if (!hasBackend) {
-								throw new Error(
-									`[swelte] ${routesDir}/${rel}: room-mode @[sse] needs the backend hub — add dbPlugin to swelte({ plugins: [...] }) (npm install @swelte/plus).`
-								)
-							}
 						}
-						// WS (future.md #3): same hub requirement — the route fn and
-						// the harness frame loop both run against backend hub state.
+						// WS: same hub — the route fn and the harness frame loop
+						// both run against builtin backend hub state.
 						const isWsFile = fns.some((fn) => fn.attr === 'ws')
 						if (isWsFile) {
+							// WS pumps frames against the same builtin backend hub.
 							hasRoomSse = true
-							const hasBackend = plugins.some((pl) =>
-								(pl.includes?.() ?? []).some((inc) => inc.module === 'backend')
-							)
-							if (!hasBackend) {
-								throw new Error(
-									`[swelte] ${routesDir}/${rel}: @[ws] needs the backend hub — add dbPlugin to swelte({ plugins: [...] }) (npm install @swelte/plus).`
-								)
-							}
 						}
 						dispatched.push({ route, mod, prefix: vPrefix(mod) })
 						// Runtime fetch stub for the browser import (dev + build).
@@ -1751,18 +1795,30 @@ export declare const dev: boolean
 				if (!existsSync(join(genDir, 'images.js')))
 					writeIfChanged(join(genDir, 'images.js'), 'export default {}\n')
 				writeIfChanged(join(genDir, 'sdk.ts'), '// Auto-generated by swelte. Do not edit.\n')
-				// Plugin V module dirs (e.g. `@swelte/plus/db` → `backend/`):
-				// copied into the `.swelte/` compilation unit so generated
-				// routes/harness can `import <module>`. Source of truth stays
-				// in the plugin package; core only copies `*.v`. Missing dirs
-				// skipped (TS-only install); stale module dirs pruned.
+				// V module dirs in the `.swelte/` compilation unit so generated
+				// routes/harness can `import <module>`: third-party plugin
+				// `includes` PLUS the builtin core backend (`vlib/backend/*.v` —
+				// copied only when room-SSE/WS fns need it: `hasRoomSse` is set
+				// by the route loop above; an unused builtin copies nothing).
+				// Stale module dirs pruned below.
 				const pluginFiles = new Set<string>()
 				for (const plugin of plugins)
 					for (const include of plugin.includes?.() ?? []) {
+						// Builtin `db` backend is usage-gated: skip here when no room/WS
+						// fn needs it — the `hasRoomSse` copy below handles the used case.
+						if (plugin.name === 'db' && include.module === 'backend' && !hasRoomSse) continue
 						if (!existsSync(include.absDir)) continue
 						for (const file of readdirSync(include.absDir))
 							if (file.endsWith('.v')) pluginFiles.add(`${include.module}/${file}`)
 					}
+				if (hasRoomSse) {
+					try {
+						for (const file of readdirSync(coreBackendVlibDir()))
+							if (file.endsWith('.v')) pluginFiles.add(`backend/${file}`)
+					} catch {
+						/* core vlib missing — harness error below names it */
+					}
+				}
 				const wanted = new Set(stageBackendModules(libAbs, genDir, pluginFiles))
 				try {
 					for (const pp of plugins) {
@@ -1783,6 +1839,9 @@ export declare const dev: boolean
 								)
 								continue
 							}
+							// Builtin `db` backend is usage-gated (room-SSE/WS only):
+							// skip here when unused (copied via the `hasRoomSse` gate above).
+							if (pp.name === 'db' && inc.module === 'backend' && !hasRoomSse) continue
 							let files: string[] = []
 							try {
 								files = readdirSync(inc.absDir).filter((f) => f.endsWith('.v'))
@@ -1831,8 +1890,8 @@ export declare const dev: boolean
 				// Server harness: verbatim skeleton from templates/ (node_modules),
 				// rendered into `.swelte/server.v`. `dev`/`build` compile `.swelte/`
 				// as one V unit (harness `module main` + `routes/` + `server_gen.v`).
-				// Plugin module marker: which `includes` were copied (build/dev
-				// read it for `-enable-globals` — `__global` in plugin modules
+				// Module marker: which V module dirs were copied (build/dev
+				// read it for `-enable-globals` — `__global` in include modules
 				// needs the flag exactly like the QJS bridge does).
 				try {
 					writeIfChanged(join(genDir, 'plugin_modules.json'), JSON.stringify([...wanted].sort()))

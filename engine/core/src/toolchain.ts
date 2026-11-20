@@ -34,8 +34,8 @@ export function toolchainEnv(extra?: Record<string, string>): NodeJS.ProcessEnv 
 }
 
 /** Whether the V compile needs `-enable-globals`: the QJS bridge uses
- *  `__global`, and so do plugin V modules (e.g. `@swelte/plus/db`'s shared
- *  connection). Detected from the generate() outputs: a real bridge file
+ *  `__global`, and so do builtin/third-party V include modules (core's backend hub,
+ *  the QJS bridge). Detected from the generate() outputs: a real bridge file
  *  (core's no-op stub does not count), or the plugin-modules marker.
  *  Missing marker (old generate) = bridge rule. `genAbs` is `.swelte/`. */
 export function needsGlobals(genAbs: string): boolean {

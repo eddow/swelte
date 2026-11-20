@@ -14,7 +14,7 @@ Every `.v` file is an ES module. Every `pub fn` with an attribute is a named exp
 | `#routes/` | `@[rpc]` | POST JSON `Accept: application/json` | body `{ "fn", "args" }`; unlimited per file |
 | `#routes/` | `@[get]` / `@[get('q')]` | GET `Accept: application/json` | query = args; default, or `?q` present |
 | `#routes/` | `@[sse]` / `@[sse('q')]` | GET `Accept: text/event-stream` | three shapes (below); same default/qualifier rules as verbs |
-| `#routes/` | `@[ws]` (needs `@swelte/plus/db`) | GET + `Upgrade: websocket` | one socket per file, no qualifier, never stacked; `(req, sub, recv, emit)` → void; TS stub is a URL builder (browser opens native `WebSocket`) |
+| `#routes/` | `@[ws]` (builtin backend hub) | GET + `Upgrade: websocket` | one socket per file, no qualifier, never stacked; `(req, sub, recv, emit)` → void; TS stub is a URL builder (browser opens native `WebSocket`) |
 | `#routes/` | `@[post]` / `@[put]` / `@[delete]` / `@[patch]` (+`('q')`) | respective method | form fields = args; default, or `?q` qualifier |
 | `#routes/` leaf + `+route.v` | `@[load]` | page data for HTML, navigation and refresh | `(SwelteRequest[, parent T]) -> !R`; zero/one per file, never stacked, no qualifier |
 | `+route.v` only | `@[before]` / `@[after]` | subtree middleware; root `+route.v` = global head | `SwelteRequest -> !SwelteRequest` / observe-or-replace response; never exported to TS |
@@ -84,8 +84,8 @@ pub fn delete_account(req SwelteRequest) !string {
 - `!T` = may reject with `SwelteRpcError`. `?T` = `T | null`.
 - `Request.params` carries dynamic segments (`req.params['id]` for `/users/[id]`); client stubs interpolate them into the URL.
 - `files: Record<string,string>` holds uploaded **filenames** only — bytes are parsed then discarded (never persisted, never projected).
-- `@[sse]` list mode returns `[]string` (harness streams each); emit mode takes trailing `emit fn (string) bool` + returns void — each `emit(e)` flushes one frame NOW (`if !emit(e) { return }` on disconnect). Room mode (needs `@swelte/plus/db`) takes trailing `sub fn (string) chan string` + `emit fn (string) bool` — harness injects a room-subscribe closure; `backend.emit(room, msg)` fans out cross-request. TS stub is `AsyncGenerator<string>` in all shapes.
-- `@[ws]` (needs `@swelte/plus/db`) takes `(req SwelteRequest, sub fn (string) chan string, recv chan string, emit fn (string) bool)` + returns void — hub messages stream out via `emit`, client frames stream back via `recv`. TS stub is a URL builder (`__swelteWsUrl`) — the browser opens a native `WebSocket` itself.
+- `@[sse]` list mode returns `[]string` (harness streams each); emit mode takes trailing `emit fn (string) bool` + returns void — each `emit(e)` flushes one frame NOW (`if !emit(e) { return }` on disconnect). Room mode (builtin backend hub) takes trailing `sub fn (string) chan string` + `emit fn (string) bool` — harness injects a room-subscribe closure; `backend.emit(room, msg)` fans out cross-request. TS stub is `AsyncGenerator<string>` in all shapes.
+- `@[ws]` (builtin backend hub) takes `(req SwelteRequest, sub fn (string) chan string, recv chan string, emit fn (string) bool)` + returns void — hub messages stream out via `emit`, client frames stream back via `recv`. TS stub is a URL builder (`__swelteWsUrl`) — the browser opens a native `WebSocket` itself.
 
 For channels on bundled V 0.5.2, bind array payloads before sending inside
 `select` (`packet := [event]`, then `ch <- packet`); array literals there can

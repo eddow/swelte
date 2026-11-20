@@ -4,7 +4,7 @@ The fixture is test material for Swelte, not an application to finish. Its
 routes and package are intentionally synthetic; only the capability asserted
 by each test matters. Run `npm run test:dogfood` from the repository root. It
 requires the managed V toolchain, a native C compiler, and the toolchain's
-SQLite amalgamation for the `@swelte/plus/db` fixture plugin. If it is absent,
+SQLite amalgamation for core's builtin backend fixture. If it is absent,
 install it with V's `vlib/db/sqlite/install_thirdparty_sqlite.vsh` script. The
 fixture uses local npm pack/install; it does not publish or require
 provider/database secrets.

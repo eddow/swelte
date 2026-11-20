@@ -290,6 +290,7 @@ describeGoldens('item 4 — literal golden strings for jsFetchFor/jsWasmFor', ()
 import assert from 'node:assert/strict'
 import {
 	cpSync,
+	existsSync,
 	mkdirSync,
 	mkdtempSync,
 	readdirSync,
@@ -974,38 +975,54 @@ describe('item 11 — codegen golden project (sample-overlay variant + routes.js
 
 	it('plugin includes: V module dirs copied into .swelte/, stale pruned', async () => {
 		const root = scaffold()
-		// Fake plugin include dir (no real package needed).
-		const incDir = join(root, 'fake-inc', 'backend')
+		// Fake third-party include dir (no real package needed).
+		const incDir = join(root, 'fake-inc', 'extra')
 		mkdirSync(incDir, { recursive: true })
-		writeFileSync(
-			join(incDir, 'db.v'),
-			'module backend\npub fn kv_get(key string) !string {\n\treturn key\n}\n'
-		)
+		writeFileSync(join(incDir, 'x.v'), 'module extra\npub fn x() int {\n\treturn 1\n}\n')
 		await generate(root, {
 			plugins: [
-				{ name: 'fake-db', attrs: [], includes: () => [{ module: 'backend', absDir: incDir }] },
+				{ name: 'fake-extra', attrs: [], includes: () => [{ module: 'extra', absDir: incDir }] },
 			],
 		})
-		const copied = readFileSync(join(root, '.swelte', 'backend', 'db.v'), 'utf8')
-		assert.ok(copied.includes('module backend'))
-		assert.ok(copied.includes('pub fn kv_get'))
+		const copied = readFileSync(join(root, '.swelte', 'extra', 'x.v'), 'utf8')
+		assert.ok(copied.includes('module extra'))
+		assert.ok(copied.includes('pub fn x'))
 		// Plugin marker lists the copied module (build/dev read it).
 		const marker = JSON.parse(readFileSync(join(root, '.swelte', 'plugin_modules.json'), 'utf8'))
-		assert.deepEqual(marker, ['backend'])
+		assert.deepEqual(marker, ['extra'])
 		// Stale module dirs pruned on the next generate without the plugin.
 		await generate(root)
 		assert.equal(
 			(() => {
 				try {
-					readdirSync(join(root, '.swelte', 'backend'))
+					readdirSync(join(root, '.swelte', 'extra'))
 					return true
 				} catch {
 					return false
 				}
 			})(),
 			false,
-			'stale backend/ pruned'
+			'stale extra/ pruned'
 		)
+	})
+
+	it('builtin backend: copied only when room-SSE/WS fns need it', async () => {
+		// No room fns → no `.swelte/backend/` (unused builtin copies nothing).
+		let root = scaffold()
+		await generate(root)
+		assert.equal(existsSync(join(root, '.swelte', 'backend')), false)
+		// Room-SSE fn → core copies its own vlib backend (hub + ws framing).
+		root = scaffold()
+		writeFileSync(
+			join(root, 'src', 'routes', 'api', 'rooms.v'),
+			`module api_rooms\nimport backend\n@[sse]\npub fn stream(req SwelteRequest, sub fn (string) chan string, emit fn (string) bool) {\n\t_ = req\n\t_ = sub\n\t_ = emit\n}`
+		)
+		await generate(root)
+		const copied = readFileSync(join(root, '.swelte', 'backend', 'db.v'), 'utf8')
+		assert.ok(copied.includes('module backend'))
+		assert.ok(existsSync(join(root, '.swelte', 'backend', 'ws.v')), 'ws framing ships with the hub')
+		const marker = JSON.parse(readFileSync(join(root, '.swelte', 'plugin_modules.json'), 'utf8'))
+		assert.deepEqual(marker, ['backend'])
 	})
 
 	it('plugin includes: reserved/bad module names skipped with a warning', async () => {
@@ -1043,36 +1060,32 @@ describe('item 11 — codegen golden project (sample-overlay variant + routes.js
 		const kept = readFileSync(join(root, '.swelte', 'routes', 'swelte_qjs_bridge.v'), 'utf8')
 		assert.ok(kept.includes('__global'), 'real bridge preserved')
 	})
-	it('bridge stub: emitted even when the route loop throws (dev pre-generate)', async () => {
-		// `swelte dev` pre-generates with swelte({}) — no dbPlugin — while
-		// routes need the hub. The throw must not leave an uncompilable
-		// .swelte/ behind: the hoisted prelude writes the stub first.
+	it('bridge stub: ws routes build with the builtin backend (no plugin needed)', async () => {
+		// Room/WS fns used to need `@swelte/plus/db`; the hub is builtin now —
+		// generate succeeds and the bridge stub is present either way.
 		const root = scaffold()
 		writeFileSync(
 			join(root, 'src', 'routes', 'api', 'sock.v'),
 			`module api_sock\n@[ws]\npub fn sock(req SwelteRequest, sub fn (string) chan string, recv chan string, emit fn (string) bool) {\n}`
 		)
-		await assert.rejects(() => generate(root), /needs the backend hub/)
+		await generate(root)
 		const stub = readFileSync(join(root, '.swelte', 'routes', 'swelte_qjs_bridge.v'), 'utf8')
-		assert.ok(
-			stub.includes('pub fn swelte_qjs_render_page('),
-			'stub has the symbol despite the throw'
-		)
+		assert.ok(stub.includes('pub fn swelte_qjs_render_page('), 'stub has the symbol')
 		assert.ok(!stub.includes('__global'), 'stub carries no globals')
+		assert.ok(existsSync(join(root, '.swelte', 'backend', 'db.v')), 'builtin backend copied for ws')
 	})
 
-	it('bridge prelude: plugin-less throw never clobbers plugin_modules.json', async () => {
-		// Dev's pre-generate (swelte({}), no plugins) runs against routes
-		// that need the hub; the hoisted prelude must leave the existing
-		// marker alone so the -enable-globals detector still fires.
+	it('bridge prelude: builtin backend marker survives regenerate', async () => {
+		// Room fns mark `.swelte/backend/` via the builtin include; a second
+		// generate keeps the marker (and prunes it when rooms go away).
 		const root = scaffold()
-		mkdirSync(join(root, '.swelte'), { recursive: true })
-		writeFileSync(join(root, '.swelte', 'plugin_modules.json'), '["backend"]')
 		writeFileSync(
 			join(root, 'src', 'routes', 'api', 'sock.v'),
 			`module api_sock\n@[ws]\npub fn sock(req SwelteRequest, sub fn (string) chan string, recv chan string, emit fn (string) bool) {\n}`
 		)
-		await assert.rejects(() => generate(root), /needs the backend hub/)
+		await generate(root)
+		assert.equal(readFileSync(join(root, '.swelte', 'plugin_modules.json'), 'utf8'), '["backend"]')
+		await generate(root)
 		assert.equal(readFileSync(join(root, '.swelte', 'plugin_modules.json'), 'utf8'), '["backend"]')
 	})
 
@@ -1126,20 +1139,8 @@ describe('item 11 — codegen golden project (sample-overlay variant + routes.js
 			join(root, 'src', 'routes', 'api', 'rooms.v'),
 			`module api_rooms\nimport backend\npub struct RoomSendIn {\npub:\n\troom string\n\tmsg string\n}\n@[rpc]\npub fn send(args RoomSendIn) int {\n\treturn backend.emit(args.room, args.msg)\n}\n@[sse]\npub fn stream(req SwelteRequest, sub fn (string) chan string, emit fn (string) bool) {\n\t_ = req\n\t_ = sub\n\t_ = emit\n}`
 		)
-		// No backend include → build error naming the fix.
-		await assert.rejects(() => generate(root), /needs the backend hub/)
-		// With the db include → room accessors + harness import backend.
-		const incDir = join(root, 'fake-inc', 'backend')
-		mkdirSync(incDir, { recursive: true })
-		writeFileSync(
-			join(incDir, 'db.v'),
-			'module backend\npub fn emit(room string, msg string) int {\n\t_ = room\n\t_ = msg\n\treturn 0\n}\n'
-		)
-		await generate(root, {
-			plugins: [
-				{ name: 'fake-db', attrs: [], includes: () => [{ module: 'backend', absDir: incDir }] },
-			],
-		})
+		// Builtin backend (no plugin include) → room accessors + harness import backend.
+		await generate(root)
 		const leaf = readFileSync(join(root, '.swelte', 'routes', 'api_rooms.v'), 'utf8')
 		assert.ok(leaf.includes('pub fn swelte_api_rooms_sse_is_room() bool'))
 		assert.ok(leaf.includes('sub, emit'), 'room fn gets sub+emit')
@@ -1204,20 +1205,8 @@ describe('item 11 — codegen golden project (sample-overlay variant + routes.js
 			join(root, 'src', 'routes', 'api', 'sock.v'),
 			`module api_sock\nimport backend\n@[ws]\npub fn sock(req SwelteRequest, sub fn (string) chan string, recv chan string, emit fn (string) bool) {\n\t_ = req\n\t_ = sub\n\t_ = recv\n\t_ = emit\n}`
 		)
-		// No backend include → build error naming the fix.
-		await assert.rejects(() => generate(root), /needs the backend hub/)
-		// With the db include → ws accessors + harness upgrade path.
-		const incDir = join(root, 'fake-inc', 'backend')
-		mkdirSync(incDir, { recursive: true })
-		writeFileSync(
-			join(incDir, 'db.v'),
-			'module backend\npub fn emit(room string, msg string) int {\n\t_ = room\n\t_ = msg\n\treturn 0\n}\n'
-		)
-		await generate(root, {
-			plugins: [
-				{ name: 'fake-db', attrs: [], includes: () => [{ module: 'backend', absDir: incDir }] },
-			],
-		})
+		// Builtin backend (no plugin include) → ws accessors + harness upgrade path.
+		await generate(root)
 		const leaf = readFileSync(join(root, '.swelte', 'routes', 'api_sock.v'), 'utf8')
 		assert.ok(leaf.includes('_swelte_ws_is() bool'))
 		assert.ok(leaf.includes('return true'), 'ws file reports is=true')
@@ -1239,12 +1228,13 @@ describe('item 11 — codegen golden project (sample-overlay variant + routes.js
 		assert.ok(stub.includes('export function sock('))
 	})
 
-	it('@[ws] without db include stays a build error when backend missing', async () => {
+	it('@[ws] builds without any plugin include (builtin backend)', async () => {
 		const root = scaffold()
 		writeFileSync(
 			join(root, 'src', 'routes', 'api', 'sock.v'),
 			`module api_sock\n@[ws]\npub fn sock(req SwelteRequest, sub fn (string) chan string, recv chan string, emit fn (string) bool) {\n}`
 		)
-		await assert.rejects(() => generate(root), /needs the backend hub/)
+		await generate(root)
+		assert.ok(existsSync(join(root, '.swelte', 'backend', 'db.v')), 'builtin backend copied')
 	})
 })

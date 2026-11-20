@@ -3,10 +3,10 @@
 Built behavior. Every command resolves the V toolchain itself
 (system `v`, else `@swelte/vvm` — no manual install). Subcommand list
 is closed: `dev` / `build` / `preview` / `deploy` / `test` / `check` /
-`export` (+ `--help` / `--version`), plus a deprecated `init`
-forwarder to `npm create @swelte` (`@swelte/create`). Plugins extend it via `SWELTE_PLUGINS`
-(comma/space-separated specifiers — e.g. `SWELTE_PLUGINS=@swelte/plus/db`
-adds `swelte migrate`). No aliases — the documented
+`export` / `migrate` (+ `--help` / `--version`), plus a deprecated `init`
+forwarder to `npm create @swelte` (`@swelte/create`). Third-party plugins
+may extend it via `SWELTE_PLUGINS` (comma/space-separated specifiers).
+No aliases — the documented
 `--target` is the deploy-target shim; `--target-os` is the cross-build
 OS (build-only, see below).
 
@@ -31,7 +31,7 @@ e.g. an external renderer). `Hand` then proxies renders; without the
 adapter (or with `--no-ssr`) the URL stays unset and dev is SPA/static
 + JSON. `.svelte` edits re-emit `render.js` (debounced) so the sidecar
 picks them up without a V restart. `swelte dev` needs no plugin;
-`SWELTE_PLUGINS=@swelte/ssr-qjs` adds `swelte ssr-check` (the CI gate).
+`SWELTE_PLUGINS=@swelte/ssr-qjs` adds `swelte ssr-check` (the CI gate, third-party plugin pattern).
 
 ## `swelte build [--root dir] [--output path] [--port N] [--target auto|static|node|edge] [--target-os linux|macos|windows] [--target-arch amd64|arm64] [--local]`
 
@@ -168,12 +168,12 @@ confirm (default No — add it later any time with `npm install
 `CI=1`, `--yes`/`--no-interactive`) skips all prompts and uses flag
 defaults (app, empty, SPA); Ctrl-C cancels cleanly.
 
-## `swelte migrate [--root dir] [--db path]` (plugin: `@swelte/plus/db`)
+## `swelte migrate [--root dir] [--db path]` (builtin)
 
 Apply `db/migrations/*.sql` to the embedded SQLite file (`SWELTE_DB_PATH`
 env, `--db` flag, else `data/app.db`). First run scaffolds
 `src/lib/backend/db.v` (shared conn + KV helpers) +
 `db/migrations/001_swelte_kv.sql`. Idempotent — re-runs apply only new
-files (tracked in `_swelte_migrations`). Requires
-`SWELTE_PLUGINS=@swelte/plus/db` (core stays dependency-free).
+files (tracked in `_swelte_migrations`). No plugin needed (was
+`@swelte/plus/db`, now deprecated — jobs + backend live in core).
 

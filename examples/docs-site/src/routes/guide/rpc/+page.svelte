@@ -94,7 +94,7 @@ import DocsNav from '#lib/DocsNav.svelte'
 			<tr>
 				<td>
 					<code>@&#91;ws]</code>
-					<span class="badge badge-sm">needs <code>@swelte/plus/db</code></span>
+					<span class="badge badge-sm">builtin backend</span>
 				</td>
 				<td>GET + <code>Upgrade: websocket</code></td>
 				<td>one socket per file — <a href="/plus/realtime" class="link">full reference</a></td>

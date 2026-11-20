@@ -92,7 +92,7 @@ import DocsNav from '#lib/DocsNav.svelte'
 				<td>
 					Subtree middleware stays local;
 					<code>@&#91;startup]/@&#91;reroute]</code>
-					handle boot + rewrite (ticks live in <code>@swelte/plus</code>).
+					handle boot + rewrite (ticks are a builtin <code>@[cron]</code> scheduler).
 				</td>
 			</tr>
 			<tr>

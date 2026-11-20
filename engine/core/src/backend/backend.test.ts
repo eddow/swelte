@@ -1,9 +1,10 @@
-// `@swelte/plus` — unit tests: jobs/cron (the only beyond-parity extraction).
-// Run via `npm test --workspace=@swelte/plus` (tsconfig.test.json → dist-test).
+// `@swelte/core/backend` — unit tests: builtin jobs scheduler + embedded backend.
+// Run via `npm test --workspace=@swelte/core` (tsconfig.test.json → dist-test).
 
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 import {
+	coreBackendVlibDir,
 	dbHelperTemplate,
 	dbInitialMigration,
 	dbPlugin,
@@ -13,12 +14,11 @@ import {
 	plusCronParse,
 	plusCronSeconds,
 	plusDbPath,
-	plusDbVlibDir,
 	plusPendingMigrations,
-} from './index.js'
+} from './jobs-index.js'
 
-describe('plus contracts', () => {
-	it('jobs plugin claims cron (moved out of core)', () => {
+describe('backend contracts (builtin jobs + db)', () => {
+	it('jobs plugin claims cron (builtin)', () => {
 		assert.deepEqual(jobsPlugin.attrs, ['cron'])
 		assert.equal(jobsPlugin.configKey, 'jobs')
 		assert.ok(jobsPlugin.validate, 'jobsPlugin needs validate')
@@ -277,7 +277,7 @@ describe('db plugin (embedded SQLite)', () => {
 		assert.equal(incs.length, 1)
 		assert.equal(incs[0].module, 'backend')
 		assert.ok(existsSync(join(incs[0].absDir, 'db.v')), 'vlib/backend/db.v ships')
-		assert.equal(plusDbVlibDir(), incs[0].absDir)
+		assert.equal(coreBackendVlibDir(), incs[0].absDir)
 	})
 	it('plusDbPath honors SWELTE_DB_PATH, else the default', () => {
 		assert.equal(PLUS_DB_DEFAULT_PATH, 'data/app.db')
@@ -324,8 +324,8 @@ describe('db plugin (embedded SQLite)', () => {
 	it('ws frame helpers ship in the backend module (RFC 6455)', async () => {
 		const { readFileSync, existsSync } = await import('node:fs')
 		const { join } = await import('node:path')
-		const ws = join(plusDbVlibDir(), 'ws.v')
-		assert.ok(existsSync(ws), 'vlib/backend/ws.v ships with dbPlugin')
+		const ws = join(coreBackendVlibDir(), 'ws.v')
+		assert.ok(existsSync(ws), 'vlib/backend/ws.v ships with core')
 		const src = readFileSync(ws, 'utf8')
 		assert.ok(src.includes('module backend'))
 		assert.ok(src.includes('pub fn ws_accept_key('), 'RFC 6455 accept key')

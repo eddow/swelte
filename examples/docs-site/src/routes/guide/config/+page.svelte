@@ -151,7 +151,7 @@ import { codeHtml } from '#lib/snippets.gen.js'
 				<li>
 					<code>src/app.v</code>: <code>@&#91;startup]</code> (boot once),
 					<code>@&#91;reroute]</code>
-					(rewrite first); ticks live in <code>@swelte/plus</code> (not core)
+					(rewrite first); ticks are a builtin <code>@[cron]</code> scheduler
 				</li>
 				<li><code>locals map[string]string</code> threaded through dispatch + cookie helpers</li>
 				<li>

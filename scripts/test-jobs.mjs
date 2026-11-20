@@ -4,7 +4,7 @@ import { once } from 'node:events'
 import { mkdtempSync, mkdirSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
-import { cronHarness, createJobsPlugin } from '../engine/plus/dist/jobs.js'
+import { cronHarness, createJobsPlugin } from '../engine/core/dist/vite.js'
 import { resolveV, resolveCC, toolchainEnv } from '../engine/core/dist/toolchain.js'
 
 const root = resolve(import.meta.dirname, '..')
@@ -48,7 +48,7 @@ time.sleep(60 * time.second)
 }`
   writeFileSync(join(scratch, 'worker.v'), source)
   const binary = join(scratch, 'worker')
-  execFileSync(resolveV(import.meta.url), ['-cc', resolveCC(), '-path', `${join(root, 'engine/plus/vlib')}|@vlib|@vmodules`, '-o', binary, join(scratch, 'worker.v')], { env: toolchainEnv(), stdio: 'pipe', timeout: 120000 })
+  execFileSync(resolveV(import.meta.url), ['-cc', resolveCC(), '-path', `${join(root, 'engine/core/vlib')}|@vlib|@vmodules`, '-o', binary, join(scratch, 'worker.v')], { env: toolchainEnv(), stdio: 'pipe', timeout: 120000 })
   const start = () => { const child = spawn(binary, [], { cwd: scratch, env: { ...toolchainEnv(), SWELTE_JOBS_PATH: join(scratch,'jobs.db') }, stdio: ['ignore','pipe','pipe'] }); workers.push(child); child.stderr.on('data', bytes => { log += bytes }); return child }
   const files = () => readdirSync(scratch).filter(file => file.startsWith('started-'))
   start(); start()

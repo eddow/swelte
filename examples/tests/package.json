@@ -19,7 +19,6 @@
   "dependencies": {
     "svelte": "^5.0.0",
     "@swelte/core": "^0.1.5",
-    "@swelte/plus": "^0.1.5",
     "@swelte/ssr-qjs": "^0.1.5"
   },
   "devDependencies": {

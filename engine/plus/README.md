@@ -1,37 +1,21 @@
-# `@swelte/plus` — beyond-SvelteKit plugins
+# `@swelte/plus` — DEPRECATED (now part of core)
 
-Optional package. Core stays parity-only (byte-identical output without
-plugins); plus owns attrs core never names. Today: `jobs` (scheduled
-`@[cron]` ticks) + `db` (embedded SQLite/KV).
+Jobs (`@[cron]`) + embedded backend (SQLite/KV, broadcast hub, WS framing,
+`swelte migrate`) moved into `@swelte/core` — always builtin, no install,
+no `plugins: [...]` entry needed.
 
-```sh
-npm install @swelte/plus
-```
+This package is an empty re-export shim so existing setups keep resolving:
 
 ```ts
-// vite.config.ts — both plugins ride the same SweltePlugin contract
-import { swelte } from '@swelte/ssr-qjs';
-import { jobsPlugin, dbPlugin } from '@swelte/plus';
-
-export default defineConfig({
-  plugins: [svelte(svelteConfig), swelte({ vBackendUrl, plugins: [jobsPlugin, dbPlugin] })],
-});
+import { jobsPlugin, dbPlugin, createJobsPlugin } from '@swelte/plus'; // still works
+import { jobsPlugin, dbPlugin, createJobsPlugin } from '@swelte/core'; // preferred
 ```
 
-- **jobs** — `@[cron('60s')]` / `@[cron('5m,retry=3')]` in `src/app.v`.
-  Single scheduler thread at boot (no CLI/SSH), console tick log.
-  `createJobsPlugin({ durable: true })` adds SQLite schedule persistence,
-  restart catchup and coordination across processes sharing `SWELTE_JOBS_PATH`.
-- **db** — `swelte migrate` via `SWELTE_PLUGINS=@swelte/plus/db`.
-  Scaffolds `src/lib/backend/db.v` (shared conn + `kv_get/kv_set/kv_del`)
-  + `db/migrations/001_swelte_kv.sql`; applies pendings in order,
-  tracked in `_swelte_migrations`. Routes `import backend` — core copies
-  `vlib/backend/*.v` into `.swelte/` at generate (see `includes`).
-- **rooms** (same package, no new dep) — cross-request SSE broadcast.
-  Any verb/`@[rpc]` calls `backend.emit(room, msg)`; an `@[sse]` fn with
-  a trailing `(sub fn (string) chan string, emit fn (string) bool)` tail
-  subscribes and streams live hub messages. Harness owns the subscription
-  (auto-reap on disconnect); single-instance best-effort like cron.
+- `@[cron('60s')]` / `@[cron('5m,retry=3')]` in `src/app.v` — zero ticks emit
+  empty harness fragments (byte-identical).
+- `swelte migrate` is a core command now (`SWELTE_PLUGINS` override unneeded).
+- `createJobsPlugin({ durable: true })` still opts the scheduler into SQLite
+  schedule persistence / restart catchup (`SWELTE_JOBS_PATH`).
+- Rooms/WS ride the builtin backend hub (no plugin needed).
 
-Full docs: `docs/plus.md`, `docs/cli.md` (`swelte migrate`).
-V lesson: DDL/DML need `exec_none` (`!= 101`); `exec()` only steps row queries.
+V lesson (kept): DDL/DML need `exec_none` (`!= 101`); `exec()` only steps row queries.

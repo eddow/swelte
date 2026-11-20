@@ -5,27 +5,29 @@ import { COMMANDS, commandHelp, VERSION } from './commands/index.js'
 import type { Command } from './commands/types.js'
 import { parseArgs } from './commands/types.js'
 
-/** Resolve the active command list: core commands + plugin commands.
- * Plugins are optional — without them this is exactly COMMANDS. Plugins may
- * contribute commands (e.g. future tooling); container-run plugins like jobs
- * intentionally expose none (cron starts at boot, no SSH needed). */
-export function resolveCommands(plugins: { cli?: Command[] }[] = []): Command[] {
+/** Resolve the active command list: core COMMANDS (now including builtin
+ *  `migrate`) + plugin commands. `migrate` may also arrive via the legacy
+ *  `@swelte/plus/db` plugin shape — deduped by name (core wins). Container-run
+ *  plugins like jobs intentionally expose no CLI commands (cron starts at
+ *  boot, no SSH needed). */
+export function resolveCommands(plugins: { cli?: Command[]; name?: string }[] = []): Command[] {
 	const extra = plugins.flatMap((p) => p.cli ?? [])
 	if (!extra.length) return COMMANDS
 	const names = new Set(COMMANDS.map((c) => c.name))
 	for (const c of extra) {
-		if (names.has(c.name))
-			throw new Error(`[swelte] plugin command '${c.name}' collides with a core command`)
+		if (names.has(c.name)) continue // builtin wins over the legacy plugin shape
 		names.add(c.name)
 	}
-	return [...COMMANDS, ...extra]
+	return [...COMMANDS, ...extra.filter((c) => !COMMANDS.some((k) => k.name === c.name))]
 }
 
 /** Discover plugin packages exposing CLI commands.
  * Core knows no package by name: `SWELTE_PLUGINS` (comma/space-separated
  * specifiers) lists optional peers to probe. Each probed module contributes
  * every export shaped like a plugin (`{ cli, attrs }`). Unlisted /
- * uninstalled packages are skipped silently, keeping core dependency-free. */
+ * uninstalled packages are skipped silently, keeping core dependency-free.
+ * Legacy `@swelte/plus/*` specs resolve to the deprecated shim (re-exports
+ * core) — harmless, deduped by `resolveCommands`. */
 export async function loadPluginPackages(
 	specs: string[] = String(process.env.SWELTE_PLUGINS ?? '')
 		.split(/[\s,]+/)

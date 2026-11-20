@@ -71,11 +71,10 @@ async function waitForServer(url) {
 try {
   console.log('dogfood: building current core and SSR adapter')
   const tsc = require.resolve('typescript/bin/tsc')
-  for (const name of ['core', 'plus', 'ssr-qjs']) {
+  for (const name of ['core', 'ssr-qjs']) {
     run(process.execPath, [tsc, '-p', `engine/${name}/tsconfig.json`])
   }
-  const { swelte } = await import(pathToFileURL(join(root, 'engine/core/dist/vite.js')))
-  const { dbPlugin, jobsPlugin } = await import(pathToFileURL(join(root, 'engine/plus/dist/index.js')))
+  const { swelte, dbPlugin, jobsPlugin } = await import(pathToFileURL(join(root, 'engine/core/dist/vite.js')))
   const startupProbe = { name: 'startup-probe', attrs: [], harness: () => ({ mainInner: "\tos.write_file('dependent-plugin-started', 'yes')!\n" }) }
   const fixturePlugins = [dbPlugin, jobsPlugin, startupProbe]
   const { resolveV, resolveCC, toolchainEnv, vVersion } = await import(pathToFileURL(join(root, 'engine/core/dist/toolchain.js')))

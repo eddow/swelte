@@ -12,18 +12,20 @@ import { codeHtml } from '#lib/snippets.gen.js'
 	</ul>
 </div>
 
-<h1 class="text-4xl font-bold mt-2">Realtime (<code class="text-2xl">@swelte/plus</code>)</h1>
+<h1 class="text-4xl font-bold mt-2">
+	Realtime
+	<span class="text-sm font-normal opacity-60"
+		>(builtin — was <code>@swelte/plus</code>, now deprecated)</span
+	>
+</h1>
 <p class="py-4 opacity-80">
-	Rooms + sockets on one hub — beyond-SvelteKit, optional package. Ships inside
-	<code>@swelte/plus/db</code>
-	(same install, same <code>dbPlugin</code>): the hub is the reason sockets live here and not in
-	core. Core stays parity-only; plus owns the
+	Rooms + sockets on core's builtin backend hub — no install, no plugin. The
 	<code>backend.emit</code>
-	hub <code>@[sse]</code> and <code>@[ws]</code> ride.
+	hub is what <code>@[sse]</code> and <code>@[ws]</code> ride.
 </p>
 
 <div class="mt-2">
-	<Code snippet={codeHtml['plus-install']} dense title="install + dbPlugin" />
+	<Code snippet={codeHtml['plus-install']} dense title="builtin — no install" />
 </div>
 
 <h2 class="text-2xl font-bold mt-8">Rooms — cross-request broadcast</h2>

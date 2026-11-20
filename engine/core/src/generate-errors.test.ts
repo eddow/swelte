@@ -19,9 +19,9 @@ function scaffold(files: Record<string, string>): string {
 	return root
 }
 
-async function buildStart(root: string): Promise<void> {
+async function buildStart(root: string, opts?: { plugins?: never }): Promise<void> {
 	const { swelte } = await import('./vite.js')
-	const plug = swelte({}) as unknown as {
+	const plug = swelte({ ...(opts ?? {}) }) as unknown as {
 		configResolved?: (c: { root: string }) => void
 		buildStart?: () => Promise<void>
 	}
@@ -198,38 +198,44 @@ describe('generate() validation errors (tmp scaffold, no V binary)', () => {
 		assert.ok(sv.includes("if rerouted != '' { path = rerouted }"), sv.slice(0, 8000))
 	})
 
-	it('unregistered attrs parse to nothing (plugins register via extraAttrs)', async () => {
+	it('builtin cron parses everywhere; misplaced/empty ticks stay inert', async () => {
 		const { readFileSync, writeFileSync } = await import('node:fs')
 		const { parseVFile } = await import('./vite/parse.js')
-		// No plugin loaded: `@[cron]` is not a core attr, so the parser drops
-		// the fn entirely (same as any typo'd attr) — core output stays inert.
+		// `cron` is a builtin core attr now: parses with body everywhere.
 		assert.deepEqual(
 			parseVFile('module s\n@[cron]\npub fn tick() { }').map((f) => f.attr),
-			[]
-		)
-		// The owning plugin registers it: fn parses with body for inlining.
-		assert.deepEqual(
-			parseVFile('module s\n@[cron]\npub fn tick() { }', ['cron']).map((f) => f.attr),
 			['cron']
 		)
 		let root = scaffold({ '+page.v': 'module p\n@[get] pub fn g() string { return "" }' })
 		writeFileSync(join(root, 'src', 'app.v'), 'module s\n@[cron]\npub fn tick() { }')
+		// Shape-invalid tick → build error naming the qualifier rule.
+		await assert.rejects(() => buildStart(root), /needs a duration qualifier/)
+		// Empty src/app.v → no cron harness (byte-identical).
+		root = scaffold({ '+page.v': 'module p\n@[get] pub fn g() string { return "" }' })
+		writeFileSync(join(root, 'src', 'app.v'), 'module s')
 		await buildStart(root)
 		const svCron = readFileSync(join(root, '.swelte', 'server.v'), 'utf8')
-		assert.ok(
-			!svCron.includes('swelte_cron'),
-			'core must emit no cron loops without the owning plugin'
-		)
-		// Unregistered @[cron] in routes → dropped at parse, route still builds.
+		assert.ok(!svCron.includes('swelte_cron'), 'core must emit no cron loops with zero ticks')
+		// `@[cron]` in routes → misplaced, build error naming src/app.v.
 		root = scaffold({
 			'+page.v':
 				'module p\n@[cron(\'60s\')]\npub fn tick() { }\n@[get] pub fn g() string { return "" }',
 		})
 		writeFileSync(join(root, 'src', 'app.v'), 'module s')
-		await buildStart(root)
-		assert.ok(
-			!readFileSync(join(root, '.swelte', 'server.v'), 'utf8').includes('swelte_cron'),
-			'unregistered cron in routes must stay inert'
+		await assert.rejects(() => buildStart(root), /only allowed in src\/app\.v/)
+		// Duplicate explicit builtin plugin instance → deduped, single scheduler.
+		root = scaffold({ '+page.v': 'module p\n@[get] pub fn g() string { return "" }' })
+		writeFileSync(
+			join(root, 'src', 'app.v'),
+			"module s\n@[cron('60s')]\npub fn tick() { println('t') }"
+		)
+		const { jobsPlugin } = await import('./vite.js')
+		await buildStart(root, { plugins: [jobsPlugin] as never })
+		const svDup = readFileSync(join(root, '.swelte', 'server.v'), 'utf8')
+		assert.equal(
+			svDup.split('fn swelte_cron_run').length - 1,
+			1,
+			'duplicate jobs plugin must dedup to a single scheduler'
 		)
 		// Misplaced core hook in routes → own-file guard rejects before dispatch.
 		root = scaffold({

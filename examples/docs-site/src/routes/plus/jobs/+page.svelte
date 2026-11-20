@@ -12,23 +12,27 @@ import { codeHtml } from '#lib/snippets.gen.js'
 	</ul>
 </div>
 
-<h1 class="text-4xl font-bold mt-2">Jobs (<code class="text-2xl">@swelte/plus</code>)</h1>
+<h1 class="text-4xl font-bold mt-2">
+	Jobs
+	<span class="text-sm font-normal opacity-60"
+		>(builtin — was <code>@swelte/plus</code>, now deprecated)</span
+	>
+</h1>
 <p class="py-4 opacity-80">
-	Scheduled <code>@[cron]</code> ticks — beyond-SvelteKit, optional package. Core stays parity-only
-	(byte-identical output without plugins); plus owns attrs core never names.
+	Scheduled <code>@[cron]</code> ticks — core builtin, no install, no <code>plugins:</code> entry.
+	Zero ticks emit empty harness fragments (byte-identical).
 </p>
 
 <div class="mt-2">
-	<Code snippet={codeHtml['plus-install']} dense title="install" />
+	<Code snippet={codeHtml['plus-install']} dense title="builtin — no install" />
 </div>
 <div class="mt-2">
-	<Code snippet={codeHtml['plus-vite-config']} dense title="vite.config.ts" />
+	<Code snippet={codeHtml['plus-vite-config']} dense title="vite.config.ts (no plugin entry)" />
 </div>
 <p class="text-sm opacity-70 mt-2">
-	Without the plugin, <code>@[cron]</code> is an unknown-attr build error. With it,
 	<code>src/app.v</code>
-	may hold one-or-more tick fns; core ignores them everywhere else. No CLI, no SSH — ticks start at
-	boot in the container.
+	may hold one-or-more tick fns; route files reject them. No CLI, no SSH — ticks start at boot in
+	the container.
 </p>
 
 <h2 class="text-2xl font-bold mt-8"><code class="text-lg">@[cron]</code> ticks</h2>
@@ -148,8 +152,8 @@ import { codeHtml } from '#lib/snippets.gen.js'
 <p class="opacity-80 mt-2">
 	The factory keeps the same <code>@[cron]</code> functions while persisting their schedules in
 	SQLite. <code>SWELTE_JOBS_PATH</code> selects a dedicated file (default
-	<code>data/jobs.db</code>), independent of <code>dbPlugin</code> and app data. SQLite development
-	files are needed at build time.
+	<code>data/jobs.db</code>), independent of the embedded backend database and app data. SQLite
+	development files are needed at build time.
 </p>
 <p class="opacity-80 mt-2">
 	A function name is its persistent identity. First registration schedules it one interval ahead;
@@ -177,8 +181,8 @@ import { codeHtml } from '#lib/snippets.gen.js'
 	</li>
 	<li>Shutdown stops scheduling and releases the connection/transaction as tracked work exits.</li>
 	<li>
-		Default <code>jobsPlugin</code> remains process-local best effort: two containers run two
-		schedulers.
+		Default <code>jobsPlugin</code> (builtin) remains process-local best effort: two containers run
+		two schedulers.
 	</li>
 	<li>Duration qualifiers are supported; cron expressions are not parsed.</li>
 </ul>

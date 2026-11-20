@@ -254,8 +254,10 @@ export interface SweltePlugin {
 	emitServerGen?: (routes: { route: string; prefix: string }[]) => string
 	harness?: (config: unknown) => SweltePluginHarness
 	/** App-level hooks from `src/app.v`: called with the parsed fns carrying
-	 * this plugin's attrs. Returns V spliced into the harness (e.g. cron
-	 * spawn loops). Core passes through; the plugin owns parse+validate+emit. */
+	 *  plugin attrs. Core builtins (`cron`) read `src/app.v` directly via
+	 *  `readJobsCrons`; third-party attrs arrive through owning plugins.
+	 *  Returns V spliced into the harness (e.g. cron spawn loops). Core passes
+	 *  through; the owner parses+validates+emits. */
 	loadAppHooks?: (
 		root: string,
 		srcDir?: string

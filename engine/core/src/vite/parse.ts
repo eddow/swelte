@@ -17,9 +17,10 @@ function splitTopLevel(s: string, sep: string): string[] {
 	return out
 }
 
-/** Core attrs parsed without plugins. Plugins extend via `extraAttrs`
- *  (e.g. `@swelte/plus/jobs` registers `cron`) — core itself names no
- *  plugin attr. Unknown attrs stay dropped unless registered here. */
+/** Core attrs parsed without plugins. Third-party plugins extend via
+ *  `extraAttrs` — core itself still names `cron` (builtin jobs scheduler:
+ *  parsed with bodies so `src/app.v` ticks inline; route files reject it).
+ *  Unknown attrs stay dropped unless registered here. */
 export const CORE_ATTRS = [
 	'get',
 	'post',
@@ -29,6 +30,7 @@ export const CORE_ATTRS = [
 	'patch',
 	'sse',
 	'ws',
+	'cron',
 	'before',
 	'after',
 	'load',
@@ -157,9 +159,9 @@ export function parseVFile(src: string, extraAttrs: string[] = []): RpcFn[] {
 			vret = vret.slice(1).trim() || 'void'
 		}
 		if (vret === '' || vret === 'void') vret = 'void'
-		// Raw fn bodies for hook/app fns (transpiled/inlined at generate).
+		// Raw fn bodies for hook/app/cron fns (transpiled/inlined at generate).
 		// Brace-balanced walk from the `{` that opens the fn body. Bodies are
-		// captured for matcher/core-hook attrs plus any plugin-registered attr
+		// captured for matcher/core-hook/cron attrs plus any plugin-registered
 		// (extraAttrs), so owning plugins can inline them; core ignores
 		// plugin-claimed fns everywhere else.
 		let body: string | undefined
@@ -167,8 +169,9 @@ export function parseVFile(src: string, extraAttrs: string[] = []): RpcFn[] {
 		if (
 			verbs.some(
 				(vb) =>
-					['matcher', 'startup', 'shutdown', 'report', 'reroute', 'error'].includes(vb.verb) ||
-					extraAttrs.includes(vb.verb)
+					['matcher', 'startup', 'shutdown', 'report', 'reroute', 'error', 'cron'].includes(
+						vb.verb
+					) || extraAttrs.includes(vb.verb)
 			)
 		) {
 			const afterRet = i + (retMatch?.[0].length ?? 0)

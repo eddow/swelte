@@ -1,27 +1,39 @@
-// Plus (`@swelte/plus`) — beyond-SvelteKit plugins (jobs/cron, db/sqlite).
-// Depends on `@swelte/core` (core stays standalone — apps not using cron
-// or db never install this package). Core owns the `SweltePlugin` contract
-// (`@swelte/core/vite`); plus implements it.
+// `@swelte/plus` — DEPRECATED empty shim (jobs + backend live in core).
+// This package exists only so existing `npm install @swelte/plus` setups
+// keep resolving. New code imports from `@swelte/core` (or
+// `@swelte/core/vite`, `@swelte/core/jobs`, `@swelte/core/db`) directly —
+// no `plugins: [...]` entry needed, both are always builtin.
 
-export type { SweltePlugin, SweltePluginHarness, SweltePluginRouteCtx } from '@swelte/core/vite'
-export { defineSweltePlugin } from '@swelte/core/vite'
+export type {
+	CronFnShape,
+	JobsCronDef,
+	PlusCronQualifier,
+	SweltePlugin,
+	SweltePluginHarness,
+	SweltePluginRouteCtx,
+} from '@swelte/core/vite'
 export {
+	builtinDbPlugin,
+	builtinJobsPlugin,
+	coreBackendVlibDir,
+	createBuiltinJobsPlugin,
+	createJobsPlugin,
+	cronHarness,
 	dbHelperTemplate,
 	dbInitialMigration,
 	dbPlugin,
-	PLUS_DB_DEFAULT_PATH,
-	PLUS_DB_MIGRATIONS_TABLE,
-	plusDbPath,
-	plusDbVlibDir,
-	plusPendingMigrations,
-	runMigrate,
-} from './db.js'
-export type { JobsCronDef } from './jobs.js'
-export {
-	createJobsPlugin,
+	defineSweltePlugin,
 	jobsPlugin,
 	PLUS_CRON_MAX_RETRY,
 	PLUS_CRON_RETRY_STEP_S,
+	PLUS_DB_DEFAULT_PATH,
+	PLUS_DB_MIGRATIONS_TABLE,
 	plusCronParse,
 	plusCronSeconds,
-} from './jobs.js'
+	plusDbPath,
+	plusDbVlibDir,
+	plusPendingMigrations,
+	readJobsCrons,
+	runMigrate,
+	validateCronFn,
+} from '@swelte/core/vite'

@@ -59,7 +59,7 @@ HTML in the background. `serviceWorker.outbox` opts endpoints into explicit
 IndexedDB/Background Sync delivery via `enqueueOffline`; endpoints deduplicate
 `Idempotency-Key`. Plus `createJobsPlugin({ durable: true })` persists schedules
 and coordinates processes sharing `SWELTE_JOBS_PATH` (separate SQLite file).
-See `docs/images.md`, `docs/outbox.md`, `docs/config.md`, and `docs/plus.md`.
+See `docs/images.md`, `docs/outbox.md`, `docs/config.md`, `docs/cli.md` (`swelte migrate`), and `docs/rpc.md` (cron/jobs + rooms/sockets).
 
 ## Commands
 

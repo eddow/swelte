@@ -1,7 +1,7 @@
 {
   "name": "@swelte/core",
   "version": "0.1.5",
-  "description": "Swelte framework core — V + Svelte unified RPC bridge (Vite plugin, SDK generator, CLI)",
+  "description": "Swelte framework core \u2014 V + Svelte unified RPC bridge (Vite plugin, SDK generator, CLI; builtin jobs scheduler + embedded backend)",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -11,7 +11,10 @@
     "./cli": "./dist/cli.js",
     "./config": "./dist/gen/config.js",
     "./diagnostics": "./dist/gen/diagnostics.js",
-    "./toolchain": "./dist/toolchain.js"
+    "./toolchain": "./dist/toolchain.js",
+    "./jobs": "./dist/backend/jobs-index.js",
+    "./db": "./dist/backend/jobs-index.js",
+    "./backend": "./dist/backend/jobs-index.js"
   },
   "bin": {
     "swelte": "bin/swelte.js"
@@ -22,7 +25,8 @@
     "templates",
     "LICENSE-MIT",
     "package.json",
-    "skills"
+    "skills",
+    "vlib"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
@@ -67,7 +71,7 @@
     }
   },
   "author": {
-    "name": "François Marie De Mey",
+    "name": "Fran\u00e7ois Marie De Mey",
     "email": "fmdm@emedware.dev",
     "url": "https://github.com/eddow"
   },
@@ -90,7 +94,11 @@
     "vite",
     "rpc",
     "wasm",
-    "fullstack"
+    "fullstack",
+    "cron",
+    "jobs",
+    "sqlite",
+    "websocket"
   ],
   "npmSkills": {
     "publish": {

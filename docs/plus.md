@@ -1,31 +1,26 @@
-# Plus (`@swelte/plus`) — beyond-SvelteKit plugins
+# Plus — DEPRECATED (jobs + backend moved into core)
 
-Optional package. Core stays parity-only (byte-identical output without
-plugins); plus owns attrs core never names. Today: `jobs` (scheduled
-`@[cron]` ticks) + `db` (embedded
-SQLite/KV).
-
-```sh
-npm install @swelte/plus
-```
+> `@swelte/plus` is an empty re-export shim. `jobs` (`@[cron]`) + embedded
+> backend (SQLite/KV, rooms/WS hub, `swelte migrate`) are core builtins now:
+> no install, no `plugins: [...]` entry. `import { jobsPlugin, dbPlugin,
+> createJobsPlugin } from '@swelte/core'` (or `@swelte/core/vite`;
+> `@swelte/plus` still resolves for existing setups).
+> Reference below is kept — shapes and runtime semantics are unchanged.
 
 ```ts
-// vite.config.ts
+// vite.config.ts — no plugin wiring needed anymore
 import { swelte } from '@swelte/ssr-qjs';
-import { jobsPlugin, dbPlugin } from '@swelte/plus'; // or '@swelte/plus/jobs', '@swelte/plus/db'
 
 export default defineConfig({
-  plugins: [svelte(svelteConfig), swelte({ vBackendUrl, plugins: [jobsPlugin, dbPlugin] })],
+  plugins: [svelte(svelteConfig), swelte({ vBackendUrl })],
 });
 ```
 
-Without a plugin, its surface is a build error (`@[cron]` unknown attr;
-`import backend` unresolvable in generated routes). With it, `src/app.v`
-may hold one-or-more tick fns and `#routes/*.v` may `import backend`.
-`db` additionally contributes its V module dir to the `.swelte/`
-compilation unit (see `includes` below), so no manual wiring is needed.
-No CLI from jobs (ticks start at boot in the container); `db` adds
-`swelte migrate` (see `cli`).
+`src/app.v` may hold one-or-more `@[cron]` tick fns; `#routes/*.v` may
+`import backend` (room-SSE/WS). Core copies its `vlib/backend/` into
+`.swelte/` only when room-SSE/WS fns need it (unused builtin copies
+nothing). `swelte migrate` is a core command (see `cli`); ticks start at
+boot in the container (no CLI/SSH).
 
 ## `@[cron]` ticks
 
@@ -106,14 +101,14 @@ Zero ticks → empty fragments: harness byte-identical to parity output.
 Use the factory to opt in, keeping the same `@[cron]` functions:
 
 ```ts
-import { createJobsPlugin } from '@swelte/plus'
+import { createJobsPlugin } from '@swelte/core'
 const jobs = createJobsPlugin({ durable: true })
-// Include jobs in swelte({ plugins: [jobs, ...] }).
+// Include jobs in swelte({ plugins: [jobs, ...] }) — explicit instance overrides the builtin default.
 ```
 
 `SWELTE_JOBS_PATH` selects a separate SQLite file (default `data/jobs.db`).
 All cooperating instances must use that same file and the same job names and
-intervals. It is independent of `dbPlugin` and the application's data database.
+intervals. It is independent of the embedded backend database and the application's data database.
 The jobs plugin stages its own native module; SQLite development dependencies
 are needed to build a durable worker.
 
@@ -140,15 +135,15 @@ releases the connection/transaction on exit. `npm run test:jobs` runs the actual
 generated native harness against two processes, kills the owning worker mid-run,
 and verifies lock recovery, committed state and restart catchup.
 
-Default `jobsPlugin` remains process-local best effort (two containers run two
+Default `jobsPlugin` (builtin) remains process-local best effort (two containers run two
 schedulers). Duration qualifiers are supported; cron expressions are not parsed.
 
 ## Helpers
 
-Pure-TS, importable without codegen (pinned by plus unit tests):
+Pure-TS, importable without codegen (pinned by core backend unit tests):
 
 ```ts
-import { plusCronSeconds, plusCronParse, PLUS_CRON_MAX_RETRY, PLUS_CRON_RETRY_STEP_S } from '@swelte/plus';
+import { plusCronSeconds, plusCronParse, PLUS_CRON_MAX_RETRY, PLUS_CRON_RETRY_STEP_S } from '@swelte/core';
 
 plusCronSeconds('5m'); // 300
 plusCronParse('5m,retry=3'); // { seconds: 300, retry: 3 }
@@ -170,7 +165,7 @@ pub fn visits(req SwelteRequest) string {
 ```
 
 Single SQLite file (WAL mode, `SWELTE_DB_PATH` env else `data/app.db`).
-`swelte migrate` (via `SWELTE_PLUGINS=@swelte/plus/db`) scaffolds
+`swelte migrate` (builtin core command) scaffolds
 `src/lib/backend/db.v` + `db/migrations/001_swelte_kv.sql` on first run,
 then applies `db/migrations/*.sql` in filename order (tracked in
 `_swelte_migrations`, idempotent re-runs). Migrations are raw SQL;
@@ -186,9 +181,9 @@ Rules:
   `exec()` only steps row queries — INSERT/CREATE silently no-op through
   it. SELECTs use `exec()` + `Row.get_string/get_int`.
 - **Helpers:** `plusDbPath(root, env?)`, `plusPendingMigrations(root,
-  applied)` — pure-TS, pinned by plus unit tests.
+  applied)` — pure-TS, pinned by core backend unit tests.
 
-## `rooms` — cross-request SSE broadcast (same package, future.md #4)
+## `rooms` — cross-request SSE broadcast (builtin backend)
 
 Any verb/`@[rpc]` publishes; a room-mode `@[sse]` fn subscribes:
 
@@ -241,24 +236,23 @@ primitive when cross-restart delivery lands).
 
 Rules:
 
-- **Room fns need the hub:** without `dbPlugin` in `swelte({ plugins:
-  [...] })`, room-mode `@[sse]` is a build error naming the fix.
+- **Room fns need the hub:** the builtin backend ships with core — no plugin
+  or `plugins:` entry needed; room-mode `@[sse]` builds directly.
 - **Keep the tail exact:** `(sub fn (string) chan string, emit fn (string)
   bool)` — stripped from the client stub (harness-injected, like emit).
   A bare closure param anywhere else is a build error.
 - **Return to leave:** the stream ends when the fn returns; the harness
   reaps the subscription. Heartbeat (`__ping__`) keeps idle streams
   alive through proxies (client ignores it).
-- **`includes` (plugin → `.swelte/` wiring):** `dbPlugin.includes()`
-  contributes `[{ module: 'backend', absDir: '<pkg>/vlib/backend' }]`.
-  Core's `generate()` copies each include's `*.v` into
-  `.swelte/<module>/`, so generated routes resolve `import backend`
-  with no manual wiring. Missing dirs are skipped (TS-only install);
-  stale module dirs are pruned; `routes`/`main` names are reserved.
-  The copy (and `.swelte/plugin_modules.json` marker) is pinned by
-  core's `codegen-shape` tests.
+- **`.swelte/` wiring:** core copies its `vlib/backend/` `*.v` into
+  `.swelte/backend/` (usage-gated: only when room-SSE/WS fns need it; an
+  unused builtin copies nothing), so generated routes resolve
+  `import backend` with no manual wiring; third-party plugin `includes`
+  work the same way. Stale module dirs are pruned; `routes`/`main` names
+  are reserved. The copy (and `.swelte/plugin_modules.json` marker) is
+  pinned by core's `codegen-shape` tests.
 
-## `sockets` — first-class `@[ws]` rooms (same package, future.md #3)
+## `sockets` — first-class `@[ws]` rooms (builtin backend)
 
 One socket fn per file; the fn drives both directions over the hub:
 
@@ -333,8 +327,8 @@ dispatch (404/405 as usual).
 
 Rules:
 
-- **Socket fns need the hub:** without `dbPlugin` in `swelte({
-  plugins: [...] })`, `@[ws]` is a build error naming the fix.
+- **Socket fns need the hub:** the builtin backend ships with core — no plugin
+  or `plugins:` entry needed; `@[ws]` builds directly.
 - **Keep the tail exact:** `(sub fn (string) chan string, recv chan
   string, emit fn (string) bool)` — harness-injected, stripped
   from the client stub like SSE `emit`. A bare closure param anywhere

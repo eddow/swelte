@@ -1,3 +1,4 @@
+import { migrateCommand } from '../backend/jobs-index.js'
 import { VERSION } from '../version.js'
 import { runBuild } from './build.js'
 import { runDeploy } from './deploy.js'
@@ -142,7 +143,11 @@ const deployCmd: Command = {
 	summary:
 		'Generate deploy wrapper files (Dockerfile + ignores + package.json target) — setup only, never ships.',
 	args: [
-		{ name: 'target', help: 'Deploy target: vercel | docker | fly | railway | render | static', value: 'string' },
+		{
+			name: 'target',
+			help: 'Deploy target: vercel | docker | fly | railway | render | static',
+			value: 'string',
+		},
 		{
 			name: 'dockerfile',
 			help: 'Dockerfile name (default Dockerfile.vercel for vercel, Dockerfile otherwise)',
@@ -230,6 +235,7 @@ export const COMMANDS: Command[] = [
 	checkCmd,
 	testCmd,
 	exportCmd,
+	migrateCommand as Command,
 ]
 
 export function findCommand(name: string): Command | undefined {

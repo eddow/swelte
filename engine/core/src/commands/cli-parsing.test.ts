@@ -58,13 +58,23 @@ describe('CLI parsing', () => {
 	})
 
 	it('helpText + commandHelp list all commands', () => {
-		const names = ['dev', 'build', 'preview', 'deploy', 'init', 'check', 'test', 'export']
+		const names = [
+			'dev',
+			'build',
+			'preview',
+			'deploy',
+			'init',
+			'check',
+			'test',
+			'export',
+			'migrate',
+		]
 		for (const n of names) {
 			assert.ok(findCommand(n), n)
 			assert.ok(helpText().includes(n))
 			assert.ok(commandHelp(findCommand(n)!).includes(n))
 		}
-		assert.equal(COMMANDS.length, 8)
+		assert.equal(COMMANDS.length, 9)
 	})
 
 	it('unknown option throws', () => {
