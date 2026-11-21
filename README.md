@@ -79,3 +79,10 @@ Built behavior, user-facing only:
 - [Versus](https://github.com/eddow/swelte/blob/master/docs/versus.md) — Swelte vs. other full-stack paradigms (positioning)
 - [Coming from SvelteKit](https://github.com/eddow/swelte/blob/master/docs/coming-from-sveltekit.md) — migration map
 - [Plus](https://github.com/eddow/swelte/blob/master/docs/plus.md) — `@swelte/plus` beyond-SvelteKit plugins: scheduled jobs (`@[cron]` ticks, retry, console log)
+
+### Application and library builds
+
+Every Swelte project supports `swelte build` for its application (`dist/`) and
+`swelte package` for reusable `src/lib` code (`package/`). Routes stay local to
+the application or demo and are excluded from published packages. There is no
+app/library project kind. See [packaging and public exports](docs/libraries.md).

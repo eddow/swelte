@@ -8,7 +8,7 @@ Contributor notes live in `internal/`. Forward plans live in `specs/`.
 Documentation for users of Swelte (all describe built behavior):
 
 - `rpc.md` — `.v` imports, attributes, transport (implemented)
-- `libraries.md` — library schema: `src/lib` (published) + `src/routes` (dogfood), `build` vs `build:lib`, `swelte check --lib`
+- `libraries.md` — one project shape: `swelte build` (application) vs `swelte package` (`src/lib` publication), metadata and V exports
 - `npm-v-libraries.md` — publish and consume reusable V modules through npm (consumer-side reference; library-side schema lives in `libraries.md`)
 - `types.md` — V → TS projection, codegen (implemented)
 - `errors.md` — error envelope, `SwelteRpcError`, SPA-first rule (implemented)

@@ -3,23 +3,23 @@
 	"version": "0.2.0",
 	"description": "Swelte AI sessions — typed runs, progressive state, adapters, tools and traces over Swelte transport.",
 	"type": "module",
-	"main": "./dist/index.js",
-	"types": "./dist/index.d.ts",
-	"svelte": "./dist/index.js",
+	"main": "./package/index.js",
+	"types": "./package/index.d.ts",
+	"svelte": "./package/index.js",
 	"exports": {
 		".": {
-			"types": "./dist/index.d.ts",
-			"default": "./dist/index.js"
+			"types": "./package/index.d.ts",
+			"default": "./package/index.js"
 		},
 		"./package.json": "./package.json",
-		"./media": "./dist/media.js",
-		"./openrouter": "./dist/openrouter.js",
-		"./openai": "./dist/openai.js",
-		"./anthropic": "./dist/anthropic.js"
+		"./media": "./package/media.js",
+		"./openrouter": "./package/openrouter.js",
+		"./openai": "./package/openai.js",
+		"./anthropic": "./package/anthropic.js"
 	},
 	"files": [
 		"README.md",
-		"dist",
+		"package",
 		"src/lib/**/*.v",
 		"LICENSE-MIT",
 		"package.json"
@@ -30,10 +30,10 @@
 		"build:local": "swelte build --local",
 		"preview": "swelte preview",
 		"check": "swelte check",
-		"build:lib": "swelte package && swelte check --lib",
+		"package": "swelte package",
 		"pretest": "tsc -p tsconfig.test.json",
 		"test": "node --test --test-reporter=spec \"dist-test/**/*.test.js\"",
-		"prepublishOnly": "npm run build:lib"
+		"prepublishOnly": "npm run package"
 	},
 	"peerDependencies": {
 		"@swelte/media": "^0.2.0",

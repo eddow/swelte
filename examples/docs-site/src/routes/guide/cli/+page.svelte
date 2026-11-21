@@ -16,6 +16,14 @@ import DocsNav from '#lib/DocsNav.svelte'
 	<code>@swelte/vvm</code>). Closed subcommand list — no aliases.
 </p>
 
+<p class="pb-4 opacity-80">
+	One project shape supports two build targets: <code>swelte build</code> builds the application
+	into <code>dist/</code>; <code>swelte package</code> builds reusable <code>src/lib</code> code
+	into separate <code>package/</code> output. Routes belong to the application or local demo and
+	never ship to consumers. The scaffolder asks about samples and SSR, with no app/library kind
+	selection.
+</p>
+
 <div class="border border-base-300 rounded-box overflow-hidden divide-y divide-base-300">
 	<div class="collapse collapse-arrow">
 		<input type="radio" name="cli-acc" checked>
@@ -52,6 +60,28 @@ import DocsNav from '#lib/DocsNav.svelte'
 	</div>
 	<div class="collapse collapse-arrow">
 		<input type="radio" name="cli-acc">
+		<div class="collapse-title font-mono text-sm">
+			swelte package [--input dir] [--output dir] [--no-types]
+		</div>
+		<div class="collapse-content text-sm opacity-80">
+			<p>
+				Builds <code>src/lib</code> (or configured <code>swelte.libDir</code>) into
+				<code>package/</code>: JS, Svelte sources and declarations. Declared V modules ship as raw
+				sources for consumer compilation. No routes or V compiler required. Validates publication
+				metadata before building and fails on invalid exports, missing library files or route
+				leakage. <code>swelte check --lib</code> reports the same metadata diagnostics without
+				writing output.
+			</p>
+			<p>
+				Every starter has <code>build</code> and <code>package</code> scripts and starts private.
+				Declare public exports and remove <code>private: true</code> when ready to publish.
+				<code>--template lib</code> selects reusable V sample content; legacy <code>--lib</code> and
+				<code>--kind lib</code> are starter aliases.
+			</p>
+		</div>
+	</div>
+	<div class="collapse collapse-arrow">
+		<input type="radio" name="cli-acc">
 		<div class="collapse-title font-mono text-sm">swelte test [--update-snapshot]</div>
 		<div class="collapse-content text-sm opacity-80">
 			<p>
@@ -82,8 +112,8 @@ import DocsNav from '#lib/DocsNav.svelte'
 				</li>
 				<li>
 					<code>npm create @swelte</code>
-					— scaffold app or lib (<code>--sample</code>
-					/ <code>--empty</code> / <code>--lib</code> / <code>--ssr</code>); routers never
+					— scaffold a Swelte project (<code>--sample</code>
+					/ <code>--empty</code> / <code>--template lib</code> / <code>--ssr</code>); routers never
 					scaffolded (<code>swelte init</code>
 					is a deprecated forwarder)
 				</li>

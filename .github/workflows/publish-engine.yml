@@ -97,11 +97,11 @@ jobs:
           npm run build
           --workspace=@swelte/vvm
           --workspace=@swelte/core
-          --workspace=@swelte/ai
           --workspace=@swelte/mcp
           --workspace=@swelte/ssr-qjs
           --workspace=@swelte/create
           --if-present
+          && npm run package --workspace=@swelte/ai
 
       - name: Publish engine packages
         env:

@@ -3,6 +3,8 @@
 # legacy generated V dispatcher dir (pre-.swelte layout) — must stay empty
 /routes/
 dist/
+package/
+.swelte/
 server
 .DS_Store
 node_modules/

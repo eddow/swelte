@@ -1,6 +1,6 @@
 # __NAME__
 
-Swelte app — V (native server binary) + Svelte 5 + WebAssembly client modules.
+Swelte project — V (native server binary) + Svelte 5 + WebAssembly client modules.
 
 ## Develop
 
@@ -27,6 +27,19 @@ here — verify with artifacts only, then ship (`swelte preview` only runs
 host-native output).
 
 `dist/` + `dist/server` are build outputs — never committed (`.gitignore`).
+
+## Build a reusable package
+
+```sh
+npm run package       # src/lib -> package/, validates publication metadata
+```
+
+Every Swelte project supports both builds. `src/routes` stays application/demo
+code and is excluded from the library build. `package/` and application `dist/`
+are separate outputs. Export your public API from `src/lib/index.ts`; add
+subpath exports and `swelte.v.exports` for public V modules as needed.
+`files` includes only library output and V sources. Projects start private;
+remove `private: true` when ready to publish. Packaging never publishes to npm.
 
 ## Deploy
 

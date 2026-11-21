@@ -94,10 +94,14 @@ const initCmd: Command = {
 		},
 		{ name: 'empty', help: 'Empty skeleton only (no prompt)', value: 'boolean' },
 		{ name: 'template', help: 'Template to use: empty | sample | lib', value: 'string' },
-		{ name: 'kind', help: 'Project kind: app | lib (no prompt)', value: 'string' },
+		{
+			name: 'kind',
+			help: 'Deprecated starter alias: app | lib (one project shape)',
+			value: 'string',
+		},
 		{
 			name: 'lib',
-			help: 'Scaffold a library (src/lib published, src/routes dogfood; build + build:lib scripts)',
+			help: 'Deprecated alias for --template lib (reusable V sample)',
 			value: 'boolean',
 		},
 		{
@@ -230,11 +234,15 @@ const exportCmd: Command = {
 const packageCmd: Command = {
 	name: 'package',
 	summary:
-		'Library publish build: src/lib -> dist (Svelte/TS half; V ships raw via swelte.v.exports).',
+		'Library publish build: src/lib -> package (validates metadata; V ships raw via swelte.v.exports).',
 	args: [
 		{ name: 'root', help: 'Project root', value: 'string' },
-		{ name: 'input', help: 'Library source dir (default: src/lib)', value: 'string' },
-		{ name: 'output', short: 'o', help: 'Publish output dir (default: dist)', value: 'string' },
+		{
+			name: 'input',
+			help: 'Library source dir (default: configured libDir or src/lib)',
+			value: 'string',
+		},
+		{ name: 'output', short: 'o', help: 'Publish output dir (default: package)', value: 'string' },
 		{
 			name: 'tsconfig',
 			help: 'tsconfig/jsconfig for .d.ts emit (default: nearest upward)',
@@ -255,7 +263,7 @@ const packageCmd: Command = {
 			...(typeof ctx.opts.tsconfig === 'string' ? { tsconfig: ctx.opts.tsconfig } : {}),
 			...(ctx.opts['no-types'] ? { types: false } : {}),
 		})
-		ctx.log(`package: src/lib -> ${outDir}`)
+		ctx.log(`package built: ${outDir}`)
 	},
 }
 

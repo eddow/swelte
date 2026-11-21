@@ -42,7 +42,7 @@ function run(command, args, cwd = root, env = process.env) {
 function copyFixture(source, destination) {
   cpSync(source, destination, {
     recursive: true,
-    filter: path => !['node_modules', 'dist', '.swelte', '.svelte-kit'].includes(basename(path)),
+    filter: path => !['node_modules', 'dist', 'package', '.swelte', '.svelte-kit'].includes(basename(path)),
   })
 }
 
@@ -97,7 +97,7 @@ try {
   }
   copyFixture(join(fixture, 'sample-lib'), library)
   // Library publish build via the CLI (Swelte-owned temp under .swelte/,
-  // never .svelte-kit) + schema validation, same as `npm run build:lib`.
+  // never .svelte-kit) + schema validation, same as `npm run package`.
   run(process.execPath, [join(root, 'engine', 'core', 'bin', 'swelte.js'), 'package', '--root', library])
   const { collectLibDiagnostics } = await import(pathToFileURL(join(root, 'engine/core/dist/gen/diagnostics.js')))
   const libDiags = collectLibDiagnostics(library).filter(
@@ -114,7 +114,7 @@ try {
   run('npm', ['install', '--ignore-scripts', '--offline', '--no-audit', '--no-fund', '--package-lock=false'], app)
   const installed = join(app, 'node_modules/@swelte-dogfood/sample-lib')
   assert.ok(existsSync(join(installed, 'src/lib/backend/runner/formatting/formatting.v')))
-  assert.ok(existsSync(join(installed, 'dist/Panel.svelte.d.ts')))
+  assert.ok(existsSync(join(installed, 'package/Panel.svelte.d.ts')))
   assert.ok(!existsSync(join(installed, 'src/routes')))
   console.log('dogfood: packed dependency installed, including nested V and UI types')
 

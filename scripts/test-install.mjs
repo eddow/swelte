@@ -77,7 +77,7 @@ console.log(`packing engine/* @ ${VERSION} ...`)
 // Create's dist must exist for the bin + templates to pack; core's dist must
 // exist for the published CLI the scaffolded apps call.
 run(process.execPath, ['-e', '1'], { stdio: 'ignore' }) // sanity: node works scrubbed
-execSync('npm run build --workspace=@swelte/create && npm run build --workspace=@swelte/core', {
+execSync('npm run build --workspace=@swelte/create && npm run build --workspace=@swelte/core && npm run package --workspace=@swelte/ai', {
 	cwd: ROOT,
 	env: ENV,
 	stdio: 'ignore',

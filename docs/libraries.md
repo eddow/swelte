@@ -1,108 +1,87 @@
-# Swelte libraries: `src/lib` (published) + `src/routes` (dogfood)
+# One Swelte project, two build targets
 
-A Swelte library is shaped like a SvelteKit library with a V blend.
-One layout covers both authoring and consumption:
+Every Swelte project can build an application and a reusable package. There is
+no app/library project kind and no kind question in `npm create @swelte`.
 
-```text
-my-lib/
-  package.json          # files + exports + swelte.v.exports (see below)
-  svelte.config.js      # same defineConfig shape as apps
-  vite.config.ts
-  src/
-    lib/                # THE public surface — published, consumed by apps
-      Panel.svelte      # Svelte components (SvelteKit-style lib)
-      state.svelte.ts   # runes / TS helpers
-      text/api.v        # isomorphic V (universal) — published from here
-      secrets/api.v     # server-only V (backend/ or *_backend.v)
-    routes/             # dogfood / demo / test ONLY — never published
-      +page.svelte      # local demo harness
-      +page.v           # exercises the lib like a consumer would
-  dist/                 # svelte-package output (JS/Svelte side only)
+```sh
+swelte dev       # develop the local application/demo
+swelte build     # application: routes + their dependencies -> dist/
+swelte package   # library: src/lib -> package/, with publication validation
 ```
 
-## Rule 1: `src/lib` is the published surface; `src/routes` is local dogfood
+| Directory | Application build | Library build |
+|---|---|---|
+| `src/routes` | Application URLs, middleware and page loads | Excluded |
+| `src/lib` | Shared application code | Reusable package sources |
+| `dist` | Server binary and static application assets | Excluded from publication |
+| `package` | Separate from application output | Built JS, Svelte and declarations |
 
-| dir | published? | routed in consumers? | purpose |
-|---|---|---|---|
-| `src/lib/**` | **yes** | never | Svelte components + TS + V modules apps import |
-| `src/routes/**` | **no** | never | author-owned demo/test/dogfood; `swelte dev/build/test` runs here |
+Routes may serve an application or a package's demo/test harness. They never
+claim URLs in a consumer. A project with only `src/lib` can run `swelte package`
+without routes, an application entry point, a server build or a V compiler.
 
-URL ownership, middleware (`+route.v` `@[before]`/`@[after]`), and `@[load]`
-stay in the consuming application. A library's `src/routes` exists so the
-author can run the library exactly like an app (`swelte dev`, `swelte build`,
-`swelte test`) — it must never leak URL claims or API surface into consumers.
-`swelte check` warns on a library whose `package.json#files` would include
-`src/routes` (as `lib-routes-leak` under `--lib`); the `build:lib` script
-below excludes it by construction.
+## Scaffolding and scripts
 
-This mirrors SvelteKit: `src/lib` ships, `src/routes` in a library repo is the
-playground. The `#lib` / `#routes` aliases keep their app meaning inside the
-library repo (author dogfoods `#lib/...` locally, demos through `#routes/...`);
-consumers never resolve the library's `#routes`.
-
-## Rule 2: Svelte side — standard `svelte-package` format, Swelte-owned build
-
-The JS/Svelte side follows SvelteKit library conventions for the *output
-format*, not a Swelte invention — but it is built by Swelte, never by
-SvelteKit tooling:
-
-- Author in `src/lib/`. Run `swelte package` (a core CLI command wrapping
-  `@sveltejs/package`'s build core with Swelte-owned paths) to emit `dist/`
-  (compiled JS + `.d.ts`, Svelte preserved as source). Temp output lives
-  under `.swelte/package/` — never `.svelte-kit`, never any SvelteKit
-  config key. The tool only compiles Svelte/TS sources; it brings no
-  SvelteKit routing, SSR or deployment.
-- `package.json` carries `"svelte": "./dist/index.js"`, a
-  `"./package.json": "./package.json"` passthrough, and per-file
-  `exports` (`"."` + `"./<path>"` for each public Svelte/TS entry).
-- `files` includes `dist` (built output). It never includes `src/routes`.
-
-The `"build:lib"` script (`npm create @swelte --lib` scaffolds it) is the ad-hoc
-equivalent of the app's `"build": "swelte build"` — same command shape,
-different target:
+The empty and sample starters share one project shape. Every starter includes:
 
 ```json
 {
+  "private": true,
   "scripts": {
     "build": "swelte build",
-    "build:lib": "swelte package && swelte check --lib"
+    "package": "swelte package"
+  },
+  "files": ["package", "src/lib/**/*.v"],
+  "exports": {
+    ".": {
+      "types": "./package/index.d.ts",
+      "svelte": "./package/index.js",
+      "default": "./package/index.js"
+    },
+    "./package.json": "./package.json"
   }
 }
 ```
 
-Apps keep `"build": "swelte build"`. Libraries keep both: `"build"` runs the
-local dogfood app (`src/routes` demo, exactly like an app build — proves the
-lib works), `"build:lib"` publishes (`svelte-package` for the Svelte/TS half,
-`swelte check --lib` for the V/packaging half).
+Export supported components/helpers from `src/lib/index.ts` or add explicit
+subpath exports. Building does not publish anything; remove `private: true`
+when you intend to publish to npm. Public exports are an explicit API decision.
+The legacy `--lib` / `--kind lib` flags select the `--template lib` reusable-V
+sample; they do not create a different project type.
 
-`svelte-package` (the bare SvelteKit binary) is never invoked: it reads
-SvelteKit config shape and writes `.svelte-kit/` scratch. `swelte package`
-calls the same build core with Swelte-owned paths, and `swelte check --lib`
-validates
-the library schema without side effects (same diagnostics engine as
-`swelte check`):
+## Packaging
 
-- `swelte.v.exports`: every `source`/`entry` inside the package, each `entry`
-  inside its `source`, module-leaf match on root files;
-- `exports` covers each public Svelte/TS entry plus the `./package.json`
-  passthrough; each `./v/*.v` TS specifier resolves to a declared export;
-- `files` includes the Svelte output (`dist`) and the V sources under
-  `src/lib/**/*.v`, and excludes `src/routes` (warn when the packed set
-  would leak dogfood).
+`swelte package` wraps `@sveltejs/package`'s build core with Swelte-owned paths:
+Svelte/TS becomes JS, preserved Svelte source and declarations in `package/`;
+scratch output lives in `.swelte/package/`. It does not invoke the standalone
+`svelte-package` CLI, build routes, or build native/WASM application artifacts.
 
-## Rule 3: V side — `src/lib/**/*.v` published as raw sources
+The command validates publication metadata before writing output and fails on
+`lib-*` diagnostics: declared V exports must resolve, `exports` must cover V
+entries and the package.json passthrough, and `files` must include the library
+output and V sources while excluding routes. Pure Svelte/TS packages need no
+`swelte.v.exports`. `swelte check --lib` remains a read-only diagnostic command.
+
+`--input` overrides `src/lib`; otherwise the configured `swelte.libDir` is used.
+`--output` overrides `package/`; update `files`, `exports` and `svelte` to match.
+The output must stay separate from source, generated files and application
+output. Existing projects should move library export paths from `dist/` to
+`package/`, narrow `files` accordingly, and replace
+`swelte package && swelte check --lib` with `swelte package`.
+
+## V modules — `src/lib/**/*.v` published as raw sources
 
 V is compiled on the consumer side (native link + optional WASM), so V
-sources ship raw from `src/lib` — there is no V "dist". Each public V module
+sources ship raw from `src/lib` — there is no precompiled V output. Each public V module
 is declared in `package.json#swelte.v.exports`:
 
 ```json
 {
-  "files": ["dist", "src/lib/**/*.v"],
+  "files": ["package", "src/lib/**/*.v"],
   "exports": {
-    ".": { "svelte": "./dist/index.js", "types": "./dist/index.d.ts" },
+    ".": { "svelte": "./package/index.js", "types": "./package/index.d.ts" },
     "./package.json": "./package.json",
-    "./v/text.v": { "types": "./.swelte/types/npm/text.d.ts" }
+    "./v/text.v": { "types": "./package/text.d.ts" }
   },
   "swelte": {
     "v": {
@@ -140,20 +119,6 @@ backend-only: resolvable from `#routes` V-to-V includes at codegen time,
 rejected from browser/TS imports with a build error — same rule as apps
 (`rpc.md`).
 
-Isomorphism to standard SvelteKit libs: `src/lib` is published (here both
-built `dist/` for JS/Svelte and raw `src/lib/**/*.v` for V) while
+The same project layout applies to every Swelte project: `src/lib` is published (here both
+built `package/` for JS/Svelte and raw `src/lib/**/*.v` for V) while
 `src/routes` stays the local dogfood/test/demo playground.
-
-## Roadmap
-
-1. ~~`swelte-lib-pack` subcommand~~ `swelte check --lib` flag: DONE —
-   library-schema validation (export/source/entry checks via the shared
-   validator + `exports`/`files` coverage + no-`src/routes`-leak), no side
-   effects.
-2. ~~scaffolder asks app-vs-lib~~ DONE — `npm create @swelte` interactive
-   kind pick (`--lib` / `--kind lib` / `--template lib` skip it),
-   `templates/lib/` overlay, `build` + `build:lib` scripts
-   (`docs/cli.md#swelte-init-deprecated`).
-3. DONE — `fixtures/dogfood/sample-lib` uses `src/lib` + author-only `src/routes`.
-   The dogfood script builds with `swelte package`, checks the library schema,
-   packs/installs the tarball and asserts no `src/routes` files were published.

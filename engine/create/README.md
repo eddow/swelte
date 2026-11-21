@@ -10,8 +10,14 @@ Scaffold a new Swelte project:
 npm create @swelte [<dir>] [--sample | --empty | --lib] [--template empty|sample|lib] [--kind app|lib] [--ssr|--no-ssr] [--yes]
 ```
 
-Interactive (TTY) wizard: directory → kind (App / Library) → sample confirm
-(apps only) → SSR confirm (default SPA-only). Non-interactive (piped stdin,
-`CI=1`, `--yes`/`--no-interactive`) uses flag defaults.
+Interactive (TTY) wizard: directory → sample confirm → SSR confirm (default
+SPA-only). Non-interactive (piped stdin, `CI=1`, `--yes`/`--no-interactive`)
+uses flag defaults (empty, SPA).
 
-Libraries scaffold `src/lib` (published) plus a `src/routes` dogfood demo.
+Every starter is the same Swelte project shape, with `swelte build` for the
+application (`dist/`) and `swelte package` for reusable `src/lib` code
+(`package/`). Routes stay local to the application or demo. Starters include
+both scripts and explicit publication metadata, and start private.
+
+`--template lib` adds a reusable V module and demo routes. Legacy `--lib` and
+`--kind lib` select that sample content; they do not create another project type.

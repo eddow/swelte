@@ -1,6 +1,6 @@
 // Interactive prompts for `npm create @swelte` — @clack/prompts with graceful
 // non-TTY fallback (CI / piped stdin: return defaults, never block).
-import { cancel, confirm, intro, isCancel, outro, select, text } from '@clack/prompts'
+import { cancel, confirm, intro, isCancel, outro, text } from '@clack/prompts'
 
 /** True when we may draw an interactive widget. Honors --no-interactive,
 // --yes (non-interactive), and CI env — not just isTTY. */
@@ -30,18 +30,6 @@ export async function promptDirName(initial: string): Promise<string> {
 			String(v ?? '').trim() ? undefined : 'Directory name is required',
 	})
 	return orCancel<string>(value).trim() || initial
-}
-
-export async function promptKind(): Promise<'app' | 'lib'> {
-	const value = await select<'app' | 'lib'>({
-		message: 'What are you building?',
-		options: [
-			{ value: 'app', label: 'App', hint: 'routes served' },
-			{ value: 'lib', label: 'Library', hint: 'src/lib published, src/routes dogfood demo' },
-		],
-		initialValue: 'app',
-	})
-	return orCancel<'app' | 'lib'>(value)
 }
 
 export async function promptSample(): Promise<boolean> {

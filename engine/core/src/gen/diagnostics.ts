@@ -84,7 +84,8 @@ export async function collectDiagnostics(
 	const warn = (file: string, kind: string, message: string, line = 1) => {
 		out.push({ file, line, kind, message })
 	}
-	if (opts.lib) out.push(...collectLibDiagnostics(root))
+	if (opts.lib)
+		out.push(...collectLibDiagnostics(root, { routesDir: cfg.routesDir, distDir: cfg.distDir }))
 	if (existsSync(routesAbs)) {
 		for (const f of listVFiles(routesAbs)) {
 			const rel = relPosix(routesAbs, f)
@@ -366,7 +367,10 @@ interface LibPackageJson {
 /** Library-schema checks (`swelte check --lib`, see `docs/libraries.md`).
  * Pure reads over `package.json` + the declared V sources: no staging, no
  * tarball, no build. Every violation is a `lib-*` warning. */
-export function collectLibDiagnostics(root: string): Diagnostic[] {
+export function collectLibDiagnostics(
+	root: string,
+	opts: { output?: string; routesDir?: string; distDir?: string } = {}
+): Diagnostic[] {
 	const out: Diagnostic[] = []
 	const warn = (file: string, kind: string, message: string, line = 1) => {
 		out.push({ file, line, kind, message })
@@ -396,9 +400,6 @@ export function collectLibDiagnostics(root: string): Diagnostic[] {
 			(error as Error).message.replace(/^\[swelte\] /, 'swelte.v.exports: ')
 		)
 		return out.sort((a, b) => a.file.localeCompare(b.file) || a.kind.localeCompare(b.kind))
-	}
-	if (!pkg.swelte?.v?.exports || Object.keys(pkg.swelte.v.exports).length === 0) {
-		warn('package.json', 'lib-exports', 'no swelte.v.exports — library publishes no V modules')
 	}
 	// 2. `exports` coverage: Svelte entries + package.json passthrough + ./v/*.v.
 	const exportsMap =
@@ -432,12 +433,13 @@ export function collectLibDiagnostics(root: string): Diagnostic[] {
 		warn(
 			'package.json',
 			'lib-files',
-			'missing files allowlist (expected dist + src/lib V sources, never src/routes)'
+			'missing files allowlist (expected package output + src/lib V sources, never src/routes)'
 		)
 	} else {
-		const coversDist = files.some((f) => f === 'dist' || f.startsWith('dist/'))
-		if (!coversDist)
-			warn('package.json', 'lib-files', 'files misses "dist" (svelte-package output)')
+		const output = opts.output ?? 'package'
+		const coversOutput = files.some((f) => f.replace(/\/$/, '') === output)
+		if (!coversOutput)
+			warn('package.json', 'lib-files', `files misses "${output}" (library output)`)
 		for (const v of validated) {
 			const rel = v.sourceDir
 				.slice(abs.length + 1)
@@ -456,11 +458,21 @@ export function collectLibDiagnostics(root: string): Diagnostic[] {
 					`files misses V source "${rel}" for export ${v.exportKey}`
 				)
 		}
-		if (
-			files.some(
-				(f) => f === 'src/routes' || f.startsWith('src/routes/') || f === 'src' || f === 'src/'
+		const includesDirectory = (dir: string) =>
+			files.some((pattern) => {
+				const f = pattern.replace(/^\.\//, '').replace(/\/$/, '')
+				const base = f.split(/[*?{[]/)[0].replace(/\/$/, '')
+				return (
+					base === '' || dir === base || dir.startsWith(`${base}/`) || base.startsWith(`${dir}/`)
+				)
+			})
+		if (includesDirectory(opts.distDir ?? 'dist'))
+			warn(
+				'package.json',
+				'lib-app-leak',
+				'files would publish application output; include only the library output'
 			)
-		) {
+		if (includesDirectory(opts.routesDir ?? 'src/routes')) {
 			warn(
 				'package.json',
 				'lib-routes-leak',

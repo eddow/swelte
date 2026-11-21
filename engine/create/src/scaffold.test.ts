@@ -28,6 +28,9 @@ describe('create-@swelte scaffolds (no prompt in tests)', () => {
 		assert.ok(readme.includes('`dist/server`'))
 		const pkg = JSON.parse(readFileSync(join(parent, 'readme-app', 'package.json'), 'utf8'))
 		assert.equal(pkg.scripts.build, 'swelte build')
+		assert.equal(pkg.scripts.package, 'swelte package')
+		assert.deepEqual(pkg.files, ['package', 'src/lib/**/*.v'])
+		assert.ok(existsSync(join(parent, 'readme-app', 'src/lib/index.ts')))
 		assert.equal(pkg.scripts['build:local'], 'swelte build --local')
 		assert.ok(!('build:deploy' in pkg.scripts) && !('preview:deploy' in pkg.scripts))
 		assert.ok(readme.includes('readme-app'))
@@ -71,17 +74,17 @@ describe('create-@swelte scaffolds (no prompt in tests)', () => {
 		assert.ok(existsSync(join(parent, 'alias-app', 'package.json')))
 	})
 
-	it('--lib scaffolds src/lib hello.v + src/routes dogfood (no sample, lib package.json)', async () => {
+	it('legacy --lib selects the reusable V sample with shared package metadata', async () => {
 		const parent = mkdtempSync(join(tmpdir(), 'swelte-init-'))
 		await run(parent, { lib: true, root: parent }, ['my-lib'])
 		assert.ok(existsSync(join(parent, 'my-lib', 'src', 'lib', 'hello', 'api.v')))
 		assert.ok(existsSync(join(parent, 'my-lib', 'src', 'routes', '+page.v')))
 		assert.ok(!existsSync(join(parent, 'my-lib', 'src', 'routes', 'api')))
 		const pkg = JSON.parse(readFileSync(join(parent, 'my-lib', 'package.json'), 'utf8'))
-		assert.equal(pkg.private, undefined)
-		assert.deepEqual(pkg.files, ['dist', 'src/lib/**/*.v'])
-		assert.ok(pkg.scripts['build:lib'].includes('swelte package'))
-		assert.ok(pkg.scripts['build:lib'].includes('swelte check --lib'))
+		assert.equal(pkg.private, true)
+		assert.deepEqual(pkg.files, ['package', 'src/lib/**/*.v'])
+		assert.equal(pkg.scripts.package, 'swelte package')
+		assert.equal(pkg.scripts['build:lib'], undefined)
 		assert.ok(pkg.scripts.build === 'swelte build')
 		assert.ok(
 			!(
@@ -95,13 +98,13 @@ describe('create-@swelte scaffolds (no prompt in tests)', () => {
 		assert.equal(pkg.swelte.v.exports['./hello.v'].entry, './src/lib/hello/api.v')
 	})
 
-	it('--kind lib equals --lib (explicit kind, no prompt)', async () => {
+	it('legacy --kind lib selects the same reusable V sample', async () => {
 		const parent = mkdtempSync(join(tmpdir(), 'swelte-init-'))
 		await run(parent, { kind: 'lib', root: parent }, ['kind-lib'])
 		assert.ok(existsSync(join(parent, 'kind-lib', 'src', 'lib', 'hello', 'api.v')))
 	})
 
-	it('--template lib scaffolds a library', async () => {
+	it('--template lib adds reusable V sample content', async () => {
 		const parent = mkdtempSync(join(tmpdir(), 'swelte-init-'))
 		await run(parent, { template: 'lib', root: parent }, ['tpl-lib'])
 		assert.ok(existsSync(join(parent, 'tpl-lib', 'src', 'lib', 'hello', 'api.v')))
@@ -153,7 +156,7 @@ describe('create-@swelte scaffolds (no prompt in tests)', () => {
 		assert.deepEqual(pkg.npmSkills?.consume?.only, ['@swelte/*'])
 	})
 
-	it('--yes/--no-interactive never prompt (defaults: app, empty, SPA)', async () => {
+	it('--yes/--no-interactive never prompt (defaults: empty, SPA)', async () => {
 		for (const flag of ['yes', 'no-interactive']) {
 			const parent = mkdtempSync(join(tmpdir(), 'swelte-init-'))
 			await run(parent, { [flag]: true, root: parent }, [`flag-${flag}`])

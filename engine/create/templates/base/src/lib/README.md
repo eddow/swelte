@@ -5,5 +5,6 @@
 // `src/lib/backend/*.v` (or `*_backend.v`) — the physical boundary: it is
 // a build error from browser/`#lib/` WASM imports.
 //
-// This file keeps the (otherwise empty) directory in git — delete it once
-// you add your first real module. See `docs/rpc.md`.
+// Svelte components and TypeScript helpers live here too. Export the public
+// API from index.ts. `swelte package` builds this directory into package/;
+// src/routes stays local application/demo code. See `docs/libraries.md`.

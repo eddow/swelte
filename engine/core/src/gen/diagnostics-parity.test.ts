@@ -101,9 +101,9 @@ describe('diagnostics parity (tmp fixtures)', () => {
 			join(root, 'package.json'),
 			JSON.stringify({
 				name: 'my-lib',
-				files: ['dist', 'src/lib/**/*.v'],
+				files: ['package', 'src/lib/**/*.v'],
 				exports: {
-					'.': { svelte: './dist/index.js', types: './dist/index.d.ts' },
+					'.': { svelte: './package/index.js', types: './package/index.d.ts' },
 					'./package.json': './package.json',
 					'./v/hello.v': { types: './.swelte/types/npm/hello.d.ts' },
 				},
@@ -132,8 +132,8 @@ describe('diagnostics parity (tmp fixtures)', () => {
 			join(root, 'package.json'),
 			JSON.stringify({
 				name: 'my-lib',
-				files: ['dist', 'src'],
-				exports: { '.': './dist/index.js' },
+				files: ['package', 'src'],
+				exports: { '.': './package/index.js' },
 				swelte: {
 					v: {
 						exports: {
@@ -156,8 +156,8 @@ describe('diagnostics parity (tmp fixtures)', () => {
 			join(root, 'package.json'),
 			JSON.stringify({
 				name: 'my-lib',
-				files: ['dist', 'src'],
-				exports: { '.': './dist/index.js', './package.json': './package.json' },
+				files: ['package', 'src'],
+				exports: { '.': './package/index.js', './package.json': './package.json' },
 				swelte: {
 					v: {
 						exports: {
@@ -180,6 +180,30 @@ describe('diagnostics parity (tmp fixtures)', () => {
 			diags.some((d) => d.kind === 'lib-routes-leak'),
 			JSON.stringify(diags)
 		)
+	})
+
+	it('lib: broad files globs cannot publish routes or application output', () => {
+		const root = rootWith({ 'src/lib/index.ts': 'export {}' })
+		for (const pattern of ['**/*', '*', 'src/**', './src/routes/']) {
+			writeFileSync(
+				join(root, 'package.json'),
+				JSON.stringify({
+					name: 'test',
+					files: ['package', pattern],
+					exports: { '.': './package/index.js', './package.json': './package.json' },
+				})
+			)
+			assert.ok(collectLibDiagnostics(root).some((d) => d.kind === 'lib-routes-leak'))
+		}
+		writeFileSync(
+			join(root, 'package.json'),
+			JSON.stringify({
+				name: 'test',
+				files: ['package', 'dist'],
+				exports: { '.': './package/index.js', './package.json': './package.json' },
+			})
+		)
+		assert.ok(collectLibDiagnostics(root).some((d) => d.kind === 'lib-app-leak'))
 	})
 
 	it('collectDiagnostics(root, { lib }) includes lib-* warnings', async () => {

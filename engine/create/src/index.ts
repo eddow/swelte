@@ -17,10 +17,14 @@ const ARGS: ArgDef[] = [
 	{ name: 'sample', help: 'Include sample routes (demo api/admin/files/users)', value: 'boolean' },
 	{ name: 'empty', help: 'Empty skeleton only (no prompt)', value: 'boolean' },
 	{ name: 'template', help: 'Template to use: empty | sample | lib', value: 'string' },
-	{ name: 'kind', help: 'Project kind: app | lib (no prompt)', value: 'string' },
+	{
+		name: 'kind',
+		help: 'Deprecated starter alias: app | lib (one project shape)',
+		value: 'string',
+	},
 	{
 		name: 'lib',
-		help: 'Scaffold a library (src/lib published, src/routes dogfood; build + build:lib scripts)',
+		help: 'Deprecated alias for --template lib (reusable V sample)',
 		value: 'boolean',
 	},
 	{
@@ -51,7 +55,7 @@ function helpText(): string {
 	const lines = [
 		'Usage: npm create @swelte [<dir>] [options]',
 		'',
-		'Scaffold a new Swelte project in <dir> (default my-swelte-app). App (routes served) or lib (src/lib published, src/routes dogfood); empty skeleton unless --sample; SPA-only unless --ssr.',
+		'Scaffold a new Swelte project in <dir> (default my-swelte-app). One project shape: swelte build for the application, swelte package for src/lib; empty skeleton unless --sample; SPA-only unless --ssr.',
 		'',
 		'Options:',
 	]

@@ -17,14 +17,18 @@ node_modules V libs — TS: `@scope/pkg/v/x.v`; V: `npm_scope_pkg.x`
 dist/server         — single self-contained prod binary + dist/ static
 ```
 
-Libraries keep the same split one level up (`docs/libraries.md`): `src/lib`
-is the published surface (built `dist/` for JS/Svelte via `svelte-package`,
-raw `src/lib/**/*.v` for V via `swelte.v.exports`), `src/routes` is the
-local dogfood/test/demo (never published, never routed in consumers).
-`npm create @swelte` asks app-vs-lib (`--lib` / `--kind lib` / `--template lib`
-skip the prompt); libraries get `"build"` (dogfood, same as apps) plus
-`"build:lib": "svelte-package && swelte check --lib"`. `swelte check --lib`
-validates the schema as `lib-*` warnings.
+One Swelte project shape, two build targets (`docs/libraries.md`):
+`swelte build` builds the application into `dist/`; `swelte package` builds
+`src/lib` into separate `package/` output (JS/Svelte + declarations), with raw
+V sources declared through `swelte.v.exports`. Routes are application/demo
+code and never published. Packaging needs no routes or V compiler.
+`npm create @swelte` asks sample + SSR, never app-vs-lib; every starter has
+`build` + `package` scripts and starts private. Legacy `--lib` / `--kind lib`
+select reusable-V sample content (`--template lib`), not a project type.
+`swelte package` validates publication metadata and fails on `lib-*` diagnostics;
+`swelte check --lib` reports them without writing. Pure Svelte/TS packages need
+no V exports. Explicit `exports` define the public API; `files` includes
+`package` and V sources, excludes routes and application `dist`.
 
 `src/routes/+page.v` → `/`, `src/routes/api/greet.v` → `/api/greet`,
 `src/routes/users/[id].v` → `/users/[id]`, `src/routes/files/[...rest].v` → `/files/[...rest]`.
@@ -68,6 +72,7 @@ npm create @swelte myapp && cd myapp
 npm install
 npx swelte dev      # Vite :5174 + V backend :8131, one command
 npx swelte build    # typecheck + dist/server + vite build + smoke probe
+npx swelte package  # library build + publication validation (src/lib -> package/)
 npx swelte preview  # serve the build, no Vite involved
 npx swelte test     # v test + TS contract check (+ swelte.contract.json snapshot)
 npx swelte check    # diagnostics without side effects (text|json)

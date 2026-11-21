@@ -5,3 +5,8 @@ A provider adapter translates a Swelte run into a model provider request and ret
 A text-only app uses `@swelte/ai` alone. A voice or camera app composes it
 with the optional [`@swelte/media` package](../../docs/specs/media.md) behind
 the `@swelte/ai/media` entry point.
+
+This is a standard Swelte project: `npm run build` builds its local application
+from `src/routes` into `dist/`; `npm run package` builds the reusable `src/lib`
+API into `package/`. Published exports refer to `package/`, and demo routes
+are excluded from the npm archive.
