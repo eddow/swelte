@@ -1,12 +1,12 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
-import { ApprovalStore, authorizeShellCall, runAllowlisted } from '../src/routes/shell/ai/shell.js'
-import { DraftStore } from '../src/lib/draft.js'
-import { RunTracker } from '../src/lib/envelope.js'
-import { createSseParser, decodeSseEvent, encodeSseEvent } from '../src/lib/sse.js'
-import { createMemorySink } from '../src/lib/trace.js'
+import { DraftStore } from '@swelte/ai'
+import { RunTracker } from '@swelte/ai'
+import { createSseParser, decodeSseEvent, encodeSseEvent } from '@swelte/ai'
+import { createMemorySink } from '@swelte/ai'
+import { ApprovalStore, authorizeShellCall, runAllowlisted } from '../src/lib/shell.js'
 
-describe('shell/ai dogfood: one backend shell shared by chat + terminal', () => {
+describe('shell example: one backend shell shared by chat + terminal', () => {
 	it('human allowlisted commands run; unknown commands fail actionably', () => {
 		const ok = authorizeShellCall('human', 'echo hello shared shell')
 		assert.equal(ok.allowed, true)

@@ -1,7 +1,7 @@
-// shell/ai dogfood backend: one shared shell owned by this module.
+// shell/ai backend: one shared shell owned by this module.
 // Chat + terminal funnel through the same allowlisted exec/keystroke path
 // with per-call authorization; AI calls wait for a human approval record.
-// Dogfood only — not the Phase C tool system.
+// Demo only — not the Phase C tool system.
 module shell_ai
 
 import backend
@@ -70,7 +70,7 @@ fn run_allowlisted(cmd string) string {
 	if name == 'pwd' {
 		return '/shell/ai'
 	}
-	return 'dogfood'
+	return 'swelte-shell'
 }
 
 fn next_seq() int {
@@ -223,4 +223,3 @@ pub fn term(req SwelteRequest, sub fn (string) chan string, recv chan string, em
 		}
 	}
 }
-

@@ -1,7 +1,7 @@
-// shell/ai dogfood frontend helper: optimistic gating + in-memory approvals.
-// Dogfood only — never published. The authoritative backend allowlist +
-// approval records live in the route module (./+page.v); this mirrors them
-// for instant UI feedback and offline tests.
+// shell/ai frontend helper: optimistic gating + in-memory approvals.
+// Consumer-side only — the authoritative backend allowlist + approval
+// records live in the shell route backend (src/routes/shell/ai/+page.v);
+// this mirrors them for instant UI feedback and offline tests.
 export type ShellCaller = 'human' | 'ai'
 
 export interface ShellDecision {
@@ -23,7 +23,7 @@ export function authorizeShellCall(caller: ShellCaller, cmd: string): ShellDecis
 	return { allowed: true, reason: 'human allowlisted command', needsApproval: false }
 }
 
-/** Stateless demo execution for the allowlist (no OS shell — dogfood only). */
+/** Stateless demo execution for the allowlist (no OS shell — demo only). */
 export function runAllowlisted(cmd: string): string {
 	const parts = cmd.trim().split(/\s+/)
 	const name = parts[0] ?? ''
@@ -31,7 +31,7 @@ export function runAllowlisted(cmd: string): string {
 	if (name === 'echo') return parts.slice(1).join(' ')
 	if (name === 'help') return 'allowlist: echo pwd whoami help'
 	if (name === 'pwd') return '/shell/ai'
-	if (name === 'whoami') return 'dogfood'
+	if (name === 'whoami') return 'swelte-shell'
 	throw new Error(`command not allowlisted: ${name}`)
 }
 

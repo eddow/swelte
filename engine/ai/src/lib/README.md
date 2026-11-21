@@ -244,5 +244,6 @@ flowchart TD
   `schema` consume it. None of them import each other (except `trace` -> `schema`
   for the `SchemaIdentity` field type).
 - `boundary` is type-only; `media` re-exports it and throws until Phase D.
-- `index.ts` re-exports the public surface only — dogfood (`src/routes/...`,
-  e.g. the shell/ai approval helper) must never be imported from `#lib`.
+- `index.ts` re-exports the public surface only — consumer demos (e.g. the
+  `examples/shell` approval helper in its own `src/lib/`) are never imported
+  from `#lib`.

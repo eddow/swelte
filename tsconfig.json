@@ -1,0 +1,38 @@
+{
+	// General fix for `*.test.ts` / `*.spec.ts` importing from `node:*`.
+	// VS Code's tsserver only auto-loads `tsconfig.json` files (never
+	// `tsconfig.test.json`), and several packages exclude their tests from
+	// their local `tsconfig.json` (to keep `tsc -p .` emit clean). An excluded
+	// test file then falls back to an *inferred project* with default `types`
+	// (no @types/node) and the editor reports:
+	//   Cannot find module 'node:…' / Cannot find name 'node:…'
+	//   Do you need to install type definitions for node?
+	// even though `tsc -p tsconfig.test.json` passes.
+	// This root project exists purely so every test/spec file in the repo
+	// always belongs to a real project with `"types": ["node"]`. It is
+	// `noEmit` and is never used for builds or tests; per-package
+	// `tsconfig.test.json` files remain the source of truth for `pretest`
+	// emit. New packages get coverage automatically via the globs below.
+	"extends": "./tsconfig.base.json",
+	"compilerOptions": {
+		"noEmit": true,
+		"allowJs": false,
+		"checkJs": false,
+		// The trick, stated once: `types` must list `node` explicitly,
+		// otherwise @types/node is hidden and `node:*` imports fail.
+		"types": ["node"]
+	},
+	"include": [
+		"engine/*/tests/**/*.test.ts",
+		"engine/*/tests/**/*.spec.ts",
+		"engine/*/src/**/*.test.ts",
+		"engine/*/src/**/*.spec.ts",
+		"examples/*/tests/**/*.test.ts",
+		"examples/*/tests/**/*.spec.ts",
+		"fixtures/*/tests/**/*.test.ts",
+		"fixtures/*/tests/**/*.spec.ts",
+		"scripts/**/*.test.ts",
+		"scripts/**/*.spec.ts"
+	],
+	"exclude": ["**/node_modules", "**/dist", "**/dist-test"]
+}
