@@ -1,7 +1,7 @@
 {
   "name": "@swelte/plus",
-  "version": "0.1.5",
-  "description": "DEPRECATED \u2014 jobs scheduler + embedded backend moved into @swelte/core (empty re-export shim).",
+  "version": "0.1.6",
+  "description": "DEPRECATED — jobs scheduler + embedded backend moved into @swelte/core (empty re-export shim).",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -36,7 +36,7 @@
   },
   "license": "MIT",
   "author": {
-    "name": "Fran\u00e7ois Marie De Mey",
+    "name": "François Marie De Mey",
     "email": "fmdm@emedware.dev",
     "url": "https://github.com/eddow"
   },

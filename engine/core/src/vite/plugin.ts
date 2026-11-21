@@ -9,8 +9,8 @@ import { isBackendMod, SWELTE_GEN_CORE_DIRS } from '../gen/paths.js'
 import { resolveV } from '../toolchain.js'
 import type { SweltePlugin } from '../vite/types.js'
 
-/** First registration wins (by plugin `name`): builtin jobs+backend come
- *  first and yield to an explicit user instance of the same name — e.g.
+/** First registration wins (by plugin `name`): explicit user plugins come
+ *  first and take precedence to an explicit user instance of the same name — e.g.
  *  `createJobsPlugin({ durable: true })` overrides the builtin default. */
 function dedupPlugins(all: SweltePlugin[]): SweltePlugin[] {
 	const seen = new Set<string>()
@@ -132,14 +132,14 @@ export function swelte(options: SweltePluginOptions = {}): Plugin {
 			: 'layout'
 	// V+TS plugins (core contract `SweltePlugin`; third-party plugins
 	// implement it for their own attrs). Builtin jobs+backend are ALWAYS
-	// registered below, ahead of user plugins of the same name (first
+	// registered below, after user plugins of the same name (first
 	// registration wins: explicit user instances — e.g.
 	// `createJobsPlugin({ durable: true })` from `@swelte/core/jobs` — keep
 	// working and override the builtin default).
 	// Usage-gated emission: zero `@[cron]` ticks emit empty fragments
 	// (byte-identical harness), and the backend V module copies only when
 	// room-SSE/WS fns need it — an unused builtin changes nothing.
-	const plugins = dedupPlugins([builtinJobsPlugin, builtinDbPlugin, ...(options.plugins ?? [])])
+	const plugins = dedupPlugins([...(options.plugins ?? []), builtinJobsPlugin, builtinDbPlugin])
 	const extraAttrs = [...new Set(plugins.flatMap((p) => p.attrs))]
 	// Resolved per-generate() against the Vite root (never at construction:
 	// outDir is relative and the cwd at plugin-construction time is not the
@@ -327,6 +327,9 @@ export function swelte(options: SweltePluginOptions = {}): Plugin {
 				// in any route file → harness imports the backend hub module.
 				// Declared here so the harness render below sees the route-loop result.
 				let hasRoomSse = false
+				const needsBackendImport = listVFiles(resolve(root, "src")).some((file) =>
+					/^\s*import\s+backend\b/m.test(readFileSync(file, "utf8"))
+				)
 				// Hoisted prelude (bridge stub + backend includes + marker):
 				// generate() must leave a compilable .swelte/ even when the
 				// route loop below throws (e.g. dev pre-generate swelte({})
@@ -372,7 +375,7 @@ export function swelte(options: SweltePluginOptions = {}): Plugin {
 					// always registered, so this always runs.
 					// Usage gate for the builtin `backend` include (room-SSE/WS
 					// only): scan route files for the hub shapes before copying.
-					let earlyNeedsBackend = false
+					let earlyNeedsBackend = needsBackendImport
 					try {
 						const earlyRoutesAbs = resolve(root, routesDir)
 						if (existsSync(earlyRoutesAbs)) {
@@ -1806,7 +1809,7 @@ export declare const dev: boolean
 					for (const include of plugin.includes?.() ?? []) {
 						// Builtin `db` backend is usage-gated: skip here when no room/WS
 						// fn needs it — the `hasRoomSse` copy below handles the used case.
-						if (plugin.name === 'db' && include.module === 'backend' && !hasRoomSse) continue
+						if (plugin.name === 'db' && include.module === 'backend' && !(hasRoomSse || needsBackendImport)) continue
 						if (!existsSync(include.absDir)) continue
 						for (const file of readdirSync(include.absDir))
 							if (file.endsWith('.v')) pluginFiles.add(`${include.module}/${file}`)
@@ -1841,7 +1844,7 @@ export declare const dev: boolean
 							}
 							// Builtin `db` backend is usage-gated (room-SSE/WS only):
 							// skip here when unused (copied via the `hasRoomSse` gate above).
-							if (pp.name === 'db' && inc.module === 'backend' && !hasRoomSse) continue
+							if (pp.name === 'db' && inc.module === 'backend' && !(hasRoomSse || needsBackendImport)) continue
 							let files: string[] = []
 							try {
 								files = readdirSync(inc.absDir).filter((f) => f.endsWith('.v'))

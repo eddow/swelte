@@ -13,13 +13,13 @@
   },
   "dependencies": {
     "svelte": "^5.0.0",
-    "@swelte/core": "^__SWELTE_VERSION__"
+    "@swelte/core": "^__SWELTE_VERSION_core__"
   },
   "devDependencies": {
     "@sveltejs/vite-plugin-svelte": "^5.0.0",
     "typescript": "^5.0.0",
     "vite": "^6.0.0",
-    "@swelte/vvm": "^__SWELTE_VERSION__",
+    "@swelte/vvm": "^__SWELTE_VERSION_vvm__",
     "npm-skills": "^0.5.1"
   },
   "allowScripts": {

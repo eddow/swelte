@@ -10,7 +10,7 @@
 // Interactive prompts (TTY only) go through `./prompts.js`
 // (@clack/prompts wizard: dir → kind → sample → ssr); piped stdin, CI,
 // `--yes`/`--no-interactive` skip them and use flag defaults.
-// Only `__NAME__` (+ `__SWELTE_VERSION__` in package.json) is replaced.
+// Only `__NAME__` (+ per-dep `__SWELTE_VERSION_<pkg>__` in package.json) is replaced.
 // Generated files (server harness, client entry, routers) are NEVER
 // scaffolded — `dev`/`build` derive them into `.swelte/`.
 // src/app.ts is the optional user-owned setup hook; the engine-owned
@@ -39,10 +39,11 @@ import {
 	promptSsr,
 } from './prompts.js'
 
-// Single truth: this package's version (synced with the monorepo by
-// scripts/sync-version.mjs). Templates pin @swelte/* to it.
 const require = createRequire(import.meta.url)
-export const VERSION: string = require('../package.json').version
+const manifest = require('../package.json')
+export const VERSION: string = manifest.version
+export const TEMPLATE_LINE = VERSION.split('.').slice(0, 2).join('.')
+export const TEMPLATE_DEPS: Record<string, string> = manifest.templateMinimums
 
 export interface CreateOpts {
 	root?: string
@@ -147,16 +148,27 @@ export async function runCreate(
 		const abs = join(root, rel)
 		if (!existsSync(abs)) continue
 		let text = readFileSync(abs, 'utf8').split('__NAME__').join(name)
+		const depVersion = (dep: string) => TEMPLATE_DEPS[dep] ?? VERSION
 		if (wantSsr) {
 			text = text
-				.split(`"@swelte/core": "^__SWELTE_VERSION__"`)
-				.join(`"@swelte/core": "^${VERSION}",\n    "@swelte/ssr-qjs": "^${VERSION}"`)
+				.split(`"@swelte/core": "^__SWELTE_VERSION_core__"`)
+				.join(
+					`"@swelte/core": "^${depVersion('@swelte/core')}",\n    "@swelte/ssr-qjs": "^${depVersion('@swelte/ssr-qjs')}"`
+				)
 				.split(`import { swelte } from '@swelte/core/vite'`)
 				.join(`import { swelte } from '@swelte/ssr-qjs'`)
-				.split('__SWELTE_VERSION__')
-				.join(VERSION)
+				.split('__SWELTE_VERSION_core__')
+				.join(depVersion('@swelte/core'))
+				.split('__SWELTE_VERSION_vvm__')
+				.join(depVersion('@swelte/vvm'))
+				.split('__SWELTE_VERSION_ssr-qjs__')
+				.join(depVersion('@swelte/ssr-qjs'))
 		} else {
-			text = text.split('__SWELTE_VERSION__').join(VERSION)
+			text = text
+				.split('__SWELTE_VERSION_core__')
+				.join(depVersion('@swelte/core'))
+				.split('__SWELTE_VERSION_vvm__')
+				.join(depVersion('@swelte/vvm'))
 		}
 		if (wantLib && rel === 'package.json') {
 			const pkg = JSON.parse(text) as Record<string, unknown>

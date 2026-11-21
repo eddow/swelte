@@ -2,7 +2,7 @@
   "name": "swelte-monorepo",
   "private": true,
   "type": "module",
-  "version": "0.1.5",
+  "version": "0.2.0",
   "workspaces": [
     "engine/*",
     "examples/*"
@@ -21,8 +21,9 @@
     "measure:dogfood": "node scripts/measure-dogfood.mjs",
     "version:sync": "node scripts/sync-version.mjs",
     "version:patch": "node scripts/sync-version.mjs patch",
-    "version:minor": "node scripts/sync-version.mjs minor",
-    "version:major": "node scripts/sync-version.mjs major",
+    "version:line-cut": "node scripts/sync-version.mjs line-cut",
+    "version:plan": "node scripts/sync-version.mjs plan",
+    "version:check": "node scripts/sync-version.mjs check",
     "biome:check": "biome check .",
     "biome": "biome check --write .",
     "biome:unsafe": "biome check --write . --unsafe",

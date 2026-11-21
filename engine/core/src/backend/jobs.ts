@@ -293,7 +293,7 @@ export function createJobsPlugin(options: { durable?: boolean } = {}): SweltePlu
 			? () => [
 					{
 						module: 'sweltejobs',
-						absDir: join(dirname(fileURLToPath(import.meta.url)), '..', 'vlib', 'sweltejobs'),
+						absDir: join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'vlib', 'sweltejobs'),
 					},
 				]
 			: undefined,

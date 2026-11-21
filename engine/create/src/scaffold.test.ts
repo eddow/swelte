@@ -106,7 +106,18 @@ describe('create-@swelte scaffolds (no prompt in tests)', () => {
 		await run(parent, { empty: true, ssr: true, root: parent }, ['ssr-app'])
 		const pkg = JSON.parse(readFileSync(join(parent, 'ssr-app', 'package.json'), 'utf8'))
 		assert.ok(pkg.dependencies['@swelte/ssr-qjs'], 'ssr dep present')
-		assert.ok(!String(pkg.dependencies['@swelte/ssr-qjs']).includes('__SWELTE_VERSION__'))
+		assert.ok(!String(pkg.dependencies['@swelte/ssr-qjs']).includes('__SWELTE_VERSION'))
+		assert.ok(!String(pkg.dependencies['@swelte/core']).includes('__SWELTE_VERSION'))
+		assert.ok(!String(pkg.devDependencies['@swelte/vvm']).includes('__SWELTE_VERSION'))
+		// Scaffold floors stay on the reviewed line: an independent create
+		// patch must never generate a minimum from a line that was never cut.
+		const { TEMPLATE_DEPS, TEMPLATE_LINE } = await import('./scaffold.js')
+		for (const [dep, v] of Object.entries(TEMPLATE_DEPS)) {
+			assert.ok(String(v).startsWith(`${TEMPLATE_LINE}.`), `${dep}@${v} not on template line ${TEMPLATE_LINE}`)
+		}
+		assert.ok(String(pkg.dependencies['@swelte/core']).startsWith(`^${TEMPLATE_LINE}.`))
+		assert.ok(String(pkg.dependencies['@swelte/ssr-qjs']).startsWith(`^${TEMPLATE_LINE}.`))
+		assert.ok(String(pkg.devDependencies['@swelte/vvm']).startsWith(`^${TEMPLATE_LINE}.`))
 		const vite = readFileSync(join(parent, 'ssr-app', 'vite.config.ts'), 'utf8')
 		assert.ok(vite.includes(`from '@swelte/ssr-qjs'`), 'adapter import swapped')
 		assert.ok(!vite.includes('@swelte/core/vite'))

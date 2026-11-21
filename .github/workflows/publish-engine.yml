@@ -1,8 +1,11 @@
-# Manually launched: build + npm-publish every engine/** package.
+# Manually launched: build + npm-publish engine packages (independent patches).
 #
-# Run from the GitHub UI: Actions → "Publish engine packages" → Run workflow.
-# Publishes in dependency order (vvm → core → mcp / plus / ssr-qjs)
-# so intra-workspace ^ranges always resolve to the just-published version.
+# Selection follows docs/specs/versioning.md: the registry gate diffs every
+# active workspace version against npm and approves exactly what needs
+# publishing — the plan preview and the publish step consume the same gate
+# output, so the reviewed list is the published list. Publishes in
+# dependency order (vvm → core → mcp / ssr-qjs → create) so intra-workspace
+# ^ranges always resolve to the just-published version.
 #
 # Requires a repository secret `NPM_TOKEN` (npm access token with
 # publish rights on the @swelte scope).
@@ -12,6 +15,14 @@ name: Publish engine packages
 'on':
   workflow_dispatch:
     inputs:
+      mode:
+        description: 'single = independent patch(es), fail-fast on line changes; line-cut = coordinated 0.1.x -> 0.2.0 for all active'
+        required: false
+        default: single
+        type: choice
+        options:
+          - single
+          - line-cut
       tag:
         description: 'npm dist-tag to publish under'
         required: false
@@ -49,14 +60,46 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Test release tooling
+        run: node --test scripts/sync-version.test.mjs
+
+      - name: Registry gate (fail-fast on line changes in single mode)
+        id: gate
+        run: |
+          set -euo pipefail
+          MODE="${{ inputs.mode || 'single' }}"
+          # The gate diffs workspace vs npm for every active package and
+          # approves exactly what needs publishing — no manual selection.
+          # check exits 1 on refusal (line change in single mode, stale,
+          # unknown, retired, registry unreachable) — that fails the run
+          # before anything is built or published. Already-published
+          # state exits 0 with an empty list (green no-op).
+          node scripts/sync-version.mjs check --mode "$MODE" --json | tee /tmp/gate.json
+          {
+            echo 'publish<<EOF'
+            node -e "console.log(JSON.parse(require('fs').readFileSync('/tmp/gate.json','utf8')).publish.join(' '))"
+            echo 'EOF'
+            echo "mode=$MODE"
+          } >> "$GITHUB_OUTPUT"
+          echo '### Registry gate' >> "$GITHUB_STEP_SUMMARY"
+          echo '' >> "$GITHUB_STEP_SUMMARY"
+          node -e "
+            const g = JSON.parse(require('fs').readFileSync('/tmp/gate.json','utf8'));
+            for (const r of g.rows) {
+              const v = g.publish.includes(r.pkg) ? 'publish' : (g.skipped.find(s=>s.pkg===r.pkg) ? 'skip: '+g.skipped.find(s=>s.pkg===r.pkg).reason : 'REFUSED: '+(g.refused.find(x=>x.pkg===r.pkg)||{}).reason);
+              console.log('- @swelte/'+r.pkg+': local '+r.local+' / npm '+(r.published??'(missing)')+' → '+v);
+            }
+            for (const r of g.refused) if (!g.rows.some(x=>x.pkg===r.pkg)) console.log('- @swelte/'+r.pkg+': REFUSED: '+r.reason);
+          " >> "$GITHUB_STEP_SUMMARY"
+
       - name: Build engine packages
         run: >-
           npm run build
           --workspace=@swelte/vvm
           --workspace=@swelte/core
           --workspace=@swelte/mcp
-          --workspace=@swelte/plus
           --workspace=@swelte/ssr-qjs
+          --workspace=@swelte/create
           --if-present
 
       - name: Publish engine packages
@@ -67,12 +110,22 @@ jobs:
           set -euo pipefail
           TAG="${{ inputs.tag || 'latest' }}"
           DRY_RUN="${{ inputs.dry-run }}"
+          WANT="${{ steps.gate.outputs.publish }}"
+          if [ -z "$WANT" ]; then
+            echo "nothing to publish (all selected already on npm) — green no-op"
+            exit 0
+          fi
           ARGS=(--tag "$TAG" --access public)
           if [ "$DRY_RUN" = "true" ]; then
             ARGS+=(--dry-run)
           fi
-          for pkg in @swelte/vvm @swelte/core @swelte/mcp @swelte/plus @swelte/ssr-qjs; do
-            echo "::group::npm publish $pkg (tag: $TAG)"
-            npm publish --workspace="$pkg" "${ARGS[@]}"
+          # Gate-approved list, dependency order: retired plus never appears.
+          for pkg in vvm core mcp ssr-qjs create; do
+            case " $WANT " in
+              *" $pkg "*) ;;
+              *) echo "skip @swelte/$pkg (not approved by gate)"; continue ;;
+            esac
+            echo "::group::npm publish @swelte/$pkg (tag: $TAG)"
+            npm publish --workspace="@swelte/$pkg" "${ARGS[@]}"
             echo "::endgroup::"
           done

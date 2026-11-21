@@ -2,6 +2,8 @@
 
 A voice recorder, a camera preview and a spoken AI conversation all need capture, playback and cleanup. The proposed optional package would expose those operations to Svelte components and describe streams a V endpoint can receive or produce. A standalone recorder should work with local browser capture and playback alone. An application can add a transport for remote media and compose the tracks with [`@swelte/ai`](ai.md) for model-backed sessions.
 
+Package versions and publish selection follow the proposed [Swelte release policy](versioning.md).
+
 ## Streams and controls
 
 Model an endpoint as a **typed stream plus a set of supported controls**. A stream can produce or consume timestamped samples. Each track describes its payload schema or encoding, units where relevant, clock and direction. A control addresses a specific endpoint and has a name, argument schema and result schema. Local browser endpoints and remote V endpoints expose the same contract to a Svelte component.

@@ -2,9 +2,15 @@
 
 An opt-in `@swelte/ai` package would let a Svelte page and a V backend exchange typed content throughout a run. A run may produce several outputs at once, accept new input while it is active, and finish without calling any tools. Keep the protocol, adapters and recording policy in the package. Reuse Swelte's native transport and V type declarations where they fit.
 
+Package versions and publish selection follow the proposed [Swelte release policy](versioning.md).
+
 ## Package boundary and typed multiplexing
 
 A text-only app can use `@swelte/ai` directly. A voice or camera app composes it with the optional [`@swelte/media` package](media.md). Each package can use Swelte's general HTTP and WebSocket primitives independently. The application connects media tracks to AI turns after checking the provider's input and output capabilities.
+
+Declare the tested media range in AI's `peerDependencies` and set `peerDependenciesMeta["@swelte/media"].optional` to `true`. npm then leaves media out of an AI-only install. Put the integration behind the proposed `@swelte/ai/media` entry point. Keep media imports, including public TypeScript declaration references and native V module imports, confined to the integration. [npm optional peer dependencies](https://docs.npmjs.com/cli/v11/configuring-npm/package-json/#peerdependenciesmeta)
+
+Verify with packed packages in clean app directories outside the monorepo. Install AI alone, confirm media is absent, then typecheck, build and run a text-streaming route. In a second app, install both packages and exercise the media entry point with the minimum supported media version.
 
 The AI envelope associates events with a run, a turn where applicable, an output ID, an event kind and a sequence number. Text deltas, transcript revisions, citations, tool progress, approval requests and structured patches can share a streaming POST response with SSE framing. Give app-defined events a namespaced kind and a versioned schema. A client can skip an unfamiliar optional event and continue consuming the run. Ending one output leaves the other outputs active until the run emits a terminal event.
 

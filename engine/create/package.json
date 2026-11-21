@@ -1,6 +1,11 @@
 {
   "name": "@swelte/create",
-  "version": "0.1.5",
+  "version": "0.2.0",
+  "templateMinimums": {
+    "@swelte/core": "0.2.0",
+    "@swelte/ssr-qjs": "0.2.0",
+    "@swelte/vvm": "0.2.0"
+  },
   "description": "Scaffold a new Swelte project — npm create @swelte (app or library, SPA or SSR).",
   "type": "module",
   "main": "./dist/index.js",

@@ -15,7 +15,9 @@ export function resolveCommands(plugins: { cli?: Command[]; name?: string }[] = 
 	if (!extra.length) return COMMANDS
 	const names = new Set(COMMANDS.map((c) => c.name))
 	for (const c of extra) {
-		if (names.has(c.name)) continue // builtin wins over the legacy plugin shape
+		if (c === COMMANDS.find((command) => command.name === 'migrate')) continue
+		if (names.has(c.name))
+			throw new Error(`[swelte] plugin command '${c.name}' collides with an existing command`)
 		names.add(c.name)
 	}
 	return [...COMMANDS, ...extra.filter((c) => !COMMANDS.some((k) => k.name === c.name))]

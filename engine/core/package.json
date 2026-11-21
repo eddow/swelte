@@ -1,7 +1,7 @@
 {
   "name": "@swelte/core",
-  "version": "0.1.5",
-  "description": "Swelte framework core \u2014 V + Svelte unified RPC bridge (Vite plugin, SDK generator, CLI; builtin jobs scheduler + embedded backend)",
+  "version": "0.2.0",
+  "description": "Swelte framework core — V + Svelte unified RPC bridge (Vite plugin, SDK generator, CLI; builtin jobs scheduler + embedded backend)",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -49,7 +49,7 @@
     "npm-skills": "^0.5.1"
   },
   "dependencies": {
-    "@swelte/vvm": "^0.1.5"
+    "@swelte/vvm": "^0.2.0"
   },
   "typesVersions": {
     "*": {
@@ -71,7 +71,7 @@
     }
   },
   "author": {
-    "name": "Fran\u00e7ois Marie De Mey",
+    "name": "François Marie De Mey",
     "email": "fmdm@emedware.dev",
     "url": "https://github.com/eddow"
   },
