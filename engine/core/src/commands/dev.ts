@@ -320,8 +320,16 @@ export async function runDev(ctx: Ctx): Promise<void> {
 	if (port === backend) throw new Error('Vite and backend ports must differ')
 	await requireFreePort(port)
 	await requireFreePort(backend)
-	const { resolveV, vVersion, toolchainEnv, resolveHostCC, needsGlobals, hasRealBridge } =
-		await import('../toolchain.js')
+	const {
+		resolveV,
+		vVersion,
+		toolchainEnv,
+		resolveHostCC,
+		needsGlobals,
+		hasRealBridge,
+		loadDotenv,
+	} = await import('../toolchain.js')
+	loadDotenv(root)
 	const { loadConfig } = await import('../gen/config.js')
 	const v = resolveV(import.meta.url)
 	ctx.log(`V toolchain: ${vVersion(v)} (${v})`)

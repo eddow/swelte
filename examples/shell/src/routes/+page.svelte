@@ -1,17 +1,34 @@
 <script lang="ts">
 import { tick } from 'svelte'
-import {
-	DeterministicAdapter,
-	DraftStore,
-	RunTracker,
-	capabilityFailure,
-	createMemorySink,
-	routeAdapter,
-} from '@swelte/ai'
+import { DraftStore, RunTracker, capabilityFailure, createMemorySink } from '@swelte/ai'
 import { applyTheme, setTheme, storedTheme, type Theme } from '#lib/theme.js'
 import { ApprovalStore, authorizeShellCall, runAllowlisted } from '#lib/shell.js'
+import {
+	activeAiConfig,
+	createAiConfig,
+	loadActiveAiConfigId,
+	loadAiConfigs,
+	saveActiveAiConfigId,
+	saveAiConfigs,
+	updateAiConfig,
+	ADAPTER_MODELS,
+	type AiAdapterKind,
+	type AiConfiguration,
+} from '#lib/ai-config.js'
 import { onMount } from 'svelte'
-import { approve, chat, deny, exec, stream } from '#routes/+page.v'
+import {
+	ai_chat,
+	ai_key_status,
+	ai_models,
+	approve,
+	chat,
+	deny,
+	exec,
+	send_input,
+	stream,
+} from '#routes/+page.v'
+
+import AiAnswer, { type AiThinkingStep, type AiToolCall } from '#lib/ai-answer.svelte'
 
 interface ChatMsg {
 	id: string
@@ -20,6 +37,10 @@ interface ChatMsg {
 	author?: string
 	meta?: string
 	pending?: boolean
+	thinking?: AiThinkingStep[]
+	thinkingActive?: boolean
+	thinkingStarted?: number
+	tools?: AiToolCall[]
 }
 
 interface PendingApproval {
@@ -77,6 +98,150 @@ const card = new DraftStore({ title: '', note: '' })
 const sink = createMemorySink()
 const tracker = new RunTracker()
 const nextOp = () => `op-${Date.now().toString(36)}-${(opSeq += 1)}`
+// AI configurations: adapter + model + run config, several to choose from
+// in the chat window. Client-side only (localStorage, never API keys);
+// the server reads keys from env (`.env`).
+let aiConfigs: AiConfiguration[] = $state(loadAiConfigs())
+let activeAiId: string | null = $state(loadActiveAiConfigId())
+let keyedUp: { adapter: string; configured: boolean }[] = $state([])
+let showAiSettings = $state(false)
+let editingAiId: string | null = $state(null)
+let aiFormName = $state('')
+let aiFormAdapter: AiAdapterKind = $state('openrouter')
+let aiFormModel = $state('')
+let aiFormSystem = $state('')
+let aiFormTemperature = $state('')
+let aiFormMaxTokens = $state('')
+// Live model catalog per adapter (fetched server-side, cached 10 min);
+// falls back to ADAPTER_MODELS when unreachable/unkeyed.
+let liveModels: Record<AiAdapterKind, string[]> = $state({
+	deterministic: [],
+	openrouter: [],
+	openai: [],
+	anthropic: [],
+})
+let liveModelsLoading = $state(false)
+
+function modelSuggestions(adapter: AiAdapterKind): string[] {
+	const live = liveModels[adapter]
+	if (live.length) {
+		// Keep the typed value first even when absent from the catalog.
+		if (aiFormModel.trim() && !live.includes(aiFormModel.trim())) {
+			return [aiFormModel.trim(), ...live]
+		}
+		return live
+	}
+	return ADAPTER_MODELS[adapter]
+}
+
+async function refreshLiveModels(adapter: AiAdapterKind) {
+	if (adapter === 'deterministic') return
+	if (liveModelsLoading || liveModels[adapter].length) return
+	liveModelsLoading = true
+	try {
+		const ids = await ai_models({ adapter })
+		if (Array.isArray(ids) && ids.length) {
+			liveModels = { ...liveModels, [adapter]: ids }
+		}
+	} catch {
+		// Offline/unkeyed/provider down — the datalist keeps the fallback.
+	} finally {
+		liveModelsLoading = false
+	}
+}
+
+function persistAiConfigs() {
+	saveAiConfigs(aiConfigs)
+}
+
+function selectAiConfig(id: string) {
+	activeAiId = id
+	saveActiveAiConfigId(id)
+}
+
+function configuredFor(adapter: AiAdapterKind): boolean {
+	if (adapter === 'deterministic') return true
+	return keyedUp.find((k) => k.adapter === adapter)?.configured ?? false
+}
+
+function startAiCreate() {
+	editingAiId = null
+	aiFormName = ''
+	aiFormAdapter = 'openrouter'
+	aiFormModel = ''
+	aiFormSystem = ''
+	aiFormTemperature = ''
+	aiFormMaxTokens = ''
+	showAiSettings = true
+}
+
+function startAiEdit(cfg: AiConfiguration) {
+	editingAiId = cfg.id
+	aiFormName = cfg.name
+	aiFormAdapter = cfg.adapter
+	aiFormModel = cfg.model
+	aiFormSystem = cfg.run.system ?? ''
+	aiFormTemperature = cfg.run.temperature !== undefined ? String(cfg.run.temperature) : ''
+	aiFormMaxTokens = cfg.run.maxTokens !== undefined ? String(cfg.run.maxTokens) : ''
+	showAiSettings = true
+}
+
+function saveAiForm() {
+	const temperature = aiFormTemperature.trim() === '' ? undefined : Number(aiFormTemperature)
+	const maxTokens = aiFormMaxTokens.trim() === '' ? undefined : Number(aiFormMaxTokens)
+	if (temperature !== undefined && !Number.isFinite(temperature)) {
+		note = 'temperature must be a number'
+		return
+	}
+	if (maxTokens !== undefined && !(Number.isFinite(maxTokens) && maxTokens > 0)) {
+		note = 'max tokens must be a positive number'
+		return
+	}
+	const input = {
+		name: aiFormName.trim() || `${aiFormAdapter} / ${aiFormModel.trim()}`,
+		adapter: aiFormAdapter,
+		model: aiFormModel.trim(),
+		run: {
+			...(temperature !== undefined ? { temperature } : {}),
+			...(maxTokens !== undefined ? { maxTokens: Math.floor(maxTokens) } : {}),
+			...(aiFormSystem.trim() ? { system: aiFormSystem.trim() } : {}),
+		},
+	}
+	try {
+		if (editingAiId) {
+			const existing = aiConfigs.find((c) => c.id === editingAiId)
+			if (!existing) return
+			aiConfigs = aiConfigs.map((c) => (c.id === editingAiId ? updateAiConfig(c, input) : c))
+		} else {
+			const created = createAiConfig(input)
+			aiConfigs = [...aiConfigs, created]
+			selectAiConfig(created.id)
+		}
+		persistAiConfigs()
+		showAiSettings = false
+		editingAiId = null
+		note = ''
+	} catch (e) {
+		showError(e)
+	}
+}
+
+function deleteAiConfig(id: string) {
+	if (aiConfigs.length <= 1) {
+		note = 'keep at least one configuration'
+		return
+	}
+	aiConfigs = aiConfigs.filter((c) => c.id !== id)
+	if (activeAiId === id) {
+		activeAiId = aiConfigs[0]?.id ?? null
+		if (activeAiId) saveActiveAiConfigId(activeAiId)
+	}
+	persistAiConfigs()
+	if (editingAiId === id) {
+		editingAiId = null
+		showAiSettings = false
+	}
+}
 
 function showError(e: unknown) {
 	note = e instanceof Error ? e.message : String(e)
@@ -157,6 +322,30 @@ function resolveMsg(id: string, patch: Partial<ChatMsg>) {
 	followChat()
 }
 
+// Merge one tool row into a message's tool session (append or update by id).
+function upsertTool(id: string, tool: AiToolCall): AiToolCall[] {
+	const msg = messages.find((m) => m.id === id)
+	const tools = [...(msg?.tools ?? [])]
+	const at = tools.findIndex((t) => t.id === tool.id)
+	if (at >= 0) {
+		const prev = tools[at]!
+		tools[at] = { ...prev, ...tool, detail: [...(prev.detail ?? []), ...(tool.detail ?? [])] }
+	} else {
+		tools.push(tool)
+	}
+	return tools
+}
+
+// Settle every tool row when the run ends (done, or failed on error).
+function markToolsDone(id: string, ok: boolean): AiToolCall[] {
+	const msg = messages.find((m) => m.id === id)
+	return (msg?.tools ?? []).map((t) =>
+		t.status === 'active' || t.status === 'pending'
+			? { ...t, status: ok ? ('done' as const) : ('failed' as const) }
+			: t
+	)
+}
+
 async function runHumanCommand(raw: string) {
 	const cmd = raw.trim()
 	if (!cmd || execRunning) return
@@ -219,24 +408,152 @@ async function sendChat() {
 	// Pin the turn now: an interrupt mid-reply must attribute this exchange
 	// to the turn it started on, not the one it settles on.
 	const turn = activeTurn
+	const cfg = activeAiConfig(aiConfigs, activeAiId)
 	pushHistory(text)
 	pushMsg('user', text, { meta: turn })
-	const waitId = pushMsg('assistant', '…', { author: 'deterministic', meta: turn, pending: true })
+	const waitId = pushMsg('assistant', '', {
+		author: `${cfg.adapter} · ${cfg.model}`,
+		meta: turn,
+		pending: true,
+		thinking: [{ label: 'Contacting provider', status: 'active' }],
+		thinkingActive: true,
+		thinkingStarted: Date.now(),
+		tools: [],
+	})
+	let assembled = ''
+	let gotTerminal = false
 	try {
-		const adapter = routeAdapter({ input: ['text'], output: ['text'] }, [
-			Object.assign(new DeterministicAdapter(), { latencyMs: 5 }),
-		])
-		if (!adapter) throw new Error(capabilityFailure({ input: ['text'], output: ['text'] }, []))
-		let reply = ''
-		for await (const event of adapter.run(text, { input: ['text'], output: ['text'] })) {
-			if (event.envelope.kind === 'text.delta') reply += (event.payload as { text: string }).text
-			if (event.envelope.kind === 'terminal') tracker.finish('completed', event.envelope.seq)
-			await tick()
+		// Streaming POST verb: engine events (text.delta, tool.progress,
+		// approval.request … terminal) arrive incrementally over swelte_stream
+		// SSE — the bubble grows per delta instead of wait-then-all. JSON
+		// content-type would hit the RPC `fn` dispatch; urlencoded reaches
+		// the verb arm. Non-2xx (missing key, bad model) throws before any
+		// event via the verb error path.
+		const form = new URLSearchParams({
+			adapter: cfg.adapter,
+			model: cfg.model,
+			prompt: text,
+			temperature: String(cfg.run.temperature ?? -1),
+			max_tokens: String(cfg.run.maxTokens ?? -1),
+			system: cfg.run.system ?? '',
+		})
+		const res = await fetch('/?q=ai_stream', {
+			method: 'POST',
+			headers: { 'content-type': 'application/x-www-form-urlencoded', accept: 'text/event-stream' },
+			body: form.toString(),
+		})
+		if (!res.ok || !res.body) {
+			let detail = `HTTP ${res.status}`
+			try {
+				const errBody = (await res.json()) as { error?: string }
+				if (errBody?.error) detail = errBody.error
+			} catch {
+				/* keep the status */
+			}
+			throw new Error(detail)
 		}
-		const res = await chat({ msg: text })
-		// Chat echoes live only in the chat pane and the SSE room now
-		// carries a `chat` frame the terminal ignores — nothing to paint.
-		resolveMsg(waitId, { body: reply || '(empty reply)', pending: false })
+		const reader = res.body.getReader()
+		const decoder = new TextDecoder()
+		let buf = ''
+		const seenSeq = new Set<number>()
+		for (;;) {
+			const { done, value } = await reader.read()
+			buf += decoder.decode(value ?? new Uint8Array(), { stream: !done })
+			let idx: number
+			while ((idx = buf.indexOf('\n\n')) >= 0) {
+				const block = buf.slice(0, idx)
+				buf = buf.slice(idx + 2)
+				let event: string | null = null
+				const dataLines: string[] = []
+				for (const line of block.split('\n')) {
+					if (line.startsWith('event:')) event = line.slice(6).trim()
+					else if (line.startsWith('data:')) dataLines.push(line.slice(5).trim())
+				}
+				if (event === null) continue
+				let parsed: {
+					envelope?: { runId?: string; outputId?: string; seq?: number }
+					payload?: {
+						text?: string
+						reason?: string
+						error?: string
+						tool?: { name?: string; decision?: string }
+						callId?: string
+						label?: string
+						detail?: string
+						step?: string
+					}
+				}
+				try {
+					parsed = JSON.parse(dataLines.join('\n')) as typeof parsed
+				} catch {
+					continue
+				}
+				// Drop replays: interrupt retires the turn; late arrivals with
+				// an already-seen seq never repaint.
+				const seq = parsed.envelope?.seq
+				if (seq !== undefined) {
+					if (seenSeq.has(seq)) continue
+					seenSeq.add(seq)
+				}
+				if (event === 'text.delta') {
+					const delta = parsed.payload?.text ?? ''
+					if (delta) {
+						assembled += delta
+						resolveMsg(waitId, { body: assembled, pending: true })
+						followChat()
+						verdict = ''
+					}
+				} else if (event === 'tool.progress') {
+					const p = parsed.payload ?? {}
+					const id = p.callId ?? p.tool?.name ?? `tool-${seq ?? Date.now()}`
+					resolveMsg(waitId, {
+						thinking: [
+							{ label: 'Contacting provider', status: 'done' },
+							{ label: p.label ?? p.tool?.name ?? 'Running tool', status: 'active' },
+						],
+						tools: upsertTool(waitId, {
+							id,
+							label: p.label ?? p.tool?.name ?? 'tool call',
+							chip: p.tool?.name ?? id,
+							status: 'active',
+							detail: p.detail ? [p.detail] : [],
+						}),
+					})
+					followChat()
+				} else if (event === 'approval.request') {
+					const p = parsed.payload ?? {}
+					resolveMsg(waitId, {
+						tools: upsertTool(waitId, {
+							id: p.callId ?? `approval-${seq ?? Date.now()}`,
+							label: p.label ?? 'Approval requested',
+							chip: 'approval',
+							status: 'pending',
+							detail: p.detail ? [p.detail] : [],
+						}),
+					})
+					followChat()
+				} else if (event === 'terminal') {
+					gotTerminal = true
+					const reason = parsed.payload?.reason ?? 'completed'
+					tracker.finish(reason === 'completed' ? 'completed' : 'failed', parsed.envelope?.seq ?? 0)
+					resolveMsg(waitId, {
+						body: assembled,
+						pending: false,
+						thinkingActive: false,
+						tools: markToolsDone(waitId, reason === 'completed'),
+					})
+					if (reason !== 'completed') {
+						throw new Error(parsed.payload?.error ?? `run ${reason}`)
+					}
+				}
+				await tick()
+			}
+			if (done) break
+		}
+		if (!gotTerminal) throw new Error('stream ended without terminal')
+		// Keep the shared-room echo (cross-client parity) but don't repaint
+		// from it — the bubble already holds the assembled text.
+		const echo = await chat({ msg: text })
 		card.applyPatch({
 			expectedRevision: card.current.revision,
 			ops: [{ op: 'set', path: ['title'], value: text.slice(0, 40) }],
@@ -245,7 +562,7 @@ async function sendChat() {
 			runId: 'run-shell',
 			turnId: turn,
 			outputId: 'out-text',
-			seq: res.seq,
+			seq: echo.seq,
 			kind: 'terminal',
 			terminal: 'completed',
 		})
@@ -253,8 +570,8 @@ async function sendChat() {
 		status = 'done'
 	} catch (e) {
 		// Settle the transient bubble too — a failed turn must not hang
-		// in its dimmed `…` state.
-		resolveMsg(waitId, { body: 'send failed — try again', pending: false })
+		// in its dimmed state; keep partial text when the stream died mid-run.
+		resolveMsg(waitId, { body: assembled || 'send failed — try again', pending: false })
 		showError(e)
 		status = 'error'
 	} finally {
@@ -405,6 +722,19 @@ onMount(() => {
 	} catch {
 		/* private mode — default theme stands */
 	}
+	aiConfigs = loadAiConfigs()
+	activeAiId = loadActiveAiConfigId()
+	void ai_key_status({ dummy: '' })
+		.then((rows) => {
+			keyedUp = rows.map((r) => ({ adapter: r.adapter, configured: r.configured }))
+			// Prime the live catalog for the visible adapter so the combo-box
+			// is populated when the user opens settings.
+			const active = activeAiConfig(aiConfigs, activeAiId)
+			void refreshLiveModels(active.adapter)
+		})
+		.catch(() => {
+			keyedUp = []
+		})
 	live = true
 	void watchShell()
 })
@@ -468,6 +798,163 @@ function toggleTheme(next: boolean) {
 			<div class="pane-head">
 				<h2>chat</h2>
 			</div>
+			<div class="ai-config-row">
+				<label class="ai-config-label">
+					<span>AI configuration</span>
+					<select
+						class="select select-bordered select-sm ai-config-select"
+						value={activeAiConfig(aiConfigs, activeAiId).id}
+						onchange={(e) => selectAiConfig(e.currentTarget.value)}
+					>
+						{#each aiConfigs as cfg (cfg.id)}
+							<option value={cfg.id}>
+								{cfg.name} ({cfg.adapter} · {cfg.model}{configuredFor(cfg.adapter)
+									? ''
+									: ' · key missing'})
+							</option>
+						{/each}
+					</select>
+				</label>
+				<button class="btn btn-sm" onclick={() => (showAiSettings = !showAiSettings)}>
+					{showAiSettings ? 'hide settings' : 'configure'}
+				</button>
+			</div>
+			{#if activeAiConfig(aiConfigs, activeAiId).adapter !== 'deterministic' &&
+				!configuredFor(activeAiConfig(aiConfigs, activeAiId).adapter)}
+				<p class="pane-hint">
+					server key missing — add
+					{activeAiConfig(aiConfigs, activeAiId).adapter === 'openrouter'
+						? 'OPENROUTER_API_KEY'
+						: activeAiConfig(aiConfigs, activeAiId).adapter === 'openai'
+							? 'OPENAI_API_KEY'
+							: 'ANTHROPIC_API_KEY'}
+					to <code>.env</code>, then restart
+					<code>swelte dev</code>
+				</p>
+			{/if}
+			{#if showAiSettings}
+				{@const settingsCfg = activeAiConfig(aiConfigs, activeAiId)}
+				<div class="ai-settings">
+					<ul class="ai-list">
+						{#each aiConfigs as cfg (cfg.id)}
+							<li class:active={cfg.id === settingsCfg.id}>
+								<span class="ai-name">{cfg.name}</span>
+								<span class="ai-detail"
+									>{cfg.adapter} · {cfg.model}{cfg.run.temperature !== undefined
+										? ` · t=${cfg.run.temperature}`
+										: ''}{cfg.run.maxTokens !== undefined
+										? ` · max=${cfg.run.maxTokens}`
+										: ''}{configuredFor(cfg.adapter) ? '' : ' · key missing'}</span
+								>
+								<span class="ai-row-actions">
+									<button class="btn btn-xs" onclick={() => selectAiConfig(cfg.id)}>use</button>
+									<button class="btn btn-xs" onclick={() => startAiEdit(cfg)}>edit</button>
+									<button
+										class="btn btn-xs"
+										onclick={() => deleteAiConfig(cfg.id)}
+										disabled={aiConfigs.length <= 1}
+									>
+										delete
+									</button>
+								</span>
+							</li>
+						{/each}
+					</ul>
+					<button class="btn btn-sm" onclick={startAiCreate}>new configuration</button>
+					<div class="ai-form">
+						<h3>{editingAiId ? 'edit configuration' : 'new configuration'}</h3>
+						<label>
+							name
+							<input
+								class="input input-bordered input-sm"
+								bind:value={aiFormName}
+								placeholder="OpenRouter fast"
+							>
+						</label>
+						<label>
+							adapter
+							<select
+								class="select select-bordered select-sm"
+								bind:value={aiFormAdapter}
+								onchange={() => void refreshLiveModels(aiFormAdapter)}
+							>
+								<option value="deterministic">deterministic (offline echo)</option>
+								<option value="openrouter">openrouter (server key)</option>
+								<option value="openai">openai (server key)</option>
+								<option value="anthropic">anthropic (server key)</option>
+							</select>
+						</label>
+						<label>
+							model
+							<input
+								class="input input-bordered input-sm"
+								bind:value={aiFormModel}
+								list="ai-model-suggestions"
+								placeholder={aiFormAdapter === 'deterministic'
+									? 'deterministic-1'
+									: aiFormAdapter === 'openrouter'
+										? 'openai/gpt-4o-mini'
+										: aiFormAdapter === 'openai'
+											? 'gpt-4o-mini'
+											: 'claude-3-5-haiku-latest'}
+							>
+							<datalist id="ai-model-suggestions">
+								{#each modelSuggestions(aiFormAdapter) as m}
+									<option value={m}></option>
+								{/each}
+							</datalist>
+							{#if liveModelsLoading}
+								<p class="pane-hint">loading live model list…</p>
+							{/if}
+						</label>
+						<label>
+							system prompt (optional)
+							<textarea
+								class="textarea textarea-bordered textarea-sm"
+								bind:value={aiFormSystem}
+								rows="2"
+								placeholder="You are a shell assistant…"
+							></textarea>
+						</label>
+						<div class="ai-form-row">
+							<label>
+								temperature (optional)
+								<input
+									class="input input-bordered input-sm"
+									bind:value={aiFormTemperature}
+									inputmode="decimal"
+									placeholder="0.7"
+								>
+							</label>
+							<label>
+								max tokens (optional)
+								<input
+									class="input input-bordered input-sm"
+									bind:value={aiFormMaxTokens}
+									inputmode="numeric"
+									placeholder="512"
+								>
+							</label>
+						</div>
+						<p class="pane-hint">
+							API keys are never entered here — the server reads them from
+							<code>.env</code> (OPENROUTER_API_KEY, OPENAI_API_KEY, ANTHROPIC_API_KEY).
+						</p>
+						<div class="ai-form-actions">
+							<button class="btn" onclick={saveAiForm}>save</button>
+							<button
+								class="btn"
+								onclick={() => {
+									showAiSettings = false
+									editingAiId = null
+								}}
+							>
+								cancel
+							</button>
+						</div>
+					</div>
+				</div>
+			{/if}
 			<div
 				class="transcript"
 				bind:this={chatEl}
@@ -496,7 +983,21 @@ function toggleTheme(next: boolean) {
 								</div>
 							{/if}
 							<div class={`chat-bubble ${m.role === 'user' ? 'chat-bubble-primary' : ''}`}>
-								{m.body}
+								{#if m.role === 'assistant'}
+									<AiAnswer
+										thinking={m.thinking ?? []}
+										thinkingActive={m.thinkingActive ?? m.pending}
+										thinkingDuration={m.thinkingStarted
+											? Math.max(0, Math.round((Date.now() - m.thinkingStarted) / 1000))
+											: 0}
+										tools={m.tools ?? []}
+										text={m.body}
+										streaming={m.pending}
+										author={m.pending ? undefined : m.author}
+									/>
+								{:else}
+									{m.body}
+								{/if}
 							</div>
 						</div>
 					</div>
@@ -790,6 +1291,100 @@ function toggleTheme(next: boolean) {
 	text-transform: uppercase;
 	letter-spacing: 0.1em;
 	opacity: 0.6;
+}
+/* AI configuration picker + editor (chat pane head). */
+.ai-config-row {
+	display: flex;
+	gap: 0.5rem;
+	align-items: flex-end;
+	flex-wrap: wrap;
+}
+.ai-config-label {
+	display: flex;
+	flex-direction: column;
+	gap: 0.25rem;
+	font-size: 0.78rem;
+	opacity: 0.9;
+	flex: 1;
+	min-width: 12rem;
+}
+.ai-config-label > span {
+	font-size: 0.75rem;
+	text-transform: uppercase;
+	letter-spacing: 0.08em;
+	opacity: 0.65;
+}
+.ai-config-select {
+	width: 100%;
+}
+.ai-settings {
+	border: 1px solid var(--color-base-300);
+	border-radius: var(--radius-box);
+	padding: 0.7rem;
+	display: flex;
+	flex-direction: column;
+	gap: 0.7rem;
+	background: color-mix(in oklab, var(--color-base-200) 40%, transparent);
+}
+.ai-list {
+	list-style: none;
+	margin: 0;
+	padding: 0;
+	display: flex;
+	flex-direction: column;
+	gap: 0.4rem;
+}
+.ai-list li {
+	display: flex;
+	gap: 0.5rem;
+	align-items: center;
+	flex-wrap: wrap;
+	border: 1px solid var(--color-base-300);
+	border-radius: var(--radius-box);
+	padding: 0.4rem 0.5rem;
+}
+.ai-list li.active {
+	border-color: var(--color-primary);
+}
+.ai-name {
+	font-weight: 600;
+}
+.ai-detail {
+	font-size: 0.78rem;
+	opacity: 0.7;
+	flex: 1;
+	min-width: 10rem;
+}
+.ai-row-actions {
+	display: flex;
+	gap: 0.35rem;
+}
+.ai-form {
+	display: flex;
+	flex-direction: column;
+	gap: 0.5rem;
+}
+.ai-form h3 {
+	margin: 0;
+	font-size: 0.8rem;
+	text-transform: uppercase;
+	letter-spacing: 0.1em;
+	opacity: 0.65;
+}
+.ai-form label {
+	display: flex;
+	flex-direction: column;
+	gap: 0.25rem;
+	font-size: 0.8rem;
+}
+.ai-form-row {
+	display: grid;
+	grid-template-columns: 1fr 1fr;
+	gap: 0.5rem;
+}
+.ai-form-actions {
+	display: flex;
+	gap: 0.5rem;
 }
 .transcript,
 .screen {

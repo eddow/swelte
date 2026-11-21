@@ -7,8 +7,9 @@ backend shell (`echo pwd whoami help`) is shared by two faces on `/`:
   headers per turn, transient dimmed reply bubble that settles when the reply
   lands, send that flips to Stop (interrupt) while streaming, auto-growing
   textarea (Enter sends, Shift+Enter breaks the line, IME-safe), and a prompt
-  history picker for resends; the approval queue below gates AI-proposed
-  commands;
+  history picker for resends; an AI-configuration picker chooses among saved
+  adapter + model + run configs (configure gear adds/edits/deletes), and the
+  approval queue below gates AI-proposed commands;
 - **terminal pane** (right) — auto-subscribes to the backend room over SSE on
   mount (no connect buttons): type a command, Enter runs it via `@[rpc] exec`.
   The room speaks one framed protocol (`exec\n<cmd>\n<output>` / `chat\n<msg>` /
@@ -23,6 +24,14 @@ AI-proposed commands never run directly: `authorizeShellCall('ai', …)` marks t
 `needsApproval`, the first `exec(caller: 'ai')` call parks a `pending` record, and
 the approval queue (`approve` / `deny` + `ApprovalStore`) executes exactly once —
 duplicates replay the receipt, expiries deny.
+
+AI configurations (`src/lib/ai-config.ts`, persisted in `localStorage`) hold
+adapter + model + run config (temperature, max tokens, system prompt) — never
+API keys. Keyed adapters (`openrouter`, `openai`, `anthropic`) run server-side
+through `ai_chat`/`ai_key_status` in `src/routes/+page.v`, which reads keys from
+server env only; the `deterministic` adapter echoes offline through the same RPC.
+Copy `.env.example` to `.env` and add keys there (`swelte dev`/`build`/`preview`
+load it; real env vars win when set).
 
 The frontend gate lives in `src/lib/shell.ts` (plain TS, offline-testable); the
 authoritative allowlist + approval records live in the route backend

@@ -12,16 +12,21 @@
     "test": "node --test --test-reporter=spec \"dist-test/**/*.test.js\""
   },
   "dependencies": {
+    "@docvia/markdown": "^3.0.0",
     "@swelte/ai": "^0.2.0",
     "@swelte/core": "^0.2.0",
     "@swelte/ssr-qjs": "^0.2.0",
-    "svelte": "^5.0.0"
+    "bits-ui": "^2.21.0",
+    "clsx": "^2.1.1",
+    "svelte": "^5.0.0",
+    "tailwind-merge": "^3.7.1",
+    "tailwind-variants": "^4.0.2"
   },
   "devDependencies": {
     "@sveltejs/vite-plugin-svelte": "^5.0.0",
+    "@swelte/vvm": "^0.2.0",
     "@tailwindcss/vite": "^4.0.0",
     "@types/node": "^26.6.6",
-    "@swelte/vvm": "^0.2.0",
     "daisyui": "^5.0.0",
     "tailwindcss": "^4.0.0",
     "typescript": "^5.0.0",

@@ -1089,7 +1089,9 @@ export function emitRouteFile(
 	}
 	const needJson = needRpc || loads.length > 0 || verbFns.some(verbNeedsJson)
 	// Only what this file's dispatch branch uses: rpc -> json+json2,
-	// verbs -> json+http. Never emit an unused import (V warns).
+	// verbs -> json+http. Route-source imports (net.http, net.urllib, …)
+	// still flow through via seenImp below — RPC fns may call providers
+	// directly (server-side AI proxy). Never emit an unused import (V warns).
 	const baseImports = [
 		...(needJson ? ['import json'] : []),
 		...(needRpc ? ['import x.json2'] : []),
@@ -1097,6 +1099,9 @@ export function emitRouteFile(
 		'',
 	]
 	const seenImp = new Set<string>()
+	const seenImpFirst = new Set<string>(
+		baseImports.map((b) => b.replace(/^import\s+/, '').split(/[\s,]/)[0])
+	)
 	for (const impsrc of [src, ...chain.map((w) => w.src)]) {
 		for (const m of impsrc.matchAll(/^\s*import\s+(.+)$/gm)) {
 			const imp = m[1].trim()
@@ -1106,8 +1111,8 @@ export function emitRouteFile(
 				first === 'routes' ||
 				first === 'json' ||
 				first === 'x.json2' ||
-				first === 'net.http' ||
-				seenImp.has(imp)
+				seenImp.has(imp) ||
+				seenImpFirst.has(first)
 			)
 				continue
 			seenImp.add(imp)

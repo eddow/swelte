@@ -8,6 +8,12 @@ import type { Ctx } from './types.js'
 
 export async function runPreview(ctx: Ctx): Promise<void> {
 	const root = resolve(String(ctx.opts.root ?? process.cwd()))
+	try {
+		const { loadDotenv } = await import('../toolchain.js')
+		loadDotenv(root)
+	} catch {
+		/* dotenv is best-effort */
+	}
 	const port = takePort(ctx.opts.port, 4173)
 	const binary = String(ctx.opts.binary ?? join(root, 'dist', 'server'))
 	if (!existsSync(binary)) {

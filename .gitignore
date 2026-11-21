@@ -13,3 +13,5 @@ engine/vvm/.active-version
 engine/vvm/.active-system-path
 .cline
 tmp/
+.env*
+!.env.example

@@ -98,7 +98,9 @@ export async function runBuild(ctx: Ctx): Promise<void> {
 		needsGlobals,
 		hasRealBridge,
 		ensureSqliteForBuild,
+		loadDotenv,
 	} = await import('../toolchain.js')
+	loadDotenv(root)
 	const { loadConfig, loadProjectSwelteOptions } = await import('../gen/config.js')
 	const v = resolveV(import.meta.url)
 	ctx.log(`V toolchain: ${vVersion(v)} (${v})`)

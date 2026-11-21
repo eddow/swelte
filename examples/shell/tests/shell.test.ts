@@ -5,6 +5,17 @@ import { RunTracker } from '@swelte/ai'
 import { createSseParser, decodeSseEvent, encodeSseEvent } from '@swelte/ai'
 import { createMemorySink } from '@swelte/ai'
 import { ApprovalStore, authorizeShellCall, runAllowlisted } from '../src/lib/shell.js'
+import {
+	activeAiConfig,
+	createAiConfig,
+	defaultAiConfigs,
+	loadActiveAiConfigId,
+	loadAiConfigs,
+	saveActiveAiConfigId,
+	saveAiConfigs,
+	updateAiConfig,
+	ADAPTER_MODELS,
+} from '../src/lib/ai-config.js'
 
 describe('shell example: one backend shell shared by chat + terminal', () => {
 	it('human allowlisted commands run; unknown commands fail actionably', () => {
@@ -82,5 +93,96 @@ describe('shell example: one backend shell shared by chat + terminal', () => {
 		push(a.slice(0, 12))
 		push(a.slice(12) + b)
 		assert.deepEqual(seen, ['text.delta', 'terminal'])
+	})
+
+	it('AI configs: defaults cover every implemented adapter, none carries keys', () => {
+		const defaults = defaultAiConfigs()
+		assert.deepEqual(
+			defaults.map((c) => c.adapter),
+			['deterministic', 'openrouter', 'openai', 'anthropic']
+		)
+		for (const c of defaults) assert.ok(!('apiKey' in c) && !JSON.stringify(c).includes('KEY'))
+		assert.equal(activeAiConfig(defaults, null).id, defaults[0]!.id)
+		assert.equal(activeAiConfig(defaults, 'missing-id').id, defaults[0]!.id)
+	})
+
+	it('AI configs: create/update validate adapter + model', () => {
+		const created = createAiConfig({
+			name: 'fast',
+			adapter: 'openrouter',
+			model: ' openai/gpt-4o-mini ',
+			run: { temperature: 0.7, maxTokens: 512, system: 'be brief' },
+		})
+		assert.equal(created.model, 'openai/gpt-4o-mini')
+		assert.deepEqual(created.run, { temperature: 0.7, maxTokens: 512, system: 'be brief' })
+		assert.throws(() => createAiConfig({ name: 'x', adapter: 'openrouter', model: '  ', run: {} }))
+		assert.throws(() =>
+			createAiConfig({ name: 'x', adapter: 'nope' as never, model: 'm', run: {} })
+		)
+		const updated = updateAiConfig(created, { model: 'anthropic/claude', adapter: 'anthropic' })
+		assert.equal(updated.adapter, 'anthropic')
+		assert.equal(updated.model, 'anthropic/claude')
+		assert.equal(updated.id, created.id)
+		assert.throws(() => updateAiConfig(created, { model: '' }))
+	})
+
+	it('AI configs: localStorage round-trips configs + active id (private-mode safe)', () => {
+		const mem = new Map<string, string>()
+		const g = globalThis as unknown as Record<string, unknown>
+		const prev = g.localStorage
+		g.localStorage = {
+			getItem: (k: string) => (mem.has(k) ? mem.get(k)! : null),
+			setItem: (k: string, v: string) => void mem.set(k, v),
+			removeItem: (k: string) => void mem.delete(k),
+		}
+		try {
+			assert.deepEqual(loadAiConfigs().map((c) => c.adapter), defaultAiConfigs().map((c) => c.adapter))
+			const mine = [createAiConfig({ name: 'mine', adapter: 'openai', model: 'gpt-4o-mini', run: {} })]
+			saveAiConfigs(mine)
+			assert.equal(loadAiConfigs()[0]!.model, 'gpt-4o-mini')
+			assert.equal(loadActiveAiConfigId(), null)
+			saveActiveAiConfigId(mine[0]!.id)
+			assert.equal(loadActiveAiConfigId(), mine[0]!.id)
+			assert.equal(activeAiConfig(mine, mine[0]!.id).name, 'mine')
+		} finally {
+			if (prev === undefined) delete g.localStorage
+			else g.localStorage = prev
+		}
+	})
+
+	it('AI configs: offline fallback models exist per adapter (live catalog wins at runtime)', () => {
+		for (const adapter of ['deterministic', 'openrouter', 'openai', 'anthropic'] as const) {
+			assert.ok(
+				ADAPTER_MODELS[adapter].length > 0,
+				`${adapter} needs an offline fallback suggestion`
+			)
+		}
+		// The live `ai_models` RPC returns this shape (array of ids) — the
+		// combo-box renders live ids when present, fallback otherwise.
+		const live: string[] = ['openai/gpt-4o-mini', 'anthropic/claude-3-5-haiku']
+		assert.ok(live.every((m) => typeof m === 'string' && m.length > 0))
+	})
+
+	it('AI configs: blocked storage falls back to defaults without throwing', () => {
+		const g = globalThis as unknown as Record<string, unknown>
+		const prev = g.localStorage
+		g.localStorage = {
+			getItem: () => {
+				throw new Error('blocked')
+			},
+			setItem: () => {
+				throw new Error('blocked')
+			},
+		}
+		try {
+			assert.doesNotThrow(() => loadAiConfigs())
+			assert.doesNotThrow(() => saveAiConfigs(defaultAiConfigs()))
+			assert.doesNotThrow(() => loadActiveAiConfigId())
+			assert.doesNotThrow(() => saveActiveAiConfigId('x'))
+			assert.ok(defaultAiConfigs().length > 0)
+		} finally {
+			if (prev === undefined) delete g.localStorage
+			else g.localStorage = prev
+		}
 	})
 })

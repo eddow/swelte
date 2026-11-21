@@ -35,6 +35,41 @@ export function toolchainEnv(extra?: Record<string, string>): NodeJS.ProcessEnv 
 	return { ...process.env, PATH: sanitizedPath(), ...extra }
 }
 
+/** Minimal `.env` loader for the Swelte CLI: reads `<root>/.env` when present
+ *  and fills `process.env` for keys not already set (env wins, same rule as
+ *  config). One file, `KEY=value` lines, `#` comments, optional `export`
+ *  prefix and optional quotes. Keys stay server-side: the V backend inherits
+ *  the CLI env; the browser never sees them. Missing/unreadable = no-op. */
+export function loadDotenv(root: string): Record<string, string> {
+	const loaded: Record<string, string> = {}
+	let text = ''
+	try {
+		text = readFileSync(join(root, '.env'), 'utf8')
+	} catch {
+		return loaded
+	}
+	for (const line of text.split('\n')) {
+		let trimmed = line.trim()
+		if (!trimmed || trimmed.startsWith('#')) continue
+		if (trimmed.startsWith('export ')) trimmed = trimmed.slice('export '.length).trim()
+		const eq = trimmed.indexOf('=')
+		if (eq <= 0) continue
+		const key = trimmed.slice(0, eq).trim()
+		if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) continue
+		let value = trimmed.slice(eq + 1).trim()
+		if (
+			value.length >= 2 &&
+			((value.startsWith('"') && value.endsWith('"')) ||
+				(value.startsWith("'") && value.endsWith("'")))
+		) {
+			value = value.slice(1, -1)
+		}
+		if (process.env[key] === undefined) process.env[key] = value
+		loaded[key] = value
+	}
+	return loaded
+}
+
 /** Whether the V compile needs `-enable-globals`: the QJS bridge uses
  *  `__global`, and so do builtin/third-party V include modules (core's backend hub,
  *  the QJS bridge). Detected from the generate() outputs: a real bridge file
