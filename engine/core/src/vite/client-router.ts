@@ -646,6 +646,7 @@ export async function preloadData(url) {
 	if (!hit) return null
 	// Static pages (no @[load] anywhere on the chain) carry no page data:
 	// skip the preload fetch entirely — no request, no 404 noise.
+	if (!hit.route.hasLoad) return { route: hit.route.path, params: hit.params, data: null, status: 200 }
 	try {
 		const res = await fetch(to, { headers: { accept: 'application/json', 'X-Swelte-Load': '1' } })
 		const data = await res.json().catch(() => null)

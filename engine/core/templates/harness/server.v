@@ -859,6 +859,13 @@ fn (mut app App) before_request(mut ctx Ctx) veb.Result {
 	if page_is_nav {
 		return swelte_serve_page(mut ctx, path, query, headers, cookies, page_load)
 	}
+	// Load protocol (page-lifecycle): GET + Accept: application/json +
+	// X-Swelte-Load: 1 selects the guarded load cascade — never ordinary
+	// @[get] verb dispatch. Without this, load fetches on RPC-only or
+	// probe-less pages fall into the verb gate and answer 405.
+	if page_load && ctx.req.method == .get && page_prefix != '' && !page_get_probe {
+		return swelte_serve_page(mut ctx, path, query, headers, cookies, true)
+	}
 	// (swelte_call_route is sync — veb runs before_request on a worker;
 	// the `spawn select` watchdog keeps the server responsive).
 	out := swelte_call_route_timeout(path, dispatch_method, query, headers, cookies, map[string]string{}, ctx.req.data, content_type, qualifier, handler_ms, ctx.lifecycle)

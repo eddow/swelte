@@ -2388,13 +2388,15 @@ export declare const dev: boolean
 							const isSelf = url.pathname === '/'
 							// SPA first: browser page loads (GET + Accept: text/html,
 							// no ?q=) are never RPC — let Vite serve index.html.
-							// Only JSON GETs (Accept: application/json) and writes
+							// Only JSON GETs (Accept: application/json), SSE GETs
+							// (Accept: text/event-stream) and writes
 							// (JSON body or form content-type) proxy.
 							if (
 								isSelf &&
 								req.method === 'GET' &&
 								!url.searchParams.has('q') &&
-								!accept.includes('application/json')
+								!accept.includes('application/json') &&
+								!accept.includes('text/event-stream')
 							)
 								return next()
 							const looksRpc =

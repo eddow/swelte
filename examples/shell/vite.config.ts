@@ -1,4 +1,5 @@
 import { defineConfig } from 'vite';
+import tailwindcss from '@tailwindcss/vite';
 import { svelte } from '@sveltejs/vite-plugin-svelte';
 import { swelte } from '@swelte/ssr-qjs';
 import svelteConfig from './svelte.config.js';
@@ -18,6 +19,7 @@ const svelteOptions = {
 
 export default defineConfig({
   plugins: [
+    tailwindcss(),
     svelte(svelteOptions as Parameters<typeof svelte>[0]),
     swelte({
       vBackendUrl,

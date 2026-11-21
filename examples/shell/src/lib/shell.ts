@@ -1,6 +1,6 @@
-// shell/ai frontend helper: optimistic gating + in-memory approvals.
+// shell frontend helper: optimistic gating + in-memory approvals.
 // Consumer-side only — the authoritative backend allowlist + approval
-// records live in the shell route backend (src/routes/shell/ai/+page.v);
+// records live in the shell route backend (src/routes/+page.v);
 // this mirrors them for instant UI feedback and offline tests.
 export type ShellCaller = 'human' | 'ai'
 
@@ -11,7 +11,7 @@ export interface ShellDecision {
 	needsApproval: boolean
 }
 
-const ALLOWLIST = new Set(['echo', 'pwd', 'whoami', 'help'])
+const ALLOWLIST = new Set(['echo', 'pwd', 'whoami', 'help', 'cat'])
 
 export function authorizeShellCall(caller: ShellCaller, cmd: string): ShellDecision {
 	const name = cmd.trim().split(/\s+/)[0] ?? ''
@@ -23,15 +23,17 @@ export function authorizeShellCall(caller: ShellCaller, cmd: string): ShellDecis
 	return { allowed: true, reason: 'human allowlisted command', needsApproval: false }
 }
 
-/** Stateless demo execution for the allowlist (no OS shell — demo only). */
+/** Stateless demo execution for the allowlist (no OS shell — demo only).
+ * `cat` has no stdin offline; the backend queues keystrokes for it. */
 export function runAllowlisted(cmd: string): string {
 	const parts = cmd.trim().split(/\s+/)
 	const name = parts[0] ?? ''
 	if (!ALLOWLIST.has(name)) throw new Error(`command not allowlisted: ${name}`)
 	if (name === 'echo') return parts.slice(1).join(' ')
-	if (name === 'help') return 'allowlist: echo pwd whoami help'
-	if (name === 'pwd') return '/shell/ai'
+	if (name === 'help') return 'allowlist: echo pwd whoami help cat'
+	if (name === 'pwd') return '/shell'
 	if (name === 'whoami') return 'swelte-shell'
+	if (name === 'cat') return '(stdin arrives over the live room)'
 	throw new Error(`command not allowlisted: ${name}`)
 }
 
