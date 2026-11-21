@@ -9,7 +9,13 @@
 		"noEmit": false,
 		"declaration": false,
 		"declarationMap": false,
-		"sourceMap": false
+		"sourceMap": false,
+		// Trick for *.test.ts / *.spec.ts: `node` must be listed explicitly,
+		// otherwise `types` inherited from an app config (vite/client+svelte
+		// or an empty default) hides @types/node and `node:*` imports fail
+		// with TS2307. Applies everywhere: repo root has no tsconfig, so the
+		// editor may pick either this file or the app tsconfig per file.
+		"types": ["node"]
 	},
-	"include": ["tests/**/*.test.ts", "src/lib/**/*.ts"]
+	"include": ["tests/**/*.test.ts", "tests/**/*.spec.ts", "src/**/*.ts"]
 }

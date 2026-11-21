@@ -3,10 +3,11 @@
 The fixture is test material for Swelte, not an application to finish. Its
 routes and package are intentionally synthetic; only the capability asserted
 by each test matters. Run `npm run test:dogfood` from the repository root. It
-requires the managed V toolchain, a native C compiler, and the toolchain's
-SQLite amalgamation for core's builtin backend fixture. If it is absent,
-install it with V's `vlib/db/sqlite/install_thirdparty_sqlite.vsh` script. The
-fixture uses local npm pack/install; it does not publish or require
+requires the managed V toolchain, a native C compiler, and — for backend-hub
+builds (rooms/WS) — the SQLite amalgamation, which `swelte build` fetches
+lazily via `vvm ensure-sqlite` when absent (cached under the managed
+toolchain, gitignored; or provide system headers, e.g. `libsqlite3-dev`).
+The fixture uses local npm pack/install; it does not publish or require
 provider/database secrets.
 
 The test installs a synthetic library tarball with a Svelte component, a

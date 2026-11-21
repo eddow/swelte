@@ -17,7 +17,13 @@
 		"./openai": "./dist/openai.js",
 		"./anthropic": "./dist/anthropic.js"
 	},
-	"files": ["README.md", "dist", "src/lib/**/*.v", "LICENSE-MIT", "package.json"],
+	"files": [
+		"README.md",
+		"dist",
+		"src/lib/**/*.v",
+		"LICENSE-MIT",
+		"package.json"
+	],
 	"scripts": {
 		"dev": "swelte dev",
 		"build": "swelte build",
@@ -45,9 +51,9 @@
 		"@swelte/vvm": "^0.2.0",
 		"@types/node": "^26.6.6",
 		"npm-skills": "^0.5.1",
+		"svelte": "^5.0.0",
 		"typescript": "^5.0.0",
-		"vite": "^6.0.0",
-		"svelte": "^5.0.0"
+		"vite": "^6.0.0"
 	},
 	"license": "MIT",
 	"author": {
@@ -66,5 +72,10 @@
 	"engines": {
 		"node": ">=20"
 	},
-	"keywords": ["swelte", "ai", "agents", "streaming"]
+	"keywords": [
+		"swelte",
+		"ai",
+		"agents",
+		"streaming"
+	]
 }

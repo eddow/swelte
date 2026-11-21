@@ -528,6 +528,9 @@ export async function installVersion(version, { force = false, root = VVM_ROOT }
 
 export const DEFAULT_ZIG_VERSION = '0.15.2'
 
+export const DEFAULT_SQLITE_VERSION = '3.54.1'
+export const DEFAULT_SQLITE_AMALGAMATION = '3540100'
+
 const ZIG_ASSETS = {
 	'linux-x64': 'zig-x86_64-linux-{v}.tar.xz',
 	'linux-arm64': 'zig-aarch64-linux-{v}.tar.xz',
@@ -546,6 +549,93 @@ export function normalizeTargetOsName(raw) {
 	if (v === 'macos' || v === 'mac' || v === 'darwin') return 'macos'
 	if (v === 'windows' || v === 'win32' || v === 'win') return 'windows'
 	return ''
+}
+
+/** V toolchain root for a resolved `v` binary (follows symlinks: vvm's
+ *  `~/.local/bin/v` link → `versions/vX.Y.Z/v`, so `dirname` alone would
+ *  point at the link dir). */
+export function vToolchainDir(vbin) {
+	try {
+		return dirname(realpathSync(resolve(String(vbin || ''))))
+	} catch {
+		return dirname(resolve(String(vbin || '')))
+	}
+}
+
+/** Where V's `db.sqlite` looks for the amalgamation (`<toolchain>/thirdparty/sqlite`). */
+export function sqliteDirForV(vbin) {
+	return join(vToolchainDir(vbin), 'thirdparty', 'sqlite')
+}
+
+/** Whether the SQLite amalgamation is present for this `v` binary. */
+export function hasSqliteAmalgamation(vbin) {
+	try {
+		const dir = sqliteDirForV(vbin)
+		return existsSync(join(dir, 'sqlite3.c')) && existsSync(join(dir, 'sqlite3.h'))
+	} catch {
+		return false
+	}
+}
+
+/** SQLite amalgamation download URL for a version (`3.54.1` → `.../2026/sqlite-amalgamation-3540100.zip`). */
+export function sqliteDownloadUrl(
+	version = DEFAULT_SQLITE_VERSION,
+	amalgamation = DEFAULT_SQLITE_AMALGAMATION
+) {
+	// sqlite.org paths the zip by release year; pin the known-good mapping.
+	const known = { '3.54.1': '2026' }
+	const dir = known[String(version)] ?? '2026'
+	return `https://sqlite.org/${dir}/sqlite-amalgamation-${amalgamation}.zip`
+}
+
+/** Download + extract the SQLite amalgamation into `<toolchain>/thirdparty/sqlite/`
+ *  (idempotent unless force). Called lazily by core only when a build needs
+ *  `db.sqlite` and the headers are absent — never on install. */
+export async function ensureSqlite({ vbin, force = false, root = VVM_ROOT } = {}) {
+	const dir = sqliteDirForV(vbin, root)
+	if (!force && existsSync(join(dir, 'sqlite3.c')) && existsSync(join(dir, 'sqlite3.h'))) {
+		return { dir, cached: true }
+	}
+	if (!vbin) throw new Error('vvm ensure-sqlite: no V binary (cannot locate toolchain dir)')
+	if (!isVvmOwned(vbin, root)) {
+		throw new Error(
+			`vvm ensure-sqlite: ${vbin} is not vvm-managed — install the amalgamation for your system V manually (see https://sqlite.org/download.html)`
+		)
+	}
+	const url = sqliteDownloadUrl()
+	const archive = join(tmpdir(), `vvm-sqlite-${Date.now()}.zip`)
+	console.log(`vvm: downloading SQLite amalgamation (${url})`)
+	await download(url, archive)
+	const stage = join(versionsDir(root), `.stage-sqlite-${Date.now()}`)
+	rmSync(stage, { recursive: true, force: true })
+	mkdirSync(stage, { recursive: true })
+	extract(archive, stage)
+	flattenSingleDir(stage)
+	// `extract` flattens one level already when the zip wraps a single dir;
+	// the amalgamation zips wrap `sqlite-amalgamation-*/` — handle both.
+	let src = stage
+	try {
+		const entries = readdirSync(stage, { withFileTypes: true })
+		if (entries.length === 1 && entries[0].isDirectory()) src = join(stage, entries[0].name)
+	} catch {
+		/* use stage as-is */
+	}
+	rmSync(dir, { recursive: true, force: true })
+	mkdirSync(dir, { recursive: true })
+	for (const f of ['sqlite3.c', 'sqlite3.h', 'sqlite3ext.h']) {
+		const from = join(src, f)
+		if (existsSync(from)) {
+			const data = readFileSync(from)
+			writeFileSync(join(dir, f), data)
+		}
+	}
+	rmSync(stage, { recursive: true, force: true })
+	rmSync(archive, { force: true })
+	if (!existsSync(join(dir, 'sqlite3.c')) || !existsSync(join(dir, 'sqlite3.h'))) {
+		throw new Error(`vvm ensure-sqlite: extraction produced no sqlite3.c/sqlite3.h from ${url}`)
+	}
+	console.log(`vvm: SQLite amalgamation → ${dir}`)
+	return { dir, cached: false }
 }
 
 /** Normalize a target arch value (aliases + case-insensitive). */
@@ -753,6 +843,9 @@ Usage: vvm <command> [args]
                               Ensure zig + write zig-cc-<os>-<arch> wrapper(s).
                               No flags = derive from SWELTE_TARGET_OS/ARCH
                               or package.json swelte.targetOs/targetArch.
+  ensure-sqlite [--force]       Ensure the SQLite amalgamation for the active
+                              toolchain (db.sqlite headers). Lazy: core calls
+                              this only when a build needs it and it is absent.
   use <version>|system [--system]  Switch toolchain: managed version or the
                               already-installed system V (never downloaded).
                               Writes .active-version (+ .active-system-path pin).
@@ -852,6 +945,21 @@ async function main(argv) {
 		}
 		const force = rest.includes('--force') || rest.includes('-f')
 		await prepareCross({ os, arch, zigVersion: zigVersion || undefined, force })
+		return
+	}
+	if (cmd === 'ensure-sqlite') {
+		const force = rest.includes('--force') || rest.includes('-f')
+		const bin = resolveV()
+		if (!bin) {
+			console.error('vvm ensure-sqlite: no V installed (run: vvm install 0.5.2)')
+			process.exit(1)
+		}
+		try {
+			await ensureSqlite({ vbin: bin, force })
+		} catch (err) {
+			console.error(`vvm ensure-sqlite: ${err.message}`)
+			process.exit(1)
+		}
 		return
 	}
 	if (cmd === 'use') {

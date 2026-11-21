@@ -1,9 +1,11 @@
 // Shared toolchain resolution (V binary via PATH or @swelte/vvm).
 import { execFileSync, execSync } from 'node:child_process'
-import { existsSync, readFileSync, rmSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync, rmSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { dirname, join } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
+
+/** Absolute system C compiler, preferring /usr/bin/* so PATH shadowing can't win. */
 
 /**
  * Conda (`miniconda3/bin`) ships its own `ld` that shadows the system
@@ -97,7 +99,95 @@ export function healDanglingBridge(genAbs: string): boolean {
 	}
 }
 
-/** Absolute system C compiler, preferring /usr/bin/* so PATH shadowing can't win. */
+/** Whether `/.v` harness compile needs V's bundled `db.sqlite` headers:
+ *  the backend hub module (`import backend` → `db.sqlite`) is copied into
+ *  `.swelte/` only when a route needs rooms/WS (usage-gated in the plugin). */
+export function needsSqliteAmalgamation(genAbs: string): boolean {
+	try {
+		const backendDir = join(genAbs, 'backend')
+		if (!existsSync(backendDir)) return false
+		for (const f of readdirSync(backendDir)) {
+			if (!f.endsWith('.v')) continue
+			try {
+				if (readFileSync(join(backendDir, f), 'utf8').includes('db.sqlite')) return true
+			} catch {
+				/* unreadable — ignore */
+			}
+		}
+	} catch {
+		/* no backend dir — no sqlite need */
+	}
+	return false
+}
+
+/** System sqlite3 headers (apt `libsqlite3-dev`): V prefers these when present. */
+export function hasSystemSqlite(): boolean {
+	for (const p of ['/usr/include/sqlite3.h', '/usr/local/include/sqlite3.h']) {
+		try {
+			if (existsSync(p)) return true
+		} catch {
+			/* ignore */
+		}
+	}
+	return false
+}
+
+/**
+ * Lazily ensure the SQLite amalgamation for `v` when this build needs
+ * `db.sqlite` and neither the toolchain amalgamation nor system headers
+ * exist. Delegates the download to vvm (`ensureSqlite`); system-V
+ * toolchains are left untouched with an actionable error naming the fix.
+ * Never throws when sqlite isn't needed — returns `{ needed: false }`.
+ */
+export async function ensureSqliteForBuild(
+	vbin: string,
+	genAbs: string,
+	log: (m: string) => void = () => {}
+): Promise<{ needed: boolean; cached: boolean }> {
+	if (!needsSqliteAmalgamation(genAbs)) return { needed: false, cached: true }
+	if (hasSystemSqlite()) return { needed: true, cached: true }
+	const fromUrl = import.meta.url
+	const require = createRequire(fromUrl)
+	let vvmDir = ''
+	try {
+		vvmDir = dirname(require.resolve('@swelte/vvm/package.json'))
+	} catch {
+		/* not installed — try the monorepo sibling */
+	}
+	const candidates = vvmDir
+		? [
+				join(vvmDir, 'bin', 'vvm.js'),
+				join(dirname(fileURLToPath(fromUrl)), '..', '..', 'vvm', 'bin', 'vvm.js'),
+			]
+		: [join(dirname(fileURLToPath(fromUrl)), '..', '..', 'vvm', 'bin', 'vvm.js')]
+	for (const vvm of candidates) {
+		if (!existsSync(vvm)) continue
+		try {
+			const mod = (await import(pathToFileURL(vvm).href)) as {
+				hasSqliteAmalgamation?: (v: string, r?: string) => boolean
+				ensureSqlite?: (o: {
+					vbin: string
+					force?: boolean
+				}) => Promise<{ dir: string; cached: boolean }>
+				resolveV?: (r?: string) => string
+			}
+			const root = dirname(dirname(vvm))
+			if (mod.hasSqliteAmalgamation?.(vbin, root)) return { needed: true, cached: true }
+			const ensured = await mod.ensureSqlite?.({ vbin })
+			if (ensured) {
+				log(`sqlite: amalgamation → ${ensured.dir}${ensured.cached ? ' (cached)' : ''}`)
+				return { needed: true, cached: ensured.cached }
+			}
+		} catch (e) {
+			throw new Error(
+				`sqlite amalgamation missing for ${vbin} (${(e as Error).message}) — run: npx vvm ensure-sqlite`
+			)
+		}
+	}
+	throw new Error(
+		`sqlite amalgamation missing for ${vbin} (@swelte/vvm not found — run: npx vvm ensure-sqlite, or install system headers: apt install libsqlite3-dev)`
+	)
+}
 export function resolveCC(): string {
 	for (const abs of ['/usr/bin/gcc', '/bin/gcc', '/usr/bin/cc', '/bin/cc', '/usr/bin/clang']) {
 		if (existsSync(abs)) return abs

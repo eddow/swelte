@@ -115,7 +115,7 @@ describe('trace', () => {
 			seq: 0,
 			kind: 'text.delta',
 			usage: { inputTokens: 3 },
-			estimatedCost: { currency: 'USD', amount: 0.001 },
+			estimatedCost: { currency: 'USD', amount: 0.001, basis: 'provider-reported' },
 		})
 		assert.equal(sink.events.length, 1)
 		assert.notDeepEqual(sink.events[0].usage, sink.events[0].estimatedCost)

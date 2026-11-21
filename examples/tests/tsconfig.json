@@ -6,9 +6,14 @@
     "allowJs": true,
     "checkJs": false,
     "noEmit": true,
+    // Trick for *.test.ts / *.spec.ts importing `node:*`: keep `node` listed
+    // so editors resolving a test file against this app config still see
+    // @types/node (types-only, never bundled). Node-run tests live under
+    // tests/ and are typechecked by tsconfig.test.json.
     "types": [
       "vite/client",
-      "svelte"
+      "svelte",
+      "node"
     ],
     "paths": {
       "#routes/*.v": [

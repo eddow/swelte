@@ -97,6 +97,7 @@ export async function runBuild(ctx: Ctx): Promise<void> {
 		resolveHostCC,
 		needsGlobals,
 		hasRealBridge,
+		ensureSqliteForBuild,
 	} = await import('../toolchain.js')
 	const { loadConfig, loadProjectSwelteOptions } = await import('../gen/config.js')
 	const v = resolveV(import.meta.url)
@@ -337,6 +338,14 @@ export async function runBuild(ctx: Ctx): Promise<void> {
 		throw new Error(
 			'no C compiler: install gcc/clang or run `npx vvm prepare` (writes the host zig-cc wrapper)'
 		)
+	}
+	// Lazy sqlite: only backend-hub builds need `db.sqlite` headers, and
+	// only when neither the toolchain amalgamation nor system headers
+	// exist. vvm owns the download; core only detects the need.
+	try {
+		await ensureSqliteForBuild(v, genAbs, (m) => ctx.log(m))
+	} catch (e) {
+		throw new Error(`sqlite setup failed: ${(e as Error).message}`)
 	}
 	try {
 		execFileSync(

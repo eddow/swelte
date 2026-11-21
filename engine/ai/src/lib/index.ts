@@ -1,4 +1,4 @@
-export type { AiAdapter, RouteOptions } from './adapters.js'
+export type { AiAdapter, CostModel, RouteOptions } from './adapters.js'
 export { DeterministicAdapter, routeAdapter } from './adapters.js'
 export type {
 	AnthropicConfig,
@@ -67,6 +67,6 @@ export type {
 export { generateSchema, schemaId } from './schema.js'
 export type { WireEvent } from './sse.js'
 export { createSseParser, decodeSseEvent, encodeSseEvent } from './sse.js'
-export type { CostEstimate, ProviderUsage, TraceEvent, TraceSink } from './trace.js'
-export { createMemorySink } from './trace.js'
+export type { CostEstimate, PriceTable, ProviderUsage, TraceEvent, TraceSink } from './trace.js'
+export { createMemorySink, estimateCost } from './trace.js'
 export { VERSION } from './version.js'

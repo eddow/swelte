@@ -35,6 +35,7 @@ npx @swelte/vvm use 0.5.2       # mark active (.active-version, gitignored)
 npx @swelte/vvm which           # print active `v` binary path
 npx @swelte/vvm list            # installed versions
 npx @swelte/vvm prepare --target-os linux --target-arch amd64  # zig + zig-cc wrapper (no flags = derive from $SWELTE_TARGET_OS/ARCH or package.json swelte key)
+npx @swelte/vvm ensure-sqlite  # SQLite amalgamation for the active toolchain (db.sqlite headers; lazy — `swelte build` fetches it only when a backend-hub build needs it and it is absent)
 ```
 
 ## System V (already installed globally)

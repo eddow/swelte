@@ -10,7 +10,11 @@
 		"esModuleInterop": true,
 		"forceConsistentCasingInFileNames": true,
 		"noEmit": true,
-		"types": ["vite/client", "svelte"],
+		// NOTE: `node` stays listed so *.test.ts / *.spec.ts (and vite.config.ts)
+		// can import from `node:*` even when the editor checks them against
+		// this app config instead of tsconfig.test.json. It only adds types,
+		// it does not bundle Node into the browser build.
+		"types": ["vite/client", "svelte", "node"],
 		"paths": {
 			"#routes/*.v": ["./.swelte/types/routes/*.d.ts"],
 			"#lib/*.v": ["./.swelte/types/lib/*.d.ts"],
@@ -22,11 +26,22 @@
 	},
 	"include": [
 		"src",
+		"tests/**/*.test.ts",
+		"tests/**/*.spec.ts",
 		"vite.config.ts",
 		".swelte/types",
 		".swelte/v-shim.d.ts",
 		".swelte/app/*.d.ts",
 		".swelte/paths.d.ts",
 		".swelte/environment.d.ts"
-	]
+	],
+	// NOTE: tests stay in this program on purpose. VS Code's tsserver only
+	// auto-loads `tsconfig.json` (never `tsconfig.test.json`), so a test file
+	// excluded here falls back to an inferred project with default `types`
+	// (no @types/node) -> `Cannot find module 'node:test'` / TS2580
+	// `Cannot find name ... Do you need to install type definitions for node?`
+	// even though `tsc -p tsconfig.test.json` passes. `types` above keeps
+	// `node` listed for exactly this reason; `swelte check` typechecks tests
+	// too, while emit still goes through tsconfig.test.json (NodeNext).
+	"exclude": ["dist", "dist-test", "node_modules"]
 }

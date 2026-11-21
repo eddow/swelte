@@ -1,10 +1,16 @@
 import assert from 'node:assert/strict'
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { describe, it } from 'node:test'
 import {
 	assertTargetArch,
 	assertTargetOs,
+	ensureSqliteForBuild,
+	hasSystemSqlite,
 	hostTargetArch,
 	hostTargetOs,
+	needsSqliteAmalgamation,
 	normalizeTargetArch,
 	normalizeTargetOs,
 	resolveCC,
@@ -138,5 +144,35 @@ describe('cross-build target OS (docs/cli.md)', () => {
 		assert.ok(typeof cc === 'string' && cc.length > 0)
 		// On this Linux dev machine gcc exists → absolute system path.
 		assert.ok(cc === resolveCC() || cc.includes('zig-cc-'))
+	})
+})
+
+describe('lazy sqlite amalgamation (db.sqlite builds only)', () => {
+	it('detects the need from the copied backend hub module', () => {
+		const gen = mkdtempSync(join(tmpdir(), 'gen-'))
+		try {
+			assert.equal(needsSqliteAmalgamation(gen), false)
+			mkdirSync(join(gen, 'backend'), { recursive: true })
+			writeFileSync(join(gen, 'backend', 'db.v'), 'module backend\n// no sqlite here\n')
+			assert.equal(needsSqliteAmalgamation(gen), false)
+			writeFileSync(join(gen, 'backend', 'db.v'), 'module backend\nimport db.sqlite\n')
+			assert.equal(needsSqliteAmalgamation(gen), true)
+		} finally {
+			rmSync(gen, { recursive: true, force: true })
+		}
+	})
+
+	it('hasSystemSqlite returns a boolean (env-dependent, never throws)', () => {
+		assert.equal(typeof hasSystemSqlite(), 'boolean')
+	})
+
+	it('skips the fetch entirely when the build needs no sqlite', async () => {
+		const gen = mkdtempSync(join(tmpdir(), 'gen-plain-'))
+		try {
+			const out = await ensureSqliteForBuild('/nonexistent/v', gen, () => {})
+			assert.deepEqual(out, { needed: false, cached: true })
+		} finally {
+			rmSync(gen, { recursive: true, force: true })
+		}
 	})
 })

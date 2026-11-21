@@ -6,7 +6,8 @@ import type { AiAdapter } from './adapters.js'
 import type { AdapterCaps, RunRequirements } from './capabilities.js'
 import type { RunTerminalReason } from './envelope.js'
 import type { WireEvent } from './sse.js'
-import type { ProviderUsage, TraceEvent, TraceSink } from './trace.js'
+import type { PriceTable, ProviderUsage, TraceEvent, TraceSink } from './trace.js'
+import { estimateCost } from './trace.js'
 
 export const ANTHROPIC_BASE_URL = 'https://api.anthropic.com'
 export const ANTHROPIC_VERSION = '2023-06-01'
@@ -17,7 +18,10 @@ export interface AnthropicConfig {
 	allowlist?: string[]
 	baseUrl?: string
 	latencyMs?: number
-	costPerRun?: number
+	/** Optional price table (per 1k tokens) — no table means unknown cost. */
+	pricing?: PriceTable
+	/** Pre-run routing ceiling: worst-case 1k-token blend of the table. */
+	maxCostPer1k?: number
 	onEvent?: (event: TraceEvent) => void
 	sink?: TraceSink
 	fetch?: typeof fetch
@@ -98,7 +102,8 @@ export class AnthropicAdapter implements AiAdapter {
 	name = 'anthropic'
 	readonly model: string
 	readonly latencyMs: number
-	readonly costPerRun: number
+	readonly pricing: PriceTable | undefined
+	readonly maxCostPer1k: number | undefined
 	readonly caps = ANTHROPIC_CAPS
 	private config: AnthropicConfig
 
@@ -107,7 +112,8 @@ export class AnthropicAdapter implements AiAdapter {
 		this.config = config
 		this.model = config.model
 		this.latencyMs = config.latencyMs ?? 0
-		this.costPerRun = config.costPerRun ?? 0
+		this.pricing = config.pricing
+		this.maxCostPer1k = config.maxCostPer1k
 	}
 
 	async *run(
@@ -178,7 +184,8 @@ export class AnthropicAdapter implements AiAdapter {
 			else throw e
 		}
 		seq += 1
-		trace({ runId, outputId, seq, kind: 'terminal', usage, terminal })
+		const estimatedCost = estimateCost(usage, this.pricing)
+		trace({ runId, outputId, seq, kind: 'terminal', usage, ...(estimatedCost ? { estimatedCost } : {}), terminal })
 		yield {
 			envelope: { runId, outputId, kind: 'terminal', seq },
 			payload: { reason: terminal, ...(usage ? { usage } : {}) },

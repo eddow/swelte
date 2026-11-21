@@ -1,4 +1,7 @@
 // Node-only scaffolder tests (same note as tsconfig.json about `types`).
+// Trick for *.test.ts / *.spec.ts importing `node:*`: `types: ["node"]`
+// must stay explicit, otherwise @types/node is hidden and `node:*` imports
+// fail with TS2307. `src/**/*.ts` already covers specs co-located in src.
 {
 	"extends": "../../tsconfig.base.json",
 	"compilerOptions": {
@@ -10,6 +13,6 @@
 		"declarationMap": false,
 		"sourceMap": false
 	},
-	"include": ["src/**/*.test.ts", "src/**/*.ts"]
+	"include": ["src/**/*.test.ts", "src/**/*.spec.ts", "src/**/*.ts"]
 }
 

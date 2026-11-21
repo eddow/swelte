@@ -15,7 +15,7 @@ import { checkOpenAiFit, OPENAI_CAPS, OpenAiAdapter, openAiFromEnv } from '../sr
 import { checkOpenRouterFit, OpenRouterAdapter } from '../src/lib/openrouter.js'
 import { applyPolicy, METADATA_ONLY } from '../src/lib/recorder.js'
 import { createSseParser, decodeSseEvent, encodeSseEvent } from '../src/lib/sse.js'
-import { createMemorySink } from '../src/lib/trace.js'
+import { createMemorySink, estimateCost } from '../src/lib/trace.js'
 
 describe('sse framing', () => {
 	it('encodes envelope+payload as one SSE message and decodes it back', () => {
@@ -113,6 +113,51 @@ describe('adapters + recorder policy', () => {
 			routeAdapter({ input: ['text'], output: ['text'] }, [slow], { maxLatencyMs: 50 }),
 			null
 		)
+	})
+	it('budget routing: priced adapters compete, unknown cost never passes a budget', () => {
+		const priced = new OpenRouterAdapter({
+			apiKey: 'k',
+			model: 'cheap',
+			latencyMs: 10,
+			pricing: { currency: 'USD', inputPer1k: 1, outputPer1k: 2 },
+			maxCostPer1k: 2,
+			fetch: async () => {
+				throw new Error('no net')
+			},
+		})
+		const pricey = new OpenRouterAdapter({
+			apiKey: 'k',
+			model: 'pricey',
+			latencyMs: 1,
+			pricing: { currency: 'USD', inputPer1k: 10, outputPer1k: 20 },
+			maxCostPer1k: 20,
+			fetch: async () => {
+				throw new Error('no net')
+			},
+		})
+		const unpriced = new DeterministicAdapter() // no table: unknown ≠ free
+		const req: RunRequirements = { input: ['text'], output: ['text'] }
+		assert.equal(routeAdapter(req, [pricey, priced])?.name, 'openrouter')
+		assert.equal(
+			routeAdapter(req, [pricey, priced], { maxCostPer1k: 2 })?.model,
+			'cheap'
+		)
+		assert.equal(
+			routeAdapter(req, [unpriced], { maxCostPer1k: 100 }),
+			null,
+			'unknown-cost adapters are excluded from budgeted routes, not treated as free'
+		)
+	})
+	it('estimateCost: table math only, basis-tagged, never invents a zero', () => {
+		const pricing = { currency: 'USD', inputPer1k: 1, outputPer1k: 3 }
+		assert.deepEqual(estimateCost({ inputTokens: 2000, outputTokens: 1000 }, pricing), {
+			currency: 'USD',
+			amount: 5,
+			basis: 'table-estimate',
+		})
+		assert.equal(estimateCost({ inputTokens: 10 }, undefined), undefined)
+		assert.equal(estimateCost(undefined, pricing), undefined)
+		assert.equal(estimateCost({}, pricing), undefined)
 	})
 	it('one text consumer switches providers by config only', async () => {
 		const sse = (body: string) =>
