@@ -516,6 +516,23 @@ describe('codegen shape snapshots (fetch/SSE/dispatcher)', () => {
 		assert.equal(by('/plain')?.serializedHeaders, null)
 	})
 
+	it('param-less verb arms silence unused req (no V warning)', async () => {
+		const root = scaffold()
+		writeFileSync(
+			join(root, 'src', 'routes', 'bare.v'),
+			'module b\n@[get] pub fn probe() string { return "ok" }'
+		)
+		await generate(root)
+		const leaf = readFileSync(join(root, '.swelte', 'routes', 'bare.v'), 'utf8')
+		// bare.v's GET arm builds `mut req` but probe() takes no params:
+		// the arm must mark it used, or V warns `unused variable: req`.
+		assert.ok(leaf.includes('mut req := SwelteRequest'), 'arm builds req')
+		assert.ok(leaf.includes('_ = req'), 'param-less arm silences unused req')
+		// Param-ful arms reference req (narrow args) — no marker needed.
+		const greet = readFileSync(join(root, '.swelte', 'routes', 'api_greet.v'), 'utf8')
+		assert.ok(greet.includes('@[get]') || greet.includes('swelte__api_greet_hello'))
+	})
+
 	it('dispatch covers every page route in the manifest (item 15, presence)', async () => {
 		const root = scaffold()
 		mkdirSync(join(root, 'src', 'routes', 'admin'), { recursive: true })

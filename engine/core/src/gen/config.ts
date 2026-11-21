@@ -544,9 +544,9 @@ export function renderHarness(
 			.map((l) => (l.trim() === '' ? '' : `\t${l}`))
 			.join('\n')
 	if (hooks?.startupBody !== undefined) {
-		const anchor = '\tmut app := &App{}'
+		const anchor = '\t// [swelte] app-startup'
 		const inject =
-			'\tmut app := &App{}\n' +
+			'\t// [swelte] app-startup\n' +
 			'\t// @[startup] (src/app.v) — once, before veb.run. Throw aborts boot.\n' +
 			'\t(fn () ! {\n' +
 			indent(hooks.startupBody) +

@@ -38,6 +38,17 @@ Swelte connects to the bundled V server's existing `veb.Server.shutdown`.
 SIGTERM and SIGINT record a stop request; allocation, locks and cleanup happen
 on ordinary threads outside the signal handler.
 
+Development also accepts stop requests over the controller's private loopback
+connection. The child authenticates with a per-launch token, protocol version,
+generation and PID; lifecycle messages never share application HTTP or logs.
+The connection is established before `@[startup]`. A stop command or controller
+EOF enters the same idempotent `request_stop` path as standalone OS signals.
+`ready` is emitted only after startup and the HTTP listener are ready. The
+controller waits for process exit, not just the `stopped` message, before
+replacement. A controller disconnect during a blocked startup is bounded by
+the same shutdown deadline. Native children launched by `swelte dev` disable
+OS shutdown handlers because normal dev lifecycle uses cooperative commands.
+
 Shutdown stops admission, wakes registered streams and stops accepting HTTP
 connections. The framework waits for admitted request work, detached load/verb
 watchdog tasks, stream producers/writers and the cron scheduler. Timed-out

@@ -1,7 +1,7 @@
 // Version tooling for the shared-line / independent-patch policy
 // (docs/specs/versioning.md).
 //
-// Active release line: 0.2 — participants core, vvm, ssr-qjs, mcp, create
+// Active release line: 0.2 — participants core, vvm, ssr-qjs, mcp, ai, create
 // share major.minor, each owns its patch counter.
 // Retired: plus stays on 0.1.x (0.1.6 exposes the deprecation), consumes the
 // 0.1 line of core (^0.1.5).
@@ -25,9 +25,9 @@ import { readFileSync, writeFileSync } from 'node:fs'
 const ROOT = 'package.json'
 // Line participants: every active package on the shared major.minor line.
 // Retired packages (plus) sit outside the roster and keep their own line.
-const ACTIVE = ['core', 'vvm', 'ssr-qjs', 'mcp', 'create']
+const ACTIVE = ['core', 'vvm', 'ssr-qjs', 'mcp', 'ai', 'create']
 const RETIRED = ['plus']
-const ALL_DIRS = ['engine/core', 'engine/vvm', 'engine/ssr-qjs', 'engine/mcp', 'engine/create', 'engine/plus']
+const ALL_DIRS = ['engine/core', 'engine/vvm', 'engine/ssr-qjs', 'engine/mcp', 'engine/ai', 'engine/create', 'engine/plus']
 const EXAMPLES = ['examples/tests', 'examples/something', 'examples/docs-site']
 const TEMPLATE = 'engine/create/templates/base'
 // Shared pins aligned on core (single truth for the whole repo).
@@ -117,7 +117,7 @@ function plan({ json = false } = {}) {
 			)
 		} else {
 			console.log(`plan: publish ${selection.length} tarball(s): ${selection.join(', ')}`)
-			console.log(`order: ${['vvm', 'core', 'mcp', 'ssr-qjs', 'create'].filter((p) => touched.has(p)).join(' -> ')}`)
+			console.log(`order: ${['vvm', 'core', 'ai', 'mcp', 'ssr-qjs', 'create'].filter((p) => touched.has(p)).join(' -> ')}`)
 		}
 	} else {
 		console.log(JSON.stringify({ selection, retiredOnly, status }))
@@ -201,7 +201,7 @@ function checkCommand(args) {
 	}
 	const targets = wantRaw ? selected : [...ACTIVE]
 	// Dependency order so ^ranges resolve to the just-published version.
-	const ORDER = ['vvm', 'core', 'mcp', 'ssr-qjs', 'create']
+	const ORDER = ['vvm', 'core', 'ai', 'mcp', 'ssr-qjs', 'create']
 	targets.sort((a, b) => ORDER.indexOf(a) - ORDER.indexOf(b))
 	const rows = targets.map((p) => {
 		const local = readJson(`engine/${p}/package.json`).version
@@ -283,6 +283,16 @@ function validateRelease(line, changes) {
 		if (template[section]?.['@swelte/' + dep] !== '^__SWELTE_VERSION_' + dep + '__') {
 			problems.push('Invalid template placeholder for ' + dep)
 		}
+	}
+	// Browser-safe version constants in published src/lib (SSR/client bundles
+	// forbid node: imports, so these duplicate package.json — gate the sync
+	// when the source file is present (release fixtures copy manifests only).
+	try {
+		const aiVersion = readJson('engine/ai/package.json', changes).version
+		const aiConst = readFileSync('engine/ai/src/lib/version.ts', 'utf8')
+		if (!aiConst.includes(`'${aiVersion}'`)) problems.push('engine/ai VERSION constant out of sync with package.json')
+	} catch (e) {
+		if (e?.code !== 'ENOENT') problems.push('engine/ai version constant unreadable')
 	}
 	return problems
 }

@@ -49,6 +49,7 @@
     "npm-skills": "^0.5.1"
   },
   "dependencies": {
+    "@sveltejs/package": "^2.0.0",
     "@swelte/vvm": "^0.2.0"
   },
   "typesVersions": {

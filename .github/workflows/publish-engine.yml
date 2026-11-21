@@ -97,6 +97,7 @@ jobs:
           npm run build
           --workspace=@swelte/vvm
           --workspace=@swelte/core
+          --workspace=@swelte/ai
           --workspace=@swelte/mcp
           --workspace=@swelte/ssr-qjs
           --workspace=@swelte/create
@@ -120,7 +121,7 @@ jobs:
             ARGS+=(--dry-run)
           fi
           # Gate-approved list, dependency order: retired plus never appears.
-          for pkg in vvm core mcp ssr-qjs create; do
+          for pkg in vvm core ai mcp ssr-qjs create; do
             case " $WANT " in
               *" $pkg "*) ;;
               *) echo "skip @swelte/$pkg (not approved by gate)"; continue ;;

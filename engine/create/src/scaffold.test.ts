@@ -80,10 +80,16 @@ describe('create-@swelte scaffolds (no prompt in tests)', () => {
 		const pkg = JSON.parse(readFileSync(join(parent, 'my-lib', 'package.json'), 'utf8'))
 		assert.equal(pkg.private, undefined)
 		assert.deepEqual(pkg.files, ['dist', 'src/lib/**/*.v'])
-		assert.ok(pkg.scripts['build:lib'].includes('svelte-package'))
+		assert.ok(pkg.scripts['build:lib'].includes('swelte package'))
 		assert.ok(pkg.scripts['build:lib'].includes('swelte check --lib'))
 		assert.ok(pkg.scripts.build === 'swelte build')
-		assert.ok(pkg.devDependencies['@sveltejs/package'])
+		assert.ok(
+			!(
+				'devDependencies' in pkg &&
+				(pkg.devDependencies as Record<string, string>)['@sveltejs/package']
+			),
+			'packager is core-owned, not a scaffold dep'
+		)
 		assert.ok(pkg.swelte.v.exports['./hello.v'])
 		assert.equal(pkg.swelte.v.exports['./hello.v'].source, './src/lib/hello')
 		assert.equal(pkg.swelte.v.exports['./hello.v'].entry, './src/lib/hello/api.v')
@@ -113,7 +119,10 @@ describe('create-@swelte scaffolds (no prompt in tests)', () => {
 		// patch must never generate a minimum from a line that was never cut.
 		const { TEMPLATE_DEPS, TEMPLATE_LINE } = await import('./scaffold.js')
 		for (const [dep, v] of Object.entries(TEMPLATE_DEPS)) {
-			assert.ok(String(v).startsWith(`${TEMPLATE_LINE}.`), `${dep}@${v} not on template line ${TEMPLATE_LINE}`)
+			assert.ok(
+				String(v).startsWith(`${TEMPLATE_LINE}.`),
+				`${dep}@${v} not on template line ${TEMPLATE_LINE}`
+			)
 		}
 		assert.ok(String(pkg.dependencies['@swelte/core']).startsWith(`^${TEMPLATE_LINE}.`))
 		assert.ok(String(pkg.dependencies['@swelte/ssr-qjs']).startsWith(`^${TEMPLATE_LINE}.`))

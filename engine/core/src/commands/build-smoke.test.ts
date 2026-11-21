@@ -88,14 +88,13 @@ describe('item 14 — build smoke matrix (mocked binary / node -e stub)', () => 
 		})
 	})
 
-	it('aliased vs taken ports: takePort fallback + killPort reuse', async () => {
-		const { takePort, killPort } = await import('./dev.js')
+	it('aliased vs taken ports: takePort fallback + free port validation', async () => {
+		const { takePort, requireFreePort } = await import('./dev.js')
 		// takePort: explicit port wins, garbage falls back.
 		assert.equal(takePort(1234, 4173), 1234)
 		assert.equal(takePort(undefined, 4173), 4173)
 		assert.equal(takePort('nope', 4173), 4173)
-		// Taken port is occupied while the holder serves (killPort path is
-		// runBuild's, not the probe's) — and frees after the child dies.
+		// A port becomes available after its owning child exits.
 		const { portFree: free } = await import('./dev.js')
 		let held = 0
 		// NOTE: the child binds 127.0.0.1 while portFree() probes a
@@ -107,10 +106,8 @@ describe('item 14 — build smoke matrix (mocked binary / node -e stub)', () => 
 			await probeSmoke(port, false)
 		})
 		assert.equal(await free(held), true)
-		// killPort on a free port is a no-op (never throws).
-		const logs: string[] = []
-		await killPort(held, (m) => logs.push(m))
-		assert.deepEqual(logs, [])
+		// requireFreePort on a free port is a no-op (never throws).
+		await requireFreePort(held)
 	})
 
 	it('good vs broken V binary: non-listener fails, wrong body fails', async () => {

@@ -9,7 +9,7 @@
   "peerDependencies": { "svelte": "^5.0.0" },
   "scripts": {
     "build": "swelte build",
-    "build:lib": "svelte-package && swelte check --lib"
+    "build:lib": "swelte package && swelte check --lib"
   },
   "exports": {
     ".": { "types": "./dist/index.d.ts", "svelte": "./dist/index.js" },

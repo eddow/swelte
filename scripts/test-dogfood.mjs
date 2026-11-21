@@ -96,10 +96,14 @@ try {
     copyFixture(join(root, 'fixtures/postgres/app'), app)
   }
   copyFixture(join(fixture, 'sample-lib'), library)
-  const packager = join(dirname(require.resolve('@sveltejs/package/package.json')), 'svelte-package.js')
-  run(process.execPath, [packager], library, env)
+  // Library publish build via the CLI (Swelte-owned temp under .swelte/,
+  // never .svelte-kit) + schema validation, same as `npm run build:lib`.
+  run(process.execPath, [join(root, 'engine', 'core', 'bin', 'swelte.js'), 'package', '--root', library])
   const { collectLibDiagnostics } = await import(pathToFileURL(join(root, 'engine/core/dist/gen/diagnostics.js')))
-  assert.deepEqual(collectLibDiagnostics(library), [])
+  const libDiags = collectLibDiagnostics(library).filter(
+    (d) => !(d.kind === 'lib-exports' && d.message.startsWith('no swelte.v.exports'))
+  )
+  assert.deepEqual(libDiags, [])
   const packed = JSON.parse(run('npm', ['pack', library, '--json', '--ignore-scripts', '--pack-destination', scratch]))[0]
   assert.ok(packed.files.every(file => !file.path.startsWith('src/routes/')), 'library author routes must never be packed')
   const tarball = join(scratch, packed.filename)

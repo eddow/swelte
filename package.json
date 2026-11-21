@@ -8,11 +8,11 @@
     "examples/*"
   ],
   "scripts": {
-    "check": "npm run biome:check",
     "build": "npm run build:engine",
-    "build:engine": "npm run build --workspace=@swelte/vvm --workspace=@swelte/core --workspace=@swelte/mcp --workspace=@swelte/plus --workspace=@swelte/ssr-qjs --workspace=@swelte/create --if-present",
+    "build:engine": "npm run build --workspace=@swelte/vvm --workspace=@swelte/core --workspace=@swelte/ai --workspace=@swelte/mcp --workspace=@swelte/plus --workspace=@swelte/ssr-qjs --workspace=@swelte/create --if-present",
     "test": "npm run test:unit && npm run test:install && npm run test:dogfood && npm run test:examples",
-    "test:unit": "npm run test --workspace=@swelte/core",
+    "test:dev": "npm run build --workspace=@swelte/core && node scripts/test-dev-lifecycle.mjs",
+    "test:unit": "npm run test --workspace=@swelte/core && npm run test --workspace=@swelte/ai",
     "test:examples": "npm run test:full --workspace=examples/tests",
     "test:install": "node scripts/test-install.mjs",
     "test:dogfood": "node scripts/test-dogfood.mjs",
@@ -31,7 +31,7 @@
     "test:jobs": "npm run build:engine && node scripts/test-jobs.mjs"
   },
   "devDependencies": {
-    "@biomejs/biome": "^2.6.4",
+    "@biomejs/biome": "^2.6.8",
     "@sveltejs/package": "^2.5.8",
     "typescript": "^5.0.0"
   }

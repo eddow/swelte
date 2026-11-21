@@ -1,8 +1,59 @@
-# Proposal for multimodal AI sessions
+# Provider abstraction and multimodal AI sessions
 
-An opt-in `@swelte/ai` package would let a Svelte page and a V backend exchange typed content throughout a run. A run may produce several outputs at once, accept new input while it is active, and finish without calling any tools. Keep the protocol, adapters and recording policy in the package. Reuse Swelte's native transport and V type declarations where they fit.
+`@swelte/ai` is intended to do for model providers what an ORM does for databases. An application describes a run once and consumes a common event stream. A provider adapter translates that request into the provider’s API and translates its responses back into Swelte events. Just as an ORM can target PostgreSQL or MySQL, the intended adapter family includes OpenRouter, direct OpenAI, direct Anthropic and other providers. Applications choose a provider and model at configuration time. Each adapter advertises its capabilities so a run can require features such as tool calls or structured output.
+
+**Implemented in `engine/ai` today:** the TypeScript `AiAdapter.run(input, requirements)` contract accepts a text string and returns an asynchronous stream of `WireEvent` values. `routeAdapter` selects among supplied candidates using capabilities and configured latency and cost estimates. The deterministic adapter supports offline tests. OpenRouter is the first network adapter and translates streamed text, token usage and completion into Swelte events. Its tests use an injected HTTP transport. [Adapter contract and routing](../../engine/ai/src/lib/adapters.ts) · [OpenRouter implementation](../../engine/ai/src/lib/openrouter.ts) · [Adapter tests](../../engine/ai/src/lib/openrouter.test.ts)
+
+**Portability still to prove:** direct OpenAI and Anthropic adapters are future targets. Selecting a model through OpenRouter exercises the OpenRouter API. The proposed native V provider interface, multi-turn and multimodal requests, and provider-independent cancellation still need implementation. For example, the OpenRouter adapter accepts an abort signal today through an adapter-specific third argument. The acceptance test for a second provider is to run the same text consumer against two distinct provider protocols by changing only the adapter configuration, and verify text deltas, usage when available, cancellation and terminal outcomes.
 
 Package versions and publish selection follow the proposed [Swelte release policy](versioning.md).
+
+## Roadmap
+
+Build the common structure once (designed for text + media + tools), ship the textual path first, keep media last. Work phases in order; do not start Phase D until the Phase B text slice replays cleanly from the recorder.
+
+### A — Common structural skeleton (media-aware, no media dependency)
+
+- [x] Freeze the AI envelope: `runId`, optional `turnId`, `outputId`, namespaced `kind`, `seq`.
+- [x] Define terminal semantics: ending one output leaves other outputs active until the run emits a terminal event.
+- [x] Define app-defined events: namespaced kind + versioned schema; a client skips an unfamiliar optional event.
+- [x] Pin schema identity and versioning: one identity for tool args, structured outputs, app events, trace decoding; fail on unsupported V wire types.
+- [x] Define capability advertisement split by input vs. output (modalities, encodings, duplex, structured output, tool calls, usage, cancellation).
+- [x] Define the trace sink shape alongside the protocol: run / turn / track IDs, event order, schema versions, tool decisions, cancellation, usage, terminal outcome.
+- [x] Lock the package boundary: `@swelte/media` optional peer, all media imports confined to `@swelte/ai/media`.
+
+### B — Text path first (AI-only install, no `@swelte/media`)
+
+- [x] Stream text over a streaming POST with SSE framing: text deltas, citations, tool progress, approval requests, structured patches.
+- [x] Implement progressive draft state: typed patches at expected revision, gap to snapshot request, full validation before publish, one bounded repair.
+- [x] Implement the provider adapters below and verify that one text consumer can switch among them. Route by declared capabilities, latency and budget.
+  - [x] Deterministic adapter (offline, tests, fixtures).
+  - [x] OpenRouter adapter (`@swelte/ai/openrouter`): OpenAI-compatible chat-completions over SSE, server-side key, model allowlist, usage + cancellation.
+  - [x] Direct OpenAI adapter. Authenticate to OpenAI with the application's OpenAI credentials and map its responses to the shared run events.
+  - [x] Direct Anthropic adapter. Authenticate to Anthropic with the application's Anthropic credentials and map its native streaming events to the same contract.
+  - [x] Run one provider conformance suite through the public `AiAdapter` interface for all three network adapters. Cover text, usage when available, cancellation, provider errors and premature stream termination. Vary only adapter configuration and provider-specific HTTP fixtures.
+- [x] Recording policy (metadata by default): prompts / transcripts / tool payloads opt-in independently, redaction, asset expiry. SQLite body still open.
+- [x] Verify with packed packages in a clean app dir: AI alone (media absent), entry points import (`@swelte/ai`, `/openrouter`, `/openai`, `/anthropic`), capability routing picks by latency. Typecheck + build + run of a text route belongs to the shell/ai dogfood (Phase B last item).
+- [x] Build the tool-free text fixture: live transcript + card, interrupt mid-reply, new turn; no stale output, validated card, trace explains.
+- [ ] Dogfood `shell/ai`: chat + interactive shell sharing one backend shell. Baby UI conversation + terminal over SSE/WS; human and AI both send commands and keystrokes via authorized shell tools; PTC integrated with approval gates.
+
+### C — Programmatic tools and approvals (still text-only)
+
+- [ ] Server-only V tool declarations generating callable bindings + input/output schemas; app selects tools per run.
+  - [ ] Shared shell tools (`shell.exec`, `shell.sendInput`, web fetch) first: bounded commands, PTY keystroke injection, per-call authorization.
+- [ ] Pre-execution validation (names, types, references, budgets); measure round trips and bytes vs one-call-per-turn baseline.
+- [ ] Bounded reporting plan: page authorized records, aggregate in V, return top five with source IDs.
+- [ ] Persist side-effect approvals against caller + exact args + operation ID; exercise expiry, duplicate, lost-ack recovery.
+- [ ] Dogfood proves it: human approves AI shell commands in-chat (approval gate), duplicate/expiry/lost-ack via the shared shell.
+
+### D — Media last (`@swelte/ai/media` + `@swelte/media` composition)
+
+- [ ] Media integration behind `@swelte/ai/media`: track ID or asset ref per event; app authorizes reads and subscriptions.
+- [ ] Interruption: stop local player immediately, mark turn interrupted, request upstream cancel, reject late output; measure local vs upstream separately.
+- [ ] Verify in a second clean app: AI + min media version; capability check fails actionably before capture on a video-less adapter.
+- [ ] Fixture with prerecorded camera + sensor track: slow consumer, missing patch; bounded buffering, sync timestamps, snapshot recovery, control events.
+- [ ] Voice-and-photo loop: live transcript + annotated image + card while playing reply; interrupt mid-sentence; silence, stale rejection, validated card, metadata-only trace.
+
 
 ## Package boundary and typed multiplexing
 
@@ -26,7 +77,7 @@ Keep progressive UI state as a draft. Apply typed patches against an expected re
 
 ## Provider abstraction and routing
 
-Each V adapter advertises capabilities separately for input and output, including modalities, supported encodings, duplex streaming, structured output, tool calls, usage reporting and cancellation. Select an adapter against the run's requirements before opening devices or sending data. For example, an adapter accepting image uploads may still lack live video input. Make any downsampling, transcription or frame extraction an explicit app choice.
+The proposed V provider interface follows the TypeScript adapter model. Each adapter advertises capabilities separately for input and output, including modalities, supported encodings, duplex streaming, structured output, tool calls, usage reporting and cancellation. Select an adapter against the run's requirements before opening devices or sending data. For example, an adapter accepting image uploads may still lack live video input. Make any downsampling, transcription or frame extraction an explicit app choice.
 
 Start with a deterministic adapter and two real adapters with different capabilities before stabilizing the interface. Let applications choose routing by capability, latency and budget. Record the chosen provider and model. Permit automatic fallback before visible output or side effects. A new attempt after that point needs an explicit transition the UI and recorder can identify.
 

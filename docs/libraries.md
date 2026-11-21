@@ -40,13 +40,18 @@ playground. The `#lib` / `#routes` aliases keep their app meaning inside the
 library repo (author dogfoods `#lib/...` locally, demos through `#routes/...`);
 consumers never resolve the library's `#routes`.
 
-## Rule 2: Svelte side — standard `svelte-package` conventions
+## Rule 2: Svelte side — standard `svelte-package` format, Swelte-owned build
 
-The JS/Svelte side follows SvelteKit library conventions, not a Swelte
-invention:
+The JS/Svelte side follows SvelteKit library conventions for the *output
+format*, not a Swelte invention — but it is built by Swelte, never by
+SvelteKit tooling:
 
-- Author in `src/lib/`. Run `svelte-package` (from `@sveltejs/package`) to
-  emit `dist/` (compiled JS + `.d.ts`, Svelte preserved as source).
+- Author in `src/lib/`. Run `swelte package` (a core CLI command wrapping
+  `@sveltejs/package`'s build core with Swelte-owned paths) to emit `dist/`
+  (compiled JS + `.d.ts`, Svelte preserved as source). Temp output lives
+  under `.swelte/package/` — never `.svelte-kit`, never any SvelteKit
+  config key. The tool only compiles Svelte/TS sources; it brings no
+  SvelteKit routing, SSR or deployment.
 - `package.json` carries `"svelte": "./dist/index.js"`, a
   `"./package.json": "./package.json"` passthrough, and per-file
   `exports` (`"."` + `"./<path>"` for each public Svelte/TS entry).
@@ -60,7 +65,7 @@ different target:
 {
   "scripts": {
     "build": "swelte build",
-    "build:lib": "svelte-package && swelte check --lib"
+    "build:lib": "swelte package && swelte check --lib"
   }
 }
 ```
@@ -70,7 +75,10 @@ local dogfood app (`src/routes` demo, exactly like an app build — proves the
 lib works), `"build:lib"` publishes (`svelte-package` for the Svelte/TS half,
 `swelte check --lib` for the V/packaging half).
 
-`svelte-package` handles the Svelte/TS half; `swelte check --lib` validates
+`svelte-package` (the bare SvelteKit binary) is never invoked: it reads
+SvelteKit config shape and writes `.svelte-kit/` scratch. `swelte package`
+calls the same build core with Swelte-owned paths, and `swelte check --lib`
+validates
 the library schema without side effects (same diagnostics engine as
 `swelte check`):
 
@@ -147,5 +155,5 @@ built `dist/` for JS/Svelte and raw `src/lib/**/*.v` for V) while
    `templates/lib/` overlay, `build` + `build:lib` scripts
    (`docs/cli.md#swelte-init-deprecated`).
 3. DONE — `fixtures/dogfood/sample-lib` uses `src/lib` + author-only `src/routes`.
-   The dogfood script builds with `svelte-package`, checks the library schema,
+   The dogfood script builds with `swelte package`, checks the library schema,
    packs/installs the tarball and asserts no `src/routes` files were published.

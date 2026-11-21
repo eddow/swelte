@@ -181,11 +181,8 @@ export async function runCreate(
 			}
 			pkg.svelte = './dist/index.js'
 			const scripts = (pkg.scripts ?? {}) as Record<string, string>
-			scripts['build:lib'] = 'svelte-package && swelte check --lib'
+			scripts['build:lib'] = 'swelte package && swelte check --lib'
 			pkg.scripts = scripts
-			const devDeps = (pkg.devDependencies ?? {}) as Record<string, string>
-			devDeps['@sveltejs/package'] = '^2.0.0'
-			pkg.devDependencies = devDeps
 			pkg.swelte = {
 				v: {
 					exports: {

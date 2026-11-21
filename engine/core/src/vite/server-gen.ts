@@ -1579,7 +1579,14 @@ ${body}
 			vb === 'get'
 				? `	if method == 'GET' || method == 'HEAD' {`
 				: `	if method == '${vb.toUpperCase()}' {`
-		return [methodCond, reqHead(vb), list(hs, verbBranch), tail, `	}`].join('\n')
+		// Param-less handlers (`probe() string`) never reference the arm's
+		// `mut req` - V would warn `unused variable: req`. The with-wrappers
+		// path already silences this (`_ = req`); do the same per-arm here.
+		const armUsesReq = hs.some(
+			(h) => (h.params.length === 1 && h.params[0].vtype === 'SwelteRequest') || h.params.length > 0
+		)
+		const head = armUsesReq ? reqHead(vb) : `${reqHead(vb)}\n\t\t_ = req`
+		return [methodCond, head, list(hs, verbBranch), tail, `	}`].join('\n')
 	}
 	const wrapVerb = (expr: string, vret: string): string => {
 		if (vret === 'void') return `swelte_json('{}')`

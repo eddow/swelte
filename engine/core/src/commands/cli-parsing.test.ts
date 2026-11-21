@@ -63,6 +63,7 @@ describe('CLI parsing', () => {
 			'build',
 			'preview',
 			'deploy',
+			'package',
 			'init',
 			'check',
 			'test',
@@ -74,7 +75,7 @@ describe('CLI parsing', () => {
 			assert.ok(helpText().includes(n))
 			assert.ok(commandHelp(findCommand(n)!).includes(n))
 		}
-		assert.equal(COMMANDS.length, 9)
+		assert.equal(COMMANDS.length, 10)
 	})
 
 	it('unknown option throws', () => {

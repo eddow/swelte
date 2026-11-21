@@ -86,7 +86,7 @@ execSync('npm run build --workspace=@swelte/create && npm run build --workspace=
 
 const PACK = join(TMP, 'packs')
 mkdirSync(PACK, { recursive: true })
-for (const pkg of ['core', 'vvm', 'ssr-qjs', 'mcp', 'plus', 'create']) {
+for (const pkg of ['core', 'vvm', 'ssr-qjs', 'mcp', 'ai', 'plus', 'create']) {
 	const out = run('npm', ['pack', `--workspace=engine/${pkg}`, '--pack-destination', PACK, '--silent'])
 		.trim()
 		.split('\n')
@@ -109,7 +109,7 @@ async function installCase(name, initArgs) {
 	// install — a scaffolded `^0.2.0` range may not exist on the registry
 	// yet (unpublished bump), and npm would fail resolving it. Same template
 	// bytes, local resolution, no publish needed.
-	for (const dep of ['core', 'vvm', 'ssr-qjs', 'mcp', 'plus']) {
+	for (const dep of ['core', 'vvm', 'ssr-qjs', 'mcp', 'ai', 'plus']) {
 		if (!existsSync(tgz(dep))) continue
 		const pjFile = join(dir, 'package.json')
 		const pj = JSON.parse(readFileSync(pjFile, 'utf8'))

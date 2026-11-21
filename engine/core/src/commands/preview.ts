@@ -3,7 +3,7 @@
 import { type ChildProcess, spawn } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { join, resolve } from 'node:path'
-import { freePortUnix, killPort, onSpawnError, takePort, waitPort } from './dev.js'
+import { onSpawnError, requireFreePort, takePort, waitPort } from './dev.js'
 import type { Ctx } from './types.js'
 
 export async function runPreview(ctx: Ctx): Promise<void> {
@@ -30,7 +30,7 @@ export async function runPreview(ctx: Ctx): Promise<void> {
 	} catch {
 		/* config unreadable — env only */
 	}
-	await killPort(port, ctx.log)
+	await requireFreePort(port)
 	ctx.log(`starting ${binary} on :${port} (dist/ + API, no Vite)`)
 	// Engine-agnostic: SWELTE_SSR_URL comes from the environment when the
 	// user (or an adapter wrapper) runs a renderer beside the binary.
@@ -88,7 +88,6 @@ export async function runPreview(ctx: Ctx): Promise<void> {
 			} catch {
 				/* ignore */
 			}
-			void freePortUnix(port)
 			setTimeout(() => {
 				try {
 					child?.kill('SIGKILL')

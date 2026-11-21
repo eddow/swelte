@@ -13,13 +13,43 @@ OS (build-only, see below).
 ## `swelte dev [--port N] [--backend N] [--root dir] [--ssr-port N] [--ssr|--no-ssr]`
 
 One command: V backend (`:backend`) + Vite (`:port`), HMR reload on
-`.v` change, Ctrl-C kills both. Runs `generate()` once pre-Vite so
-`.swelte/` exists before the V backend boots. Dev sets same-origin
+`.v` change, Ctrl-C closes the session. Vite initializes the configured
+Swelte plugin before the native backend is compiled. Dev sets same-origin
 `SWELTE_CORS_ORIGIN` (`http://localhost:<port>`) so the Vite proxy
 passes the CSRF guard; config knobs forward to env (env wins when set).
 `generate()` is compare-then-write: unchanged output keeps its mtime,
 so idle `dev` stays quiet (no phantom HMR), and the watcher ignores
 `.swelte/` output — regenerating never re-triggers itself.
+
+Dev starts Vite through its Node API in a worker thread, then generates and
+compiles a separate native candidate for each backend generation. The running
+application continues serving during compilation. Failed builds leave it
+running; successful builds request cooperative shutdown over a private,
+authenticated loopback connection. Only after the old process exits does the
+controller launch the candidate directly and await its explicit `ready` event.
+No compiler or npm wrapper owns the application process. Candidates live in a
+unique session directory under the configured output directory and are removed
+when discarded or stopped, including on Windows.
+
+`r` rebuilds and replaces the backend; `u` calls Vite's restart API; `q` quits
+(no Enter required). File edits and keyboard restarts share one controller:
+requests are coalesced, obsolete candidates are discarded, and replacements
+never overlap. Every queued backend build regenerates `.swelte/` first, and the
+plugin's own file watcher skips autonomous regen under `dev` — one writer, so
+the native compiler never reads half-written output. Quit cancels pending
+replacements and joins active work. A lost controller connection makes the
+native application stop itself, even during startup. Vite and the optional SSR
+sidecar close when the controller exits.
+
+Normal restart and quit send no OS signals to the application. The existing
+`SWELTE_SHUTDOWN_TIMEOUT_MS` budget (default 10000) covers native draining and
+cleanup; only a hung owned child is forcibly terminated after that budget plus
+a 500ms margin. Occupied ports cause an error; Swelte never kills their owners
+or searches process command lines. Preview shares the occupied-port policy.
+
+`npm run test:dev` exercises the real native controller lifecycle in a disposable
+project, including failed builds, graceful drain, controller loss and quit
+during startup. It requires the V toolchain and uses portable Node APIs.
 
 SSR is automatic when the adapter is installed: `swelte dev` probes
 `@swelte/ssr-qjs` from the project root (no new dep for core, resolved
@@ -147,7 +177,7 @@ shape. `--lib` / `--kind lib` / `--template lib`: a library instead —
 same base skeleton plus public `src/lib` starter (`hello` universal V
 module with matching `swelte.v.exports`) and a `src/routes` dogfood
 demo; `package.json` gets `"build": "swelte build"` (local dogfood
-build, same as apps) plus `"build:lib": "svelte-package && swelte
+build, same as apps) plus `"build:lib": "swelte package && swelte
 check --lib"` (publish path). `src/app.ts` is the optional user-owned
 setup hook (plus `src/app.css` when present) — both auto-imported by
 the generated `.swelte/entry-main.ts`; routers are

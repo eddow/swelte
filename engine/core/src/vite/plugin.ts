@@ -327,8 +327,8 @@ export function swelte(options: SweltePluginOptions = {}): Plugin {
 				// in any route file → harness imports the backend hub module.
 				// Declared here so the harness render below sees the route-loop result.
 				let hasRoomSse = false
-				const needsBackendImport = listVFiles(resolve(root, "src")).some((file) =>
-					/^\s*import\s+backend\b/m.test(readFileSync(file, "utf8"))
+				const needsBackendImport = listVFiles(resolve(root, 'src')).some((file) =>
+					/^\s*import\s+backend\b/m.test(readFileSync(file, 'utf8'))
 				)
 				// Hoisted prelude (bridge stub + backend includes + marker):
 				// generate() must leave a compilable .swelte/ even when the
@@ -1809,7 +1809,12 @@ export declare const dev: boolean
 					for (const include of plugin.includes?.() ?? []) {
 						// Builtin `db` backend is usage-gated: skip here when no room/WS
 						// fn needs it — the `hasRoomSse` copy below handles the used case.
-						if (plugin.name === 'db' && include.module === 'backend' && !(hasRoomSse || needsBackendImport)) continue
+						if (
+							plugin.name === 'db' &&
+							include.module === 'backend' &&
+							!(hasRoomSse || needsBackendImport)
+						)
+							continue
 						if (!existsSync(include.absDir)) continue
 						for (const file of readdirSync(include.absDir))
 							if (file.endsWith('.v')) pluginFiles.add(`${include.module}/${file}`)
@@ -1844,7 +1849,12 @@ export declare const dev: boolean
 							}
 							// Builtin `db` backend is usage-gated (room-SSE/WS only):
 							// skip here when unused (copied via the `hasRoomSse` gate above).
-							if (pp.name === 'db' && inc.module === 'backend' && !(hasRoomSse || needsBackendImport)) continue
+							if (
+								pp.name === 'db' &&
+								inc.module === 'backend' &&
+								!(hasRoomSse || needsBackendImport)
+							)
+								continue
 							let files: string[] = []
 							try {
 								files = readdirSync(inc.absDir).filter((f) => f.endsWith('.v'))
@@ -1959,6 +1969,7 @@ export declare const dev: boolean
 
 	const plugin: Plugin = {
 		name: 'swelte',
+		api: { generate: () => generate(activeRoot || process.cwd()) },
 		// Run before vite-plugin-svelte so `.v` ids resolve before the
 		// Svelte compiler requests them (Svelte emits relative `.v`
 		// imports verbatim; our load() codegens the JS).
@@ -2304,9 +2315,17 @@ export declare const dev: boolean
 				const norm = file.split(sep).join('/')
 				const outNorm = resolve(server.config.root, outDir).split(sep).join('/')
 				if (norm === outNorm || norm.startsWith(`${outNorm}/`)) return
-				void generate(server.config.root).catch(() => {
-					/* ignore */
-				})
+				// Single-writer rule under `swelte dev`: the controller queue
+				// regenerates explicitly (api.generate via prepare()) before
+				// each native compile so the compiler never reads half-written
+				// output. An autonomous regen here would race an in-flight
+				// `v -o`. Skip the file write but still invalidate the module
+				// graph below so HMR stays fresh until the queued regen lands.
+				if (process.env.SWELTE_DEV_CONTROLLER !== '1') {
+					void generate(server.config.root).catch(() => {
+						/* ignore */
+					})
+				}
 				try {
 					// Roadmap 21: signature change must remount, not go stale.
 					// The old path only covered #lib/; routes stubs

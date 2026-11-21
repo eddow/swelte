@@ -4,6 +4,7 @@ import { runBuild } from './build.js'
 import { runDeploy } from './deploy.js'
 import { runDev } from './dev.js'
 import { runExport } from './export.js'
+import { runPackage } from './package.js'
 import { runPreview } from './preview.js'
 import { runTest } from './test.js'
 import type { ArgDef, Command, Ctx } from './types.js'
@@ -226,11 +227,44 @@ const exportCmd: Command = {
 	},
 }
 
+const packageCmd: Command = {
+	name: 'package',
+	summary:
+		'Library publish build: src/lib -> dist (Svelte/TS half; V ships raw via swelte.v.exports).',
+	args: [
+		{ name: 'root', help: 'Project root', value: 'string' },
+		{ name: 'input', help: 'Library source dir (default: src/lib)', value: 'string' },
+		{ name: 'output', short: 'o', help: 'Publish output dir (default: dist)', value: 'string' },
+		{
+			name: 'tsconfig',
+			help: 'tsconfig/jsconfig for .d.ts emit (default: nearest upward)',
+			value: 'string',
+		},
+		{
+			name: 'no-types',
+			help: 'Skip .d.ts declaration emit',
+			value: 'boolean',
+		},
+	],
+	async run(ctx: Ctx) {
+		const { resolve } = await import('node:path')
+		const { outDir } = await runPackage({
+			root: resolve(String(ctx.opts.root ?? process.cwd())),
+			...(typeof ctx.opts.input === 'string' ? { input: ctx.opts.input } : {}),
+			...(typeof ctx.opts.output === 'string' ? { output: ctx.opts.output } : {}),
+			...(typeof ctx.opts.tsconfig === 'string' ? { tsconfig: ctx.opts.tsconfig } : {}),
+			...(ctx.opts['no-types'] ? { types: false } : {}),
+		})
+		ctx.log(`package: src/lib -> ${outDir}`)
+	},
+}
+
 export const COMMANDS: Command[] = [
 	devCmd,
 	buildCmd,
 	previewCmd,
 	deployCmd,
+	packageCmd,
 	initCmd,
 	checkCmd,
 	testCmd,

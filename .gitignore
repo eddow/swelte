@@ -4,6 +4,7 @@ dist/
 **/dist/
 **/dist-test/
 **/.swelte/
+**/.svelte-kit/
 examples/*/server
 engine/core/templates/*/.swelte/
 engine/vvm/versions/

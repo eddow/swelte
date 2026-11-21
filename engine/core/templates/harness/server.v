@@ -28,6 +28,8 @@ mut:
 	active int
 	watching bool
 	deadline i64
+	control_mu sync.Mutex
+	control &net.TcpConn = unsafe { nil }
 	connections map[int]&net.TcpConn
 	instance string = time.now().unix_nano().str()
 	isr_busy map[string]bool
@@ -94,14 +96,88 @@ fn swelte_stream_report(req routes.SwelteRequest, message string) {
 	swelte_report(SwelteReport{phase: 'stream-error', request_id: req.headers['x-swelte-request-id'] or { '' }, method: req.method, path: req.path, status: 500, message: message})
 }
 
+// Every trigger enters this one idempotent lifecycle operation.
 fn (mut state SwelteLifecycle) request_stop() {
 	state.mu.lock()
-	defer { state.mu.unlock() }
-	if !state.stopping {
-		state.stopping = true
-		state.stop.close()
-		for handle, _ in state.connections { net.shutdown(handle) }
+	if state.stopping { state.mu.unlock(); return }
+	state.stopping = true
+	state.deadline = time.now().unix_milli() + swelte_env_int('SWELTE_SHUTDOWN_TIMEOUT_MS', 10000)
+	state.stop.close()
+	for handle, _ in state.connections { net.shutdown(handle) }
+	state.mu.unlock()
+	state.control_emit('stopping')
+}
+
+struct SwelteDevCommand {
+	kind string @[json: 'type']
+}
+
+fn swelte_control_line(mut conn net.TcpConn) !string {
+	mut line := []u8{cap: 128}
+	mut byte := [u8(0)]
+	for line.len < 4096 {
+		if conn.read(mut byte)! == 0 { return error('controller disconnected') }
+		if byte[0] == `\n` { return line.bytestr() }
+		line << byte[0]
 	}
+	return error('control message too long')
+}
+
+fn swelte_control_write(mut conn net.TcpConn, message string) ! {
+	bytes := message.bytes()
+	mut offset := 0
+	for offset < bytes.len {
+		n := conn.write(bytes[offset..])!
+		if n <= 0 { return error('controller disconnected') }
+		offset += n
+	}
+}
+
+fn (mut state SwelteLifecycle) control_emit(kind string) {
+	if isnil(state.control) { return }
+	state.control_mu.lock()
+	defer { state.control_mu.unlock() }
+	swelte_control_write(mut state.control, '{"type":"${kind}"}\n') or {}
+}
+
+fn swelte_open_dev_control(mut state SwelteLifecycle) ! {
+	endpoint := os.getenv('SWELTE_DEV_CONTROL')
+	if endpoint == '' { return }
+	token := os.getenv('SWELTE_DEV_TOKEN')
+	generation := os.getenv('SWELTE_DEV_GENERATION').int()
+	if !endpoint.starts_with('127.0.0.1:') || token.len != 64 || generation <= 0 {
+		return error('invalid dev controller configuration')
+	}
+	mut conn := net.dial_tcp(endpoint)!
+	conn.set_read_timeout(5 * time.second)
+	conn.set_write_timeout(time.second)
+	swelte_control_write(mut conn, '{"type":"hello","version":1,"token":"${token}","generation":${generation},"pid":${os.getpid()}}\n')!
+	accepted := json.decode(SwelteDevCommand, swelte_control_line(mut conn)!)!
+	if accepted.kind != 'accepted' { return error('dev controller rejected handshake') }
+	conn.set_read_timeout(net.infinite_timeout)
+	state.control = conn
+	// Child application workers must not inherit the parent's private credentials.
+	os.unsetenv('SWELTE_DEV_CONTROL')
+	os.unsetenv('SWELTE_DEV_TOKEN')
+	os.unsetenv('SWELTE_DEV_GENERATION')
+	spawn swelte_dev_control_watch(state)
+}
+
+fn swelte_dev_control_watch(lifecycle &SwelteLifecycle) {
+	mut state := unsafe { &SwelteLifecycle(lifecycle) }
+	for {
+		line := swelte_control_line(mut state.control) or { break }
+		command := json.decode(SwelteDevCommand, line) or { break }
+		if command.kind == 'stop' { break }
+		// Unknown commands close the session and stop this owned application.
+		break
+	}
+	state.request_stop()
+	// Also bound a startup hook that never returns after controller loss.
+	remaining := state.deadline - time.now().unix_milli()
+	if remaining > 0 { time.sleep(remaining * time.millisecond) }
+	eprintln('[swelte:shutdown] status=timeout phase=control')
+	exit(1)
 }
 
 fn (mut state SwelteLifecycle) track(conn &net.TcpConn) bool {
@@ -135,13 +211,14 @@ pub fn (mut app App) init_server(server &veb.Server) {
 fn swelte_shutdown_watch(server &veb.Server, lifecycle &SwelteLifecycle) {
 	mut state := unsafe { &SwelteLifecycle(lifecycle) }
 	server.wait_till_running() or { state.finished <- false; return }
+	if !state.is_stopping() { state.control_emit('ready') }
 	for C.swelte_received_stop() == 0 {
 		if !swelte_wait_active(25, state) { break }
 	}
 	state.request_stop()
-	budget := swelte_env_int('SWELTE_SHUTDOWN_TIMEOUT_MS', 10000)
-	deadline := time.now().unix_milli() + budget
-	state.deadline = deadline
+	deadline := state.deadline
+	budget := deadline - time.now().unix_milli()
+	if budget <= 0 { exit(1) }
 	eprintln('[swelte:shutdown] status=draining')
 	server.shutdown(timeout: budget * time.millisecond) or {
 		eprintln('[swelte:shutdown] status=timeout phase=http')
@@ -1755,11 +1832,15 @@ pub fn (mut app App) swelte_catchall(mut ctx Ctx, _path string) veb.Result {
 fn main() {
 	port := (os.getenv_opt('PORT') or { '8131' }).int()
 	mut app := &App{}
+	swelte_open_dev_control(mut app.lifecycle) or { eprintln('[swelte:control] status=error'); exit(1) }
+	// [swelte] app-startup
+	if !app.lifecycle.is_stopping() {
 	// [swelte] background-start: app startup must finish before plugin jobs.
 	if (os.getenv_opt('SWELTE_SHUTDOWN_SIGNALS') or { '1' }) != '0' {
 		if C.swelte_install_stop_signals() == 0 { panic('cannot install shutdown signals') }
 	}
 	veb.run_at[App, Ctx](mut app, port: port, family: .ip) or { panic(err.msg()) }
+	}
 	app.lifecycle.request_stop()
 	if app.lifecycle.watching {
 		drained := <-app.lifecycle.finished
@@ -1774,6 +1855,7 @@ fn main() {
 		remaining * time.millisecond { eprintln('[swelte:shutdown] status=timeout phase=hook'); exit(1) }
 	}
 	eprintln('[swelte:shutdown] status=complete')
+	app.lifecycle.control_emit('stopped')
 }
 
 // A loopback render follows ordinary guards/loads with no request credentials.

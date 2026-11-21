@@ -1,15 +1,10 @@
 import assert from 'node:assert/strict'
 import { mkdtempSync, writeFileSync } from 'node:fs'
+import { createServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, it } from 'node:test'
-import {
-	maybeStartSsrSidecar,
-	onSpawnError,
-	portFree,
-	projectKillPattern,
-	takePort,
-} from './dev.js'
+import { maybeStartSsrSidecar, onSpawnError, portFree, requireFreePort, takePort } from './dev.js'
 
 describe('dev port helpers (no real binds except port 0)', () => {
 	it('takePort fallbacks/NaN/negative', () => {
@@ -25,8 +20,17 @@ describe('dev port helpers (no real binds except port 0)', () => {
 		assert.equal(await portFree(0), true)
 	})
 
-	it('projectKillPattern returns basename', () => {
-		assert.equal(projectKillPattern('/a/b/my-app'), 'my-app')
+	it('rejects an occupied port without stopping its owner', async () => {
+		const holder = createServer()
+		await new Promise<void>((resolve) => holder.listen(0, '127.0.0.1', resolve))
+		try {
+			const address = holder.address()
+			assert.ok(address && typeof address === 'object')
+			await assert.rejects(requireFreePort(address.port), /already in use/)
+			assert.equal(holder.listening, true)
+		} finally {
+			await new Promise<void>((resolve) => holder.close(() => resolve()))
+		}
 	})
 
 	it('onSpawnError logs readable hint', () => {
