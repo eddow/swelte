@@ -4,8 +4,8 @@
 # active workspace version against npm and approves exactly what needs
 # publishing — the plan preview and the publish step consume the same gate
 # output, so the reviewed list is the published list. Publishes in
-# dependency order (vvm → core → mcp / ssr-qjs → create) so intra-workspace
-# ^ranges always resolve to the just-published version.
+# dependency order (vvm → core → plus → ai / mcp / ssr-qjs → create) so
+# intra-workspace ^ranges always resolve to the just-published version.
 #
 # Requires a repository secret `NPM_TOKEN` (npm access token with
 # publish rights on the @swelte scope).
@@ -16,7 +16,7 @@ name: Publish engine packages
   workflow_dispatch:
     inputs:
       mode:
-        description: 'single = independent patch(es), fail-fast on line changes; line-cut = coordinated 0.1.x -> 0.2.0 for all active'
+        description: 'single = independent patch(es), fail-fast on line changes; line-cut = coordinated minor cut to the next line (e.g. 0.2 -> 0.3) for all active'
         required: false
         default: single
         type: choice
@@ -97,6 +97,7 @@ jobs:
           npm run build
           --workspace=@swelte/vvm
           --workspace=@swelte/core
+          --workspace=@swelte/plus
           --workspace=@swelte/mcp
           --workspace=@swelte/ssr-qjs
           --workspace=@swelte/create
@@ -120,8 +121,8 @@ jobs:
           if [ "$DRY_RUN" = "true" ]; then
             ARGS+=(--dry-run)
           fi
-          # Gate-approved list, dependency order: retired plus never appears.
-          for pkg in vvm core ai mcp ssr-qjs create; do
+          # Gate-approved list, dependency order.
+          for pkg in vvm core plus ai mcp ssr-qjs create; do
             case " $WANT " in
               *" $pkg "*) ;;
               *) echo "skip @swelte/$pkg (not approved by gate)"; continue ;;

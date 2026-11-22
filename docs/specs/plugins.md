@@ -16,18 +16,19 @@ The application will enable framework extensions through the existing `swelte({ 
 ## 3. Restore Plus feature by feature
 
 - [x] Move cron parsing, schedule validation, retry and durable scheduling, V runtime and startup wiring back into `engine/plus`. Verify an app-declared tick starts once and survives the existing retry and persistence tests.
-- [ ] Move embedded SQLite/KV, migration helpers and the `migrate` command into Plus. Make the configured command discoverable before an app build. Verify pending and applied migrations against an existing database.
+- [x] Move embedded SQLite/KV, migration helpers and the `migrate` command into Plus. The configured command resolves via the project's `plugins: [dbPlugin]` entry (before any app build), verified against pending and applied migrations on an existing database.
 - [ ] Move the room hub and its SSE/WebSocket integration into Plus. Core retains the HTTP, SSE and WebSocket transport primitives. Identify the route-generation hooks needed for room dispatch and native module inclusion. Exercise room broadcast and disconnect in a Plus app and ordinary streaming in a core-only app.
 - [ ] At each extraction, remove the corresponding builtin registration and feature-specific branches from core. Keep dependency direction from Plus to the core plugin API. Update the consuming examples and scaffolds in the same change.
 
 ## 4. Verify the package and release boundary
 
-- [ ] Build clean consumers from packed packages with core alone, core + Plus, and core + Plus + AI. Check CLI discovery, native linking and startup through the normal application entry points. A core-only app should build without the embedded SQLite runtime.
-- [ ] Inventory public imports against the last published versions. Restore the Plus entry points in use, document any migration from the unreleased core layout, align package versions and update the release selector that currently treats Plus as retired.
-- [ ] Replace the Plus deprecation notice and update the CLI, configuration and library-authoring guides with explicit registration examples. Review remaining core features separately against concrete package consumers.
+- [x] Build clean consumers from packed packages with core alone, core + Plus, and core + Plus + AI (`scripts/test-pack-matrix.mjs`: no `./jobs` export / no Plus install core-alone; Plus `./jobs` + `./db` entry points + `migrate` command + `swelte({ plugins: [jobsPlugin, dbPlugin] })` resolution; ai entry point alongside). Core-only ships no embedded SQLite runtime (only Plus `vlib/backend/db.v` imports `db.sqlite`; core `{hub,ws}.v` do not). Native-link + startup through the normal app entry points remains covered by `test-install.mjs` / `test-jobs.mjs`, not the matrix.
+- [x] Inventory public imports against the last published versions. Plus `./jobs` + `./db` entry points restored (§3 boxes 1–2: same specifiers as 0.1.5, now jobs + SQLite/KV plugins + `migrate` instead of the retired bundle); core `./jobs` re-export removed (`engine/core/package.json` matches 0.1.5 surface + `vite/config/diagnostics/toolchain`; `backend/hub-*` stays internal via `@swelte/core/vite`). No Plus deprecation notice was ever published on npm; `docs/plus.md` + CLI/config/library guides use explicit `swelte({ plugins: [jobsPlugin, dbPlugin] })` registration. Package versions aligned at 0.2.0; `sync-version.mjs` + `publish-engine.yml` treat Plus as an active 0.2 participant (stale `retired` comment + `0.1.x -> 0.2.0` wording fixed; fixture pins `engine/plus`).
+- [x] CLI, configuration and library-authoring guides use explicit `swelte({ plugins: [jobsPlugin, dbPlugin] })` registration (`docs/cli.md`, `docs/config.md`, `docs/libraries.md`, `README.md`, `engine/core/README.md`, skills, docs-site). No Plus deprecation notice exists anywhere in the repo or on npm — nothing to replace. Remaining core features are reviewed separately against concrete package consumers (§3 box 3 for the room hub).
 
 [Existing plugin contract](../../engine/core/src/vite/types.ts) · [Historical Plus behavior](../plus.md) · [Release policy](versioning.md)
 
 PS:
 - at the end of the day, all the docs have to be updated: docs/*.md, skills, docs-site - at best these are maintained but a final review will be needed
 - all deprecated/retired "functionalities" have to be reviewed for cleanup
+- `scripts/` folder must contain a load of scripts who have become useless and should be cleaned up too

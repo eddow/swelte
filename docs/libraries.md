@@ -119,6 +119,26 @@ backend-only: resolvable from `#routes` V-to-V includes at codegen time,
 rejected from browser/TS imports with a build error — same rule as apps
 (`rpc.md`).
 
+### Plus plugins and `src/lib/backend/db.v`
+
+The embedded SQLite/KV helper is Plus-owned, not a core builtin. Register
+the `db` plugin explicitly in `vite.config.ts` (`@swelte/plus` §3 box 2):
+
+```ts
+import { dbPlugin, jobsPlugin } from '@swelte/plus';
+import { swelte } from '@swelte/core/vite';
+
+export default defineConfig({
+  plugins: [svelte(svelteConfig), swelte({ plugins: [jobsPlugin, dbPlugin] })],
+});
+```
+
+`swelte migrate` (resolved from the configured `plugins: [dbPlugin]` entry,
+`@swelte/plus/db`) scaffolds `src/lib/backend/db.v` + `db/migrations/*.sql`
+and stages `backend/db.v` into `.swelte/` whenever the plugin is registered.
+Core alone stages nothing here — remove the plugin and the staged file
+prunes. See `plus.md` and `cli.md` (`swelte migrate`).
+
 The same project layout applies to every Swelte project: `src/lib` is published (here both
 built `package/` for JS/Svelte and raw `src/lib/**/*.v` for V) while
 `src/routes` stays the local dogfood/test/demo playground.

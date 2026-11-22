@@ -1,10 +1,8 @@
 // Version tooling for the shared-line / independent-patch policy
 // (docs/specs/versioning.md).
 //
-// Active release line: 0.2 — participants core, vvm, ssr-qjs, mcp, ai, create
+// Active release line: 0.2 — participants core, vvm, ssr-qjs, mcp, ai, create, plus
 // share major.minor, each owns its patch counter.
-// Retired: plus stays on 0.1.x (0.1.6 exposes the deprecation), consumes the
-// 0.1 line of core (^0.1.5).
 //
 // Usage:
 //   node scripts/sync-version.mjs                  sync ranges/pins to per-package versions
@@ -18,15 +16,13 @@
 //
 // Publish selection: publish the packages whose artifacts or declared
 // compatibility changed — derived from git status, reviewed via `plan`.
-// Retired packages (plus) never enter publish plans.
 import { execFileSync, execSync } from 'node:child_process'
 import { readFileSync, writeFileSync } from 'node:fs'
 
 const ROOT = 'package.json'
-// Line participants: every active package on the shared major.minor line.
-// Retired packages (plus) sit outside the roster and keep their own line.
-const ACTIVE = ['core', 'vvm', 'ssr-qjs', 'mcp', 'ai', 'create']
-const RETIRED = ['plus']
+// Line participants: every active package on the shared major.minor line
+// (plus is an active 0.2 participant — jobs + db plugins).
+const ACTIVE = ['core', 'vvm', 'ssr-qjs', 'mcp', 'ai', 'create', 'plus']
 const ALL_DIRS = ['engine/core', 'engine/vvm', 'engine/ssr-qjs', 'engine/mcp', 'engine/ai', 'engine/create', 'engine/plus']
 const EXAMPLES = ['examples/tests', 'examples/something', 'examples/docs-site']
 const TEMPLATE = 'engine/create/templates/base'
@@ -53,7 +49,7 @@ function syncAll(changes, targetLine) {
 	for (const dir of [...ALL_DIRS, ...EXAMPLES]) {
 		const path = dir + '/package.json'
 		const manifest = readJson(path, changes)
-		if (targetLine && dir !== 'engine/plus') {
+		if (targetLine) {
 			for (const section of sections) {
 				for (const dep of ACTIVE) {
 					const name = '@swelte/' + dep
@@ -106,21 +102,16 @@ function plan({ json = false } = {}) {
 		const m = f.match(/^engine\/([^/]+)\//)
 		if (m && ACTIVE.includes(m[1])) touched.add(m[1])
 	}
-	const retiredOnly = status.length > 0 && touched.size === 0 && status.some((f) => f.startsWith('engine/plus/'))
 	const selection = [...touched]
 	if (!json) {
 		if (selection.length === 0) {
-			console.log(
-				retiredOnly
-					? 'plan: no publish (retired plus change only — existing artifacts stay)'
-					: 'plan: no publish (docs-only or no engine changes)',
-			)
+			console.log('plan: no publish (docs-only or no engine changes)')
 		} else {
 			console.log(`plan: publish ${selection.length} tarball(s): ${selection.join(', ')}`)
-			console.log(`order: ${['vvm', 'core', 'ai', 'mcp', 'ssr-qjs', 'create'].filter((p) => touched.has(p)).join(' -> ')}`)
+			console.log(`order: ${['vvm', 'core', 'plus', 'ai', 'mcp', 'ssr-qjs', 'create'].filter((p) => touched.has(p)).join(' -> ')}`)
 		}
 	} else {
-		console.log(JSON.stringify({ selection, retiredOnly, status }))
+		console.log(JSON.stringify({ selection, status }))
 	}
 	return selection
 }
@@ -137,7 +128,6 @@ const arg = rest[0]
 // - workspace behind published: stale -> refuse (both modes)
 // - E404 (never published): allow (first release)
 // - registry unreachable: fail closed (never publish blind)
-// - retired (plus): always refused
 function parseVer(v) {
 	const m = /^(\d+)\.(\d+)\.(\d+)(?:[-+].*)?$/.exec(v.trim())
 	return m ? { major: +m[1], minor: +m[2], patch: +m[3] } : null
@@ -190,18 +180,16 @@ function checkCommand(args) {
 		console.error(`check: want --mode single|line-cut (got ${mode})`)
 		process.exit(1)
 	}
-	// Explicit refusal list: retired or unknown names are refused, never published.
-	const retired = []
+	// Explicit allow-list: unknown names are refused, never published.
 	const unknown = []
 	const selected = []
 	for (const p of wantRaw.split(/\s+/).filter(Boolean)) {
-		if (RETIRED.includes(p)) retired.push(p)
-		else if (ACTIVE.includes(p)) selected.push(p)
+		if (ACTIVE.includes(p)) selected.push(p)
 		else unknown.push(p)
 	}
 	const targets = wantRaw ? selected : [...ACTIVE]
 	// Dependency order so ^ranges resolve to the just-published version.
-	const ORDER = ['vvm', 'core', 'ai', 'mcp', 'ssr-qjs', 'create']
+	const ORDER = ['vvm', 'core', 'plus', 'ai', 'mcp', 'ssr-qjs', 'create']
 	targets.sort((a, b) => ORDER.indexOf(a) - ORDER.indexOf(b))
 	const rows = targets.map((p) => {
 		const local = readJson(`engine/${p}/package.json`).version
@@ -216,10 +204,7 @@ function checkCommand(args) {
 	const registryError = rows.some((r) => r.error)
 	const publish = []
 	const skipped = []
-	const refused = [
-		...retired.map((p) => ({ pkg: p, reason: 'retired — never published from here' })),
-		...unknown.map((p) => ({ pkg: p, reason: 'unknown package' })),
-	]
+	const refused = [...unknown.map((p) => ({ pkg: p, reason: 'unknown package' }))]
 	const line = lineOf(readJson(ROOT).version)
 	for (const reason of validateRelease(line)) refused.push({ pkg: 'workspace', reason })
 	if (mode === 'line-cut' && !ACTIVE.every((pkg) => targets.includes(pkg))) {
@@ -267,8 +252,6 @@ function validateRelease(line, changes) {
 			}
 		}
 	}
-	const plus = readJson('engine/plus/package.json', changes)
-	if (lineOf(plus.version) !== '0.1' || plus.dependencies['@swelte/core'] !== '^0.1.5') problems.push('Invalid retired Plus manifest')
 	const create = readJson('engine/create/package.json', changes)
 	const template = readJson(TEMPLATE + '/package.json', changes)
 	for (const dep of templatePackages) {
@@ -303,7 +286,7 @@ if (!cmd || cmd === 'patch' || cmd === 'line-cut') {
 	let line = lineOf(root.version)
 	let targetLine
 	if (cmd === 'patch') {
-		if (![...ACTIVE, ...RETIRED].includes(arg)) throw new Error('Unknown package: ' + arg)
+		if (!ACTIVE.includes(arg)) throw new Error('Unknown package: ' + arg)
 		const path = `engine/${arg}/package.json`
 		const manifest = readJson(path)
 		manifest.version = bump(manifest.version)

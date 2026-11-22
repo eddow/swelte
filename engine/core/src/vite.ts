@@ -6,25 +6,13 @@
  *  additive chunking helpers promoted from private scope:
  *  `assertChunkHint`, `chunkKeyFor`, `readChunkHint`, `WrapperMw`.
  *
- *  Jobs (`@[cron]`) moved to `@swelte/plus` (§3 box 1) — import
- *  `jobsPlugin`/`createJobsPlugin` from `@swelte/plus` (or
- *  `@swelte/plus/jobs`).
+ *  Jobs (`@[cron]`) + SQLite/KV (`migrate`, `backend/db.v`) moved to
+ *  `@swelte/plus` (§3 boxes 1–2) — import `jobsPlugin`/`createJobsPlugin`
+ *  from `@swelte/plus` (or `@swelte/plus/jobs`) and `dbPlugin` from
+ *  `@swelte/plus/db`. Core keeps the hub-transport gate only (§3 box 3).
  */
 
-export {
-	builtinDbPlugin,
-	coreBackendVlibDir,
-	dbHelperTemplate,
-	dbInitialMigration,
-	dbPlugin,
-	migrateCommand,
-	PLUS_DB_DEFAULT_PATH,
-	PLUS_DB_MIGRATIONS_TABLE,
-	plusDbPath,
-	plusDbVlibDir,
-	plusPendingMigrations,
-	runMigrate,
-} from './backend/jobs-index.js'
+export { coreBackendVlibDir, coreHubVlibFiles, hasPlusDbPlugin } from './backend/hub-index.js'
 export type { SwelteConfig, SwelteOptions } from './gen/config.js'
 export { defineConfig } from './gen/config.js'
 export type { ErrorBoundary } from './vite/error-boundaries.js'

@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync } fr
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { dirname, join, resolve, sep } from 'node:path'
 import type { Plugin } from 'vite'
-import { builtinDbPlugin, coreBackendVlibDir } from '../backend/jobs-index.js'
+import { hasPlusDbPlugin, coreBackendVlibDir, coreHubVlibFiles } from '../backend/hub-index.js'
 import { loadConfig, renderAppDts, renderClientEntry, renderHarness } from '../gen/config.js'
 import { isBackendMod, SWELTE_GEN_CORE_DIRS } from '../gen/paths.js'
 import { resolveV } from '../toolchain.js'
@@ -122,10 +122,10 @@ export function swelte(options: SweltePluginOptions = {}): Plugin {
 			? options.chunking
 			: 'layout'
 	// V+TS plugins (core contract `SweltePlugin`; e.g. `@swelte/plus`
-	// jobs or `@swelte/ai` tools implement it for their own attrs).
-	// The embedded backend stays builtin-registered below (always on:
-	// KV/SQLite, rooms hub, `migrate`) until §3 boxes 2–3 move it to Plus.
-	const plugins = dedupPlugins([...(options.plugins ?? []), builtinDbPlugin])
+	// jobs + db, or `@swelte/ai` tools implement it for their own attrs).
+	// No builtins: Plus registers explicitly via `swelte({ plugins: [...] })`
+	// (§3 boxes 1–2; hub transport gate in §3 box 3).
+	const plugins = dedupPlugins([...(options.plugins ?? [])])
 	const extraAttrs = [...new Set(plugins.flatMap((p) => p.attrs))]
 	// Resolved per-generate() against the Vite root (never at construction:
 	// outDir is relative and the cwd at plugin-construction time is not the
@@ -361,10 +361,13 @@ export function swelte(options: SweltePluginOptions = {}): Plugin {
 				try {
 					// Early copy before the route loop throws: generate() must
 					// leave a compilable .swelte/ even on shape errors (dev
-					// pre-generate needs the V backend to boot). Builtins are
-					// always registered, so this always runs.
-					// Usage gate for the builtin `backend` include (room-SSE/WS
+					// pre-generate needs the V backend to boot).
+					// Usage gate for the hub (`backend` include, room-SSE/WS
 					// only): scan route files for the hub shapes before copying.
+					// The Plus `db` plugin's own `db.v` is NOT gated (KV is
+					// available to any route when registered); core's hub files
+					// (`hub.v` + `ws.v`) copy only when room routes or a raw
+					// `import backend` in app source need them.
 					let earlyNeedsBackend = needsBackendImport
 					try {
 						const earlyRoutesAbs = resolve(root, routesDir)
@@ -409,26 +412,51 @@ export function swelte(options: SweltePluginOptions = {}): Plugin {
 							for (const inc of earlyIncs) {
 								if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(inc.module)) continue
 								if (inc.module === 'routes' || inc.module === 'main') continue
-								// Builtin `backend` is usage-gated (room-SSE/WS only):
-								// skip the early copy when no route file needs the hub.
-								// The late copy below applies the same gate.
-								if (inc.module === 'backend' && pp.name === 'db' && !earlyNeedsBackend) continue
+								// Hub gate: core stages its own hub files
+								// (`hub.v`/`ws.v`) only when room-SSE/WS routes
+								// (or a raw `import backend`) need them. The
+								// Plus `db` plugin include copies ungated (KV
+								// available whenever registered). Per-file:
+								// app-scaffolded `src/lib/backend/db.v`
+								// shadows the staged plugin copy (same rel
+								// path wins — never a collision error), so
+								// skip staged files shadowed by app sources.
 								let earlyFiles: string[] = []
 								try {
 									earlyFiles = readdirSync(inc.absDir).filter((f) => f.endsWith('.v'))
 								} catch {
 									continue
 								}
-								earlyWanted.add(inc.module)
+								let filesToCopy = earlyFiles
+								if (inc.module === 'backend') {
+									if (pp.name === 'db') {
+										filesToCopy = earlyFiles.filter((f) => f === 'db.v')
+									} else {
+										if (!earlyNeedsBackend) continue
+										filesToCopy = earlyFiles.filter((f) => coreHubVlibFiles().includes(f))
+									}
+									try {
+										const appBackend = resolve(root, libDir, 'backend')
+										if (existsSync(appBackend)) {
+											const shadowed = new Set(
+												listVFiles(appBackend).map((f) => relPosix(appBackend, f).split('/').pop() ?? '')
+											)
+											filesToCopy = filesToCopy.filter((f) => !shadowed.has(f))
+										}
+									} catch {
+										/* no app backend — copy staged files */
+									}
+								}
 								const dest = join(genDir, inc.module)
 								mkdirSync(dest, { recursive: true })
-								for (const f of earlyFiles) {
+								for (const f of filesToCopy) {
 									try {
 										writeIfChanged(join(dest, f), readFileSync(join(inc.absDir, f), 'utf8'))
 									} catch {
 										/* unreadable file — skip */
 									}
 								}
+								if (filesToCopy.length > 0) earlyWanted.add(inc.module)
 							}
 						}
 						writeIfChanged(
@@ -1157,15 +1185,16 @@ ${list(st.fields, (fld) => `\t${fld.name}${fld.optional ? '?' : ''}: ${fld.tstyp
 								)
 						)
 						if (isRoomSseFile) {
-							// Room-mode SSE fans out via the builtin backend hub
-							// (`import backend` — copied by the core backend include).
+							// Room-mode SSE fans out via the hub transport
+							// (`import backend` — staged when the Plus `db`
+							// plugin is registered, §3 box 3 moves it fully).
 							hasRoomSse = true
 						}
 						// WS: same hub — the route fn and the harness frame loop
-						// both run against builtin backend hub state.
+						// both run against the Plus-staged hub state.
 						const isWsFile = fns.some((fn) => fn.attr === 'ws')
 						if (isWsFile) {
-							// WS pumps frames against the same builtin backend hub.
+							// WS pumps frames against the same staged hub.
 							hasRoomSse = true
 						}
 						dispatched.push({ route, mod, prefix: vPrefix(mod) })
@@ -1906,40 +1935,84 @@ export declare const dev: boolean
 					writeIfChanged(join(genDir, 'images.js'), 'export default {}\n')
 				writeIfChanged(join(genDir, 'sdk.ts'), '// Auto-generated by swelte. Do not edit.\n')
 				// V module dirs in the `.swelte/` compilation unit so generated
-				// routes/harness can `import <module>`: third-party plugin
-				// `includes` PLUS the builtin core backend (`vlib/backend/*.v` —
-				// copied only when room-SSE/WS fns need it: `hasRoomSse` is set
-				// by the route loop above; an unused builtin copies nothing).
-				// Stale module dirs pruned below.
+				// routes/harness can `import <module>`: plugin `includes`
+				// (e.g. Plus `db` stages `backend/db.v` ungated — KV whenever
+				// registered) PLUS core's hub transport files
+				// (`vlib/backend/{hub,ws}.v` — copied only when the Plus `db`
+				// plugin is present AND room-SSE/WS fns need the hub:
+				// `hasRoomSse || needsBackendImport`; an unused hub copies
+				// nothing; app-scaffolded `src/lib/backend/*.v` shadows staged
+				// files — never a collision error). Stale module dirs/files
+				// pruned below.
 				// (§1: genAbsEarly emitted plugin generate() outputs above,
 				// unconditionally — even with zero .svelte routes.)
 				const genAbs = resolve(root, outDir)
 				mkdirSync(genAbs, { recursive: true })
+				// App-backend shadow set: `src/lib/backend/**/*.v` basenames —
+				// the scaffolded `db.v` wins over the staged plugin copy.
+				const appStagedShadow = new Set<string>()
+				try {
+					const appBackendDir = resolve(libAbs, 'backend')
+					if (existsSync(appBackendDir))
+						for (const f of listVFiles(appBackendDir))
+							appStagedShadow.add(relPosix(appBackendDir, f).split('/').pop() ?? '')
+				} catch {
+					/* no app backend — nothing shadowed */
+				}
 				const includeModules = new Set<string>()
+				// `backend/` merge: the Plus `db` plugin stages `db.v`; core
+				// stages `{hub,ws}.v`. Both list the same `backend` module —
+				// collect per-file and merge (never last-writer-wins).
+				const stagedBackendFiles = new Map<string, string>()
 				const pluginFiles = new Set<string>()
+				const plusDbPresent = hasPlusDbPlugin(plugins)
+				const hubStaged = plusDbPresent && (hasRoomSse || needsBackendImport)
 				for (const plugin of plugins)
 					for (const include of plugin.includes?.() ?? []) {
 						includeModules.add(include.module)
-						// Builtin `db` backend is usage-gated: skip here when no room/WS
-						// fn needs it — the `hasRoomSse` copy below handles the used case.
-						if (
-							plugin.name === 'db' &&
-							include.module === 'backend' &&
-							!(hasRoomSse || needsBackendImport)
-						)
-							continue
+						// The Plus `db` plugin's own include is ungated (KV
+						// whenever registered); per-file below keeps `db.v`
+						// only. The `hasRoomSse` hub copy below handles core's
+						// `{hub,ws}.v` — skip other plugins' `backend/*`.
+						if (include.module === 'backend' && plugin.name !== 'db') continue
 						if (!existsSync(include.absDir)) continue
-						for (const file of readdirSync(include.absDir))
-							if (file.endsWith('.v')) pluginFiles.add(`${include.module}/${file}`)
+						for (const file of readdirSync(include.absDir)) {
+							if (!file.endsWith('.v')) continue
+							// Plus `db` include owns `db.v` only (§3 box 3
+							// keeps `hub.v`/`ws.v` core-owned).
+							if (include.module === 'backend' && plugin.name === 'db' && file !== 'db.v') continue
+							if (include.module === 'backend') {
+								if (appStagedShadow.has(file)) continue
+								try {
+									stagedBackendFiles.set(
+										`backend/${file}`,
+										readFileSync(join(include.absDir, file), 'utf8')
+									)
+								} catch {
+									/* unreadable file — skip */
+								}
+							} else pluginFiles.add(`${include.module}/${file}`)
+						}
 					}
-				if (hasRoomSse) {
+				if (hubStaged) {
 					try {
-						for (const file of readdirSync(coreBackendVlibDir()))
-							if (file.endsWith('.v')) pluginFiles.add(`backend/${file}`)
+						for (const file of coreHubVlibFiles()) {
+							if (appStagedShadow.has(file)) continue
+							pluginFiles.add(`backend/${file}`)
+							try {
+								stagedBackendFiles.set(
+									`backend/${file}`,
+									readFileSync(join(coreBackendVlibDir(), file), 'utf8')
+								)
+							} catch {
+								/* core vlib missing — harness error below names it */
+							}
+						}
 					} catch {
 						/* core vlib missing — harness error below names it */
 					}
 				}
+				for (const f of stagedBackendFiles.keys()) pluginFiles.add(f)
 				const wanted = new Set(stageBackendModules(libAbs, genDir, pluginFiles))
 				// §2: the AI tools plugin's generated `tools/` V module is a first-class
 				// compilation member: add it to the staged dir set so `import tools`
@@ -1969,30 +2042,67 @@ export declare const dev: boolean
 								)
 								continue
 							}
-							// Builtin `db` backend is usage-gated (room-SSE/WS only):
-							// skip here when unused (copied via the `hasRoomSse` gate above).
-							if (
-								pp.name === 'db' &&
-								inc.module === 'backend' &&
-								!(hasRoomSse || needsBackendImport)
-							)
-								continue
+							// Plus `db` include is ungated (KV whenever
+							// registered) but owns `db.v` only; core hub files
+							// copy per the `hubStaged` gate above (Plus `db`
+							// present + room-SSE/WS need). Other plugins'
+							// `backend/*` stays skipped (§3 box 3 moves the
+							// hub). App-scaffolded files shadow staged ones.
+							if (inc.module === 'backend' && pp.name !== 'db') continue
 							let files: string[] = []
 							try {
 								files = readdirSync(inc.absDir).filter((f) => f.endsWith('.v'))
 							} catch {
 								continue
 							}
-							wanted.add(inc.module)
+							if (inc.module === 'backend') {
+								files =
+									pp.name === 'db'
+										? files.filter((f) => f === 'db.v' && !appStagedShadow.has(f))
+										: []
+								if (files.length === 0 && !hubStaged) continue
+							} else wanted.add(inc.module)
 							const dest = join(genDir, inc.module)
 							mkdirSync(dest, { recursive: true })
 							for (const f of files) {
 								try {
-									const src = readFileSync(join(inc.absDir, f), 'utf8')
+									const fileKey = `${inc.module}/${f}`
+									const staged = stagedBackendFiles.get(fileKey)
+									const src =
+										staged !== undefined ? staged : readFileSync(join(inc.absDir, f), 'utf8')
 									writeIfChanged(join(dest, f), src)
 								} catch {
 									/* unreadable file — skip */
 								}
+							}
+							if (inc.module === 'backend') {
+								// Merge core hub files ({hub,ws}.v) into the same
+								// dir the Plus include staged `db.v` into.
+								for (const [k, body] of stagedBackendFiles) {
+									if (!k.startsWith('backend/')) continue
+									if (k === `backend/db.v`) continue
+									try {
+										writeIfChanged(join(genDir, k), body)
+									} catch {
+										/* ignore */
+									}
+								}
+								// Prune staged files the gate dropped (e.g. `hub.v`
+								// when room routes go away, `db.v` when the
+								// Plus plugin is removed). App-owned files
+								// (scaffolded `db.v`, user modules) are never
+								// pruned here — `stageBackendModules` owns them.
+								try {
+									for (const ef of readdirSync(dest, { withFileTypes: true })) {
+										if (!ef.isFile() || !ef.name.endsWith('.v')) continue
+										if (appStagedShadow.has(ef.name)) continue
+										if (!stagedBackendFiles.has(`backend/${ef.name}`))
+											rmSync(join(dest, ef.name), { force: true })
+									}
+								} catch {
+									/* ignore */
+								}
+								wanted.add('backend')
 							}
 						}
 					}

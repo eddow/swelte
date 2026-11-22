@@ -305,7 +305,7 @@ export const chunk = 'eager' | 'lazy' // default: 'inherit' (follow global mode)
   runs first in `before_request` — before `trailingSlash`
   normalization, CSRF/CORS/static/dispatch
   (`''` = no-op). Scheduled ticks (`@[cron]`) are owned by the `@swelte/plus`
-  jobs plugin — register `jobsPlugin` via `swelte({ plugins: [...] })`;
+  jobs plugin — register `jobsPlugin` via `swelte({ plugins: [...] })` (embedded DB likewise: `dbPlugin` stages `src/lib/backend/db.v` — see `plus.md`, `libraries.md`);
   without it ticks stay inert (zero ticks / no plugin emit empty
   fragments, byte-identical harness). The qualifier is
   the duration literal plus an optional `,retry=n` suffix: `@[cron('60s')]`,

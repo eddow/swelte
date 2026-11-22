@@ -19,7 +19,7 @@ function fixture(t) {
 	for (const path of paths) {
 		const file = join(cwd, path)
 		const manifest = JSON.parse(readFileSync(file, 'utf8'))
-		if (path === 'package.json' || dirs.slice(0, 6).some((dir) => path === dir + '/package.json')) {
+		if (path === 'package.json' || dirs.slice(0, 7).some((dir) => path === dir + '/package.json')) {
 			manifest.version = '0.2.0'
 			for (const section of ['dependencies', 'devDependencies', 'peerDependencies']) {
 				for (const name of Object.keys(manifest[section] ?? {})) {
@@ -89,7 +89,7 @@ test('registry failures, stale versions and tagged retries in both modes', (t) =
 	for (const mode of ['single', 'line-cut']) {
 		for (const [LATEST, EXACT, status, count] of [
 			['0.1.9', 'timeout', 1, 0], ['0.2.1', 'exists', 1, 0], ['0.1.9', 'exists', 0, 0],
-			['0.1.9', 'missing', mode === 'single' ? 1 : 0, mode === 'single' ? 0 : 6],
+			['0.1.9', 'missing', mode === 'single' ? 1 : 0, mode === 'single' ? 0 : 7],
 		]) {
 			const result = f.run(['check', '--mode', mode, '--json'], { LATEST, EXACT })
 			const report = JSON.parse(result.stdout)

@@ -28,6 +28,7 @@
     "biome": "biome check --write .",
     "biome:unsafe": "biome check --write . --unsafe",
     "test:images": "npm run build:engine && node scripts/test-images.mjs",
+    "test:pack-matrix": "npm run build:engine && node scripts/test-pack-matrix.mjs",
     "test:jobs": "npm run build:engine && node scripts/test-jobs.mjs",
     "test:plugins": "npm run build:engine && node scripts/test-plugin-lifecycle.mjs"
   },
