@@ -16,7 +16,6 @@
   "files": [
     "README.md",
     "dist",
-    "c",
     "shims",
     "LICENSE-MIT",
     "package.json",

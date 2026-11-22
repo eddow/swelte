@@ -4,8 +4,7 @@ import { existsSync, mkdtempSync, rmSync, statSync, writeFileSync } from 'node:f
 import { tmpdir } from 'node:os'
 import { delimiter, join } from 'node:path'
 import { describe, it } from 'node:test'
-import { fileURLToPath } from 'node:url'
-import { bridgeSrc, buildQjsProd, whichCC } from './qjs.js'
+import { bridgeSrc, buildQjsProd, qjsCDir, whichCC } from './qjs.js'
 
 describe('item 25 — QJS prod link (gcc-gated)', () => {
 	const cc = whichCC()
@@ -111,7 +110,7 @@ int main(void) {
 `
 		)
 		const executable = join(root, 'probe')
-		const cDir = fileURLToPath(new URL('../c/', import.meta.url))
+		const cDir = qjsCDir(import.meta.url)
 		const env = {
 			...process.env,
 			PATH: process.env.PATH?.split(delimiter)

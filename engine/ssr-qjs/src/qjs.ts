@@ -44,11 +44,17 @@ function resolveSystemCC(): string {
 
 export function qjsCDir(fromUrl: string): string {
 	const here = dirname(fileURLToPath(fromUrl))
-	const candidates = [join(here, '..', 'c'), join(here, 'c')]
+	// Shared location first: engine/qjs/c (sibling of engine/ssr-qjs).
+	// Legacy ssr-qjs/c kept as fallback for packed layouts.
+	const candidates = [
+		join(here, '..', '..', 'qjs', 'c'),
+		join(here, '..', 'c'),
+		join(here, 'c'),
+	]
 	for (const c of candidates) {
 		if (existsSync(join(c, 'swelte_qjs.c'))) return c
 	}
-	return join(here, '..', 'c')
+	return join(here, '..', '..', 'qjs', 'c')
 }
 
 export function whichCC(): string {
