@@ -18,16 +18,6 @@ const ARGS: ArgDef[] = [
 	{ name: 'empty', help: 'Empty skeleton only (no prompt)', value: 'boolean' },
 	{ name: 'template', help: 'Template to use: empty | sample | lib', value: 'string' },
 	{
-		name: 'kind',
-		help: 'Deprecated starter alias: app | lib (one project shape)',
-		value: 'string',
-	},
-	{
-		name: 'lib',
-		help: 'Deprecated alias for --template lib (reusable V sample)',
-		value: 'boolean',
-	},
-	{
 		name: 'no-interactive',
 		help: 'Never prompt: use flag defaults (same as CI/non-TTY)',
 		value: 'boolean',

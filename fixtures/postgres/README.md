@@ -1,6 +1,6 @@
 # Native PostgreSQL integration
 
-Run `npm run test:postgres` (optionally `-- --browser`). Requires PostgreSQL
+Run `npm run test:dogfood:postgres` (optionally `-- --browser`). Requires PostgreSQL
 client tools, a role with CREATEDB, libpq and SQLite development files, a C
 compiler and the managed V toolchain. Production needs libpq's runtime library;
 neither Node nor a database sidecar is used by the native server fixture.

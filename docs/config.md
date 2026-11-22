@@ -332,7 +332,7 @@ export const chunk = 'eager' | 'lazy' // default: 'inherit' (follow global mode)
   component on the snippet anchor, so SSR DOM is adopted, not remounted;
   mismatch falls back to mount).
 * **Per-route types**: every `types/routes/*.d.ts` starts with
-  `RouteId` + `Params` (the `$types`-lite). Client `__swelteUrl(args)`
+  `RouteId` + `Params` (the SvelteKit route-type analogy). Client `__swelteUrl(args)`
   interpolates dynamics and strips them from the payload; missing param
   throws `swelte: missing route param`.
 * **`#app/paths` / `#app/environment`**: generated `.swelte/paths.js`

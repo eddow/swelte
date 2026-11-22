@@ -17,14 +17,15 @@ export function doubleClaimCheck(
 	const b = baseOf(mod)
 	const inDir = (bm: string) => (d === '' ? bm : `${d}/${bm}`)
 	const pairs: string[][] = []
-	if (b === 'index' || b === '+page') {
-		const other = b === 'index' ? '+page' : 'index'
-		pairs.push([`${inDir(other)}.v`, `${inDir(other)}.svelte`])
+	if (b === '+page') {
 		if (d !== '') pairs.push([`${d}.v`, `${d}.svelte`])
+	} else if (b === 'index') {
+		throw new Error(
+			`[swelte] ${routesDir}/${rel}: index.v was removed — rename to ${inDir('+page.v')} (same URL).`
+		)
 	} else {
 		// A flat /events leaf competes with events/+page, not with the
 		// surrounding directory's root page (which serves a different URL).
-		pairs.push([`${mod}/index.v`, `${mod}/index.svelte`])
 		pairs.push([`${mod}/+page.v`, `${mod}/+page.svelte`])
 	}
 	const others: string[] = []
@@ -221,8 +222,7 @@ export function ancestorDirs(leafDir: string): string[] {
 
 /** URL dir of a leaf mod (`admin/users` for the file serving /admin/users). */
 export function leafDirOf(m: string): string {
-	if (m === 'index' || m === '+page') return ''
-	if (m.endsWith('/index')) return m.slice(0, -'/index'.length)
+	if (m === '+page') return ''
 	if (m.endsWith('/+page')) return m.slice(0, -'/+page'.length)
 	return m.includes('/') ? m.slice(0, m.lastIndexOf('/')) : ''
 }
@@ -942,7 +942,7 @@ pub fn swelte_sse_emit_for(prefix string, qualifier string, req SwelteRequest, e
 		`pub fn swelte_page_identity(prefix string) (string, string) {`,
 		...dispatched.map(
 			(d) =>
-				`if prefix == ${vJsonStr(d.prefix)} { return ${vJsonStr(`/${d.mod.replace(/(^|\/)(\+page|index)$/, '').replace(/\/$/, '')}`)}, ${vJsonStr(d.route)} }`
+				`if prefix == ${vJsonStr(d.prefix)} { return ${vJsonStr(`/${d.mod.replace(/(^|\/)\+page$/, '').replace(/\/$/, '')}`)}, ${vJsonStr(d.route)} }`
 		),
 		`return '', ''\n}`,
 		// Page-route resolver for the load path: path → (prefix, params),

@@ -23,8 +23,8 @@ One Swelte project shape, two build targets (`docs/libraries.md`):
 V sources declared through `swelte.v.exports`. Routes are application/demo
 code and never published. Packaging needs no routes or V compiler.
 `npm create @swelte` asks sample + SSR, never app-vs-lib; every starter has
-`build` + `package` scripts and starts private. Legacy `--lib` / `--kind lib`
-select reusable-V sample content (`--template lib`), not a project type.
+`build` + `package` scripts and starts private. `--template lib` selects the
+reusable-V sample content, not a project type.
 `swelte package` validates publication metadata and fails on `lib-*` diagnostics;
 `swelte check --lib` reports them without writing. Pure Svelte/TS packages need
 no V exports. Explicit `exports` define the public API; `files` includes
@@ -48,7 +48,7 @@ connection until explicit unlock and release. Database policy stays app-owned.
 App-local `src/lib/backend/**/*.v` modules are staged into native compilation;
 routes and `src/app.v` hooks can use ordinary V imports (`import backend`).
 The PostgreSQL recipe and disposable integration test live in
-`fixtures/postgres` (`npm run test:postgres`).
+`fixtures/postgres` (`npm run test:dogfood:postgres`).
 
 Native process lifecycle also reuses V's `veb.Server.shutdown`. Swelte wires
 signals, admitted-work drain and bounded `@[shutdown]` cleanup; plugin jobs
@@ -88,7 +88,7 @@ npx swelte check    # diagnostics without side effects (text|json)
 
 ## SPA-first proxy rule
 
-`GET /` (no `?q=`, no `Accept: application/json`) always serves the Vite page.
+`GET /` (no `Accept: application/json`) always serves the Vite page.
 Only proxied to V: `Accept: application/json` GETs, JSON bodies, form bodies.
 Browser refresh never hits the API; `curl` does.
 

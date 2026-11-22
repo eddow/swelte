@@ -266,6 +266,52 @@ describe('§1 review fixes (1–4)', () => {
 		}
 	})
 })
+describe('§1 plugin validate shape parity (check vs generate)', () => {
+	it('passes the full fn shape to validate — the rooms @[ws] socket tail must not trip check', async () => {
+		// Regression: collectPluginDiagnostics called validate with only
+		// `{ name, attr }`, so a shape-aware plugin saw no params and always
+		// failed — `swelte check` flagged valid `ws` fns that generate()
+		// accepted (the tests fixture's ws-echo/ws-rooms hit exactly this).
+		const { mkdtempSync: mk, mkdirSync: mkd, writeFileSync: wfs } = await import('node:fs')
+		const root = mk(join(tmpdir(), 'swelte-check-shape-'))
+		try {
+			mkd(join(root, 'src', 'routes', 'api'), { recursive: true })
+			wfs(join(root, 'package.json'), '{"name":"t","type":"module"}')
+			wfs(join(root, 'svelte.config.js'), 'export default {}')
+			wfs(
+				join(root, 'src', 'routes', 'api', 'sock.v'),
+				'module sock\n\n@[ws]\npub fn sock(req SwelteRequest, sub fn (string) chan string, recv chan string, emit fn (string) bool) {\n\t_ = req\n\t_ = sub\n\t_ = recv\n\t_ = emit\n}'
+			)
+			const { roomsPlugin } = await import('@swelte/plus/rooms')
+			const { collectPluginDiagnostics } = await import('./gen/diagnostics.js')
+			const diags = await collectPluginDiagnostics(root, [roomsPlugin], {
+				routesDir: 'src/routes',
+				libDir: 'src/lib',
+			})
+			assert.deepEqual(
+				diags.filter((d) => d.kind === 'plugin-validate'),
+				[],
+				`valid socket tail must not trip check (got ${JSON.stringify(diags)})`
+			)
+			// And a genuinely bad tail still fails through the same path.
+			wfs(
+				join(root, 'src', 'routes', 'api', 'sock.v'),
+				'module sock\n\n@[ws]\npub fn sock(req SwelteRequest) {\n\t_ = req\n}'
+			)
+			const bad = await collectPluginDiagnostics(root, [roomsPlugin], {
+				routesDir: 'src/routes',
+				libDir: 'src/lib',
+			})
+			assert.ok(
+				bad.some((d) => d.kind === 'plugin-validate' && /needs trailing/.test(d.message)),
+				`bad socket tail must trip check (got ${JSON.stringify(bad)})`
+			)
+		} finally {
+			const { rmSync: rm } = await import('node:fs')
+			rm(root, { recursive: true, force: true })
+		}
+	})
+})
 
 describe('§1 lifecycle ordering vs the app startup hook', () => {
 	it('starts plugins in registration order and shuts down in reverse after @[startup]', async () => {

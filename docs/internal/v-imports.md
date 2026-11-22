@@ -14,7 +14,7 @@ a named export. **Directory decides runtime; extension stays `.v`:**
 
 ```svelte
 <script lang="ts">
-  import { get_greeting } from '#routes/index.v';
+  import { get_greeting } from '#routes/+page.v';
   import { login } from '#routes/api/greet.v';
   import { hash_string } from '#lib/crypto/hash.v';
   import type { Session } from '#routes/api/greet.v';
@@ -57,11 +57,9 @@ Rules (`routeFor`, once in `vite.ts`, reused by V dispatcher gen):
 * `src/routes/<path>.v` -> `/<path>`, except `src/routes/api/**`
   -> `/api/**` (same string, kept explicit so API files need no
   `.svelte` partner).
-* `index.v` -> `/` (or `/api/` under api — discouraged, warn).
-  Renamed per §7: the folder-root leaf is `+page.v`
-  (`foo/index.v` → `foo/+page.v`, `src/routes/index.v` →
-  `src/routes/+page.v`, same URL). Both spellings still accepted
-  (legacy back-compat); both present is a build error.
+* The folder-root leaf is `+page.v` (`foo/+page.v` → `/foo`,
+  `src/routes/+page.v` → `/`). Sibling `foo/index.v` is not a leaf: since
+  `index` removal it routes as the literal stem `/foo/index`.
 * `+route.v` is a wrapper, not an endpoint: it declares `@[before]` /
   `@[after]` middleware for its directory subtree (never a route of
   its own; never exported as callables to TS, but its `pub struct`s
@@ -294,7 +292,7 @@ Only `#routes/` participates. `generate()` emits `routes/`
 `SwelteRequest` + `swelte_route`), shared with the generated harness
 `.swelte/server.v` (rendered from `templates/harness/server.v`; `Hand` +
 static + `main()`) via directory-mode `v run .` (`/` ->
-`src/routes/index.v`, `/api/greet` -> `src/routes/api/greet.v`,
+`src/routes/+page.v`, `/api/greet` -> `src/routes/api/greet.v`,
 else 404; unknown fn -> 404 + available; missing carrier -> 400;
 bad JSON -> 400; `!T` -> 400; mismatch -> 405).
 Envelope: `../errors.md`. Dev proxy: `../errors.md` SPA-first rule.

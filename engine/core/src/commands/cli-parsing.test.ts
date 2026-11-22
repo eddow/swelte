@@ -64,7 +64,6 @@ describe('CLI parsing', () => {
 			'preview',
 			'deploy',
 			'package',
-			'init',
 			'check',
 			'test',
 			'export',
@@ -76,8 +75,9 @@ describe('CLI parsing', () => {
 			assert.ok(helpText().includes(n))
 			assert.ok(commandHelp(findCommand(n)!).includes(n))
 		}
+		assert.equal(findCommand('init'), undefined, 'init removed: use npm create @swelte')
 		assert.equal(findCommand('migrate'), undefined, 'migrate is Plus-owned, not core')
-		assert.equal(COMMANDS.length, 9)
+		assert.equal(COMMANDS.length, 8)
 	})
 
 	it('unknown option throws', () => {

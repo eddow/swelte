@@ -74,9 +74,9 @@ describe('create-@swelte scaffolds (no prompt in tests)', () => {
 		assert.ok(existsSync(join(parent, 'alias-app', 'package.json')))
 	})
 
-	it('legacy --lib selects the reusable V sample with shared package metadata', async () => {
+	it('--template lib selects the reusable V sample with shared package metadata', async () => {
 		const parent = mkdtempSync(join(tmpdir(), 'swelte-init-'))
-		await run(parent, { lib: true, root: parent }, ['my-lib'])
+		await run(parent, { template: 'lib', root: parent }, ['my-lib'])
 		assert.ok(existsSync(join(parent, 'my-lib', 'src', 'lib', 'hello', 'api.v')))
 		assert.ok(existsSync(join(parent, 'my-lib', 'src', 'routes', '+page.v')))
 		assert.ok(!existsSync(join(parent, 'my-lib', 'src', 'routes', 'api')))
@@ -96,18 +96,6 @@ describe('create-@swelte scaffolds (no prompt in tests)', () => {
 		assert.ok(pkg.swelte.v.exports['./hello.v'])
 		assert.equal(pkg.swelte.v.exports['./hello.v'].source, './src/lib/hello')
 		assert.equal(pkg.swelte.v.exports['./hello.v'].entry, './src/lib/hello/api.v')
-	})
-
-	it('legacy --kind lib selects the same reusable V sample', async () => {
-		const parent = mkdtempSync(join(tmpdir(), 'swelte-init-'))
-		await run(parent, { kind: 'lib', root: parent }, ['kind-lib'])
-		assert.ok(existsSync(join(parent, 'kind-lib', 'src', 'lib', 'hello', 'api.v')))
-	})
-
-	it('--template lib adds reusable V sample content', async () => {
-		const parent = mkdtempSync(join(tmpdir(), 'swelte-init-'))
-		await run(parent, { template: 'lib', root: parent }, ['tpl-lib'])
-		assert.ok(existsSync(join(parent, 'tpl-lib', 'src', 'lib', 'hello', 'api.v')))
 	})
 
 	it('--ssr adds @swelte/ssr-qjs dep + adapter import', async () => {

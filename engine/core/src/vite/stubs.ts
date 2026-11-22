@@ -46,7 +46,7 @@ export function jsFetchFor(
 	fns: RpcFn[],
 	trailingSlash = 'ignore',
 	matcherDefs?: Map<string, MatcherDef>,
-	namedActions = false
+	namedActions = true
 ): string {
 	const hasDyn = route.includes('[')
 	// Dynamics: [id] required, [id=integer] matcher, [...rest] catch-all, [[slug]] optional.

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, it } from 'node:test'
@@ -469,32 +469,4 @@ describe('generate() validation errors (tmp scaffold, no V binary)', () => {
 		const page = entries.find((e) => e.svelte === 'admin/+page.svelte')
 		assert.deepEqual(page?.serializedHeaders, ['x-own'])
 	})
-})
-
-it('retired auto-discovery refuses to generate: register toolsPlugin explicitly', async (t) => {
-	const root = scaffold({})
-	t.after(() => rmSync(root, { recursive: true, force: true }))
-	const dep = join(root, 'node_modules', 'fixture')
-	mkdirSync(dep, { recursive: true })
-	writeFileSync(
-		join(dep, 'package.json'),
-		JSON.stringify({
-			name: 'fixture',
-			type: 'module',
-			exports: { './swelte/build': './phase.js' },
-		})
-	)
-	writeFileSync(
-		join(dep, 'phase.js'),
-		`export default {
-		attrs: ['fixture'], module: 'fixture_out',
-		generate(files) { return { 'names.json': JSON.stringify(files.flatMap(f => f.declarations.map(d => d.name))) } }
-	}`
-	)
-	const backend = join(root, 'src/lib/backend')
-	mkdirSync(backend)
-	const source = join(backend, 'example.v')
-	writeFileSync(source, "module backend\n@[fixture] pub fn named() string { return '' }")
-	writeFileSync(join(root, 'package.json'), '{"type":"module","dependencies":{"fixture":"1"}}')
-	await assert.rejects(() => buildStart(root), /automatic \.\/swelte\/build discovery is retired/)
 })

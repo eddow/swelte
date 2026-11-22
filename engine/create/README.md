@@ -7,7 +7,7 @@
 Scaffold a new Swelte project:
 
 ```sh
-npm create @swelte [<dir>] [--sample | --empty | --lib] [--template empty|sample|lib] [--kind app|lib] [--ssr|--no-ssr] [--yes]
+npm create @swelte [<dir>] [--sample | --empty] [--template empty|sample|lib] [--ssr|--no-ssr] [--yes]
 ```
 
 Interactive (TTY) wizard: directory → sample confirm → SSR confirm (default
@@ -19,5 +19,4 @@ application (`dist/`) and `swelte package` for reusable `src/lib` code
 (`package/`). Routes stay local to the application or demo. Starters include
 both scripts and explicit publication metadata, and start private.
 
-`--template lib` adds a reusable V module and demo routes. Legacy `--lib` and
-`--kind lib` select that sample content; they do not create another project type.
+`--template lib` adds the reusable-V sample content (never a separate project type).

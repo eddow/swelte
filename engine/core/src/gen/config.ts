@@ -12,6 +12,9 @@ import type { SweltePlugin } from '../vite/types.js'
 
 export interface SwelteOptions {
 	compat?: 'none' | 'sveltekit'
+	/** Action query syntax: `'named'` (default, `?/save`) or `'legacy'` (`?save` / `?q=save`).
+	 *  `compat: 'sveltekit'` no longer changes the default — it only selects
+	 *  nested data/form props, `$app/state` and the `$app/forms` adapter. */
 	actionQuery?: 'legacy' | 'named'
 	name?: string
 	routesDir?: string
@@ -153,7 +156,7 @@ function normalize(raw: SwelteOptions | null | undefined): ResolvedSwelteOptions
 	return {
 		name: String(r.name ?? ''),
 		compat: r.compat === 'sveltekit' ? 'sveltekit' : 'none',
-		actionQuery: r.actionQuery ?? (r.compat === 'sveltekit' ? 'named' : 'legacy'),
+		actionQuery: r.actionQuery === 'legacy' ? 'legacy' : 'named',
 		routesDir: String(r.routesDir ?? DEFAULTS.routesDir),
 		libDir: String(r.libDir ?? DEFAULTS.libDir),
 		outDir: String(r.outDir ?? DEFAULTS.outDir),
@@ -268,16 +271,13 @@ function normalizeServiceWorker(
 /** Load `<root>/svelte.config.js` (default export), reading the `swelte` key;
  *  missing file/key falls back to `<root>/package.json`'s `swelte` key
  *  (deploy-target declaration lives with the package, e.g. docs-site's
- *  targetOs/targetArch that `npm i` uses to prep zig), then to defaults.
- *  Also honors legacy `<root>/swelte.config.mts` / `.ts` default exports. */
+ *  targetOs/targetArch that `npm i` uses to prep zig), then to defaults. */
 export async function loadConfig(root: string): Promise<ResolvedSwelteOptions> {
 	const dir = resolve(root)
 	const files = [
 		join(dir, 'svelte.config.js'),
 		join(dir, 'svelte.config.mts'),
 		join(dir, 'svelte.config.ts'),
-		join(dir, 'swelte.config.mts'),
-		join(dir, 'swelte.config.ts'),
 	]
 	for (const file of files) {
 		if (!existsSync(file)) continue
@@ -289,8 +289,7 @@ export async function loadConfig(root: string): Promise<ResolvedSwelteOptions> {
 			if (!d) return normalize(readPackageSwelte(dir))
 			// svelte.config.* carries our fields under the `swelte` key
 			// (non-enumerable since defineConfig hides it from the svelte()
-			// plugin — direct access still reads it); legacy swelte.config.ts
-			// held them at the top level.
+			// plugin — direct access still reads it).
 			const maybeSwelte = (d as SwelteConfig).swelte as SwelteOptions | undefined
 			const opts = maybeSwelte ?? (d as SwelteOptions)
 			return normalize(mergePackageSwelte(dir, opts))
@@ -724,20 +723,14 @@ export function renderHarness(
  *  user-owned setup pulled in by the generated entry (inverted wiring):
  *  when `<root>/src/app.ts` exists it is imported for side effects
  *  (as `../src/app.js` — `.js` specifier so `tsc` stays clean without
- *  `allowImportingTsExtensions`); legacy `<root>/src/client.ts` is
- *  honored the same way when `app.ts` is absent. When
- *  `<root>/src/app.css` exists it is imported too. Missing files emit
- *  a comment line instead, so the entry never throws when the hooks
- *  are absent. Legacy `src/main.ts` shims are NOT auto-imported: they
- *  contain `import '../.swelte/entry-main.ts'` (reimporting the entry
- *  would cycle) — move custom setup to `src/app.ts` and delete them. */
+ *  `allowImportingTsExtensions`). When `<root>/src/app.css` exists it
+ *  is imported too. Missing files emit a comment line instead, so the
+ *  entry never throws when the hooks are absent. */
 export function renderClientEntry(root: string, fromUrl: string): string {
 	const file = join(templatesDir(fromUrl), 'client', 'main.ts')
 	const src = readFileSync(file, 'utf8')
 	const lines: string[] = []
 	if (existsSync(join(resolve(root), 'src', 'app.ts'))) lines.push(`import '../src/app.js'`)
-	else if (existsSync(join(resolve(root), 'src', 'client.ts')))
-		lines.push(`import '../src/client.js'`)
 	else lines.push(`// Optional user hook: create src/app.ts for app-level setup.`)
 	if (existsSync(join(resolve(root), 'src', 'app.css'))) lines.push(`import '../src/app.css'`)
 	return `${lines.join('\n')}\n${src}`

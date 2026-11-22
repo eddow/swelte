@@ -106,5 +106,5 @@ own job context and associate it with the request ID where useful.
 
 `npm run test:dogfood -- --browser` verifies lifecycle ordering, repeated signals,
 drain and deadline behavior, idle/repeated room cleanup, reporting isolation and
-normal WS completion. `npm run test:postgres -- --browser` also verifies pool
-cleanup after native work and failed migrations before plugin startup.
+normal WS completion. `npm run test:dogfood:postgres -- --browser` also verifies pool
+cleanup after native work and failed migrations before plugin startup (self-managed temp DB; bring your own via `test:dogfood -- --postgres` + `DATABASE_URL`).

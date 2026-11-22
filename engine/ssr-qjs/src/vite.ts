@@ -12,6 +12,7 @@ import type { Plugin } from 'vite'
 
 export interface SsrQjsOptions {
 	compat?: 'none' | 'sveltekit'
+	/** Action query syntax: `'named'` (default, `?/save`) or `'legacy'` (`?save` / `?q=save`). */
 	actionQuery?: 'legacy' | 'named'
 	vBackendUrl?: string
 	routesDir?: string

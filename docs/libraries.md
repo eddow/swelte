@@ -46,8 +46,8 @@ The empty and sample starters share one project shape. Every starter includes:
 Export supported components/helpers from `src/lib/index.ts` or add explicit
 subpath exports. Building does not publish anything; remove `private: true`
 when you intend to publish to npm. Public exports are an explicit API decision.
-The legacy `--lib` / `--kind lib` flags select the `--template lib` reusable-V
-sample; they do not create a different project type.
+`--template lib` selects the reusable-V sample content; it does not create
+a different project type.
 
 ## Packaging
 

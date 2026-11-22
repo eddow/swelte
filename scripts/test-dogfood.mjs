@@ -23,6 +23,7 @@ if (process.env.SWELTE_TEST_NATIVE_DEPS) {
 }
 mkdirSync(join(root, 'tmp'), { recursive: true })
 const scratch = mkdtempSync(join(root, 'tmp', 'dogfood-'))
+let managedDb = null
 let server
 let staticHost
 let serverLog = ''
@@ -93,9 +94,19 @@ try {
   const app = join(scratch, 'app')
   const library = join(scratch, 'library')
   copyFixture(join(fixture, 'app'), app)
-  const postgres = process.argv.includes('--postgres')
+  const postgres = process.argv.includes('--postgres') || process.argv.includes('--postgres-managed')
+  const postgresManaged = process.argv.includes('--postgres-managed')
+  if (postgresManaged) {
+    if (process.env.DATABASE_URL) throw new Error('--postgres-managed creates its own database; unset DATABASE_URL first')
+    const { execFileSync: createDb } = await import('node:child_process')
+    const { randomBytes: randomDbSuffix } = await import('node:crypto')
+    managedDb = `swelte_dogfood_${randomDbSuffix(8).toString('hex')}`
+    createDb('createdb', ['--template=template0', '--locale=C', managedDb], { stdio: ['ignore', 'pipe', 'pipe'] })
+    process.env.DATABASE_URL = `dbname=${managedDb}`
+    console.log(`dogfood: created managed database ${managedDb}`)
+  }
   if (postgres) {
-    if (!process.env.DATABASE_URL) throw new Error('--postgres requires a disposable DATABASE_URL; use npm run test:postgres')
+    if (!process.env.DATABASE_URL) throw new Error('--postgres requires a disposable DATABASE_URL; use npm run test:dogfood:postgres or --postgres-managed')
     copyFixture(join(root, 'fixtures/postgres/app'), app)
   }
   copyFixture(join(fixture, 'sample-lib'), library)
@@ -315,6 +326,12 @@ try {
   }
   console.log('PASS: installed native/UI package, browser build, native JSON and QuickJS HTML with empty runtime PATH')
 } finally {
+  if (managedDb) {
+    try {
+      const { execFileSync: dropDb } = await import('node:child_process')
+      dropDb('dropdb', ['--force', managedDb], { stdio: ['ignore', 'pipe', 'pipe'] })
+    } catch { /* best-effort cleanup of the managed database */ }
+  }
   await staticHost?.close()
   if (server && server.exitCode === null) {
     const exited = once(server, 'exit')

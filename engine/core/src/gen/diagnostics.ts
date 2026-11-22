@@ -146,7 +146,7 @@ export async function collectDiagnostics(
 		for (const f of listVFiles(routesAbs)) {
 			const rel = relPosix(routesAbs, f)
 			const mod = rel.replace(/\.v$/, '')
-			if (mod === 'index' || mod === '+page' || mod.startsWith('api/')) continue
+			if (mod === '+page' || mod.startsWith('api/')) continue
 			// JSON-only leaves need no .svelte partner (examples/tests
 			// dyn-items/[id].v): a verb/@[rpc] without @[load] never paints
 			// HTML, so requiring a page would flag every API-shaped route.
@@ -158,14 +158,13 @@ export async function collectDiagnostics(
 			}
 			if (src && !/@\[\s*load\b/.test(src)) continue
 			const sveltePage = join(routesAbs, mod, '+page.svelte')
-			const svelteIndex = join(routesAbs, mod, 'index.svelte')
 			const svelteMatch = join(
 				routesAbs,
 				`${mod.replace(/\[\.\.\.[^\]]+\]/g, 'x').replace(/\[[^\]]+\]/g, 'x')}.svelte`
 			)
 			let ok = false
 			try {
-				ok = existsSync(sveltePage) || existsSync(svelteIndex) || existsSync(svelteMatch)
+				ok = existsSync(sveltePage) || existsSync(svelteMatch)
 			} catch {
 				ok = false
 			}
@@ -187,23 +186,19 @@ export async function collectDiagnostics(
 				),
 			])
 			for (const mod of seen) {
-				for (const leafName of ['index', '+page']) {
-					if (mod !== leafName && seen.has(`${mod}/${leafName}`)) {
-						warn(
-							`${routesDir}/${mod}.v`,
-							'clash',
+				if (seen.has(`${mod}/+page`)) {
+					warn(
+						`${routesDir}/${mod}.v`,
+						'clash',
+						routesDir +
+							'/' +
+							mod +
+							'.v clashes with ' +
 							routesDir +
-								'/' +
-								mod +
-								'.v clashes with ' +
-								routesDir +
-								'/' +
-								mod +
-								'/' +
-								leafName +
-								'.v -- ambiguous route'
-						)
-					}
+							'/' +
+							mod +
+							'/+page.v -- ambiguous route'
+					)
 				}
 			}
 		} catch {

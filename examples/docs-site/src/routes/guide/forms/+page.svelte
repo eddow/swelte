@@ -56,13 +56,14 @@ import { codeHtml } from '#lib/snippets.gen.js'
 </p>
 <h2 class="text-2xl font-bold mt-8">Named actions and compatibility</h2>
 <p class="opacity-80 mt-2">
-	Set <code>swelte.actionQuery: 'named'</code> to use
-	<code>?/save</code>. Named actions preserve search parameters such as <code>q</code>;
+	Named actions (the default, <code>?/save</code>) preserve search parameters such as
+	<code>q</code>;
 	<code>?/save&amp;q=hello</code>
-	redirects to <code>?q=hello</code> on no-JS success. Legacy mode retains <code>?q=save</code> and
-	<code>?save</code>.
+	redirects to <code>?q=hello</code> on no-JS success.
+	<code>swelte.actionQuery: 'legacy'</code> opts back into <code>?q=save</code> /
+	<code>?save</code> parsing.
 	<code>swelte.compat: 'sveltekit'</code>
-	selects named actions by default and supplies nested data/form props, reactive
+	supplies nested data/form props, reactive
 	<code>$app/state</code>
 	and the <code>$app/forms</code> adapter.
 </p>

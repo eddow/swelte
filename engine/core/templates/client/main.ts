@@ -1,8 +1,8 @@
 // Swelte client entry (engine-owned source of truth).
 // generate() renders this plus user-setup imports into `.swelte/entry-main.ts`
 // (same pattern as `templates/harness/server.v` → `.swelte/server.v`):
-// renderClientEntry prepends `import '../src/app.js'` when src/app.ts exists
-// (legacy src/client.ts fallback), plus `import '../src/app.css'` when the
+// renderClientEntry prepends `import '../src/app.js'` when src/app.ts exists,
+// plus `import '../src/app.css'` when the
 // stylesheet exists — all `.js`/extensionless-safe specifiers, so user `tsc`
 // stays clean without `allowImportingTsExtensions`.
 // Route through `.swelte/routes.js` so +route.svelte wrappers nest

@@ -316,10 +316,8 @@ export function patchReadme(
 	}
 	// Managed region: open marker through the close marker's line end.
 	const closeAt = prev.indexOf(close, at)
-	const end =
-		closeAt < 0
-			? prev.length // legacy single-marker file: whole tail is managed
-			: prev.indexOf('\n', closeAt) + 1 || prev.length
+	if (closeAt < 0) return 'unchanged' // close marker missing: never touch user prose
+	const end = prev.indexOf('\n', closeAt) + 1 || prev.length
 	const next = `${prev.slice(0, at)}${block}${prev.slice(end)}`
 	if (next === prev) return 'unchanged'
 	if (!dryRun) writeFileSync(readmePath, next)

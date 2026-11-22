@@ -1,6 +1,5 @@
-// Swelte client runtime. No back-compat: the only user API is importing
+// Swelte client runtime. The only user API is importing
 // `.v` files (codegen calls __swelteFetch / __swelteWasmCall).
-// Direct sdk.post/get/worker usage was removed with self/$ssapi/$csapi.
 
 export type ArgValue =
 	| string

@@ -123,13 +123,13 @@ Keep action names separate from application query values.
 
 Named mode does not reserve `q` or arbitrary empty query keys. Thus
 `?filter=unread&q=example` remains a search request. Select parsing with
-`swelte.actionQuery: 'named' | 'legacy'`. With no setting, existing applications
-keep legacy parsing; `compat: 'sveltekit'` selects named parsing unless explicitly
-overridden. New app scaffolds set named mode explicitly. Generated SDK verb
-stubs use the resolved syntax. Legacy mode preserves `?q=delete` / `?delete`
+`swelte.actionQuery: 'named' | 'legacy'` (default `'named'`). `compat: 'sveltekit'`
+selects nested data/form props, reactive `$app/state` and the `$app/forms`
+adapter (it no longer changes action parsing). Generated SDK verb
+stubs use the resolved syntax. `actionQuery: 'legacy'` keeps `?q=delete` / `?delete`
 and continues reserving `q` by definition; applications needing search `q`
-must select named mode. Diagnose mixed selectors in named mode; never silently
-change existing consumers' default parsing.
+must use named mode. Diagnose mixed selectors in named mode; existing
+consumers that relied on the old legacy default must now opt in explicitly.
 
 Normal named submissions can preserve other query parameters, e.g.
 `?/markRead&filter=unread&q=example`. On no-JS success, remove only the action

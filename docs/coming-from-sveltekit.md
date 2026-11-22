@@ -19,7 +19,7 @@ that bites during migration. Only built behavior is documented here.
 | `params/*.ts` matchers | `src/matchers.v` `@[matcher]` | Central file, V-only + codegen'd JS mirrors. `[id=integer]` builtin (digits, `Params` narrows to `number`); custom `@[matcher] (s string) bool` fns in the portable subset inline into `swelte_matcher_check` + both JS mirrors. Unknown name / bad shape / `time\|os\|net` import = build error. |
 | `hooks.server.ts` | `+route.v` `@[before]`/`@[after]` + `src/app.v` | Subtree middleware stays in `+route.v`; root `+route.v` is already the global head. `src/app.v` (`@[startup] () void|!void` once before `veb.run`; `@[reroute](host, path)` to rewritten path or `''`; `@[error](message, status)` → sanitized message (`''` = keep, SvelteKit `handleError` lite — applied to JSON + HTML error bodies before send); each zero/one fn, no qualifier) handles boot + rewrite + error sanitize. Scheduled ticks are the `@swelte/plus` jobs plugin (`@[cron]`, explicit `plugins:` registration — inert without it). No `handle`/`handleFetch` (client `handleFetch(hook)` in `sdk.ts` covers stub interception); `transformPageChunk` = `@[after]` string rewrite. |
 | `src/lib/server/*` | `src/lib/**/backend/*.v` or `*_backend.v` | Physical: backend-only files are a build error from browser/`#lib/` WASM imports. Same V compiles native + WASM for non-backend `#lib/`. |
-| `+page.v` naming | `+page.v` / legacy `index.v` (optional — `+page.svelte` alone renders) | `foo/+page.v` (or `foo/index.v`) claims `/foo` for the API dispatcher (verbs/`@[rpc]`/`@[load]`). Flat `foo.v` is the same URL (see leaf duality above). `foo.v` + `foo/+page.v` together is a build error (one file per URL). |
+| `+page.v` naming | `+page.v` (optional — `+page.svelte` alone renders) | `foo/+page.v` claims `/foo` for the API dispatcher (verbs/`@[rpc]`/`@[load]`). Flat `foo.v` is the same URL (see leaf duality above). `foo.v` + `foo/+page.v` together is a build error (one file per URL). |
 
 ### Leaf duality: `about.*` ⇔ `about/+page.*`
 
@@ -31,8 +31,6 @@ src/routes/about.v       ⇔  src/routes/about/+page.v        →  /about (API/l
 src/routes/about.ts      ⇔  src/routes/about/+page.ts       →  universal load sibling
 src/routes/+page.svelte (+ .v / .ts)                        →  / (root)
 ```
-
-(`index.*` is the accepted legacy spelling of `+page.*`, same URL.)
 
 * One file per URL: mixing `foo.svelte` + `foo/+page.svelte` (or `foo.v` +
   `foo/+page.v`, or cross-extension `foo.svelte` + `foo/+page.v`) is a
@@ -193,7 +191,7 @@ src/routes/+page.svelte (+ .v / .ts)                        →  / (root)
   always passes so load-side redirects keep working). Dynamic routes
   match by pattern (`/users/[id]` fires for `/users/42`).
 * Per-route `Params` types generated (`RouteId` + `Params` in every
-  `types/routes/*.d.ts`) — the `$types`-lite.
+  `types/routes/*.d.ts`) — the SvelteKit route-type analogy.
 
 ## Platform / config
 

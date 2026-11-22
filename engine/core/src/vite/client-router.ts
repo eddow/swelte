@@ -276,7 +276,7 @@ export const ROUTES = [
 	for (const e of entries) {
 		const noCsr = csrByMod.get(e.mod) === false
 		const csrFlag = noCsr ? ', csr: false' : ''
-		const metadata = `, mod: ${JSON.stringify(e.mod)}, wrapperMods: ${JSON.stringify(e.wrappers)}, id: ${JSON.stringify(`/${e.mod.replace(/(^|\/)(\+page|index)$/, '').replace(/\/$/, '')}`)}`
+		const metadata = `, mod: ${JSON.stringify(e.mod)}, wrapperMods: ${JSON.stringify(e.wrappers)}, id: ${JSON.stringify(`/${e.mod.replace(/(^|\/)\+page$/, '').replace(/\/$/, '')}`)}`
 		if (!lazy) {
 			const wraps = e.wrappers.map((w) => sym(w, '_Wrap')).join(', ')
 			o.push(

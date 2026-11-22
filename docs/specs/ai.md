@@ -89,7 +89,7 @@ Offer an optional SQLite recorder with retention controls. Default to metadata. 
 
 Phase C uses `@[tool]` on application functions in `src/lib/backend/`. The attribute is independent of `@[rpc]` and HTTP routes. Shared V code can be called by a backend tool. All agent tool calls execute on the backend in this phase. Browser TS tools, browser WASM dispatch and a backend-to-browser tool bridge are deferred. The browser talks to the application backend, which owns the provider session and credentials. The IDE's project MCP server is a separate surface. [Project MCP](../mcp.md)
 
-Explicit registration replaced the automatic discovery prototype ([plugin and Plus roadmap](plugins.md) §2). The app registers the tools plugin in its Vite config — installing `@swelte/ai` alone no longer enables codegen:
+Explicit registration replaced the automatic discovery prototype (see `../plus.md`). The app registers the tools plugin in its Vite config — installing `@swelte/ai` alone no longer enables codegen:
 
 ```ts
 import { toolsPlugin } from '@swelte/ai/tools'

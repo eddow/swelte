@@ -10,14 +10,13 @@
   "scripts": {
     "build": "npm run build:engine",
     "build:engine": "npm run build --workspace=@swelte/vvm --workspace=@swelte/core --workspace=@swelte/mcp --workspace=@swelte/plus --workspace=@swelte/ssr-qjs --workspace=@swelte/create --if-present && npm run package --workspace=@swelte/ai",
-    "test": "npm run test:unit && npm run test:install && npm run test:dogfood && npm run test:examples",
-    "test:dev": "npm run build --workspace=@swelte/core && node scripts/test-dev-lifecycle.mjs",
-    "test:unit": "npm run test --workspace=@swelte/core && npm run test --workspace=@swelte/ai",
+    "test": "npm run test:unit && npm run test:e2e && npm run test:dogfood && npm run test:examples",
+    "test:unit": "npm run test --workspace=@swelte/core && npm run test --workspace=@swelte/plus && npm run test --workspace=@swelte/mcp && npm run test --workspace=@swelte/ssr-qjs && npm run test --workspace=@swelte/create && npm run test --workspace=@swelte/ai",
+    "test:e2e": "npm run build:engine && node scripts/test-e2e.mjs",
     "test:examples": "npm run test:full --workspace=examples/tests",
-    "test:install": "node scripts/test-install.mjs",
     "test:dogfood": "node scripts/test-dogfood.mjs",
+    "test:dogfood:postgres": "node scripts/test-dogfood.mjs --postgres-managed",
     "prepare:dogfood": "npm run package --prefix fixtures/dogfood/sample-lib && npm install --prefix fixtures/dogfood/app --ignore-scripts --offline --no-audit --no-fund --package-lock=false",
-    "test:postgres": "node scripts/test-postgres.mjs",
     "measure:dogfood": "node scripts/measure-dogfood.mjs",
     "version:sync": "node scripts/sync-version.mjs",
     "version:patch": "node scripts/sync-version.mjs patch",
@@ -26,11 +25,7 @@
     "version:check": "node scripts/sync-version.mjs check",
     "biome:check": "biome check .",
     "biome": "biome check --write .",
-    "biome:unsafe": "biome check --write . --unsafe",
-    "test:images": "npm run build:engine && node scripts/test-images.mjs",
-    "test:pack-matrix": "npm run build:engine && node scripts/test-pack-matrix.mjs",
-    "test:jobs": "npm run build:engine && node scripts/test-jobs.mjs",
-    "test:plugins": "npm run build:engine && node scripts/test-plugin-lifecycle.mjs"
+    "biome:unsafe": "biome check --write . --unsafe"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.6.8",

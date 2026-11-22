@@ -21,7 +21,7 @@ import { join, resolve } from 'node:path'
  * is covered by hmr-proof.test.ts.
  * Core's `swelte build` smoke stays static/SPA + JSON — this is the
  * adapter's proof. Missing `+error.svelte` → SPA `index.html` 200 is
- * covered by the static fallback (back-compat, asserted in core smoke).
+ * covered by the static fallback (asserted in core smoke).
  * Used by CI and `swelte ssr-check` (via `SWELTE_PLUGINS`). */
 /** Probe one HTTP assertion against a live base URL. Throws on mismatch. */
 async function probeSsr(

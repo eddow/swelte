@@ -76,7 +76,7 @@ describeSw('service worker (opt-in, additive)', () => {
 import assertGolden from 'node:assert/strict'
 import { describe as describeGoldens, it as itGolden } from 'node:test'
 import type { RpcFn as RpcFnGolden } from './vite.js'
-import { jsFetchFor as jsFetchForGolden, jsWasmFor as jsWasmForGolden } from './vite.js'
+import { jsFetchFor, jsFetchFor as jsFetchForGolden, jsWasmFor as jsWasmForGolden } from './vite.js'
 
 function goldenFn(over: Partial<RpcFnGolden> = {}): RpcFnGolden {
 	return {
@@ -139,7 +139,7 @@ describeGoldens('item 4 — literal golden strings for jsFetchFor/jsWasmFor', ()
 			'}',
 			'',
 			'export function remove(args = {}) {',
-			'\treturn __swelteFetch("/api/greet", "remove", "post", args, "delete")',
+			'\treturn __swelteFetch("/api/greet", "remove", "post", args, "/delete")',
 			'}',
 			'',
 			'export async function * tick(args = {}) {',
@@ -149,6 +149,17 @@ describeGoldens('item 4 — literal golden strings for jsFetchFor/jsWasmFor', ()
 			'',
 		].join('\n')
 		assertGolden.equal(got, want)
+	})
+
+	itGolden('jsFetchFor legacy qualifier: no slash prefix on opt-in', () => {
+		const got = jsFetchFor(
+			'/api/greet',
+			[goldenFn({ name: 'remove', attr: 'post', qualifier: 'delete' })],
+			'ignore',
+			undefined,
+			false
+		)
+		assertGolden.ok(got.includes('"delete"') && !got.includes('"/delete"'), got)
 	})
 
 	itGolden(
@@ -168,7 +179,7 @@ describeGoldens('item 4 — literal golden strings for jsFetchFor/jsWasmFor', ()
 				assertGolden.ok(got.includes('function __swelteUrl(args = {})'))
 				assertGolden.ok(got.includes('missing route param'))
 				assertGolden.ok(
-					got.includes('return __swelteFetch(__swelteUrl(args), "g", "get", __swelteArgs, "q")')
+					got.includes('return __swelteFetch(__swelteUrl(args), "g", "get", __swelteArgs, "/q")')
 				)
 				assertGolden.ok(
 					got.includes('yield* __swelteStream(__swelteUrl(args), "tick", __swelteArgs, "")')
@@ -206,11 +217,21 @@ describeGoldens('item 4 — literal golden strings for jsFetchFor/jsWasmFor', ()
 					got2.endsWith(
 						[
 							'void __swelteRest',
-							'  return __swelteFetch(__swelteUrl(args), "g", "get", __swelteArgs, "q")',
+							'  return __swelteFetch(__swelteUrl(args), "g", "get", __swelteArgs, "/q")',
 							'}',
 							'export async function * tick(args = {}) {',
 						].join('\n')
 					) === false
+				)
+				// legacy qualifier shape still available on opt-in
+				assertGolden.ok(
+					jsFetchFor(
+						'/users/[id]',
+						[goldenFn({ name: 'g', qualifier: 'q' })],
+						'ignore',
+						undefined,
+						false
+					).includes('"q"')
 				)
 				// full byte comparison via JSON round-trip: regenerating yields identical bytes
 				assertGolden.equal(
@@ -404,7 +425,7 @@ describe('codegen shape snapshots (fetch/SSE/dispatcher)', () => {
 		assert.ok(stub.includes('__swelteUrl'))
 		assert.ok(stub.includes('async function *'))
 		assert.ok(stub.includes('__swelteStream'))
-		assert.ok(stub.includes(`"q"`))
+		assert.ok(stub.includes(`"/q"`), 'named is the default qualifier syntax')
 	})
 
 	it('wasm stub references __swelteWasmCall + wasm url', async () => {

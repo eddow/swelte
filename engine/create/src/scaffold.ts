@@ -1,5 +1,4 @@
 // `npm create @swelte <dir>`: one project shape, two build targets.
-// Base + optional sample templates; legacy lib flags select a reusable-V demo.
 // Interactive wizard: directory → sample → SSR. Build runs the application;
 // package builds src/lib, regardless of the selected starter.
 // Generated files (server harness, client entry, routers) are NEVER
@@ -34,8 +33,6 @@ export interface CreateOpts {
 	sample?: boolean
 	empty?: boolean
 	template?: string
-	kind?: string
-	lib?: boolean
 	ssr?: boolean
 	yes?: boolean
 	'no-interactive'?: boolean
@@ -69,8 +66,8 @@ export async function runCreate(
 	if (existsSync(root) && readdirSync(root).length > 0) {
 		throw new Error(`target ${root} exists and is not empty (pass an empty dir)`)
 	}
-	// Compatibility flags select sample content, never a package kind.
-	const wantLibSample = opts.lib === true || opts.kind === 'lib' || opts.template === 'lib'
+	// `--template lib` selects the reusable-V sample content.
+	const wantLibSample = opts.template === 'lib'
 	const wantSample = wantLibSample
 		? false
 		: opts.sample === true || opts.template === 'sample'

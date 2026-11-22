@@ -15,8 +15,7 @@ helpers). `.swelte/server.v` (generated harness: `Hand` + static handlers
 ## Directories
 
 - `src/routes/**/*.v` — server RPC. File path is the route:
-  `+page.v` → `/`, `api/greet.v` → `/api/greet` (`index.v` is the legacy
-  spelling of `+page.v`, same URL). Dynamic segments: `users/[id].v` →
+  `+page.v` → `/`, `api/greet.v` → `/api/greet`. Dynamic segments: `users/[id].v` →
   `/users/[id]`, `files/[...rest].v` → `/files/[...rest]`;
   `[id=integer]` constrains to digits (see `config.md`);
   params arrive in `Request.params`). `[...rest]` may match empty

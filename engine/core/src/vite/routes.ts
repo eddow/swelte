@@ -29,7 +29,7 @@ export function listVFiles(dir: string, base?: string): string[] {
 
 export function svelteModKind(mod: string): 'page' | 'wrapper' | 'error' | 'plain' | null {
 	const base = mod.includes('/') ? mod.slice(mod.lastIndexOf('/') + 1) : mod
-	if (base === '+page' || base === 'index') return 'page'
+	if (base === '+page') return 'page'
 	if (base === '+route') return 'wrapper'
 	if (base === '+error') return 'error'
 	if (base.startsWith('+')) return null
@@ -851,11 +851,10 @@ export function routeFor(
 			)
 		return null
 	}
-	const leaf =
-		mod === 'index' || mod.endsWith('/index') || mod === '+page' || mod.endsWith('/+page')
+	const leaf = mod === '+page' || mod.endsWith('/+page')
 	if (leaf) {
-		// Folder-root leaf: strip the leaf segment (`+page` or legacy
-		// `index`) to get the directory, whose path is the URL.
+		// Folder-root leaf: strip the `+page` segment to get the directory,
+		// whose path is the URL.
 		// `+page` → `/`, `admin/+page` → `/admin`.
 		// NOTE: `+page.v` sorting — `+` (0x2B) sorts before letters,
 		// so `+page.v` may scan before `admin/`. Sort order of

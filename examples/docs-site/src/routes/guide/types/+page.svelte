@@ -81,7 +81,7 @@ import { codeHtml } from '#lib/snippets.gen.js'
 	<span
 		>Per-route <code>RouteId</code> + <code>Params</code> types ship in every
 		<code>types/routes/*.d.ts</code>
-		— the <code>$types</code>-lite. Unknown names project
+		— the SvelteKit route-type analogy. Unknown names project
 		<code>unknown</code>
 		+ warning.</span
 	>

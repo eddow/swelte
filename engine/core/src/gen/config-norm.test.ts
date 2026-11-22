@@ -34,13 +34,6 @@ describe('config normalization (tmp roots)', () => {
 		assert.equal(cfg.port, 4321)
 	})
 
-	it('legacy top-level swelte.config.ts read', async () => {
-		const root = tmpCfgRoot()
-		writeFileSync(join(root, 'swelte.config.mts'), `export default { port: 5555 }`)
-		const cfg = await loadConfig(root)
-		assert.equal(cfg.port, 5555)
-	})
-
 	it('broken config warns and falls back', async () => {
 		const root = tmpCfgRoot()
 		writeFileSync(join(root, 'svelte.config.js'), `this is not js (((`)
@@ -220,16 +213,5 @@ describe('config normalization (tmp roots)', () => {
 		assert.ok(hook.startsWith(`import '../src/app.js'`))
 		assert.ok(hook.includes(`import '../src/app.css'`))
 		assert.ok(!hook.includes(`import '../src/client.js'`))
-	})
-
-	it('renderClientEntry honors legacy src/client.ts when app.ts is absent', async () => {
-		const { templatesDir } = await import('./config.js')
-		const fromUrl = import.meta.url
-		void templatesDir
-		const root = tmpCfgRoot()
-		mkdirSync(join(root, 'src'), { recursive: true })
-		writeFileSync(join(root, 'src', 'client.ts'), 'export {}')
-		const hook = renderClientEntry(root, fromUrl)
-		assert.ok(hook.startsWith(`import '../src/client.js'`))
 	})
 })

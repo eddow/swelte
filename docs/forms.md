@@ -19,9 +19,9 @@ decides: JSON → `@[rpc]`, form (multipart/urlencoded) → verb dispatch.
 
 Opt in to `swelte: { compat: 'sveltekit' }` in `svelte.config.js` for
 `?/delete` named actions, nested `{ data, form, params }` page props,
-reactive `$app/state` and the `$app/forms` callback adapter. The default
-keeps flat props and legacy qualifiers. `actionQuery: 'named' | 'legacy'`
-overrides qualifier selection independently.
+reactive `$app/state` and the `$app/forms` callback adapter. Named actions
+are the default (`?/save`); `actionQuery: 'legacy'` opts back into
+`?save` / `?q=save` parsing for existing applications.
 
 ## No-JS (§12)
 

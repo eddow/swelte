@@ -137,9 +137,9 @@ Use an ordinary local/shared-host SQLite filesystem, not a network filesystem or
 independent copies on separate hosts.
 
 The scheduler remains lifecycle-tracked, stops scheduling during shutdown and
-releases the connection/transaction on exit. `npm run test:jobs` runs the actual
+releases the connection/transaction on exit. `npm run test:e2e` (jobs step) runs the actual
 generated native harness against two processes, kills the owning worker mid-run,
-and verifies lock recovery, committed state and restart catchup.
+and verifies lock recovery, committed state and restart catchup (cherry-pick: `node scripts/test-jobs.mjs`).
 
 Default `jobsPlugin` (Plus-owned, not a core builtin) remains process-local best effort (two containers run two
 schedulers). Duration qualifiers are supported; cron expressions are not parsed.

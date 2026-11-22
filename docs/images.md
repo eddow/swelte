@@ -48,6 +48,6 @@ originals are not copied by this pipeline. Generated metadata and intermediate
 assets live under the configured `outDir`. A failed decode, resize or encode
 fails the build. Cross-compiling the app still processes images on the host.
 
-Run `npm run test:images` to exercise resizing, decoding the actual WebP output,
-alpha, dimension bounds and stable asset names. It requires the build dependencies
+Run `npm run test:e2e` (images step) to exercise resizing, decoding the actual WebP output,
+alpha, dimension bounds and stable asset names (cherry-pick: `node scripts/test-images.mjs`). It requires the build dependencies
 above; no image service or external executable encoder is used.

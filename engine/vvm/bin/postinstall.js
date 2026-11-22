@@ -1,5 +1,5 @@
 // Runs on `npm install @swelte/vvm`: ensures a V toolchain exists under versions/.
-// Respects SWELTE_V_VERSION (legacy: SWELTE_V_VERSION, default 0.5.2) and VVM_SKIP_INSTALL=1 to opt out.
+// Respects SWELTE_V_VERSION (default 0.5.2) and VVM_SKIP_INSTALL=1 to opt out.
 // Also runs `vvm prepare` when a cross target is declared (explicit
 // SWELTE_TARGET_OS/ARCH env or package.json swelte.targetOs/targetArch) —
 // so `npm i` preps the machine for `swelte build --target-os/--target-arch`.
@@ -37,8 +37,7 @@ if (isSystemActive()) {
 	if (existing) {
 		console.log(`vvm postinstall: V already available (${existing}), skipping download.`)
 	} else {
-		const version =
-			process.env.SWELTE_V_VERSION || process.env.SWELTE_V_VERSION || DEFAULT_V_VERSION
+		const version = process.env.SWELTE_V_VERSION || DEFAULT_V_VERSION
 		console.log(`vvm postinstall: installing V ${version} ...`)
 		await installVersion(version)
 	}

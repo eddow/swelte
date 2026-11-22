@@ -914,10 +914,7 @@ async function main(argv) {
 	}
 	if (cmd === 'install') {
 		const version = normalizeVersion(
-			rest.find((a) => !a.startsWith('-')) ||
-				process.env.SWELTE_V_VERSION ||
-				process.env.SWELTE_V_VERSION ||
-				DEFAULT_V_VERSION
+			rest.find((a) => !a.startsWith('-')) || process.env.SWELTE_V_VERSION || DEFAULT_V_VERSION
 		)
 		const force = rest.includes('--force') || rest.includes('-f')
 		await installVersion(version, { force })

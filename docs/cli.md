@@ -3,8 +3,8 @@
 Built behavior. Every command resolves the V toolchain itself
 (system `v`, else `@swelte/vvm` — no manual install). Core subcommand
 list is closed: `dev` / `build` / `preview` / `deploy` / `test` / `check` /
-`export` (+ `--help` / `--version`), plus a deprecated `init`
-forwarder to `npm create @swelte` (`@swelte/create`). `swelte migrate`
+`export` (+ `--help` / `--version`). New projects come from
+`npm create @swelte` (`@swelte/create`). `swelte migrate`
 arrives via the project's Plus `db` plugin entry (see below).
 Third-party plugins may extend it via `SWELTE_PLUGINS` (comma/space-separated specifiers).
 No aliases — the documented
@@ -48,9 +48,9 @@ cleanup; only a hung owned child is forcibly terminated after that budget plus
 a 500ms margin. Occupied ports cause an error; Swelte never kills their owners
 or searches process command lines. Preview shares the occupied-port policy.
 
-`npm run test:dev` exercises the real native controller lifecycle in a disposable
+`npm run test:e2e` (dev-lifecycle step) exercises the real native controller lifecycle in a disposable
 project, including failed builds, graceful drain, controller loss and quit
-during startup. It requires the V toolchain and uses portable Node APIs.
+during startup. It requires the V toolchain and uses portable Node APIs (cherry-pick: `node scripts/test-dev-lifecycle.mjs`).
 
 SSR is automatic when the adapter is installed: `swelte dev` probes
 `@swelte/ssr-qjs` from the project root (no new dep for core, resolved
@@ -175,20 +175,18 @@ in `dist/`; package output must be separate from application/source/generated
 directories. `--output` requires matching publication paths in `package.json`.
 See `libraries.md`; `swelte check --lib` offers read-only diagnostics.
 
-## `swelte init [<dir>] [options]` — DEPRECATED
+## Scaffolding
 
-Forwards to `@swelte/create` when installed; otherwise errors with the
-install hint. Use **`npm create @swelte [<dir>]`** instead:
+New projects come from **`npm create @swelte [<dir>]`**:
 
 ```
-npm create @swelte [<dir>] [--sample | --empty | --lib] [--template empty|sample|lib] [--kind app|lib] [--ssr|--no-ssr] [--yes|-y|--no-interactive] [--root dir] [--dir name]
+npm create @swelte [<dir>] [--sample | --empty] [--template empty|sample|lib] [--ssr|--no-ssr] [--yes|-y|--no-interactive] [--root dir] [--dir name]
 ```
 
 Scaffold one Swelte project shape (empty by default; `--sample` adds demo
 routes). Every starter has `"build": "swelte build"` for the application and
 `"package": "swelte package"` for reusable `src/lib` output. No app/library
-kind question is asked. `--template lib` selects reusable V sample content;
-`--lib` / `--kind lib` remain compatibility aliases, not package types.
+kind question is asked. `--template lib` selects reusable V sample content.
 Projects start private; configure public exports and remove `private: true`
 when publishing. See `libraries.md` for publication metadata.
 `src/app.ts` and `src/app.css` are optional setup files, auto-imported by

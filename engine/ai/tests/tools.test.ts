@@ -120,6 +120,21 @@ describe('@[tool] manifest projection', () => {
 		)
 	})
 
+	it('rejects arrays of structs loudly instead of flattening them', () => {
+		// Contract pin for the struct-ref guard in structSchema: an
+		// array-typed field must go through the array projection (or fail
+		// loudly in fieldSchema) — never resolve as a nested struct `$ref`
+		// and flatten to a bare `{ type: 'object' }`.
+		// (`/^(\[|…)/` replaced a lint-rejected `/^([]|…)/`; the
+		// `/^[A-Za-z_]/` conjunct already excluded `[`-leading types, so the
+		// change is lint-level — this pins the behavior it protects.)
+		const src = `pub struct Row {\npub:\n\ttitle string\n}\npub struct A {\npub:\n\trows []Row\n}\n@[tool]\npub fn f(args A) string { return '' }`
+		assert.throws(
+			() => toolManifestFor('backend/m', parseVFile(src), parseStructs(src)),
+			/unsupported V type '\[\]Row'/
+		)
+	})
+
 
 	describe('schema identity + nullable + arrays', () => {
 		it('wire change publishes a different identity; same shape reuses it', () => {

@@ -40,8 +40,8 @@ status 0 (WASM never touches HTTP) — e.g. `WASM compile failed`,
 
 ## SPA-first proxy rule (vite.ts + `Hand` static-first)
 
-`GET /` (no `?q=`, no `Accept: application/json`) always serves Vite
-(page), regardless of `Accept`. Only proxied to V:
+`GET /` (no `Accept: application/json`) always serves Vite
+(page), regardless of `Accept` or query string. Only proxied to V:
 `Accept: application/json` GETs, JSON bodies, form bodies
 (multipart/urlencoded). Result: browser refresh never hits the API;
 curl does.

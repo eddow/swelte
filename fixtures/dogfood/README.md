@@ -57,10 +57,12 @@ native binary, run `npm run measure:dogfood -- <scratch>/app [report.json]`.
 See [measurement method and sample](../../docs/native-runtime-measurements.md)
 for startup/RSS/HTML/stream concurrency results and their scope.
 
-Run `npm run test:postgres -- --browser` with PostgreSQL client commands on
+Run `npm run test:dogfood:postgres -- --browser` with PostgreSQL client commands on
 PATH and a local role allowed to create databases. Standard `PGHOST`, `PGPORT`,
 `PGUSER` and authentication settings apply. It creates and drops only its own
 randomly named database; it never applies migrations to an existing app DB.
+To use your own disposable database instead: set `DATABASE_URL` and run
+`npm run test:dogfood -- --postgres --browser`.
 The managed V toolchain must have its SQLite amalgamation installed, and the
 native build needs libpq development files. These are dependencies of the
 fixture plugins; Swelte does not build a PostgreSQL or SQLite ORM.

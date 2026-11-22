@@ -35,6 +35,11 @@ describe('route helpers', () => {
 		assert.equal(routeFor('src/routes', '/tmp/rr/src/routes', R('admin/+page.v')), '/admin')
 	})
 
+	it('routeFor: removed index.v spelling routes as a literal stem', () => {
+		assert.equal(routeFor('src/routes', '/tmp/rr/src/routes', R('index.v')), '/index')
+		assert.equal(routeFor('src/routes', '/tmp/rr/src/routes', R('admin/index.v')), '/admin/index')
+	})
+
 	it('routeFor: dynamic [id] passes through; [...rest] leaf is a valid catch-all', () => {
 		assert.equal(routeFor('src/routes', '/tmp/rr/src/routes', R('users/[id].v')), '/users/[id]')
 		// Bare catch-all leaf is allowed: /files/[...rest] with empty rest
@@ -92,7 +97,7 @@ describe('route helpers', () => {
 		assert.equal(svelteModKind('Widget'), null)
 		assert.equal(svelteRouteFor('router/live/Streamed'), null)
 		assert.equal(svelteRouteFor('Widget'), null)
-		// Lowercase stems stay routable; +page/index spellings unaffected.
+		// Lowercase stems stay routable; +page spelling unaffected.
 		assert.equal(svelteModKind('router/live/streamed'), 'plain')
 		assert.equal(svelteRouteFor('router/live/streamed'), '/router/live/streamed')
 	})
@@ -106,6 +111,15 @@ describe('route helpers', () => {
 		assert.equal(routeFor('src/routes', '/tmp/rr/src/routes', R('(mkt)/+page.v')), '/')
 		assert.equal(svelteRouteFor('(mkt)/users/+page'), '/users')
 		assert.equal(svelteRouteFor('(mkt)/+page'), '/')
+		assert.equal(svelteModKind('index'), 'plain')
+		assert.equal(svelteRouteFor('index'), '/index')
+		// Identity `id` strips only the `+page` folder-root leaf: a literal
+		// `index` stem keeps its segment (C1: `index.v` is no longer a leaf).
+		const pageId = (mod: string) => `/${mod.replace(/(^|\/)\+page$/, '').replace(/\/$/, '')}`
+		assert.equal(pageId('admin/+page'), '/admin')
+		assert.equal(pageId('+page'), '/')
+		assert.equal(pageId('admin/index'), '/admin/index')
+		assert.equal(pageId('index'), '/index')
 	})
 
 	it('roadmap §1.2 optional [[slug]] validates last-only, routes, params', () => {

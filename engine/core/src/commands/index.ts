@@ -80,68 +80,6 @@ const previewCmd: Command = {
 	},
 }
 
-const initCmd: Command = {
-	name: 'init',
-	summary: 'DEPRECATED: use `npm create @swelte` (@swelte/create). Forwards to it when installed.',
-	args: [
-		{ name: 'root', help: 'Parent dir for the scaffold', value: 'string' },
-		{ name: 'dir', help: 'Target directory name', value: 'string' },
-		{
-			name: 'sample',
-			help: 'Include sample routes (demo api/admin/files/users)',
-			value: 'boolean',
-		},
-		{ name: 'empty', help: 'Empty skeleton only (no prompt)', value: 'boolean' },
-		{ name: 'template', help: 'Template to use: empty | sample | lib', value: 'string' },
-		{
-			name: 'kind',
-			help: 'Deprecated starter alias: app | lib (one project shape)',
-			value: 'string',
-		},
-		{
-			name: 'lib',
-			help: 'Deprecated alias for --template lib (reusable V sample)',
-			value: 'boolean',
-		},
-		{
-			name: 'no-interactive',
-			help: 'Never prompt: use flag defaults (same as CI/non-TTY)',
-			value: 'boolean',
-		},
-		{
-			name: 'yes',
-			short: 'y',
-			help: 'Alias for --no-interactive (accept defaults)',
-			value: 'boolean',
-		},
-		{
-			name: 'ssr',
-			help: 'Include SSR via @swelte/ssr-qjs (else SPA-only; --no-ssr forces SPA)',
-			value: 'boolean',
-		},
-	],
-	async run(ctx: Ctx) {
-		ctx.error('`swelte init` moved to `npm create @swelte` (@swelte/create) — forwarding.')
-		try {
-			const mod = (await import(/* @vite-ignore */ '@swelte/create/scaffold')) as Record<
-				string,
-				unknown
-			>
-			const runCreate = mod.runCreate as (
-				opts: Record<string, unknown>,
-				rest: string[],
-				log: (m: string) => void
-			) => Promise<void>
-			if (typeof runCreate !== 'function') throw new Error('no runCreate export')
-			await runCreate({ ...ctx.opts }, ctx.rest, (m) => ctx.log(m))
-		} catch {
-			throw new Error(
-				'install the scaffolder (`npm install -g @swelte/create`) or run `npm create @swelte`'
-			)
-		}
-	},
-}
-
 const deployCmd: Command = {
 	name: 'deploy',
 	summary:
@@ -272,7 +210,6 @@ export const COMMANDS: Command[] = [
 	previewCmd,
 	deployCmd,
 	packageCmd,
-	initCmd,
 	checkCmd,
 	testCmd,
 	exportCmd,

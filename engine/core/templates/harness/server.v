@@ -837,8 +837,11 @@ fn (mut app App) before_request(mut ctx Ctx) veb.Result {
 	// send `text/html`, but crawlers/AI readers send `*/*` or nothing —
 	// those must also get SSR HTML, not the verb-dispatch JSON probe
 	// (which made agents see only the page title + `"Swelte docs"`).
-	// Explicit JSON stays JSON: `application/json` Accept, `?q`/`?payload`
-	// probes, XHR `X-Requested-With`, the SDK load fetch, non-GET.
+	// Explicit JSON stays JSON: `application/json` Accept, XHR
+	// `X-Requested-With`, the SDK load fetch, non-GET. Query strings do
+	// NOT divert: page URLs legitimately carry `?q=`/`?payload=` (read
+	// by `@[load]` from `req.query`), so document requests are routed by
+	// Accept/headers alone — SPA-first, a browser refresh never hits the API.
 	page_is_neutral := page_accept == '' || page_accept == '*/*' || (!page_accept.contains('application/json') && !page_accept.contains('json') && !page_accept.contains('text/event-stream') && (page_accept.contains('text/html') || page_accept.contains('text/') || page_accept.contains('*')))
 	page_is_fetch := page_load || (headers['X-Requested-With'] or { headers['x-requested-with'] or { '' } }) != '' || (headers['X-Swelte-Fetch'] or { headers['x-swelte-fetch'] or { '' } }) != ''
 	page_wants_json := page_accept.contains('application/json') || page_accept.contains('+json')
@@ -1278,7 +1281,7 @@ fn swelte_render_detailed(route string, props_json string) (string, bool, string
 
 // Split the bridge/sidecar `head + marker + body` form into the
 // (html, head, ok) triple Hand fills into the shell. Marker absent →
-// body-only (no <svelte:head> on the page, or legacy bridge).
+// body-only (no <svelte:head> on the page).
 fn swelte_split_head_body(s string, ok bool) (string, bool) {
 	if !ok || s == '' {
 		return '', false

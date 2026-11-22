@@ -14,7 +14,6 @@
 
 export type { SwelteConfig, SwelteOptions } from './gen/config.js'
 export { defineConfig } from './gen/config.js'
-export { loadBuildPhases } from './vite/build.js'
 export type { ErrorBoundary } from './vite/error-boundaries.js'
 export {
 	collectErrorBoundaries,

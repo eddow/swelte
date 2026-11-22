@@ -5,6 +5,7 @@
 
 export interface SweltePluginOptions {
 	compat?: 'none' | 'sveltekit'
+	/** Action query syntax: `'named'` (default, `?/save`) or `'legacy'` (`?save` / `?q=save`). */
 	actionQuery?: 'legacy' | 'named'
 	routesDir?: string
 	libDir?: string
@@ -13,9 +14,7 @@ export interface SweltePluginOptions {
 	 * Falls back to SWELTE_V_BACKEND_URL (injected by `swelte dev`). Unset = no proxy. */
 	vBackendUrl?: string
 	/** V+TS plugins (contracted in core, implemented outside it).
-	 * Default [] = parity-only output, byte-identical to today.
-	 * Explicit registration replaces the retired `./swelte/build`
-	 * auto-discovery prototype. */
+	 * Default [] = parity-only output, byte-identical to today. */
 	plugins?: SweltePlugin[]
 	/** URL trailing-slash policy ('always'|'never'|'ignore'). Env SWELTE_TRAILING_SLASH wins. */
 	trailingSlash?: 'always' | 'never' | 'ignore'

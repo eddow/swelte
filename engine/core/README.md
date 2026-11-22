@@ -47,7 +47,7 @@ configured `swelte({ plugins: [dbPlugin] })` entry (`@swelte/plus/db`) —
 see `docs/cli.md` + `docs/plus.md`. Core alone ships no `migrate`.
 
 New projects: `npm create @swelte [<dir>] [...]` (`@swelte/create`
-scaffolder). `swelte init` is a deprecated forwarder to it.
+scaffolder).
 
 Notes:
 - `build` smoke-probes `/` always; the `/api/greet` API probe runs only

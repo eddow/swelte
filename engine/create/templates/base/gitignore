@@ -1,7 +1,5 @@
 # build outputs — never commit
 .svelte/
-# legacy generated V dispatcher dir (pre-.swelte layout) — must stay empty
-/routes/
 dist/
 package/
 .swelte/

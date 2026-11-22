@@ -225,7 +225,7 @@ import DocsNav from '#lib/DocsNav.svelte'
 		allowlists which load-envelope headers land on the HTML navigation (<code>Set-Cookie</code>
 		untouched, <code>Location</code> always passes). Per-route
 		<code>RouteId</code>
-		+ <code>Params</code> types (the <code>$types</code>-lite). Per-route
+		+ <code>Params</code> types (the SvelteKit route-type analogy). Per-route
 		<code>limits</code>
 		override the global hardening knobs (single binary, no regions/runtime).
 	</li>
@@ -251,8 +251,8 @@ import DocsNav from '#lib/DocsNav.svelte'
 	<code>swelte.compat: 'sveltekit'</code>
 	enables nested data/form props, request-local SSR page state, reactive <code>$app/state</code>,
 	and the forms callback adapter.
-	<code>swelte.actionQuery</code>
-	selects named or legacy actions independently. See
+	<code>swelte.actionQuery: 'legacy'</code>
+	opts back into legacy <code>?save</code> action parsing. See
 	<a href="/guide/lifecycle" class="link">page lifecycle</a>
 	and
 	<a href="/guide/forms" class="link">forms</a>

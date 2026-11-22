@@ -75,8 +75,7 @@ import DocsNav from '#lib/DocsNav.svelte'
 			<p>
 				Every starter has <code>build</code> and <code>package</code> scripts and starts private.
 				Declare public exports and remove <code>private: true</code> when ready to publish.
-				<code>--template lib</code> selects reusable V sample content; legacy <code>--lib</code> and
-				<code>--kind lib</code> are starter aliases.
+				<code>--template lib</code> selects the reusable V sample content.
 			</p>
 		</div>
 	</div>
@@ -127,9 +126,7 @@ import DocsNav from '#lib/DocsNav.svelte'
 				<li>
 					<code>npm create @swelte</code>
 					— scaffold a Swelte project (<code>--sample</code>
-					/ <code>--empty</code> / <code>--template lib</code> / <code>--ssr</code>); routers never
-					scaffolded (<code>swelte init</code>
-					is a deprecated forwarder)
+					/ <code>--empty</code> / <code>--template lib</code> / <code>--ssr</code>)
 				</li>
 			</ul>
 		</div>

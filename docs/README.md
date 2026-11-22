@@ -19,7 +19,7 @@ Documentation for users of Swelte (all describe built behavior):
 - `streaming.md` — native POST byte streams, framing, cancellation and buffering
 - `lifecycle.md` — startup ordering, cooperative shutdown, resource drain and native reporting
 - `native-runtime-measurements.md` — repeatable native fixture workload and recorded measurement scope
-- `cli.md` — `dev`/`build`/`preview`/`deploy`/`test`/`check`/`export` (+ deprecated `init` forwarder, Plus-owned `migrate` via `plugins: [dbPlugin]`), `--target`, contract snapshot (implemented)
+- `cli.md` — `dev`/`build`/`preview`/`deploy`/`test`/`check`/`export` (+ Plus-owned `migrate` via `plugins: [dbPlugin]`), `--target`, contract snapshot (implemented)
 - `deploy.md` — `swelte deploy init|status`: setup-only deploy-config automater (vercel/docker P0), drift check (implemented)
 - `ssr.md` — SSR, built (ownership, request path, `@[load]` cascade, `+error` contract, measured budgets, gate)
 - `mcp.md` — Agents: MCP server + skills install (implemented)
@@ -40,6 +40,6 @@ Internal docs to modify Swelte (design rationale, decisions, ephemeral notes):
 
 - [Framework roadmap](specs/future.md) — proposed work and acceptance criteria.
 - [Multimodal AI sessions](specs/ai.md) — typed media streams, schema management, provider adapters, tracing and programmatic tools.
-- [Explicit plugins and Plus restoration](specs/plugins.md) — completed roadmap record: plugin contract, AI on explicit registration, Plus feature restoration, release boundary.
+- [Explicit plugins and Plus restoration](plus.md) — completed roadmap record: plugin contract, AI on explicit registration, Plus feature restoration, release boundary.
 - [Proposed package versioning](specs/versioning.md) — shared release lines, per-package patches and the registry gate.
 - [Media proposal](specs/media.md) — the optional `@swelte/media` capture/playback/transport package.
