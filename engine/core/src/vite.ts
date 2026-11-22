@@ -12,7 +12,6 @@
  *  `@swelte/plus/db`. Core keeps the hub-transport gate only (§3 box 3).
  */
 
-export { coreBackendVlibDir, coreHubVlibFiles, hasPlusDbPlugin } from './backend/hub-index.js'
 export type { SwelteConfig, SwelteOptions } from './gen/config.js'
 export { defineConfig } from './gen/config.js'
 export type { ErrorBoundary } from './vite/error-boundaries.js'
@@ -74,7 +73,6 @@ export {
 	validateLoadFn,
 	validateMiddlewareFn,
 	validateSseFn,
-	validateWsFn,
 } from './vite/server-gen.js'
 export {
 	renderServiceWorker,

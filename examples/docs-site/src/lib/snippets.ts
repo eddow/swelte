@@ -140,17 +140,17 @@ hashed = hash_string({ input: name })  // Promise`,
 	},
 	'plus-install': {
 		lang: 'bash',
-		code: `# jobs: explicit plugin registration
+		code: `# jobs + embedded DB: explicit plugin registration
 npm install @swelte/plus`,
 	},
 	'plus-vite-config': {
 		lang: 'ts',
-		code: `import { jobsPlugin } from '@swelte/plus';
+		code: `import { jobsPlugin, dbPlugin, roomsPlugin } from '@swelte/plus';
 import { swelte } from '@swelte/ssr-qjs';
 
-// jobs are the Plus plugin — backend stays a core builtin (no backend entry)
+// jobs + embedded DB + rooms are the Plus plugins — registered explicitly
 export default defineConfig({
-  plugins: [svelte(svelteConfig), swelte({ vBackendUrl, plugins: [jobsPlugin] })],
+  plugins: [svelte(svelteConfig), swelte({ vBackendUrl, plugins: [jobsPlugin, dbPlugin, roomsPlugin] })],
 });`,
 	},
 	'plus-cron': {

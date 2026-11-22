@@ -74,10 +74,12 @@ try {
   for (const name of ['core', 'ssr-qjs']) {
     run(process.execPath, [tsc, '-p', `engine/${name}/tsconfig.json`])
   }
-  const { swelte, dbPlugin } = await import(pathToFileURL(join(root, 'engine/core/dist/vite.js')))
+  const { swelte } = await import(pathToFileURL(join(root, 'engine/core/dist/vite.js')))
   const { jobsPlugin } = await import(pathToFileURL(join(root, 'engine/plus/dist/jobs.js')))
+  const { dbPlugin } = await import(pathToFileURL(join(root, 'engine/plus/dist/db.js')))
+  const { roomsPlugin } = await import(pathToFileURL(join(root, 'engine/plus/dist/rooms.js')))
   const startupProbe = { name: 'startup-probe', attrs: [], harness: () => ({ mainInner: "\tos.write_file('dependent-plugin-started', 'yes')!\n" }) }
-  const fixturePlugins = [dbPlugin, jobsPlugin, startupProbe]
+  const fixturePlugins = [dbPlugin, jobsPlugin, roomsPlugin, startupProbe]
   const { resolveV, resolveCC, toolchainEnv, vVersion } = await import(pathToFileURL(join(root, 'engine/core/dist/toolchain.js')))
   const { emitRenderJs } = await import(pathToFileURL(join(root, 'engine/ssr-qjs/dist/ssr.js')))
   const { buildQjsProd } = await import(pathToFileURL(join(root, 'engine/ssr-qjs/dist/qjs.js')))
@@ -123,13 +125,27 @@ try {
   process.chdir(app)
   const invalidEntry = join(app, 'browser-invalid.ts')
   writeFileSync(invalidEntry, 'import { run } from "@swelte-dogfood/sample-lib/v/runner.v"; console.log(run);\n')
-  await assert.rejects(
-    () => build({
-      root: app, configFile: false, logLevel: 'silent', plugins: [swelte({ plugins: fixturePlugins })],
-      build: { write: false, rollupOptions: { input: invalidEntry } },
-    }),
-    /server-only/
-  )
+  // Room routes validate before the bundler resolves the bad entry — move
+  // them aside so this probe exercises the server-only import rejection.
+  const roomStash = []
+  for (const f of ['socket.v', 'room.v']) {
+    const pth = join(app, 'src', 'routes', f)
+    try {
+      roomStash.push({ file: pth, src: readFileSync(pth, 'utf8') })
+      rmSync(pth)
+    } catch { /* absent — nothing to stash */ }
+  }
+  try {
+    await assert.rejects(
+      () => build({
+        root: app, configFile: false, logLevel: 'silent', plugins: [swelte({ plugins: fixturePlugins })],
+        build: { write: false, rollupOptions: { input: invalidEntry } },
+      }),
+      /server-only/
+    )
+  } finally {
+    for (const { file, src } of roomStash) writeFileSync(file, src)
+  }
   run(process.execPath, [tsc, '-p', join(app, 'tsconfig.json')], app, env)
   console.log('dogfood: installed UI/universal declarations resolve; server browser import rejected')
 

@@ -1,7 +1,7 @@
 import { defineConfig } from 'vite';
 import { svelte } from '@sveltejs/vite-plugin-svelte';
 import { swelte } from '@swelte/ssr-qjs';
-import { jobsPlugin } from '@swelte/plus';
+import { jobsPlugin, dbPlugin, roomsPlugin } from '@swelte/plus';
 import svelteConfig from './svelte.config.js';
 
 const vBackendUrl =
@@ -24,9 +24,8 @@ export default defineConfig({
     // the unified config for any option not passed here.
     swelte({
       vBackendUrl,
-      // Jobs live in `@swelte/plus` (§3 box 1: explicit registration);
-      // the embedded backend stays a core builtin (no backend entry).
-      plugins: [jobsPlugin],
+      // Plus owns jobs + the embedded DB + the room hub (§3: explicit registration).
+      plugins: [jobsPlugin, dbPlugin, roomsPlugin],
     }),
   ],
 });

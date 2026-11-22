@@ -1,11 +1,12 @@
 # CLI: `swelte` commands
 
 Built behavior. Every command resolves the V toolchain itself
-(system `v`, else `@swelte/vvm` — no manual install). Subcommand list
-is closed: `dev` / `build` / `preview` / `deploy` / `test` / `check` /
-`export` / `migrate` (+ `--help` / `--version`), plus a deprecated `init`
-forwarder to `npm create @swelte` (`@swelte/create`). Third-party plugins
-may extend it via `SWELTE_PLUGINS` (comma/space-separated specifiers).
+(system `v`, else `@swelte/vvm` — no manual install). Core subcommand
+list is closed: `dev` / `build` / `preview` / `deploy` / `test` / `check` /
+`export` (+ `--help` / `--version`), plus a deprecated `init`
+forwarder to `npm create @swelte` (`@swelte/create`). `swelte migrate`
+arrives via the project's Plus `db` plugin entry (see below).
+Third-party plugins may extend it via `SWELTE_PLUGINS` (comma/space-separated specifiers).
 No aliases — the documented
 `--target` is the deploy-target shim; `--target-os` is the cross-build
 OS (build-only, see below).
@@ -208,11 +209,13 @@ confirm (default No — add it later any time with `npm install
 `CI=1`, `--yes`/`--no-interactive`) skips all prompts and uses flag
 defaults (empty, SPA); Ctrl-C cancels cleanly.
 
-## `swelte migrate [--root dir] [--db path]` (builtin)
+## `swelte migrate [--root dir] [--db path]` (Plus `db` plugin — explicit registration)
 
 Apply `db/migrations/*.sql` to the embedded SQLite file (`SWELTE_DB_PATH`
 env, `--db` flag, else `data/app.db`). First run scaffolds
 `src/lib/backend/db.v` (shared conn + KV helpers) +
 `db/migrations/001_swelte_kv.sql`. Idempotent — re-runs apply only new
-files (tracked in `_swelte_migrations`). No plugin needed (embedded backend stays a core builtin until §3 boxes 2–3 move it to Plus; jobs live in `@swelte/plus`).
+files (tracked in `_swelte_migrations`). The command resolves from the
+project's configured `swelte({ plugins: [dbPlugin] })` entry (`@swelte/plus/db`),
+so it is discoverable before any app build (see `plus.md`); `SWELTE_PLUGINS` env peers extend it.
 

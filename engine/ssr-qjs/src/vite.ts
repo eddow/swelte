@@ -30,13 +30,13 @@ export interface SsrQjsOptions {
 	csrf?: 'ignore' | 'enforce'
 	methodOverride?: boolean
 	version?: string
-	/** Third-party V+TS plugins (core `SweltePlugin` contract; `@swelte/plus` jobs are a plugin, backend stays a core builtin). */
+	/** Third-party V+TS plugins (core `SweltePlugin` contract; `@swelte/plus` jobs + db are plugins). */
 	plugins?: import('@swelte/core/vite').SweltePlugin[]
 }
 
 /** SSR adapter as a Swelte plugin: exposes `swelte ssr-check` (the §5 CI
- * gate) as a core CLI command when probed via `SWELTE_PLUGINS`. Same shape
- * as core's builtin `migrate` — core stays dependency-free, the
+ * gate) as a CLI command when probed via `SWELTE_PLUGINS`. Same shape
+ * as a Plus `db` plugin `migrate` command — core stays dependency-free, the
  * adapter owns the dynamic imports. `swelte dev` needs no plugin: it
  * auto-boots the sidecar via `maybeStartSsrSidecar`. */
 export const ssrPlugin: SweltePlugin = {

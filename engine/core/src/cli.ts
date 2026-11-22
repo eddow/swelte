@@ -26,7 +26,6 @@ export function resolveCommands(plugins: { cli?: Command[]; name?: string }[] = 
 	if (!extra.length) return COMMANDS
 	const names = new Set(COMMANDS.map((c) => c.name))
 	for (const c of extra) {
-		if (c === COMMANDS.find((command) => command.name === 'migrate')) continue
 		if (names.has(c.name))
 			throw new Error(`[swelte] plugin command '${c.name}' collides with an existing command`)
 		names.add(c.name)
@@ -34,14 +33,14 @@ export function resolveCommands(plugins: { cli?: Command[]; name?: string }[] = 
 	return [...COMMANDS, ...extra.filter((c) => !COMMANDS.some((k) => k.name === c.name))]
 }
 
-/** Discover plugin packages exposing CLI commands.
+/** Discover plugin packages exposing CLI commands (e.g. `@swelte/plus`
+ *  `migrate` when the app registers it via `swelte({ plugins: [dbPlugin] })`
+ *  — `main()` merges configured plugins first, `SWELTE_PLUGINS` second).
  * Core knows no package by name: `SWELTE_PLUGINS` (comma/space-separated
  * specifiers) lists optional peers to probe. Each probed module contributes
  * every export shaped like a plugin (`{ cli, attrs }` — `name` required;
  * nameless `{ cli }` providers throw at resolveCommands). Unlisted /
- * uninstalled packages are skipped silently, keeping core dependency-free.
- * Legacy `@swelte/plus/*` specs resolve to the deprecated shim (re-exports
- * core) — harmless, deduped by `resolveCommands`. */
+ * uninstalled packages are skipped silently, keeping core dependency-free. */
 export async function loadPluginPackages(
 	specs: string[] = String(process.env.SWELTE_PLUGINS ?? '')
 		.split(/[\s,]+/)

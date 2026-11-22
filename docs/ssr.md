@@ -134,7 +134,7 @@ gets the same `-enable-globals -cc <abs-gcc>` flags as the build (flags
 go **before** `run`; after it V treats them as program argv).
 Core-only projects compile against generate()'s no-op bridge stub (same
 symbol, returns not-ok — SSR falls through to the sidecar proxy); plugin
-V modules (core's builtin `backend/`, third-party plugin includes) add `-enable-globals`
+V modules (core's `{hub,ws}.v` transport gate, third-party plugin includes) add `-enable-globals`
 via the `.swelte/plugin_modules.json` marker generate() writes.
 Conda-safe: absolute cc + conda-free PATH (conda's `ld` shadows
 the system linker).

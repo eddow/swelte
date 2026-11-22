@@ -43,9 +43,9 @@ src/lib/crypto/hash.v               isomorphic (hash_string @[rpc] → WASM/dev 
 src/lib/backend/secrets.v           backend-only (never ships to browser — physical boundary)
 src/app.v                           user lifecycle — @[startup] boot stamp + @[reroute] /old → /router + @[cron('60s')] tick (Plus `jobsPlugin` — inert without the plugin)
 .swelte/server.v                    Hand + static + main() — calls generated routes/swelte_route
-.swelte/backend/                    copied from core vlib (db.v hub + ws.v frames) — only when room-SSE/WS fns need it
+.swelte/backend/                    Plus `db.v` (SQLite/KV, ungated) + Plus `{hub,ws}.v` (room hub, ungated with `roomsPlugin` — core stages no V modules)
 routes/                             generated V dispatcher (regenerating, gitignored)
-vite.config.ts                     swelte({ vBackendUrl, plugins: [jobsPlugin] }) — jobs are the `@swelte/plus` plugin; backend stays a core builtin (no backend entry)
+vite.config.ts                     swelte({ vBackendUrl, plugins: [jobsPlugin, dbPlugin, roomsPlugin] }) — jobs + embedded DB + rooms are `@swelte/plus` plugins
 ```
 
 ## Run

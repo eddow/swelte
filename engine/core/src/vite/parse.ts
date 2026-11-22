@@ -17,11 +17,12 @@ function splitTopLevel(s: string, sep: string): string[] {
 	return out
 }
 
-/** Core attrs parsed without plugins. Plus owns `cron` via its plugin
- *  `attrs` (parsed with bodies through `extraAttrs`); register the
- *  jobs plugin with `swelte({ plugins: [jobsPlugin] })` from
- *  `@swelte/plus`. Route files reject stray `cron` via plugin validate;
- *  core drops unknown attrs unless registered here. */
+/** Core attrs parsed without plugins. Plus owns `cron` (jobs), `ws` +
+ *  room-mode `sse` (rooms) via its plugin `attrs` (parsed with bodies
+ *  through `extraAttrs`); register them with `swelte({ plugins: [...] })`
+ *  from `@swelte/plus`. Route files reject stray plugin attrs via plugin
+ *  validate; core drops unknown attrs unless registered here.
+ *  Plain (list/emit) `@[sse]` stays core: SvelteKit-parity streaming. */
 export const CORE_ATTRS = [
 	'get',
 	'post',
@@ -30,7 +31,6 @@ export const CORE_ATTRS = [
 	'delete',
 	'patch',
 	'sse',
-	'ws',
 	'before',
 	'after',
 	'load',

@@ -805,7 +805,15 @@ fn (mut app App) before_request(mut ctx Ctx) veb.Result {
 			ctx.res.header.set_custom('Access-Control-Allow-Credentials', 'true') or {}
 		}
 		mut events := []string{}
-		if !routes.swelte_sse_is_emit(sse_prefix) {
+		if routes.swelte_sse_is_room(sse_prefix) {
+			// Room mode (Plus rooms): the fn runs inside the writer via
+			// `swelte_sse_room_for` (produce side) — no events to resolve,
+			// but pre-flight the qualifier so typos fail fast, not silent.
+			routes.swelte_sse_check_qual(sse_prefix, qualifier) or {
+				ctx.res.set_status(.bad_request)
+				return ctx.send_response_to_client('application/json', '{"error":"' + err.msg() + '"}')
+			}
+		} else if !routes.swelte_sse_is_emit(sse_prefix) {
 			events = routes.swelte_sse_events_for(sse_prefix, qualifier, sse_req) or {
 				return swelte_send_envelope(mut ctx, routes.swelte_error_response(sse_req, err))
 			}

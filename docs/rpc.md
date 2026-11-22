@@ -69,10 +69,10 @@ JSON body. No `?fn=` anywhere (removed with the old model).
 |---|---|---|---|
 | `#routes/` | `@[rpc]` | POST JSON `Accept: application/json` (or local WASM call in `#lib/`) | body `{ "fn", "args" }`; unlimited per file. **Protocol-ignorant:** typed args-struct in, typed value out (or throw → reject). No HTTP types (`SwelteRequest`/`SwelteResponse`/`[]u8`/`(int,string)` are build errors) |
 | `#routes/` | `@[get]` / `@[get('q')]` | GET `Accept: application/json` (+`HEAD` on the same arm) | query = args; default, or `?q` present (`@[head]` stacks as an alias — never a separate default) |
-| `#routes/` | `@[sse]` / `@[sse('q')]` | GET `Accept: text/event-stream` (true streaming via veb) | query = args; default, or `?q` present. Three shapes: list mode returns `[]string` (harness streams each per-event); emit mode takes trailing `emit fn (string) bool` + returns void — each `emit(e)` flushes one frame NOW (`if !emit(e) { return }` on disconnect); room mode (future.md #4) takes trailing `sub fn (string) chan string` + `emit fn (string) bool` — the harness injects a room-subscribe closure, the fn drives the stream from live `backend.emit(room, msg)` fan-out. Client stub is `AsyncGenerator<string>` (`for await`); `!T` failures + unknown qualifiers stay JSON |
+| `#routes/` | `@[sse]` / `@[sse('q')]` | GET `Accept: text/event-stream` (true streaming via veb) | query = args; default, or `?q` present. Three shapes: list mode returns `[]string` (harness streams each per-event); emit mode takes trailing `emit fn (string) bool` + returns void — each `emit(e)` flushes one frame NOW (`if !emit(e) { return }` on disconnect); room mode (Plus `rooms` plugin) takes trailing `sub fn (string) chan string` + `emit fn (string) bool` — the harness injects a room-subscribe closure, the fn drives the stream from live `backend.emit(room, msg)` fan-out. Client stub is `AsyncGenerator<string>` (`for await`); `!T` failures + unknown qualifiers stay JSON |
 | `#routes/` | `@[post]` / `@[post('q')]` | POST form (multipart / urlencoded) | form fields = args; default, or `?q` present. `File`/`Blob` stub args → multipart, filenames land in `SwelteRequest.files` (bytes discarded); plain values → urlencoded |
 | `#routes/` | `@[put]`/`@[delete]`/`@[patch]` (+`('q')`) | respective method | same per-method rules |
-| `#routes/` | `@[ws]` (builtin backend hub) | GET + `Upgrade: websocket` (own transport, intercepted before dispatch) | one socket per file, no qualifier, never stacked with verbs/rpc/sse/load. Shape: `(req SwelteRequest, sub fn (string) chan string, recv chan string, emit fn (string) bool)` returning void; the harness injects the room-subscribe closure, the inbound frame channel, and the frame emitter. Client stub is a URL builder (`__swelteWsUrl`) — the browser opens a native `WebSocket` itself. Non-upgrade GETs on the same path fall through to dispatch (404/405 as usual) |
+| `#routes/` | `@[ws]` (Plus `rooms` plugin) | GET + `Upgrade: websocket` (own transport, intercepted before dispatch) | one socket per file, no qualifier, never stacked with verbs/rpc/sse/load. Shape: `(req SwelteRequest, sub fn (string) chan string, recv chan string, emit fn (string) bool)` returning void; the harness injects the room-subscribe closure, the inbound frame channel, and the frame emitter. Client stub is a URL builder (`__swelteWsUrl`) — the browser opens a native `WebSocket` itself. Non-upgrade GETs on the same path fall through to dispatch (404/405 as usual) |
 | `#routes/` | `@[before]` / `@[after]` (only in `+route.v`) | — (subtree middleware; root `+route.v` is the global head, chains into every leaf) | `@[before]`: root→leaf, `SwelteRequest -> !SwelteRequest`; `@[after]`: leaf→root, `(SwelteRequest, SwelteResponse) -> !SwelteResponse`; middleware fns never exported to TS, but the wrapper's `pub struct`s are (+layout-shaped shared types) |
 | `#routes/` leaf + `+route.v` | `@[load]` | — (page data, `Hand` HTML navigations only) | `(SwelteRequest[, parent T]) -> !R` (or `!SwelteLoadResult`). Zero/one per file, never stacked, no qualifier. Level 0 takes `(req)`; deeper levels take `(req, parent T)` where T is the previous level's return struct (short or prefixed spelling — mismatch is a build error). The cascade threads typed values root-first; the leaf's return is encoded once at the edge → `props_json` for SSR. `SwelteLoadResult{ status, headers, cookies, body }` (built with pre-encoded `body = json.encode(props)`) opts the load into status/headers/cookies on the HTML navigation (SvelteKit `load` setHeaders/cookies lite) — plain values wrap in a 200 default envelope. Non-200 envelope status renders `+error` with the status. No JSON in `.v` files (except the envelope `body`). Throw → `+error` props (use `swelte_error(status, msg)` to preserve the status). On-click stubs stay — `load` is initial paint only |
 | `#lib/` | `@[rpc]` | local WASM call | none (direct dispatch) |
@@ -90,7 +90,7 @@ JSON body. No `?fn=` anywhere (removed with the old model).
   `emit fn (string) bool` + returns void (mutually exclusive —
   build error otherwise; the injected tail never reaches the
   client stub).
-- `@[ws]` (builtin backend hub) is its own transport,
+- `@[ws]` (Plus `rooms` plugin) is its own transport,
   GET+`Upgrade: websocket`-gated, intercepted in `before_request`
   before dispatch. One socket fn per file, no qualifier, never
   stacked with verbs/rpc/sse/load. Shape:
@@ -149,11 +149,14 @@ response: `string`/`struct` (JSON), `[]u8` (binary, `Content-Type` required),
 `status`, `headers`, `cookies`, `body`/`body_bytes`). `@[sse]` fns take the framework `SwelteRequest`
 like verbs in two shapes: list mode returns `[]string`, emit mode
 takes trailing `emit fn (string) bool` + returns void — the harness
-injects `emit`, each call flushes one frame NOW. The TS stub is an
+injects `emit`, each call flushes one frame NOW. Room SSE takes trailing
+`sub fn (string) chan string` + `emit` and rides the Plus `rooms`-plugin hub
+(`backend.emit(room, msg)` fans out cross-request; register via
+`swelte({ plugins: [roomsPlugin] })` (`@swelte/plus/rooms`). The TS stub is an
 `AsyncGenerator<string>` (`for await … of`). `@[ws]` fns take
 `(req SwelteRequest, sub fn (string) chan string, recv chan string,
 emit fn (string) bool)` and return void — hub messages stream out via
-`emit`, client frames stream back via `recv`. The TS stub is a URL
+`emit`, client frames stream back via `recv` (same Plus `rooms`-plugin hub). The TS stub is a URL
 builder (`__swelteWsUrl`): the browser opens a native `WebSocket` on
 the same route + query itself (`new WebSocket(url)`); non-upgrade
 GETs on that path still hit dispatch.

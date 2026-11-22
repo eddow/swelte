@@ -20,13 +20,16 @@ Swelte framework core — V + Svelte unified RPC bridge (Vite plugin, client run
 | `@swelte/core/toolchain` | `dist/toolchain.js` | node (V binary resolution) |
 | `swelte` (bin) | `bin/swelte.js` → `dist/cli.js` | shell |
 
+`migrate` is Plus-owned (`@swelte/plus/db`, `swelte({ plugins: [dbPlugin] })`) — not a core entry point.
+
 Rule: `index.ts` (browser) must never import `node:*`. CLI/toolchain stay
 behind `./cli` so Vite never bundles `node:child_process` into the page
 (this bit us once — see session notes).
 
 ## Commands
 
-Single `swelte` bin, subcommands (all implemented):
+Single `swelte` bin, subcommands (all implemented; `migrate` arrives via
+the configured Plus `db` plugin — see below):
 
 ```sh
 swelte dev [--port N] [--backend N] [--root dir]
@@ -38,6 +41,10 @@ swelte test [--root dir] [--update-snapshot | -u]
 swelte export [--root dir] [--out snapshot/]
 swelte --help | --version
 ```
+
+`swelte migrate [--root dir] [--db path]` resolves from the project's
+configured `swelte({ plugins: [dbPlugin] })` entry (`@swelte/plus/db`) —
+see `docs/cli.md` + `docs/plus.md`. Core alone ships no `migrate`.
 
 New projects: `npm create @swelte [<dir>] [...]` (`@swelte/create`
 scaffolder). `swelte init` is a deprecated forwarder to it.

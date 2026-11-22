@@ -1,14 +1,15 @@
 {
   "name": "@swelte/plus",
   "version": "0.2.0",
-  "description": "Swelte Plus — jobs scheduler plugin (@[cron], durable scheduling).",
+  "description": "Swelte Plus — jobs scheduler + embedded SQLite/KV + rooms backend plugins (@[cron], durable scheduling, swelte migrate, @[ws]/room-SSE hub).",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
     ".": "./dist/index.js",
     "./jobs": "./dist/jobs.js",
-    "./db": "./dist/db.js"
+    "./db": "./dist/db.js",
+    "./rooms": "./dist/rooms.js"
   },
   "files": [
     "README.md",
@@ -56,6 +57,11 @@
     "swelte",
     "svelte",
     "cron",
-    "jobs"
+    "jobs",
+    "sqlite",
+    "kv",
+    "migrate",
+    "rooms",
+    "websocket"
   ]
 }

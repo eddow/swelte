@@ -1,5 +1,6 @@
 // Embedded KV store demo (future.md #2): `import backend` shared conn +
-// kv_get/kv_set/kv_del over a single SQLite file. Needs dbPlugin.
+// kv_get/kv_set/kv_del over the Plus SQLite file. Needs the Plus `db` plugin
+// (`swelte({ plugins: [dbPlugin] })`) — and `swelte migrate` first.
 module store
 
 import backend

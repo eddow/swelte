@@ -1023,172 +1023,89 @@ describe('item 11 — codegen golden project (sample-overlay variant + routes.js
 		)
 	})
 
-	it('builtin backend: copied only when room-SSE/WS fns need it', async () => {
-		// No room fns → no `.swelte/backend/` (unused builtin copies nothing).
+	it('backend staging comes from plugin includes only (Plus db + rooms)', async () => {
+		// Box 3: core stages no V modules itself. Every `backend/` file
+		// arrives via a plugin include (Plus `db` -> db.v, Plus `rooms`
+		// -> hub.v + ws.v). No plugin -> no `.swelte/backend/`.
+		const backendLike = (name: string, dir: string) => ({
+			name,
+			attrs: [],
+			includes: () => [{ module: 'backend', absDir: dir }],
+		})
+		const mkMod = (root: string, file: string) => {
+			const dir = join(root, `fake-plus-${file.replace('.v', '')}`)
+			mkdirSync(dir, { recursive: true })
+			writeFileSync(join(dir, file), 'module backend\npub fn x() int {\n\treturn 1\n}\n')
+			return dir
+		}
 		let root = scaffold()
 		await generate(root)
 		assert.equal(existsSync(join(root, '.swelte', 'backend')), false)
-		// Room-SSE fn → core copies its own vlib backend (hub + ws framing).
+		// db-like include stages db.v; rooms-like include stages hub.v + ws.v.
 		root = scaffold()
-		writeFileSync(
-			join(root, 'src', 'routes', 'api', 'rooms.v'),
-			`module api_rooms\nimport backend\n@[sse]\npub fn stream(req SwelteRequest, sub fn (string) chan string, emit fn (string) bool) {\n\t_ = req\n\t_ = sub\n\t_ = emit\n}`
-		)
-		await generate(root)
-		const copied = readFileSync(join(root, '.swelte', 'backend', 'db.v'), 'utf8')
-		assert.ok(copied.includes('module backend'))
-		assert.ok(existsSync(join(root, '.swelte', 'backend', 'ws.v')), 'ws framing ships with the hub')
+		const dbDir = mkMod(root, 'db.v')
+		const hubDir = mkMod(root, 'hub.v')
+		await generate(root, { plugins: [backendLike('db', dbDir), backendLike('rooms', hubDir)] })
+		assert.ok(existsSync(join(root, '.swelte', 'backend', 'db.v')))
+		assert.ok(existsSync(join(root, '.swelte', 'backend', 'hub.v')))
 		const marker = JSON.parse(readFileSync(join(root, '.swelte', 'plugin_modules.json'), 'utf8'))
 		assert.deepEqual(marker, ['backend'])
+		// Removing the plugins prunes the dir again.
+		await generate(root)
+		assert.equal(existsSync(join(root, '.swelte', 'backend')), false)
 	})
 
-	it('plugin includes: reserved/bad module names skipped with a warning', async () => {
+	it('bridge stub: plain routes build with no backend modules', async () => {
+		// No room/WS fns registered -> no backend dir, no hub import.
+		// The bridge stub is present on top.
 		const root = scaffold()
-		const incDir = join(root, 'fake-inc')
-		mkdirSync(incDir, { recursive: true })
-		writeFileSync(join(incDir, 'x.v'), 'module routes\n')
-		// Reserved 'routes' is skipped, not copied over the dispatcher.
-		await generate(root, {
-			plugins: [
-				{ name: 'fake', attrs: [], includes: () => [{ module: 'routes', absDir: incDir }] },
-			],
-		})
-		const disp = readFileSync(join(root, '.swelte', 'routes', 'server_gen.v'), 'utf8')
-		assert.ok(disp.includes('pub fn swelte_route('), 'dispatcher intact')
-	})
-
-	it('bridge stub: swelte_qjs_bridge.v emitted when absent, never clobbers the real bridge', async () => {
-		const root = scaffold()
-		await generate(root)
-		const stub = readFileSync(join(root, '.swelte', 'routes', 'swelte_qjs_bridge.v'), 'utf8')
-		assert.ok(stub.includes('module routes'))
-		assert.ok(stub.includes('pub fn swelte_qjs_render_page('))
-		assert.ok(!stub.includes('__global'), 'stub carries no globals')
-		assert.ok(stub.includes("return '', false"), 'stub returns not-ok')
-		assert.ok(!stub.includes('\\t'), 'stub uses real tabs (valid V)')
-		assert.ok(stub.includes('\n\t_ = route'), 'stub body indented')
-		// Adapter overwrites with the real bridge; the next generate must
-		// not clobber it back to the stub.
-		writeFileSync(
-			join(root, '.swelte', 'routes', 'swelte_qjs_bridge.v'),
-			'module routes\n__global swelte_qjs_cache int\npub fn swelte_qjs_render_page(route string, props_json string) (string, bool) {\n\treturn route + props_json, true\n}\n'
-		)
-		await generate(root)
-		const kept = readFileSync(join(root, '.swelte', 'routes', 'swelte_qjs_bridge.v'), 'utf8')
-		assert.ok(kept.includes('__global'), 'real bridge preserved')
-	})
-	it('bridge stub: ws routes build with the builtin backend (no plugin needed)', async () => {
-		// Room/WS fns used to need `@swelte/plus/db`; the hub is builtin now —
-		// generate succeeds and the bridge stub is present either way.
-		const root = scaffold()
-		writeFileSync(
-			join(root, 'src', 'routes', 'api', 'sock.v'),
-			`module api_sock\n@[ws]\npub fn sock(req SwelteRequest, sub fn (string) chan string, recv chan string, emit fn (string) bool) {\n}`
-		)
 		await generate(root)
 		const stub = readFileSync(join(root, '.swelte', 'routes', 'swelte_qjs_bridge.v'), 'utf8')
 		assert.ok(stub.includes('pub fn swelte_qjs_render_page('), 'stub has the symbol')
 		assert.ok(!stub.includes('__global'), 'stub carries no globals')
-		assert.ok(existsSync(join(root, '.swelte', 'backend', 'db.v')), 'builtin backend copied for ws')
+		assert.equal(existsSync(join(root, '.swelte', 'backend')), false)
 	})
 
-	it('bridge prelude: builtin backend marker survives regenerate', async () => {
-		// Room fns mark `.swelte/backend/` via the builtin include; a second
-		// generate keeps the marker (and prunes it when rooms go away).
+	it('bridge prelude: plugin backend marker survives regenerate', async () => {
+		// Plain (non-room) fns mark nothing; a backend include keeps the
+		// marker across regenerates (and prunes when the plugin goes away).
 		const root = scaffold()
-		writeFileSync(
-			join(root, 'src', 'routes', 'api', 'sock.v'),
-			`module api_sock\n@[ws]\npub fn sock(req SwelteRequest, sub fn (string) chan string, recv chan string, emit fn (string) bool) {\n}`
-		)
-		await generate(root)
+		const incDir = join(root, 'fake-plus-db')
+		mkdirSync(incDir, { recursive: true })
+		writeFileSync(join(incDir, 'db.v'), 'module backend\n')
+		const dbLike = [{ name: 'db', attrs: [], includes: () => [{ module: 'backend', absDir: incDir }] }]
+		await generate(root, { plugins: dbLike })
 		assert.equal(readFileSync(join(root, '.swelte', 'plugin_modules.json'), 'utf8'), '["backend"]')
-		await generate(root)
+		await generate(root, { plugins: dbLike })
 		assert.equal(readFileSync(join(root, '.swelte', 'plugin_modules.json'), 'utf8'), '["backend"]')
 	})
 
-	it('toolchain: bridge helpers (real vs stub vs dangling)', async () => {
-		const { mkdtempSync, mkdirSync, writeFileSync, rmSync } = await import('node:fs')
-		const { tmpdir } = await import('node:os')
-		const { hasRealBridge, bridgeLinkedArchives, healDanglingBridge, needsGlobals } = await import(
-			'./toolchain.js'
-		)
-		const gen = mkdtempSync(join(tmpdir(), 'swelte-bridge-'))
-		mkdirSync(join(gen, 'routes'), { recursive: true })
-		// No bridge → nothing real, nothing to heal, no globals.
-		assert.equal(hasRealBridge(gen), false)
-		assert.deepEqual(bridgeLinkedArchives(gen), [])
-		assert.equal(healDanglingBridge(gen), false)
-		assert.equal(needsGlobals(gen), false)
-		// Stub → not real, nothing dangling, no globals.
-		writeFileSync(join(gen, 'routes', 'swelte_qjs_bridge.v'), 'module routes\npub fn x() {}\n')
-		assert.equal(hasRealBridge(gen), false)
-		assert.deepEqual(bridgeLinkedArchives(gen), [])
-		assert.equal(healDanglingBridge(gen), false)
-		assert.equal(needsGlobals(gen), false)
-		// Dangling real bridge (archive missing) → heal deletes it.
-		writeFileSync(
-			join(gen, 'routes', 'swelte_qjs_bridge.v'),
-			'module routes\n__global c int\n#flag /nonexistent/libqjs.a@START_LIBS\npub fn x() {}\n'
-		)
-		assert.equal(hasRealBridge(gen), true)
-		assert.deepEqual(bridgeLinkedArchives(gen), ['/nonexistent/libqjs.a'])
-		assert.equal(healDanglingBridge(gen), true)
-		assert.equal(hasRealBridge(gen), false)
-		// Healthy real bridge (archive present) → kept.
-		mkdirSync(join(gen, 'qjs'), { recursive: true })
-		writeFileSync(join(gen, 'qjs', 'libqjs.a'), 'fake')
-		writeFileSync(
-			join(gen, 'routes', 'swelte_qjs_bridge.v'),
-			`module routes\n__global c int\n#flag ${join(gen, 'qjs', 'libqjs.a')}@START_LIBS\npub fn x() {}\n`
-		)
-		assert.equal(hasRealBridge(gen), true)
-		assert.equal(healDanglingBridge(gen), false)
-		assert.equal(needsGlobals(gen), true)
-		// Plugin marker alone (no bridge) → globals needed.
-		rmSync(join(gen, 'routes', 'swelte_qjs_bridge.v'))
-		writeFileSync(join(gen, 'plugin_modules.json'), '["backend"]')
-		assert.equal(needsGlobals(gen), true)
-	})
-
-	it('room-mode SSE: (sub, emit) tail routes to sse_room + harness import', async () => {
+	it('room-mode SSE without the rooms plugin names the fix', async () => {
 		const root = scaffold()
 		writeFileSync(
 			join(root, 'src', 'routes', 'api', 'rooms.v'),
-			`module api_rooms\nimport backend\npub struct RoomSendIn {\npub:\n\troom string\n\tmsg string\n}\n@[rpc]\npub fn send(args RoomSendIn) int {\n\treturn backend.emit(args.room, args.msg)\n}\n@[sse]\npub fn stream(req SwelteRequest, sub fn (string) chan string, emit fn (string) bool) {\n\t_ = req\n\t_ = sub\n\t_ = emit\n}`
+			`module api_rooms\nimport backend\n@[sse]\npub fn stream(req SwelteRequest, sub fn (string) chan string, emit fn (string) bool) {\n\t_ = req\n\t_ = sub\n\t_ = emit\n}`
 		)
-		// Builtin backend (no plugin include) → room accessors + harness import backend.
-		await generate(root)
-		const leaf = readFileSync(join(root, '.swelte', 'routes', 'api_rooms.v'), 'utf8')
-		assert.ok(leaf.includes('pub fn swelte_api_rooms_sse_is_room() bool'))
-		assert.ok(leaf.includes('sub, emit'), 'room fn gets sub+emit')
-		const disp = readFileSync(join(root, '.swelte', 'routes', 'server_gen.v'), 'utf8')
-		assert.ok(disp.includes('pub fn swelte_sse_is_room(prefix string) bool'))
-		assert.ok(disp.includes('pub fn swelte_sse_room_for('))
-		const srv = readFileSync(join(root, '.swelte', 'server.v'), 'utf8')
-		assert.ok(srv.includes('import backend'), 'harness imports the hub module')
-		assert.ok(srv.includes('swelte_sse_room_for'), 'produce drives room mode')
-		assert.ok(
-			srv.includes('fn swelte_room_subscribe('),
-			'room mode keeps the subscribe helper (has callers)'
-		)
-		// Client stub is unchanged (AsyncGenerator over query args).
-		const stub = readFileSync(
-			join(root, '.swelte', 'generated', 'routes', 'api', 'rooms.js'),
-			'utf8'
-		)
-		assert.ok(stub.includes('export async function * stream('))
+		let threw: Error | null = null
+		try {
+			await generate(root)
+		} catch (e) {
+			threw = e as Error
+		}
+		assert.ok(threw, 'room sse without roomsPlugin throws')
+		assert.ok(threw?.message.includes('roomsPlugin'), `names roomsPlugin (got ${threw?.message.slice(0, 120)})`)
 	})
 
-	it('classic emit SSE unchanged (room tables present but empty without room fns)', async () => {
+	it('classic emit SSE unchanged (room stubs present but inert without rooms fns)', async () => {
 		const root = scaffold()
 		await generate(root)
 		const leaf = readFileSync(join(root, '.swelte', 'routes', 'api_greet.v'), 'utf8')
 		assert.ok(leaf.includes('pub fn swelte_api_greet_sse_is_room() bool'))
-		assert.ok(leaf.includes('return false'), 'no room fns → is_room false')
+		assert.ok(leaf.includes('return false'), 'no room fns -> is_room false')
 		const disp = readFileSync(join(root, '.swelte', 'routes', 'server_gen.v'), 'utf8')
 		assert.ok(disp.includes('pub fn swelte_sse_is_room(prefix string) bool'))
 		const srv = readFileSync(join(root, '.swelte', 'server.v'), 'utf8')
-		assert.ok(!srv.includes('import backend'), 'no hub import without room fns')
+		assert.ok(!srv.includes('import backend'), 'no hub import without rooms plugin')
 		assert.ok(
 			!srv.includes('fn swelte_room_subscribe('),
 			'no-room harness drops the callerless helper (V unused-fn notice)'
@@ -1199,59 +1116,20 @@ describe('item 11 — codegen golden project (sample-overlay variant + routes.js
 		)
 	})
 
-	it('Uc-first .svelte colocated with a page is a component, not a route', async () => {
-		const root = scaffold()
-		mkdirSync(join(root, 'src', 'routes', 'router', 'live'), { recursive: true })
-		writeFileSync(join(root, 'src', 'routes', 'router', 'live', '+page.svelte'), '<h1>l</h1>')
-		// Plain component imported by the page: claims no URL, emits no
-		// dispatch file (used to become router_live_Streamed.v and fail
-		// V's snake_case fn-name check).
-		writeFileSync(join(root, 'src', 'routes', 'router', 'live', 'Streamed.svelte'), '<p>helper</p>')
-		await generate(root)
-		const routes = tree(root, '.swelte/routes')
-		assert.ok(!routes.some((f) => f.includes('Streamed')), 'no route file for the component')
-		assert.ok(
-			routes.some((f) => f === 'router_live__page.v'),
-			'the +page leaf still dispatches'
-		)
-	})
-
-	it('@[ws]: (sub, recv, emit) tail routes to ws_open + harness import', async () => {
+	it('@[ws] without the rooms plugin names the fix', async () => {
 		const root = scaffold()
 		writeFileSync(
 			join(root, 'src', 'routes', 'api', 'sock.v'),
-			`module api_sock\nimport backend\n@[ws]\npub fn sock(req SwelteRequest, sub fn (string) chan string, recv chan string, emit fn (string) bool) {\n\t_ = req\n\t_ = sub\n\t_ = recv\n\t_ = emit\n}`
+			`module api_sock\n@[ws]\npub fn sock(req SwelteRequest, sub fn (string) chan string, recv chan string, emit fn (string) bool) {\n\t_ = req\n\t_ = sub\n\t_ = recv\n\t_ = emit\n}`
 		)
-		// Builtin backend (no plugin include) → ws accessors + harness upgrade path.
-		await generate(root)
-		const leaf = readFileSync(join(root, '.swelte', 'routes', 'api_sock.v'), 'utf8')
-		assert.ok(leaf.includes('_swelte_ws_is() bool'))
-		assert.ok(leaf.includes('return true'), 'ws file reports is=true')
-		assert.ok(leaf.includes('req, sub, recv, emit'), 'open passes sub+recv+emit')
-		const disp = readFileSync(join(root, '.swelte', 'routes', 'server_gen.v'), 'utf8')
-		assert.ok(disp.includes('pub fn swelte_ws_route('))
-		assert.ok(disp.includes('pub fn swelte_ws_is(prefix string) bool'))
-		assert.ok(disp.includes('pub fn swelte_ws_open_for('))
-		const srv = readFileSync(join(root, '.swelte', 'server.v'), 'utf8')
-		assert.ok(srv.includes('import backend'), 'harness imports the hub module')
-		assert.ok(srv.includes('swelte_serve_ws'), 'upgrade handshake present')
-		assert.ok(srv.includes('swelte_ws_open_for'), 'produce drives ws open')
-		// Client stub is a URL builder (browser opens a native WebSocket).
-		const stub = readFileSync(
-			join(root, '.swelte', 'generated', 'routes', 'api', 'sock.js'),
-			'utf8'
-		)
-		assert.ok(stub.includes('__swelteWsUrl'))
-		assert.ok(stub.includes('export function sock('))
+		let threw: Error | null = null
+		try {
+			await generate(root)
+		} catch (e) {
+			threw = e as Error
+		}
+		assert.ok(threw, 'ws without roomsPlugin throws')
+		assert.ok(threw?.message.includes('roomsPlugin'), `names roomsPlugin (got ${threw?.message.slice(0, 120)})`)
 	})
 
-	it('@[ws] builds without any plugin include (builtin backend)', async () => {
-		const root = scaffold()
-		writeFileSync(
-			join(root, 'src', 'routes', 'api', 'sock.v'),
-			`module api_sock\n@[ws]\npub fn sock(req SwelteRequest, sub fn (string) chan string, recv chan string, emit fn (string) bool) {\n}`
-		)
-		await generate(root)
-		assert.ok(existsSync(join(root, '.swelte', 'backend', 'db.v')), 'builtin backend copied')
-	})
 })

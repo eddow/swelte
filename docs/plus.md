@@ -1,26 +1,32 @@
-# Plus — jobs scheduler plugin (`@[cron]` live in `@swelte/plus`)
+# Plus — jobs scheduler + embedded DB + rooms plugins (`@[cron]`, `migrate`, `@[ws]`/room-SSE live in `@swelte/plus`)
 
-> `@swelte/plus` owns `jobs` (`@[cron]`, incl. durable scheduling) as an
-> explicit `swelte({ plugins: [...] })` registration. Embedded backend
-> (SQLite/KV, rooms/WS hub, `swelte migrate`) stays a core builtin until
-> §3 boxes 2–3 move it to Plus.
+> `@swelte/plus` owns `jobs` (`@[cron]`, incl. durable scheduling), `db`
+> (embedded SQLite/KV + `swelte migrate`) and `rooms` (room hub +
+> `@[ws]`/room-mode-`@[sse]` dispatch) as explicit
+> `swelte({ plugins: [...] })` registrations. Core keeps the HTTP verbs,
+> plain SSE (list/emit) and the WS *transport* (upgrade handshake, socket
+> pump, `__swelteWsUrl` client URL builder); the hub, room dispatch and
+> socket-open wiring arrive only with the rooms plugin.
 > Reference below is kept — shapes and runtime semantics are unchanged.
 
 ```ts
-// vite.config.ts — register the jobs plugin explicitly
-import { jobsPlugin } from '@swelte/plus';
+// vite.config.ts — register the Plus plugins explicitly
+import { jobsPlugin, dbPlugin, roomsPlugin } from '@swelte/plus';
 import { swelte } from '@swelte/core/vite';
 
 export default defineConfig({
-  plugins: [svelte(svelteConfig), swelte({ plugins: [jobsPlugin] })],
+  plugins: [svelte(svelteConfig), swelte({ plugins: [jobsPlugin, dbPlugin, roomsPlugin] })],
 });
 ```
 
 `src/app.v` may hold one-or-more `@[cron]` tick fns (inert without the
-plugin); `#routes/*.v` may `import backend` (room-SSE/WS). Core copies its
-`vlib/backend/` into `.swelte/` only when room-SSE/WS fns need it (unused
-builtin copies nothing). `swelte migrate` is a core command (see `cli`);
-ticks start at boot in the container (no CLI/SSH).
+plugin); `#routes/*.v` may `import backend` (SQLite/KV via `db.v`, room-SSE/WS
+via the hub). The Plus `db` plugin stages `backend/db.v` into `.swelte/`
+whenever registered; the Plus `rooms` plugin stages `backend/{hub,ws}.v`
+whenever registered (unused hub copies nothing; remove the plugin and the
+staged dir prunes). Core stages no backend V modules itself. `swelte migrate`
+is a Plus command (see `cli`); ticks start at boot in the container (no CLI/SSH).
+Room/WS fns without the rooms plugin are build errors naming the fix.
 
 ## `@[cron]` ticks
 
@@ -165,7 +171,7 @@ pub fn visits(req SwelteRequest) string {
 ```
 
 Single SQLite file (WAL mode, `SWELTE_DB_PATH` env else `data/app.db`).
-`swelte migrate` (builtin core command) scaffolds
+`swelte migrate` (Plus `db` plugin command) scaffolds
 `src/lib/backend/db.v` + `db/migrations/001_swelte_kv.sql` on first run,
 then applies `db/migrations/*.sql` in filename order (tracked in
 `_swelte_migrations`, idempotent re-runs). Migrations are raw SQL;
@@ -181,9 +187,9 @@ Rules:
   `exec()` only steps row queries — INSERT/CREATE silently no-op through
   it. SELECTs use `exec()` + `Row.get_string/get_int`.
 - **Helpers:** `plusDbPath(root, env?)`, `plusPendingMigrations(root,
-  applied)` — pure-TS, pinned by core backend unit tests.
+  applied)` — pure-TS, pinned by the Plus db unit tests.
 
-## `rooms` — cross-request SSE broadcast (builtin backend)
+## `rooms` — cross-request SSE broadcast (Plus `rooms` plugin)
 
 Any verb/`@[rpc]` publishes; a room-mode `@[sse]` fn subscribes:
 
@@ -236,23 +242,26 @@ primitive when cross-restart delivery lands).
 
 Rules:
 
-- **Room fns need the hub:** the builtin backend ships with core — no plugin
-  or `plugins:` entry needed; room-mode `@[sse]` builds directly.
+- **Room fns need the hub:** register the Plus `rooms` plugin
+  (`plugins: [roomsPlugin]`, `@swelte/plus/rooms`) — the hub transport
+  (`hub.v` + `ws.v`) stages into `.swelte/backend/` when registered.
+  Without it, room-mode `@[sse]` is a build error naming the fix.
 - **Keep the tail exact:** `(sub fn (string) chan string, emit fn (string)
   bool)` — stripped from the client stub (harness-injected, like emit).
   A bare closure param anywhere else is a build error.
 - **Return to leave:** the stream ends when the fn returns; the harness
   reaps the subscription. Heartbeat (`__ping__`) keeps idle streams
   alive through proxies (client ignores it).
-- **`.swelte/` wiring:** core copies its `vlib/backend/` `*.v` into
-  `.swelte/backend/` (usage-gated: only when room-SSE/WS fns need it; an
-  unused builtin copies nothing), so generated routes resolve
-  `import backend` with no manual wiring; third-party plugin `includes`
-  work the same way. Stale module dirs are pruned; `routes`/`main` names
-  are reserved. The copy (and `.swelte/plugin_modules.json` marker) is
-  pinned by core's `codegen-shape` tests.
+- **`.swelte/` wiring:** the Plus `db` plugin stages `backend/db.v`
+  (ungated — KV whenever registered); the Plus `rooms` plugin stages
+  `backend/{hub,ws}.v` (ungated — hub whenever registered, pruned on
+  plugin removal), so generated routes resolve `import backend` with no
+  manual wiring; third-party plugin `includes` work the same way. Stale
+  module dirs are pruned; `routes`/`main` names are reserved. The copy
+  (and `.swelte/plugin_modules.json` marker) is pinned by core's
+  `codegen-shape` + Plus `rooms` tests.
 
-## `sockets` — first-class `@[ws]` rooms (builtin backend)
+## `sockets` — first-class `@[ws]` rooms (Plus `rooms` plugin)
 
 One socket fn per file; the fn drives both directions over the hub:
 
@@ -327,8 +336,9 @@ dispatch (404/405 as usual).
 
 Rules:
 
-- **Socket fns need the hub:** the builtin backend ships with core — no plugin
-  or `plugins:` entry needed; `@[ws]` builds directly.
+- **Socket fns need the hub:** register the Plus `rooms` plugin
+  (`plugins: [roomsPlugin]`, `@swelte/plus/rooms`) — `@[ws]` builds with
+  the staged hub. Without it, `@[ws]` is a build error naming the fix.
 - **Keep the tail exact:** `(sub fn (string) chan string, recv chan
   string, emit fn (string) bool)` — harness-injected, stripped
   from the client stub like SSE `emit`. A bare closure param anywhere
@@ -339,9 +349,9 @@ Rules:
   proxies (client ignores it) — rooms should send it; echo need
   not (any client frame resets the read timeout).
 - **Shape errors:** non-void return, any qualifier, or anything but
-  `(SwelteRequest, sub, recv, emit)` is a file+line build error via
-  `validateWsFn`. Two `@[ws]` fns in one file is a build error (one
-  socket per file — rooms join inside via `sub(room)`).
+  `(SwelteRequest, sub, recv, emit)` is a file+line build error via the
+  rooms plugin validate. Two `@[ws]` fns in one file is a build error
+  (one socket per file — rooms join inside via `sub(room)`).
 
 ## Bridge stub + dangling-bridge heal (core)
 

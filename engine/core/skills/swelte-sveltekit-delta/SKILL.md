@@ -21,7 +21,7 @@ and page. See `docs/ssr.md` for hydration and unknown-URL behavior.
 Existing primitives do not establish full application migration parity: page
 state, refresh, guarded streams and hydration still require representative
 validation. V's native PostgreSQL/HTTP/crypto facilities are reusable backend
-dependencies; lack of a Swelte plugin does not imply lack of native support.
+dependencies; Swelte's Plus plugins (`jobs`, `db`) own only what they declare.
 
 ## Sources
 

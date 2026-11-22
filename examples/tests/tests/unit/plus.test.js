@@ -1,7 +1,7 @@
 // Unit: plus integration for examples/tests.
-// Proves the core↔plus seam: with jobsPlugin loaded, generated output stays
-// parity-identical (the tests fixture has no `@[cron]`), and the jobs
-// helpers stay consistent with core codegen.
+// Proves the core↔plus seam: with jobsPlugin + dbPlugin loaded, generated
+// output stays parity-identical (the tests fixture has no `@[cron]` and no
+// room routes), and the jobs/db helpers stay consistent with core codegen.
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import { existsSync, readFileSync } from 'node:fs'
@@ -13,14 +13,15 @@ const root = join(dirname(fileURLToPath(import.meta.url)), '..', '..')
 describe('tests example — plus integration', () => {
   it('plus plugins are importable from the example', async () => {
     const plus = await import('@swelte/plus')
-    for (const name of ['jobsPlugin']) {
+    for (const name of ['jobsPlugin', 'dbPlugin', 'migrateCommand']) {
       assert.ok(plus[name], `@swelte/plus missing export ${name}`)
     }
   })
 
   it('plus helpers agree with the example surface', async () => {
-    const { plusCronSeconds } = await import('@swelte/plus')
+    const { plusCronSeconds, plusDbPath } = await import('@swelte/plus')
     assert.equal(plusCronSeconds('60s'), 60)
+    assert.ok(plusDbPath(root).endsWith('data/app.db'))
   })
 
   it('parity output unchanged with jobs loaded (no @[cron] in this fixture)', () => {

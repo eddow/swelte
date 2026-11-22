@@ -84,22 +84,25 @@ function probe(file, code) {
 {
   const dir = installConsumer('core-plus', { '@swelte/core': `file:${tgz('core')}`, '@swelte/plus': `file:${tgz('plus')}`, '@swelte/vvm': `file:${tgz('vvm')}` })
   const plusPkg = JSON.parse(readFileSync(join(dir, 'node_modules', '@swelte', 'plus', 'package.json'), 'utf8'))
-  assert.deepEqual(Object.keys(plusPkg.exports ?? {}).sort(), ['.', './db', './jobs'])
+  assert.deepEqual(Object.keys(plusPkg.exports ?? {}).sort(), ['.', './db', './jobs', './rooms'])
   const out = probe(join(dir, 'probe-plus.mjs'),
     `import assert from 'node:assert/strict';\n` +
     `const plus = await import('@swelte/plus');\n` +
     `const jobs = await import('@swelte/plus/jobs');\n` +
     `const db = await import('@swelte/plus/db');\n` +
+    `const rooms = await import('@swelte/plus/rooms');\n` +
     `assert.equal(plus.jobsPlugin.name, 'jobs');\n` +
     `assert.ok(typeof jobs.createJobsPlugin === 'function');\n` +
     `assert.equal(db.dbPlugin.name, 'db');\n` +
     `assert.ok((db.dbPlugin.cli ?? []).some((c) => c.name === 'migrate'), 'dbPlugin owns migrate');\n` +
+    `assert.equal(rooms.roomsPlugin.name, 'rooms');\n` +
+    `assert.ok(rooms.roomsPlugin.attrs.includes('ws'), 'rooms claims ws');\n` +
     `const { swelte } = await import('@swelte/core/vite');\n` +
-    `const plugin = swelte({ plugins: [plus.jobsPlugin, db.dbPlugin] });\n` +
+    `const plugin = swelte({ plugins: [plus.jobsPlugin, db.dbPlugin, rooms.roomsPlugin] });\n` +
     `assert.ok(plugin && typeof plugin.name === 'string', 'vite plugin resolves');\n` +
     `console.log('core-plus ok');\n`)
   assert.match(out, /core-plus ok/)
-  console.log('ok: core+plus (./jobs + ./db, jobs/db plugins, migrate command)')
+  console.log('ok: core+plus (./jobs + ./db + ./rooms, jobs/db/rooms plugins, migrate command)')
 }
 
 // --- case 3: core + plus + ai ---

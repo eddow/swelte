@@ -125,11 +125,11 @@ The embedded SQLite/KV helper is Plus-owned, not a core builtin. Register
 the `db` plugin explicitly in `vite.config.ts` (`@swelte/plus` §3 box 2):
 
 ```ts
-import { dbPlugin, jobsPlugin } from '@swelte/plus';
+import { dbPlugin, jobsPlugin, roomsPlugin } from '@swelte/plus';
 import { swelte } from '@swelte/core/vite';
 
 export default defineConfig({
-  plugins: [svelte(svelteConfig), swelte({ plugins: [jobsPlugin, dbPlugin] })],
+  plugins: [svelte(svelteConfig), swelte({ plugins: [jobsPlugin, dbPlugin, roomsPlugin] })],
 });
 ```
 

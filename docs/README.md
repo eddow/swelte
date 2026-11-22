@@ -19,11 +19,11 @@ Documentation for users of Swelte (all describe built behavior):
 - `streaming.md` — native POST byte streams, framing, cancellation and buffering
 - `lifecycle.md` — startup ordering, cooperative shutdown, resource drain and native reporting
 - `native-runtime-measurements.md` — repeatable native fixture workload and recorded measurement scope
-- `cli.md` — `dev`/`build`/`preview`/`deploy`/`test`/`check`/`export` (+ deprecated `init` forwarder), `--target`, contract snapshot (implemented)
+- `cli.md` — `dev`/`build`/`preview`/`deploy`/`test`/`check`/`export` (+ deprecated `init` forwarder, Plus-owned `migrate` via `plugins: [dbPlugin]`), `--target`, contract snapshot (implemented)
 - `deploy.md` — `swelte deploy init|status`: setup-only deploy-config automater (vercel/docker P0), drift check (implemented)
 - `ssr.md` — SSR, built (ownership, request path, `@[load]` cascade, `+error` contract, measured budgets, gate)
 - `mcp.md` — Agents: MCP server + skills install (implemented)
-- `plus.md` — Plus jobs plugin (`swelte({ plugins: [jobsPlugin] })`): `@[cron]` ticks (wiring, retry, durable schedules); embedded backend (SQLite/KV, `swelte migrate`, rooms/WS hub) stays a core builtin until §3 boxes 2–3 move it to Plus
+- `plus.md` — Plus jobs/db plugins (`swelte({ plugins: [jobsPlugin, dbPlugin] })`): `@[cron]` ticks (wiring, retry, durable schedules); embedded backend (SQLite/KV, `swelte migrate`); rooms/WS hub rides the Plus `db` plugin (core keeps only HTTP/SSE/WS transport primitives)
 - `example.md` — the `something` example (implemented; browseable twin: `examples/docs-site/`)
 - `versus.md` — Swelte vs. other full-stack paradigms (positioning)
 - `coming-from-sveltekit.md` — SvelteKit → Swelte migration map (built behavior)

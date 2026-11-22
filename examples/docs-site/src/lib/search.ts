@@ -104,7 +104,7 @@ export const searchIndex: SearchEntry[] = [
 		label: 'CLI',
 		group: 'Guide',
 		keywords:
-			'cli dev build preview test check init export target snapshot contract format json agents',
+			'cli dev build preview test check init export target snapshot contract format json agents migrate plus db plugin dbPlugin SWELTE_PLUGINS',
 	},
 	{
 		href: '/guide/mcp',
@@ -125,14 +125,14 @@ export const searchIndex: SearchEntry[] = [
 		label: 'Database',
 		group: 'Plus',
 		keywords:
-			'postgresql db.pg orm pooling transactions libpq database sqlite migrate kv backend exec_none wal swelte_kv migrations _swelte_migrations embedded database persistence builtin core (backend stays core until Plus §3 boxes 2-3)',
+			'postgresql db.pg orm pooling transactions libpq database sqlite migrate kv backend exec_none wal swelte_kv migrations _swelte_migrations embedded database persistence plus db plugin dbPlugin swelte migrate command',
 	},
 	{
 		href: '/plus/realtime',
 		label: 'Realtime',
 		group: 'Plus',
 		keywords:
-			'realtime rooms broadcast emit subscribe room sse ws websocket socket wssay echo hub ping sub recv live hub fan-out backpressure builtin backend core (hub stays core until Plus §3 box 3)',
+			'realtime rooms broadcast emit subscribe room sse ws websocket socket wssay echo hub ping sub recv live hub fan-out backpressure plus rooms plugin roomsPlugin swelte migrate command',
 	},
 	{
 		href: '/from-sveltekit',

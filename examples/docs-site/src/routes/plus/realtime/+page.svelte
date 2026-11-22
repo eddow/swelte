@@ -15,17 +15,18 @@ import { codeHtml } from '#lib/snippets.gen.js'
 <h1 class="text-4xl font-bold mt-2">
 	Realtime
 	<span class="text-sm font-normal opacity-60"
-		>(builtin — was <code>@swelte/plus</code>, now deprecated)</span
+		>(Plus <code>db</code> plugin — hub stages via <code>plugins: [dbPlugin]</code>)</span
 	>
 </h1>
 <p class="py-4 opacity-80">
-	Rooms + sockets on core's builtin backend hub — no install, no plugin. The
+	Rooms + sockets on the hub transport — register the Plus
+	<code>rooms</code> plugin (<code>swelte({ plugins: [roomsPlugin] })</code>). The
 	<code>backend.emit</code>
 	hub is what <code>@[sse]</code> and <code>@[ws]</code> ride.
 </p>
 
 <div class="mt-2">
-	<Code snippet={codeHtml['plus-install']} dense title="builtin — no install" />
+	<Code snippet={codeHtml['plus-install']} dense title="npm install @swelte/plus" />
 </div>
 
 <h2 class="text-2xl font-bold mt-8">Rooms — cross-request broadcast</h2>

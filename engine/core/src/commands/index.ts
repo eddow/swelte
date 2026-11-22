@@ -1,4 +1,3 @@
-import { migrateCommand } from '../backend/jobs-index.js'
 import { VERSION } from '../version.js'
 import { runBuild } from './build.js'
 import { runDeploy } from './deploy.js'
@@ -277,7 +276,6 @@ export const COMMANDS: Command[] = [
 	checkCmd,
 	testCmd,
 	exportCmd,
-	migrateCommand as Command,
 ]
 
 export function findCommand(name: string): Command | undefined {

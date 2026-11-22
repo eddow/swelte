@@ -10,13 +10,13 @@ Suppose core is at `0.2.4`, Plus at `0.2.1` and MCP at `0.2.0`. A core bug fix p
 
 Strict synchronization gives every active package a release on the new line. This makes “install any Swelte package at 0.3” a reliable instruction, at the cost of publishing unchanged packages once per major/minor transition. A lazy transition lets a package stay on its last published line until its artifacts or compatibility metadata change. This avoids ceremonial releases, but consumers need the package's declared ranges or a tested install recipe to select compatible versions.
 
-Prefer strict transitions for the common release line if the project wants that installation promise. Decide which packages participate before cutting the line. Private experiments and retired packages sit outside the active roster. Stable independent tools could follow their own cadence if the project explicitly exempts them. A package-specific feature that warrants a minor bump triggers a line decision; disguising the feature as a patch would defeat the policy. While Swelte is at 0.x, document breaking changes at minor boundaries and preserve compatibility within a line.
+Prefer strict transitions for the common release line if the project wants that installation promise. Decide which packages participate before cutting the line. Private experiments sit outside the active roster. Stable independent tools could follow their own cadence if the project explicitly exempts them. A package-specific feature that warrants a minor bump triggers a line decision; disguising the feature as a patch would defeat the policy. While Swelte is at 0.x, document breaking changes at minor boundaries and preserve compatibility within a line.
 
 ## Migration and checks
 
-The current [sync script](../../scripts/sync-version.mjs) rewrites six engine versions and their internal ranges. The [publish workflow](../../.github/workflows/publish-engine.yml) attempts five packages and omits create. The scaffolder also derives generated dependencies from its own version. An independent create patch must never generate a minimum core or SSR version that was never published. Give templates explicit tested dependency ranges.
+The current [sync script](../../scripts/sync-version.mjs) rewrites engine versions and their internal ranges. The [publish workflow](../../.github/workflows/publish-engine.yml) covers every active workspace (builds vvm / core / plus / mcp / ssr-qjs / create, packages ai). The scaffolder also derives generated dependencies from its own version. An independent create patch must never generate a minimum core or SSR version that was never published. Give templates explicit tested dependency ranges.
 
-Separate patch selection from a coordinated line cut. Preserve existing published versions, review internal dependency floors individually, and dry-run the publish plan in dependency order. Verify three cases before switching: a single-package patch selects one tarball, a docs-only change selects none, and a coordinated minor cut selects every active participant exactly once. Retiring a package removes it from future plans while preserving existing consumers' access to published artifacts.
+Separate patch selection from a coordinated line cut. Preserve existing published versions, review internal dependency floors individually, and dry-run the publish plan in dependency order. Verify three cases before switching: a single-package patch selects one tarball, a docs-only change selects none, and a coordinated minor cut selects every active participant exactly once.
 
 ## Registry gate (publish workflow)
 
@@ -28,6 +28,6 @@ Separate patch selection from a coordinated line cut. Preserve existing publishe
 - workspace behind → refuse both modes (stale checkout);
 - line change (`major.minor` differs) → **refused in `single`, allowed in `line-cut`** — but only when every active participant shares the new line;
 - never published (`E404`) → allow (first release);
-- retired (`plus`), unknown names → always refused; ANY nonempty refused list fails the command; registry unreachable → fail closed.
+- unknown names → always refused; ANY nonempty refused list fails the command; registry unreachable → fail closed.
 
 A line cut prepares package versions, dependency ranges and scaffold minimums in memory and validates them before writing manifests. Ordinary sync and patch commands preserve reviewed internal ranges. The scaffolder reads its tested minimums from its own published package manifest. The publish gate repeats the compatibility checks and rejects stale checkouts before considering tagged-release retries.

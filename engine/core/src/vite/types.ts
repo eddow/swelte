@@ -296,10 +296,31 @@ export interface SweltePlugin {
 		fn: { name: string; attr: string; qualifier?: string },
 		declaration?: SweltePluginDeclaration,
 	) => void
-	/** V fragment appended to the route leaf file. */
-	emitRoute?: (ctx: SweltePluginRouteCtx, fns: { name: string; attr: string }[]) => string
-	/** V fragment appended to server_gen.v. */
-	emitServerGen?: (routes: { route: string; prefix: string }[]) => string
+	/** V fragments appended to the route leaf file (e.g. Plus rooms emits
+	 *  the `sse_room` / `swelte_ws_open` accessors for claimed room/WS fns).
+	 *  Called per dispatched route file with that file's claimed fns
+	 *  (name/attr plus qualifier, params and fallibility for dispatch). */
+	emitRoute?: (
+		ctx: SweltePluginRouteCtx,
+		fns: {
+			name: string
+			attr: string
+			qualifier?: string
+			params?: { name: string; vtype: string }[]
+			fallible?: boolean
+		}[],
+	) => string
+	/** V fragment appended to server_gen.v (e.g. Plus rooms emits the
+	 *  `sse_is_room` / `sse_room_for` / `ws_is` / `ws_open_for` fan-out
+	 *  tables routing prefixes to the per-file accessors above). Called
+	 *  once with the dispatched routes contributing claimed fns, each
+	 *  annotated with its claimed attrs plus precomputed `room` (room-mode
+	 *  `sse` present) / `socket` (`ws` present) flags so the plugin fans
+	 *  out per capability — a room-only file has no `swelte_ws_open`
+	 *  accessor and must not appear in the socket tables. */
+	emitServerGen?: (
+		routes: { route: string; prefix: string; attrs: string[]; room: boolean; socket: boolean }[],
+	) => string
 	harness?: (config: unknown, declarations?: SweltePluginDeclaration[]) => SweltePluginHarness
 	/** App-level hooks from `src/app.v`: called with the parsed fns carrying
 	 *  plugin attrs (e.g. Plus `cron`). The owner parses+validates+emits;
@@ -318,7 +339,8 @@ export interface SweltePlugin {
 	 *  runtime includes). Core validates names, rejects collisions across
 	 *  plugins/core and prunes stale output on regeneration or removal. */
 	generate?: (ctx: SweltePluginGenerateCtx) => Record<string, string>
-	/** TS declarations appended to types/<mod>.d.ts. */
+	/** TS declarations appended to types/<mod>.d.ts (e.g. a plugin could
+	 *  document claimed fns; core emits verb/rpc/sse/ws DTS itself). */
 	clientDts?: (mod: string, fns: { name: string; attr: string }[]) => string
 	/** CLI commands merged into `swelte` (see `commands/types.ts` Command). */
 	cli?: {

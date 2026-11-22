@@ -15,6 +15,7 @@
     "@docvia/markdown": "^3.0.0",
     "@swelte/ai": "^0.2.0",
     "@swelte/core": "^0.2.0",
+    "@swelte/plus": "^0.2.0",
     "@swelte/ssr-qjs": "^0.2.0",
     "bits-ui": "^2.21.0",
     "clsx": "^2.1.1",

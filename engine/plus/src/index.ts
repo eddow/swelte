@@ -1,9 +1,9 @@
-// `@swelte/plus` — jobs scheduler plugin (`@[cron]`, durable scheduling).
-// Explicit registration: `swelte({ plugins: [jobsPlugin] })` (or
-// `createJobsPlugin({ durable: true })`). DB/rooms stay in core until
-// §3 boxes 2–3 move them here.
+// `@swelte/plus` — jobs scheduler + embedded SQLite/KV + rooms plugins.
+// Explicit registration: `swelte({ plugins: [jobsPlugin, dbPlugin, roomsPlugin] })`
+// (or `createJobsPlugin({ durable: true })`). Rooms/hub live in §3 box 3
+// (`roomsPlugin` claims `@[ws]` + room-mode `@[sse]`; core keeps plain SSE).
+export { roomsPlugin, validateRoomSseFn, validateRoomWsFn, plusRoomsVlibDir } from './rooms.js'
 
-export type { CronFnShape, JobsCronDef, PlusCronQualifier } from './jobs.js'
 export {
 	createJobsPlugin,
 	cronHarness,
@@ -15,3 +15,16 @@ export {
 	readJobsCrons,
 	validateCronFn,
 } from './jobs.js'
+export {
+	dbHelperTemplate,
+	dbInitialMigration,
+	dbPlugin,
+	migrateCommand,
+	PLUS_DB_DEFAULT_PATH,
+	PLUS_DB_MIGRATIONS_TABLE,
+	plusDbPath,
+	plusDbVlibDir,
+	plusPendingMigrations,
+	renderMigrateProgram,
+	runMigrate,
+} from './db.js'

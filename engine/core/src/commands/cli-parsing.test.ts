@@ -68,14 +68,16 @@ describe('CLI parsing', () => {
 			'check',
 			'test',
 			'export',
-			'migrate',
+			// `migrate` is Plus-owned (§3 box 2): not a core command, it
+			// resolves via the configured `plugins: [dbPlugin]` entry.
 		]
 		for (const n of names) {
 			assert.ok(findCommand(n), n)
 			assert.ok(helpText().includes(n))
 			assert.ok(commandHelp(findCommand(n)!).includes(n))
 		}
-		assert.equal(COMMANDS.length, 10)
+		assert.equal(findCommand('migrate'), undefined, 'migrate is Plus-owned, not core')
+		assert.equal(COMMANDS.length, 9)
 	})
 
 	it('unknown option throws', () => {

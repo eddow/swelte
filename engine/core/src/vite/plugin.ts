@@ -3,7 +3,6 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync } fr
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { dirname, join, resolve, sep } from 'node:path'
 import type { Plugin } from 'vite'
-import { hasPlusDbPlugin, coreBackendVlibDir, coreHubVlibFiles } from '../backend/hub-index.js'
 import { loadConfig, renderAppDts, renderClientEntry, renderHarness } from '../gen/config.js'
 import { isBackendMod, SWELTE_GEN_CORE_DIRS } from '../gen/paths.js'
 import { resolveV } from '../toolchain.js'
@@ -46,7 +45,6 @@ import {
 	validateRpcFn,
 	validateSseFn,
 	validateVerbFn,
-	validateWsFn,
 	vType,
 } from './server-gen.js'
 import { loadBuildPhases } from './build.js'
@@ -313,9 +311,9 @@ export function swelte(options: SweltePluginOptions = {}): Plugin {
 				 *  only guards already-installed legacy phases. */
 				await loadBuildPhases(root, extraAttrs)
 				const dispatched: { route: string; mod: string; prefix: string }[] = []
-				// Room-mode SSE (future.md #4) or @[ws] (future.md #3) present
-				// in any route file → harness imports the backend hub module.
-				// Declared here so the harness render below sees the route-loop result.
+				// Room/WS routes (§3 box 3, Plus-owned): computed from the
+				// resolved plugin claims below — never from core attrs.
+				// Declared here so the harness render below sees it.
 				let hasRoomSse = false
 				const needsBackendImport = listVFiles(resolve(root, 'src')).some((file) =>
 					/^\s*import\s+backend\b/m.test(readFileSync(file, 'utf8'))
@@ -362,44 +360,10 @@ export function swelte(options: SweltePluginOptions = {}): Plugin {
 					// Early copy before the route loop throws: generate() must
 					// leave a compilable .swelte/ even on shape errors (dev
 					// pre-generate needs the V backend to boot).
-					// Usage gate for the hub (`backend` include, room-SSE/WS
-					// only): scan route files for the hub shapes before copying.
-					// The Plus `db` plugin's own `db.v` is NOT gated (KV is
-					// available to any route when registered); core's hub files
-					// (`hub.v` + `ws.v`) copy only when room routes or a raw
-					// `import backend` in app source need them.
-					let earlyNeedsBackend = needsBackendImport
-					try {
-						const earlyRoutesAbs = resolve(root, routesDir)
-						if (existsSync(earlyRoutesAbs)) {
-							for (const f of listVFiles(earlyRoutesAbs)) {
-								let esrc = ''
-								try {
-									esrc = readFileSync(f, 'utf8')
-								} catch {
-									continue
-								}
-								const efns = parseVFile(esrc, extraAttrs)
-								const isRoom = efns.some(
-									(fn) =>
-										fn.attr === 'sse' &&
-										fn.params.length >= 2 &&
-										/^fn\s*\(\s*string\s*\)\s*chan\s+string$/.test(
-											fn.params[fn.params.length - 2].vtype.trim()
-										) &&
-										/^fn\s*\(\s*string\s*\)(\s*bool)?$/.test(
-											fn.params[fn.params.length - 1].vtype.trim()
-										)
-								)
-								if (isRoom || efns.some((fn) => fn.attr === 'ws')) {
-									earlyNeedsBackend = true
-									break
-								}
-							}
-						}
-					} catch {
-						/* scan failed — fall through without backend */
-					}
+					// All backend staging comes from plugin includes
+					// (Plus db -> db.v, Plus rooms -> hub.v + ws.v).
+					// App-scaffolded src/lib/backend/*.v shadows staged copies
+					// (same rel path wins — never a collision error).
 					if (plugins.length > 0) {
 						const earlyWanted = new Set<string>()
 						for (const pp of plugins) {
@@ -412,36 +376,20 @@ export function swelte(options: SweltePluginOptions = {}): Plugin {
 							for (const inc of earlyIncs) {
 								if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(inc.module)) continue
 								if (inc.module === 'routes' || inc.module === 'main') continue
-								// Hub gate: core stages its own hub files
-								// (`hub.v`/`ws.v`) only when room-SSE/WS routes
-								// (or a raw `import backend`) need them. The
-								// Plus `db` plugin include copies ungated (KV
-								// available whenever registered). Per-file:
-								// app-scaffolded `src/lib/backend/db.v`
-								// shadows the staged plugin copy (same rel
-								// path wins — never a collision error), so
-								// skip staged files shadowed by app sources.
 								let earlyFiles: string[] = []
 								try {
 									earlyFiles = readdirSync(inc.absDir).filter((f) => f.endsWith('.v'))
 								} catch {
 									continue
 								}
-								let filesToCopy = earlyFiles
 								if (inc.module === 'backend') {
-									if (pp.name === 'db') {
-										filesToCopy = earlyFiles.filter((f) => f === 'db.v')
-									} else {
-										if (!earlyNeedsBackend) continue
-										filesToCopy = earlyFiles.filter((f) => coreHubVlibFiles().includes(f))
-									}
 									try {
 										const appBackend = resolve(root, libDir, 'backend')
 										if (existsSync(appBackend)) {
 											const shadowed = new Set(
 												listVFiles(appBackend).map((f) => relPosix(appBackend, f).split('/').pop() ?? '')
 											)
-											filesToCopy = filesToCopy.filter((f) => !shadowed.has(f))
+											earlyFiles = earlyFiles.filter((f) => !shadowed.has(f))
 										}
 									} catch {
 										/* no app backend — copy staged files */
@@ -449,14 +397,14 @@ export function swelte(options: SweltePluginOptions = {}): Plugin {
 								}
 								const dest = join(genDir, inc.module)
 								mkdirSync(dest, { recursive: true })
-								for (const f of filesToCopy) {
+								for (const f of earlyFiles) {
 									try {
 										writeIfChanged(join(dest, f), readFileSync(join(inc.absDir, f), 'utf8'))
 									} catch {
 										/* unreadable file — skip */
 									}
 								}
-								if (filesToCopy.length > 0) earlyWanted.add(inc.module)
+								if (earlyFiles.length > 0) earlyWanted.add(inc.module)
 							}
 						}
 						writeIfChanged(
@@ -482,10 +430,17 @@ export function swelte(options: SweltePluginOptions = {}): Plugin {
 				// native attrs like `@[heap]` that are never dispatch, and a
 				// typo'd qualifier still parses). Each entry names the attr
 				// + file:line and hints the owning plugin when known
-				// (`cron` → Plus jobs, `tool` → AI tools). Without this the
-				// fn silently drops (parseVFile only emits known attrs).
+				// (`cron` → Plus jobs, `tool` → AI tools, `ws` → Plus rooms).
+				// Plus-owned attrs reaching here without their plugin are build
+				// errors (not warnings): silently dropping a socket/room fn
+				// would ship a dead route. Everything else only warns.
 				const warnUnknownAttrs = (file: string, src: string) => {
 					for (const u of collectUnknownAttrs(src, extraAttrs)) {
+						if (u.name === 'ws') {
+							throw new Error(
+								`[swelte] ${file}:${u.line}: @[ws] needs the Plus rooms plugin: swelte({ plugins: [roomsPlugin] }) from '@swelte/plus/rooms' — core has no socket dispatch without it.`,
+							)
+						}
 						const hint =
 							u.name === 'cron'
 								? ' (Plus jobs: register jobsPlugin via swelte({ plugins: [...] }))'
@@ -563,6 +518,18 @@ export function swelte(options: SweltePluginOptions = {}): Plugin {
 						})(),
 					},
 				)
+				// Box 3: room-ness comes from plugin claims (rooms plugin owns
+				// `ws` + room-mode `sse`). `import backend` in app source also
+				// needs the hub staged (backend.emit from plain routes).
+				hasRoomSse =
+					plugins.some((pl) => (claims.get(pl.name) ?? []).some((d) => {
+						if (d.fn.attr === 'ws') return true
+						if (d.fn.attr !== 'sse' || d.fn.params.length < 2) return false
+						const ps = d.fn.params
+						const tail1 = ps[ps.length - 2].vtype.trim()
+						const tail0 = ps[ps.length - 1].vtype.trim()
+						return /^fn\s*\(\s*string\s*\)\s*chan\s+string$/.test(tail1) && /^fn\s*\(\s*string\s*\)(\s*bool)?$/.test(tail0)
+					}))
 				const appHookFragments: { imports?: string; main?: string; mainInner?: string; shutdown?: string }[] =
 					hooks.imports ? [{ imports: hooks.imports }] : []
 				for (const plug of plugins) {
@@ -1131,18 +1098,29 @@ ${list(st.fields, (fld) => `\t${fld.name}${fld.optional ? '?' : ''}: ${fld.tstyp
 							}
 						}
 						// verbs = HTTP, rpc = protocol-ignorant (typed args/return, throw → reject).
-						// sse = list / emit / room (validateSseFn owns all three shapes).
-						// ws = bidirectional socket rooms (validateWsFn: (req, sub, emit)).
+						// sse = list / emit (core). `sse` is a SHARED attr: when the
+						// rooms plugin is registered it owns the room tail (its
+						// validate() already ran above); core validates only the
+						// plain tails. Reaching here with a room tail means the
+						// plugin is NOT registered → name it. `ws` is rooms-only:
+						// unknown without the plugin, unreachable with it.
+						const roomsRegistered = plugins.some((pl) => pl.attrs?.includes('ws'))
 						for (const r of fns.filter((x) => x.attr === 'rpc'))
 							validateRpcFn(`${routesDir}/${rel}`, r)
 						for (const v of fns.filter((x) =>
 							['get', 'post', 'put', 'delete', 'patch'].includes(x.attr)
 						))
 							validateVerbFn(`${routesDir}/${rel}`, v)
-						for (const s of fns.filter((x) => x.attr === 'sse'))
+						for (const s of fns.filter((x) => x.attr === 'sse')) {
+							if (roomsRegistered) continue // rooms plugin validated the tail above
 							validateSseFn(`${routesDir}/${rel}`, s)
-						for (const w of fns.filter((x) => x.attr === 'ws'))
-							validateWsFn(`${routesDir}/${rel}`, w)
+						}
+						if (!roomsRegistered)
+							for (const w of fns.filter((x) => x.attr === 'ws')) {
+								throw new Error(
+									`[swelte] ${routesDir}/${rel}: @[ws] ${w.name} needs the Plus rooms plugin: swelte({ plugins: [roomsPlugin] }) from '@swelte/plus/rooms' — core has no socket dispatch without it.`,
+								)
+							}
 						const route = routeFor(routesDir, routesAbs, f, knownMatchers)
 						if (route === null) continue // wrapper-only (handled above); leaf always has a route
 						emitTypes(
@@ -1169,34 +1147,11 @@ ${list(st.fields, (fld) => `\t${fld.name}${fld.optional ? '?' : ''}: ${fld.tstyp
 									`[swelte] ${routesDir}/${rel} has the same dynamic shape as ${routesDir}/${d.mod}.v (${shB}) — rename one file.`
 								)
 						}
-						// SSE room mode: trailing `sub fn (string)` +
-						// `emit fn (string) bool` — the harness injects the room
-						// subscribe closure. Track file-level room-ness for the
-						// harness `import backend` decision (builtin core include).
-						const isRoomSseFile = fns.some(
-							(fn) =>
-								fn.attr === 'sse' &&
-								fn.params.length >= 2 &&
-								/^fn\s*\(\s*string\s*\)\s*chan\s+string$/.test(
-									fn.params[fn.params.length - 2].vtype.trim()
-								) &&
-								/^fn\s*\(\s*string\s*\)(\s*bool)?$/.test(
-									fn.params[fn.params.length - 1].vtype.trim()
-								)
-						)
-						if (isRoomSseFile) {
-							// Room-mode SSE fans out via the hub transport
-							// (`import backend` — staged when the Plus `db`
-							// plugin is registered, §3 box 3 moves it fully).
-							hasRoomSse = true
-						}
-						// WS: same hub — the route fn and the harness frame loop
-						// both run against the Plus-staged hub state.
-						const isWsFile = fns.some((fn) => fn.attr === 'ws')
-						if (isWsFile) {
-							// WS pumps frames against the same staged hub.
-							hasRoomSse = true
-						}
+						// Room/WS hub: Plus-owned (§3 box 3). Room-mode sse +
+						// ws fns are plugin-claimed (validated above via the
+						// owning plugin) and never reach core dispatch here;
+						// any surviving `ws` attr means the rooms plugin is
+						// absent (thrown above). Plain sse never sets this.
 						dispatched.push({ route, mod, prefix: vPrefix(mod) })
 						// Runtime fetch stub for the browser import (dev + build).
 						// Sorted by mod: readdir order is filesystem-dependent;
@@ -1291,11 +1246,35 @@ ${list(st.fields, (fld) => `\t${fld.name}${fld.optional ? '?' : ''}: ${fld.tstyp
 								want = l.vret.includes('_') ? l.vret : vType(l.vret, l.mod)
 							}
 						}
+						// Hook emitRoute: plugin-owned dispatch accessors (Plus
+						// rooms appends the real `sse_room` / `swelte_ws_open` bodies
+						// for claimed room/WS fns; core emits failing stubs so the
+						// leaf compiles before the plugin pass).
+						const roomDecls = (claims.get('rooms') ?? []).filter((c) => c.modulePath === d.mod)
+						const roomsOwned =
+							roomDecls.length > 0 &&
+							plugins.some((pl) => pl.name === 'rooms' && pl.emitRoute)
+						let leafSrc = emitRouteFile(d.mod, d.route, d.prefix, src, fns, chain, loads, emittedWrappers, {
+							roomsOwned,
+						})
+						for (const plug of plugins) {
+							if (!plug.emitRoute) continue
+							const decls = (claims.get(plug.name) ?? []).filter((c) => c.modulePath === d.mod)
+							if (!decls.length) continue
+							const extra = plug.emitRoute(
+								{ prefix: d.prefix, mod: d.mod, route: d.route },
+								decls.map((c) => ({
+									name: c.fn.name,
+									attr: c.fn.attr,
+									qualifier: c.fn.qualifier,
+									params: c.fn.params,
+									fallible: c.fn.fallible,
+								})),
+							)
+							if (extra.trim()) leafSrc += '\n' + extra
+						}
 						mkdirSync(routesGenDir, { recursive: true })
-						writeIfChanged(
-							join(routesGenDir, `${vFileSafe(d.mod)}.v`),
-							emitRouteFile(d.mod, d.route, d.prefix, src, fns, chain, loads, emittedWrappers)
-						)
+						writeIfChanged(join(routesGenDir, `${vFileSafe(d.mod)}.v`), leafSrc)
 					}
 					// Prune stale generated files (renamed/deleted routes).
 					// Compare against the CURRENT naming (vFileSafe) — and drop
@@ -1365,7 +1344,7 @@ ${list(st.fields, (fld) => `\t${fld.name}${fld.optional ? '?' : ''}: ${fld.tstyp
 						for (const f of routeFiles) {
 							try {
 								const mod = modulePath(routesAbs, f)
-								const fns = parseVFile(readFileSync(f, 'utf8'))
+								const fns = parseVFile(readFileSync(f, 'utf8'), extraAttrs)
 								if (fns.some((x) => x.attr === 'sse')) sseMods.add(mod)
 								if (fns.some((x) => x.attr === 'ws')) wsMods.add(mod)
 							} catch {
@@ -1397,25 +1376,68 @@ ${list(st.fields, (fld) => `\t${fld.name}${fld.optional ? '?' : ''}: ${fld.tstyp
 						} catch {
 							/* no svelte routes */
 						}
+						let serverGenSrc = emitServerGen(
+							dispatched,
+							sseMods,
+							matchers,
+							noSsrRoutes,
+							noCsrRoutes,
+							routeLimits,
+							serializedHeaders,
+							wsMods,
+							{
+								compat,
+								namedActions: actionQuery === 'named',
+								pages: collectSvelteManifest(routesAbs, routesDir, vMods)
+									.entries.filter((e) => e.kind !== 'wrapper' && e.kind !== 'error')
+									.map((e) => e.svelte.replace(/\.svelte$/, '')),
+							},
+							// Rooms-owned mods: core skips its own room/WS/socket
+							// dispatch tables for these files — the rooms plugin
+							// appends the real fan-out below.
+							new Set(
+								[...(claims.get('rooms') ?? [])]
+									.filter((c) => plugins.some((pl) => pl.name === 'rooms' && pl.emitServerGen))
+									.map((c) => c.modulePath),
+							),
+						)
+						// Hook emitServerGen: plugin-owned fan-out tables (Plus rooms
+						// appends sse_is_room / sse_room_for / ws_is / ws_open_for for
+						// claimed room/WS routes; core emits empty tables).
+						for (const plug of plugins) {
+							if (!plug.emitServerGen) continue
+							const declByMod = new Map<string, { attr: string; room: boolean }[]>()
+							for (const c of claims.get(plug.name) ?? []) {
+								let list = declByMod.get(c.modulePath)
+								if (!list) declByMod.set(c.modulePath, (list = []))
+								const ps = c.fn.params ?? []
+								const room =
+									c.fn.attr === 'ws' ||
+									(c.fn.attr === 'sse' &&
+										ps.length >= 2 &&
+										/^fn\s*\(\s*string\s*\)\s*chan\s+string$/.test(ps[ps.length - 2].vtype.trim()) &&
+										/^fn\s*\(\s*string\s*\)(\s*bool)?$/.test(ps[ps.length - 1].vtype.trim()))
+								list.push({ attr: c.fn.attr, room })
+							}
+							const plugRoutes = dispatched
+								.filter((d) => declByMod.has(d.mod))
+								.map((d) => {
+									const decls = declByMod.get(d.mod)!
+									return {
+										route: d.route,
+										prefix: d.prefix,
+										attrs: [...new Set(decls.map((x) => x.attr))],
+										room: decls.some((x) => x.room && x.attr === 'sse'),
+										socket: decls.some((x) => x.attr === 'ws'),
+									}
+								})
+							if (!plugRoutes.length) continue
+							const extra = plug.emitServerGen(plugRoutes)
+							if (extra.trim()) serverGenSrc += '\n' + extra
+						}
 						writeIfChanged(
 							join(routesGenDir, `server_gen.v`),
-							emitServerGen(
-								dispatched,
-								sseMods,
-								matchers,
-								noSsrRoutes,
-								noCsrRoutes,
-								routeLimits,
-								serializedHeaders,
-								wsMods,
-								{
-									compat,
-									namedActions: actionQuery === 'named',
-									pages: collectSvelteManifest(routesAbs, routesDir, vMods)
-										.entries.filter((e) => e.kind !== 'wrapper' && e.kind !== 'error')
-										.map((e) => e.svelte.replace(/\.svelte$/, '')),
-								}
-							)
+							serverGenSrc
 						)
 					}
 					// Leaf-vs-index clash: foo.v + foo/index.v (or +page.v) both exist.
@@ -1935,14 +1957,11 @@ export declare const dev: boolean
 					writeIfChanged(join(genDir, 'images.js'), 'export default {}\n')
 				writeIfChanged(join(genDir, 'sdk.ts'), '// Auto-generated by swelte. Do not edit.\n')
 				// V module dirs in the `.swelte/` compilation unit so generated
-				// routes/harness can `import <module>`: plugin `includes`
-				// (e.g. Plus `db` stages `backend/db.v` ungated — KV whenever
-				// registered) PLUS core's hub transport files
-				// (`vlib/backend/{hub,ws}.v` — copied only when the Plus `db`
-				// plugin is present AND room-SSE/WS fns need the hub:
-				// `hasRoomSse || needsBackendImport`; an unused hub copies
+				// routes/harness can `import <module>`: plugin `includes` only
+				// (Plus `db` → `backend/db.v`, Plus `rooms` → `hub.v` + `ws.v`;
+				// core stages no V modules itself). An unused include copies
 				// nothing; app-scaffolded `src/lib/backend/*.v` shadows staged
-				// files — never a collision error). Stale module dirs/files
+				// files — never a collision error. Stale module dirs/files
 				// pruned below.
 				// (§1: genAbsEarly emitted plugin generate() outputs above,
 				// unconditionally — even with zero .svelte routes.)
@@ -1960,27 +1979,17 @@ export declare const dev: boolean
 					/* no app backend — nothing shadowed */
 				}
 				const includeModules = new Set<string>()
-				// `backend/` merge: the Plus `db` plugin stages `db.v`; core
-				// stages `{hub,ws}.v`. Both list the same `backend` module —
-				// collect per-file and merge (never last-writer-wins).
+				// `backend/` merge: every plugin include stages its own files
+				// (Plus `db` → `db.v`, Plus `rooms` → `hub.v` + `ws.v`).
+				// Collect per-file and merge (never last-writer-wins).
 				const stagedBackendFiles = new Map<string, string>()
 				const pluginFiles = new Set<string>()
-				const plusDbPresent = hasPlusDbPlugin(plugins)
-				const hubStaged = plusDbPresent && (hasRoomSse || needsBackendImport)
 				for (const plugin of plugins)
 					for (const include of plugin.includes?.() ?? []) {
 						includeModules.add(include.module)
-						// The Plus `db` plugin's own include is ungated (KV
-						// whenever registered); per-file below keeps `db.v`
-						// only. The `hasRoomSse` hub copy below handles core's
-						// `{hub,ws}.v` — skip other plugins' `backend/*`.
-						if (include.module === 'backend' && plugin.name !== 'db') continue
 						if (!existsSync(include.absDir)) continue
 						for (const file of readdirSync(include.absDir)) {
 							if (!file.endsWith('.v')) continue
-							// Plus `db` include owns `db.v` only (§3 box 3
-							// keeps `hub.v`/`ws.v` core-owned).
-							if (include.module === 'backend' && plugin.name === 'db' && file !== 'db.v') continue
 							if (include.module === 'backend') {
 								if (appStagedShadow.has(file)) continue
 								try {
@@ -1994,24 +2003,6 @@ export declare const dev: boolean
 							} else pluginFiles.add(`${include.module}/${file}`)
 						}
 					}
-				if (hubStaged) {
-					try {
-						for (const file of coreHubVlibFiles()) {
-							if (appStagedShadow.has(file)) continue
-							pluginFiles.add(`backend/${file}`)
-							try {
-								stagedBackendFiles.set(
-									`backend/${file}`,
-									readFileSync(join(coreBackendVlibDir(), file), 'utf8')
-								)
-							} catch {
-								/* core vlib missing — harness error below names it */
-							}
-						}
-					} catch {
-						/* core vlib missing — harness error below names it */
-					}
-				}
 				for (const f of stagedBackendFiles.keys()) pluginFiles.add(f)
 				const wanted = new Set(stageBackendModules(libAbs, genDir, pluginFiles))
 				// §2: the AI tools plugin's generated `tools/` V module is a first-class
@@ -2042,13 +2033,9 @@ export declare const dev: boolean
 								)
 								continue
 							}
-							// Plus `db` include is ungated (KV whenever
-							// registered) but owns `db.v` only; core hub files
-							// copy per the `hubStaged` gate above (Plus `db`
-							// present + room-SSE/WS need). Other plugins'
-							// `backend/*` stays skipped (§3 box 3 moves the
-							// hub). App-scaffolded files shadow staged ones.
-							if (inc.module === 'backend' && pp.name !== 'db') continue
+							// Every plugin stages its own backend files (Plus db -> db.v,
+							// Plus rooms -> hub.v + ws.v). App-scaffolded files shadow
+							// staged ones (same rel path wins).
 							let files: string[] = []
 							try {
 								files = readdirSync(inc.absDir).filter((f) => f.endsWith('.v'))
@@ -2056,11 +2043,8 @@ export declare const dev: boolean
 								continue
 							}
 							if (inc.module === 'backend') {
-								files =
-									pp.name === 'db'
-										? files.filter((f) => f === 'db.v' && !appStagedShadow.has(f))
-										: []
-								if (files.length === 0 && !hubStaged) continue
+								files = files.filter((f) => !appStagedShadow.has(f))
+								if (files.length === 0) continue
 							} else wanted.add(inc.module)
 							const dest = join(genDir, inc.module)
 							mkdirSync(dest, { recursive: true })

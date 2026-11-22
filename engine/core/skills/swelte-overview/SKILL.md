@@ -5,7 +5,7 @@ description: Swelte project orientation — routes vs lib layout, CLI commands, 
 
 # Swelte Overview
 
-Swelte is V + Svelte 5. V is the compute engine (native server binary, WASM client modules). Svelte 5 is the UI. One RPC protocol bridges them.
+Swelte is V + Svelte 5. V is the compute engine (native server binary, WASM client modules). Svelte 5 is the UI. One RPC protocol bridges them. Framework extensions (jobs, embedded DB, tools) register explicitly via `swelte({ plugins: [...] })` — no builtins, no auto-discovery.
 
 ## Layout
 
@@ -63,7 +63,12 @@ HTML in the background. `serviceWorker.outbox` opts endpoints into explicit
 IndexedDB/Background Sync delivery via `enqueueOffline`; endpoints deduplicate
 `Idempotency-Key`. Plus `createJobsPlugin({ durable: true })` persists schedules
 and coordinates processes sharing `SWELTE_JOBS_PATH` (separate SQLite file).
-See `docs/images.md`, `docs/outbox.md`, `docs/config.md`, `docs/cli.md` (`swelte migrate`), and `docs/rpc.md` (cron/jobs + rooms/sockets).
+The Plus `db` plugin (`swelte({ plugins: [dbPlugin] })`) provides embedded
+SQLite/KV + `swelte migrate` (see `plus.md`); register the jobs plugin
+(`jobsPlugin` / `createJobsPlugin({ durable: true })`) for `@[cron]` ticks.
+The room/WS hub (`hub.v` + `ws.v`, `@[ws]` + room-mode `@[sse]` dispatch)
+arrives only with the Plus `rooms` plugin (`swelte({ plugins: [roomsPlugin] })`).
+See `docs/images.md`, `docs/outbox.md`, `docs/config.md`, `docs/cli.md` (`swelte migrate`), `docs/plus.md`, and `docs/rpc.md` (cron/jobs + rooms/sockets).
 
 ## Commands
 

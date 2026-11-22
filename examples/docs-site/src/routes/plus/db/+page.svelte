@@ -15,27 +15,31 @@ import { codeHtml } from '#lib/snippets.gen.js'
 <h1 class="text-4xl font-bold mt-2">
 	Database
 	<span class="text-sm font-normal opacity-60"
-		>(builtin — was <code>@swelte/plus</code>, now deprecated)</span
+		>(Plus <code>db</code> plugin — explicit registration)</span
 	>
 </h1>
 <p class="py-4 opacity-80">
-	Embedded SQLite/KV — core builtin. A single SQLite file (WAL mode) lives next to the binary;
+	Embedded SQLite/KV — the Plus <code>db</code> plugin. A single SQLite
+	file (WAL mode) lives next to the binary;
 	<code>swelte migrate</code>
-	is a core command.
+	is a Plus command (resolved from
+	<code>swelte(&#123; plugins: [dbPlugin] &#125;)</code>).
 </p>
 
 <div class="alert alert-info text-sm">
 	<span
-		>Live updates live next door: rooms + sockets share the hub this package owns — see
-		<a href="/plus/realtime" class="link font-bold">Realtime</a>.</span
+		>Rooms + sockets on the hub transport — register the Plus
+		<code>db</code> plugin (<code>swelte(&#123; plugins: [dbPlugin] &#125;)</code>). The
+		<code>backend.emit</code>
+		hub rides that plugin entry; core keeps only the HTTP/SSE/WebSocket transport primitives.</span
 	>
 </div>
 
 <div class="mt-2">
-	<Code snippet={codeHtml['plus-install']} dense title="builtin — no install" />
+	<Code snippet={codeHtml['plus-install']} dense title="npm install @swelte/plus" />
 </div>
 <div class="mt-2">
-	<Code snippet={codeHtml['plus-migrate']} dense title="swelte migrate" />
+	<Code snippet={codeHtml['plus-migrate']} dense title="swelte migrate (Plus db plugin)" />
 </div>
 <div class="mt-2">
 	<Code snippet={codeHtml['plus-db']} dense title="src/lib/backend/db.v" />
@@ -61,7 +65,7 @@ import { codeHtml } from '#lib/snippets.gen.js'
 
 <h2 class="text-2xl font-bold mt-8">PostgreSQL through V</h2>
 <p class="opacity-80 mt-2">
-	Core's builtin backend provides SQLite/KV. V also supplies
+	Plus's <code>db</code> plugin provides embedded SQLite/KV. V also supplies
 	<code>db.pg</code>, ORM support, pooling, parameterized queries and transactions. Use those
 	facilities from native backend modules with the required libpq dependencies. Initialize shared
 	resources during startup and close them after shutdown draining. The disposable PostgreSQL fixture

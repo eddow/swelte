@@ -124,45 +124,15 @@ describe('generate() validation errors (tmp scaffold, no V binary)', () => {
 		await assert.rejects(() => buildStart(root), /only allowed in its own file/)
 	})
 
-	it('@[ws] shape errors (tail/head/return/qualifier)', async () => {
-		// Missing the (sub, recv, emit) tail → build error.
-		let root = scaffold({
-			'+page.v': 'module p\n@[ws] pub fn s(req SwelteRequest) { }',
-		})
-		await assert.rejects(
-			() => buildStart(root),
-			/needs trailing \(sub fn \(string\) chan string, recv chan string, emit fn \(string\) bool\)/
-		)
-		// Emit without bool → SSE emit-tail parse → wrong-attr rejection, not ws.
-		root = scaffold({
+	it('@[ws] without the rooms plugin names the fix (any ws fn)', async () => {
+		// `@[ws]` is Plus-owned: without `roomsPlugin` every ws fn — well-
+		// formed or not — throws the roomsPlugin error. Shape validation
+		// lives in the plugin (`engine/plus/tests/rooms.test.ts`).
+		const root = scaffold({
 			'+page.v':
-				'module p\n@[ws] pub fn s(req SwelteRequest, sub fn (string) chan string, recv chan string) { }',
+				'module p\n@[ws] pub fn s(req SwelteRequest, sub fn (string) chan string, recv chan string, emit fn (string) bool) { }',
 		})
-		await assert.rejects(() => buildStart(root), /needs trailing/)
-		// Non-void return → build error.
-		root = scaffold({
-			'+page.v':
-				'module p\n@[ws] pub fn s(req SwelteRequest, sub fn (string) chan string, recv chan string, emit fn (string) bool) string { return "" }',
-		})
-		await assert.rejects(() => buildStart(root), /must return void/)
-		// Qualifier → build error (one socket per file).
-		root = scaffold({
-			'+page.v':
-				"module p\n@[ws('q')] pub fn s(req SwelteRequest, sub fn (string) chan string, recv chan string, emit fn (string) bool) { }",
-		})
-		await assert.rejects(() => buildStart(root), /takes no qualifier/)
-		// Head must be exactly (SwelteRequest, sub, recv, emit).
-		root = scaffold({
-			'+page.v':
-				'module p\n@[ws] pub fn s(sub fn (string) chan string, recv chan string, emit fn (string) bool) { }',
-		})
-		await assert.rejects(() => buildStart(root), /must take \(SwelteRequest, sub, recv, emit\)/)
-		// Bare closure elsewhere → build error (harness-injected only).
-		root = scaffold({
-			'+page.v':
-				'module p\n@[ws] pub fn s(req SwelteRequest, cb fn (string) bool, sub fn (string) chan string, recv chan string, emit fn (string) bool) { }',
-		})
-		await assert.rejects(() => buildStart(root), /must take \(SwelteRequest, sub, recv, emit\)/)
+		await assert.rejects(() => buildStart(root), /roomsPlugin/)
 	})
 
 	it('server hooks: shape errors + happy-path codegen', async () => {

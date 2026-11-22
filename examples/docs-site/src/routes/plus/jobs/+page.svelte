@@ -28,7 +28,7 @@ import { codeHtml } from '#lib/snippets.gen.js'
 	<Code snippet={codeHtml['plus-install']} dense title="install the Plus plugin" />
 </div>
 <div class="mt-2">
-	<Code snippet={codeHtml['plus-vite-config']} dense title="vite.config.ts (jobs plugin entry; backend needs none)" />
+	<Code snippet={codeHtml['plus-vite-config']} dense title="vite.config.ts (Plus plugin entries)" />
 </div>
 <p class="text-sm opacity-70 mt-2">
 	<code>src/app.v</code>

@@ -4,13 +4,21 @@ import { isBackendMod, SWELTE_GEN_CORE_DIRS } from '../gen/paths.js'
 import { writeIfChanged } from './fs.js'
 import { listVFiles, relPosix } from './routes.js'
 
-/** Stage native-only app modules alongside generated routes and plugin modules. */
+/** Stage native-only app modules alongside generated routes and plugin modules.
+ * App files win over staged plugin copies: the scaffolded
+ * `src/lib/backend/db.v` shadows the Plus `db` plugin's staged `db.v`
+ * (same rel path) — the plugin copy is skipped, never a collision error.
+ * Other collisions (app file vs a DIFFERENT plugin file at the same path)
+ * still throw. */
 export function stageBackendModules(
 	lib: string,
 	output: string,
 	pluginFiles: Set<string>
 ): string[] {
 	const files = new Map<string, string>()
+	// Basenames the Plus `db` plugin may stage: the app scaffold shadows
+	// these (identical origin — `swelte migrate` copies verbatim).
+	const shadowable = new Set(['db.v'])
 	if (existsSync(lib))
 		for (const file of listVFiles(lib)) {
 			const relative = relPosix(lib, file)
@@ -27,8 +35,9 @@ export function stageBackendModules(
 			) {
 				throw new Error(`[swelte] ${file}: invalid or reserved native module directory`)
 			}
-			if (pluginFiles.has(target))
+			if (pluginFiles.has(target) && !(target === 'backend/db.v' && shadowable.has(target.split('/').pop() ?? ''))) {
 				throw new Error(`[swelte] ${file}: native module file collides with plugin ${target}`)
+			}
 			files.set(target, source)
 		}
 	const manifest = join(output, 'backend_files.json')

@@ -95,6 +95,20 @@ import DocsNav from '#lib/DocsNav.svelte'
 	<div class="collapse collapse-arrow">
 		<input type="radio" name="cli-acc">
 		<div class="collapse-title font-mono text-sm">
+			swelte migrate [--root dir] [--db path] (Plus db plugin)
+		</div>
+		<div class="collapse-content text-sm opacity-80">
+			<p>
+				Resolved from the project's configured
+				<code>swelte(&#123; plugins: [dbPlugin] &#125;)</code> entry
+				(<code>@swelte/plus/db</code>) — see the <a href="/plus/db" class="link">Database</a> page. Core
+				alone ships no <code>migrate</code>.
+			</p>
+		</div>
+	</div>
+	<div class="collapse collapse-arrow">
+		<input type="radio" name="cli-acc">
+		<div class="collapse-title font-mono text-sm">
 			swelte preview / export / check (+ npm create @swelte)
 		</div>
 		<div class="collapse-content text-sm opacity-80">

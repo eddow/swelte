@@ -167,9 +167,9 @@ export async function runBuild(ctx: Ctx): Promise<void> {
 		process.env.SWELTE_ISR = Object.entries(cfg.isr)
 			.map(([k, v]) => `${k}=${v}`)
 			.join(',')
-	// Project plugins (e.g. `@swelte/plus` jobs; builtin backend needs no entry) live in vite.config.ts,
+	// Project plugins (e.g. `@swelte/plus` jobs + db) live in vite.config.ts,
 	// which the CLI never loads — recover them so generate() sees the
-	// same options as `vite build` (else backend-hub build errors).
+	// same options as `vite build` (else room-hub builds miss the staged hub).
 	const projectSwelteOpts = await loadProjectSwelteOptions(root)
 	// §1: resolved plugins identical for build/dev/check/test/CLI.
 	const { loadProjectSweltePlugins } = await import('../gen/config.js')
@@ -249,7 +249,9 @@ export async function runBuild(ctx: Ctx): Promise<void> {
 		}
 		const swelte = mod.default ?? mod.swelte
 		if (typeof swelte !== 'function') throw new Error('vite.js has no swelte export')
-		const plug = swelte({ ...projectSwelteOpts }) as unknown as {
+		// Same plugins as step 1 (configured `plugins: [dbPlugin]` must
+		// survive this pass or the staged hub/backend prunes mid-build).
+		const plug = swelte({ ...projectSwelteOpts, plugins: projectPlugins }) as unknown as {
 			buildStart?: () => Promise<void> | void
 			configResolved?: (c: { root: string }) => void
 		}

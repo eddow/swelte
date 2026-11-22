@@ -1,10 +1,10 @@
-// WebSocket frames + upgrade (future.md #3): RFC 6455 over a hijacked veb
-// conn. Server frames are unmasked; client frames MUST be masked (browsers
-// always mask). Only text frames surface: ping → auto-pong, close → clean
+// WebSocket frames (`ws_*`): RFC 6455 over the harness-upgraded TcpConn.
+// Server frames are unmasked; client frames MUST be masked (browsers always
+// mask). Only text frames surface: ping → auto-pong, close → clean
 // shutdown, continuation → assembled, binary/reserved → protocol-error
 // close. The harness performs the HTTP→WS upgrade handshake, then pumps
 // frames BOTH ways: hub → socket (outgoing) and socket → route fn
-// (incoming, via the fn's receive loop).
+// (incoming, via the fn's receive loop). Staged by the Plus `rooms` plugin.
 module backend
 
 import crypto.sha1
