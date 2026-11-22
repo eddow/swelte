@@ -53,3 +53,7 @@ functionality and `scripts/` hygiene.
       `cron`/`jobs`/`sqlite`/`websocket` — those features live in
       `@swelte/plus` (`jobsPlugin`/`dbPlugin`/`roomsPlugin`), whose
       keywords already cover them.
+
+## Post-final add-on
+
+There should be a way to "install/register plugins" automatically (thinking of post-install scripts from package.json, perhaps a pre-uninstall) - so that plugins could be listed in the project (a specific entry of package.json) and used on v-build 

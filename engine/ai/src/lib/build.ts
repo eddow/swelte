@@ -89,7 +89,7 @@ function structSchema(
 		// so providers see plain JSON Schema.
 		const refBase = f.vtype.trim().replace(/^\?/, '')
 		const ref = structs.get(refBase.split('.').pop() as string)
-		if (ref && !/^([]|map\[|\(|fn\s|chan\s)/.test(refBase) && /^[A-Za-z_]/.test(refBase)) {
+		if (ref && !/^(\[|map\[|\(|fn\s|chan\s)/.test(refBase) && /^[A-Za-z_]/.test(refBase)) {
 			const nested = structSchema(toolName, structs, ref.name, seen)
 			if (/^\?/.test(f.vtype.trim())) {
 				const ty = (nested as Record<string, unknown>).type

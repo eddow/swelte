@@ -312,11 +312,6 @@ export function swelte(options: SweltePluginOptions = {}): Plugin {
 				const dispatched: { route: string; mod: string; prefix: string }[] = []
 				// Room/WS routes (§3 box 3, Plus-owned): computed from the
 				// resolved plugin claims below — never from core attrs.
-				// Declared here so the harness render below sees it.
-				let hasRoomSse = false
-				const needsBackendImport = listVFiles(resolve(root, 'src')).some((file) =>
-					/^\s*import\s+backend\b/m.test(readFileSync(file, 'utf8'))
-				)
 				// Hoisted prelude (bridge stub + backend includes + marker):
 				// generate() must leave a compilable .swelte/ even when the
 				// route loop below throws (e.g. dev pre-generate swelte({})
@@ -526,7 +521,7 @@ export function swelte(options: SweltePluginOptions = {}): Plugin {
 				// Box 3: room-ness comes from plugin claims (rooms plugin owns
 				// `ws` + room-mode `sse`). `import backend` in app source also
 				// needs the hub staged (backend.emit from plain routes).
-				hasRoomSse = plugins.some((pl) =>
+				const hasRoomSse = plugins.some((pl) =>
 					(claims.get(pl.name) ?? []).some((d) => {
 						if (d.fn.attr === 'ws') return true
 						if (d.fn.attr !== 'sse' || d.fn.params.length < 2) return false

@@ -841,9 +841,15 @@ fn (mut app App) before_request(mut ctx Ctx) veb.Result {
 	// probes, XHR `X-Requested-With`, the SDK load fetch, non-GET.
 	page_is_neutral := page_accept == '' || page_accept == '*/*' || (!page_accept.contains('application/json') && !page_accept.contains('json') && !page_accept.contains('text/event-stream') && (page_accept.contains('text/html') || page_accept.contains('text/') || page_accept.contains('*')))
 	page_is_fetch := page_load || (headers['X-Requested-With'] or { headers['x-requested-with'] or { '' } }) != '' || (headers['X-Swelte-Fetch'] or { headers['x-swelte-fetch'] or { '' } }) != ''
-	page_get_probe := ctx.req.url.contains('?q=') || ctx.req.url.contains('?payload=') || ctx.req.url.contains('&q=') || ctx.req.url.contains('&payload=')
 	page_wants_json := page_accept.contains('application/json') || page_accept.contains('+json')
-	page_is_nav := ctx.req.method == .get && page_prefix != '' && !page_is_fetch && !page_get_probe && !page_wants_json && (page_accept.contains('text/html') || page_is_neutral)
+	// A navigation is a GET on a page route asking for a document (browser
+	// HTML or neutral-agent Accept, no JSON, not an SDK fetch). Query
+	// strings — including `?q=`/`?payload=`-looking ones — do NOT divert:
+	// page URLs legitimately carry them (`@[load]` reads `req.query`), and
+	// verb-probe intent travels via `Accept: application/json` (SDK fetch)
+	// or `X-Swelte-*` headers, both excluded above. SPA-first: a browser
+	// refresh never hits the API.
+	page_is_nav := ctx.req.method == .get && page_prefix != '' && !page_is_fetch && !page_wants_json && (page_accept.contains('text/html') || page_is_neutral)
 	// ISR is public and canonical: personalized/query/data requests bypass it.
 	if ctx.req.method == .get && page_prefix != '' && page_accept.contains('text/html') && !page_accept.contains('application/json') && !page_load && !ctx.req.url.contains('?') && cookies.len == 0 && (headers['Authorization'] or { headers['authorization'] or { '' } }) == '' && (headers['X-Swelte-Isr'] or { headers['x-swelte-isr'] or { '' } }) != app.lifecycle.instance {
 		seconds := swelte_isr_seconds(path)
@@ -869,9 +875,13 @@ fn (mut app App) before_request(mut ctx Ctx) veb.Result {
 	}
 	// Load protocol (page-lifecycle): GET + Accept: application/json +
 	// X-Swelte-Load: 1 selects the guarded load cascade — never ordinary
-	// @[get] verb dispatch. Without this, load fetches on RPC-only or
-	// probe-less pages fall into the verb gate and answer 405.
-	if page_load && ctx.req.method == .get && page_prefix != '' && !page_get_probe {
+	// @[get] verb dispatch. The load header is the stronger signal: load
+	// fetches use the page URL verbatim, so a page URL may itself carry
+	// `?q=`/`?payload=` (read by `@[load]` from `req.query`). Unlike the
+	// navigation branch above, probe-looking query strings must NOT divert
+	// here — without this, load fetches on probe-less pages fall into the
+	// verb gate and answer 405.
+	if page_load && ctx.req.method == .get && page_prefix != '' {
 		return swelte_serve_page(mut ctx, path, query, headers, cookies, true)
 	}
 	// (swelte_call_route is sync — veb runs before_request on a worker;

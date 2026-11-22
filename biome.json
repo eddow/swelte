@@ -9,6 +9,7 @@
 			"**/src/**/*.css",
 			"engine/vvm/bin/*.js",
 			"!tmp",
+			"!**/dist-test",
 			"!**/src/lib/snippets.gen.ts",
 			"!**/coverage"
 		],

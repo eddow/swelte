@@ -293,7 +293,13 @@ export interface SweltePlugin {
 	includes?: () => SweltePluginInclude[]
 	validate?: (
 		rel: string,
-		fn: { name: string; attr: string; qualifier?: string },
+		fn: {
+			name: string
+			attr: string
+			qualifier?: string
+			params?: { name: string; vtype: string }[]
+			vret?: string
+		},
 		declaration?: SweltePluginDeclaration
 	) => void
 	/** V fragments appended to the route leaf file (e.g. Plus rooms emits

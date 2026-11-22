@@ -619,7 +619,17 @@ export async function collectPluginDiagnostics(
 		}
 		for (const decl of decls) {
 			try {
-				plugin.validate?.(decl.file, { name: decl.fn.name, attr: decl.fn.attr }, decl as never)
+				plugin.validate?.(
+					decl.file,
+					{
+						name: decl.fn.name,
+						attr: decl.fn.attr,
+						qualifier: decl.fn.qualifier,
+						params: decl.fn.params,
+						vret: decl.fn.vret,
+					} as never,
+					decl as never
+				)
 			} catch (e) {
 				out.push({
 					file: decl.file,

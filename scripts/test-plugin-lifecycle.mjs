@@ -37,7 +37,7 @@ try {
   const startA = a.indexOf('// [swelte] plugin init')
   const endA = a.indexOf('// [swelte] background-start')
   assert.ok(startA >= 0 && endA > startA, 'init blocks emitted')
-  const srcA = `${prelude}fn main() {\napp := App{lifecycle: &SwelteLifecycle{}}\n${a.slice(startA, endA)}eprintln('BOOT-CONTINUED')\n}`
+  const srcA = `${prelude}fn main() {\nmut app := App{lifecycle: &SwelteLifecycle{}}\n${a.slice(startA, endA)}eprintln('BOOT-CONTINUED')\n}`
   const resA = run(compile('lc_init', srcA))
   assert.equal(existsSync(join(scratch, 'first-init')), true, 'first init ran')
   assert.equal(existsSync(join(scratch, 'third-init')), false, 'third init skipped after failure')

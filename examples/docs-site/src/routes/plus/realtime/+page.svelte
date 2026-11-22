@@ -20,7 +20,7 @@ import { codeHtml } from '#lib/snippets.gen.js'
 </h1>
 <p class="py-4 opacity-80">
 	Rooms + sockets on the hub transport — register the Plus
-	<code>rooms</code> plugin (<code>swelte({ plugins: [roomsPlugin] })</code>). The
+	<code>rooms</code> plugin (<code>swelte(&#123; plugins: [roomsPlugin] &#125;)</code>). The
 	<code>backend.emit</code>
 	hub is what <code>@[sse]</code> and <code>@[ws]</code> ride.
 </p>
