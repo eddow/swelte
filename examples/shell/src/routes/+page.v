@@ -9,15 +9,25 @@ import json
 import net.http
 import os
 import time
+import tools
 
 const room_name = 'shell'
 const seq_key = 'shell:seq'
 const scroll_key_prefix = 'shell:line:'
+// Legacy demo approval path retired (spec §4): AI shell calls dispatch
+// through the generated `tools` table (`tool_shell_exec`, single approval
+// record per op). `approval_prefix` stays as the key shape only so old KV
+// rows are recognizable; the `exec` RPC no longer reads/writes them.
 const approval_prefix = 'shell:approval:'
 // Pending stdin lines, queued by `send_input`, drained by `cat`.
 const stdin_prefix = 'shell:stdin:'
 const stdin_seq_key = 'shell:stdin:seq'
 const stdin_head_key = 'shell:stdin:head'
+// Driver lease (§3): `shell:driver` = `human` | `ai:<holder runId/turnId>`;
+// `shell:driver:expires` = unix seconds. Holder-bound single driver —
+const driver_key = 'shell:driver'
+const driver_expires_key = 'shell:driver:expires'
+const driver_ttl_s = 90
 // How long `cat` with an empty buffer waits for keystrokes (100ms polls).
 // Sized under the handler budget (SWELTE_HANDLER_TIMEOUT_MS, default 10s).
 const stdin_wait_polls = 80
@@ -141,9 +151,157 @@ fn stdin_drain() []string {
 	backend.kv_set(stdin_head_key, head.str()) or {}
 	return out
 }
+// Transcript-tail re-entry (§5-C, Stage C): compact orientation for a
+// turn that starts while the model idled. Last `n` scrollback frames
+// (same KV the SSE tail serves), one row per frame in `$ <cmd>\n<output>`
+// / `› <keys>` / chat form, ≤1024B with truncation marked. Empty when the
+// scrollback is empty — the caller omits the context line instead.
+fn transcript_tail(n int) string {
+	cap := if n <= 0 { 5 } else if n > 10 { 10 } else { n }
+	last := (backend.kv_get(seq_key) or { '0' }).int()
+	if last <= 0 {
+		return ''
+	}
+	mut start := last - cap + 1
+	if start < 1 {
+		start = 1
+	}
+	mut out := ''
+	mut i := start
+	for i <= last {
+		line := backend.kv_get(scroll_key_prefix + i.str()) or { '' }
+		if line != '' {
+			nl := line.index('\n') or { -1 }
+			kind := if nl < 0 { line } else { line[..nl] }
+			rest := if nl < 0 { '' } else { line[nl + 1..] }
+			mut row := ''
+			if kind == 'exec' {
+				nl2 := rest.index('\n') or { -1 }
+				if nl2 < 0 {
+					row = '$ ' + rest
+				} else {
+					row = '$ ' + rest[..nl2] + '\n' + rest[nl2 + 1..]
+				}
+			} else if kind == 'stdin' {
+				row = '› ' + rest
+			} else if kind == 'chat' {
+				row = rest
+			}
+			if row != '' {
+				if out != '' {
+					out += '\n---\n'
+				}
+				out += row
+			}
+		}
+		i++
+	}
+	if out == '' {
+		return ''
+	}
+	if out.len > 1024 {
+		out = out[..1021] + '...'
+	}
+	return out
+}
+
 
 fn approval_key(op_id string) string {
 	return approval_prefix + op_id
+}
+
+// Driver lease (§3). `shell_driver_holder` mirrors the backend helper
+// (`module backend` in `shell_tools.v` — the route is `module shell`, so it
+// keeps its own copy over the same KV).
+fn shell_driver_holder(driver string) string {
+	if driver == 'human' || driver == '' {
+		return ''
+	}
+	if driver.starts_with('ai:') && driver.len > 3 {
+		return driver[3..]
+	}
+	return ''
+}
+
+fn shell_driver_holds(driver string, holder string, expires_unix int) bool {
+	if holder == '' {
+		return false
+	}
+	if shell_driver_holder(driver) != holder {
+		return false
+	}
+	return time.now().unix() <= i64(expires_unix)
+}
+
+// Non-RPC lease read for the stream verb scope (`@[rpc]` fns are not
+// visible from `swelte_stream` closures — same KV read, no dispatch).
+fn stream_held_driver() string {
+	return backend.kv_get(driver_key) or { 'human' }
+}
+
+// Non-RPC lease read for the stream verb scope (`@[rpc]` fns are not
+// visible from `swelte_stream` closures — same KV read, no dispatch).
+// Release the AI lease back to `human` (cause traced by the caller via the
+// pane event). Idempotent: a `human` driver stays `human`.
+fn shell_driver_release(cause string) {
+	driver := backend.kv_get(driver_key) or { 'human' }
+	if shell_driver_holder(driver) == '' {
+		if driver != 'human' {
+			backend.kv_set(driver_key, 'human') or {}
+		}
+		return
+	}
+	backend.kv_set(driver_key, 'human') or {}
+	backend.kv_set(driver_expires_key, '0') or {}
+	publish_chat('driver → human (' + cause + ')')
+}
+
+pub struct DriverArgs {
+pub:
+	// Owning `runId/turnId` for this turn's drive.
+	holder string
+}
+
+pub struct DriverResult {
+pub:
+	ok     bool
+	driver string
+	note   string
+}
+
+// Handoff (§3): explicit per-turn request. Fail-closed under contention —
+// a second holder is rejected while a live lease holds. Re-checks expiry
+// with the wall clock: a lapsed lease is treated as free even if the KV row
+// still names the old holder.
+@[rpc]
+pub fn shell_handoff(args DriverArgs) !DriverResult {
+	if args.holder.trim_space() == '' {
+		return error('shell: handoff needs a holder runId/turnId')
+	}
+	driver := backend.kv_get(driver_key) or { 'human' }
+	expires := (backend.kv_get(driver_expires_key) or { '0' }).int()
+	if shell_driver_holds(driver, shell_driver_holder(driver), expires) {
+		cur := shell_driver_holder(driver)
+		if cur != args.holder {
+			return error('shell: driver held by ' + cur + ' (single driver)')
+		}
+		return DriverResult{ ok: true, driver: driver, note: 'lease already held by this turn' }
+	}
+	held := 'ai:' + args.holder
+	backend.kv_set(driver_key, held) or {}
+	backend.kv_set(driver_expires_key, (time.now().unix() + i64(driver_ttl_s)).str()) or {}
+	publish_chat('driver → ' + held + ' (handoff)')
+	return DriverResult{ ok: true, driver: held, note: 'handoff granted for this turn' }
+}
+
+// Turn end / interrupt path (§3): explicit release. The human terminal
+// submit and Stop press call this (or `exec` flips implicitly) so a late
+// tool result after the flip is rejected, never applied.
+@[rpc]
+pub fn shell_release(args DriverArgs) !DriverResult {
+	_ = args
+	shell_driver_release('turn-end')
+	return DriverResult{ ok: true, driver: 'human', note: 'released' }
 }
 
 @[rpc]
@@ -156,31 +314,14 @@ pub fn exec(args ExecArgs) !ExecResult {
 		return error('command not allowlisted: ' + name)
 	}
 	if args.caller == 'ai' {
-		key := approval_key(args.op_id)
-		stored := backend.kv_get(key) or { '' }
-		if stored == '' {
-			backend.kv_set(key, 'pending|' + args.caller + '|' + args.cmd) or {}
-			return error('ai shell.exec needs human approval (op ' + args.op_id + ' pending)')
-		}
-		if stored.starts_with('pending|') {
-			return error('ai shell.exec still pending human approval (op ' + args.op_id + ')')
-		}
-		if stored.starts_with('denied|') || stored.starts_with('expired|') {
-			return error('ai shell.exec ' + stored.all_before('|') + ' (op ' + args.op_id + ')')
-		}
-		if stored.starts_with('done|') {
-			prev := stored.all_after_first('|')
-			seq := backend.kv_get(seq_key) or { '0' }
-			return ExecResult{ ok: true, output: prev, seq: seq.int() }
-		}
-		if !stored.starts_with('approved|') {
-			return error('ai shell.exec not approved (op ' + args.op_id + ')')
-		}
-		output := run_cat_or_allowlisted(args.cmd)
-		backend.kv_set(key, 'done|' + output) or {}
-		seq := publish_exec(args.cmd, output)
-		return ExecResult{ ok: true, output: output, seq: seq }
+		// Legacy demo path retired: AI shell calls dispatch through the
+		// generated `tools` table (`tool_shell_exec`, approval-gated) — the
+		// human `exec` RPC no longer parks `shell:approval:*` records.
+		return error('ai shell calls dispatch via tool_shell_exec (approval-gated)')
 	}
+	// Any human command preempts an AI lease (§3): flip first so only
+	// keys queued before the flip can still drain.
+	shell_driver_release('human-input')
 	output := run_cat_or_allowlisted(args.cmd)
 	seq := publish_exec(args.cmd, output)
 	return ExecResult{ ok: true, output: output, seq: seq }
@@ -213,11 +354,27 @@ pub fn send_input(args SendInputArgs) string {
 	if args.keys.trim_space() == '' {
 		return 'empty keystrokes'
 	}
+	// Human keystrokes ride the human path: any AI lease they preempt flips
+	// first (§3), so only keys queued before the flip can still drain.
+	shell_driver_release('human-input')
 	stdin_push(args.keys)
 	publish_stdin(args.keys)
 	return 'queued'
 }
 
+pub struct ToolApprovalArgs {
+pub:
+	op_id    string
+	decision string
+	tool     string
+	cmd      string
+}
+
+// Approval decisions for AI tool ops (spec §6): recorded against the op id
+// the dispatch table binds (`caller + tool + exact args + op_id`). Human
+// `exec` calls no longer consult these — the tools route (`api/tools.v`)
+// records + decides via the generated `tools` module instead. These RPCs
+// stay as the pane-facing decision surface; the queue UI drives them.
 @[rpc]
 pub fn approve(args ExecArgs) ExecResult {
 	key := approval_key(args.op_id)
@@ -285,8 +442,31 @@ pub fn ai_stream(req SwelteRequest) !SwelteResponse {
 	max_tokens := (req.form['max_tokens'] or { '-1' }).int()
 	system := req.form['system'] or { '' }
 	run_id := 'run-' + time.now().unix_nano().str()
-	return swelte_stream({'Content-Type': 'text/event-stream'}, fn [run_id, adapter, model, prompt, temperature, max_tokens, system] (stream SwelteStream) ! {
-		ai_stream_run(stream, run_id, adapter, model, prompt, temperature, max_tokens, system)
+	drive := (req.form['drive'] or { '' }) == '1'
+	holder := if drive { run_holder(run_id) } else { '' }
+	if drive {
+		// Per-turn handoff before the text pass: the driving tail parks
+		// against `ai:<holder>`; a live lease rejects (single driver).
+		// Inline (not `shell_handoff`): `fn` RPCs are not visible here.
+		if holder.trim_space() == '' {
+			return error('shell: handoff needs a holder runId/turnId')
+		}
+		cur_driver := backend.kv_get(driver_key) or { 'human' }
+		cur_expires := (backend.kv_get(driver_expires_key) or { '0' }).int()
+		if shell_driver_holds(cur_driver, shell_driver_holder(cur_driver), cur_expires) {
+			cur := shell_driver_holder(cur_driver)
+			if cur != holder {
+				return error('shell: driver held by ' + cur + ' (single driver)')
+			}
+		} else {
+			held_name := 'ai:' + holder
+			backend.kv_set(driver_key, held_name) or {}
+			backend.kv_set(driver_expires_key, (time.now().unix() + i64(driver_ttl_s)).str()) or {}
+			publish_chat('driver → ' + held_name + ' (handoff)')
+		}
+	}
+	return swelte_stream({'Content-Type': 'text/event-stream'}, fn [run_id, adapter, model, prompt, temperature, max_tokens, system, holder] (stream SwelteStream) ! {
+		ai_stream_run(stream, run_id, adapter, model, prompt, temperature, max_tokens, system, holder)
 	})
 }
 
@@ -295,7 +475,13 @@ fn ai_sse_emit(stream SwelteStream, run_id string, output_id string, kind string
 	return stream.write(msg.bytes())
 }
 
-fn ai_stream_run(stream SwelteStream, run_id string, adapter string, model string, prompt string, temperature f64, max_tokens int, system string) {
+// Holder for this stream run: `runId/turn-1` — the frontend's first turn
+// id for the run, so resume + release address the same holder.
+fn run_holder(run_id string) string {
+	return run_id + '/turn-1'
+}
+
+fn ai_stream_run(stream SwelteStream, run_id string, adapter string, model string, prompt string, temperature f64, max_tokens int, system string, holder string) {
 	mut ctx := AiStreamCtx{ run_id: run_id }
 	if adapter == 'deterministic' {
 		full := 'echo: ' + prompt
@@ -307,6 +493,17 @@ fn ai_stream_run(stream SwelteStream, run_id string, adapter string, model strin
 			}
 			time.sleep(30 * time.millisecond)
 		}
+		// Deterministic drive stub: exercises the driving tail without a
+		// provider key — parks one dispatch record, closes waiting_approval.
+		if holder != '' {
+			held := stream_held_driver()
+			if shell_driver_holder(held) == holder {
+				args := '{"cmd":"pwd","holder":' + json.encode(holder) + ',"op_id":' + json.encode(holder + '-op-1') + '}'
+				tools.swelte_tool_approval_record('ai', drive_exec_name, args, holder + '-op-1')
+				ai_sse_emit(stream, ctx.run_id, 'out-text', 'approval.request', new_tool_seq(mut ctx), '{"cmd":' + json.encode(drive_exec_name) + ',"op_id":' + json.encode(holder + '-op-1') + ',"tool":' + json.encode(drive_exec_name) + ',"args":' + json.encode(args) + ',"holder":' + json.encode(holder) + '}')
+				ai_sse_delta(stream, mut ctx, '\n[parked ' + drive_exec_name + ' ' + holder + '-op-1 waiting_approval]')
+			}
+		}
 		ai_sse_terminal(stream, mut ctx, 'completed', '')
 		return
 	}
@@ -316,7 +513,7 @@ fn ai_stream_run(stream SwelteStream, run_id string, adapter string, model strin
 		ai_sse_terminal(stream, mut ctx, 'failed', adapter + ': missing ' + env_name + ' (server env only — add it to .env)')
 		return
 	}
-	ok := ai_stream_provider(stream, mut ctx, adapter, model, prompt, temperature, max_tokens, system, key) or {
+	ok := ai_stream_provider(stream, mut ctx, adapter, model, prompt, temperature, max_tokens, system, key, holder) or {
 		ai_sse_terminal(stream, mut ctx, 'failed', err.msg())
 		return
 	}
@@ -427,16 +624,392 @@ fn ai_extract_provider_delta(adapter string, data string) string {
 	return ai_json_unescape(rest[..end])
 }
 
-fn ai_stream_provider(stream SwelteStream, mut ctx AiStreamCtx, adapter string, model string, prompt string, temperature f64, max_tokens int, system string, key string) !bool {
+// AI observe turn (§2 Stage A / §10.2 fixture 3): example-local,
+// read-only. After the provider text completes, a second non-streaming
+// pass asks the model to emit one `<tool name args-json>` line naming a
+// read-only shell tool (`tool_shell_read_output`, optionally
+// `tool_top_commands`); the backend parses that single line, dispatches
+// with an observe-only allowlist (caller `ai-observe`, never the lease
+// holder), and feeds the bounded result back as turn text. One parse, one
+// dispatch, read-only tools only — no lease, no approval, no mutation.
+// Malformed/no line → plain text turn, no error.
+const drive_read_name = 'backend.shell_tools.tool_shell_read_output'
+const drive_top_name = 'backend.shell_tools.tool_top_commands'
+
+fn ai_observe_tool_json() string {
+	return '{"tools":[{"name":"' + drive_read_name + '","input":{"since_seq":"last seq seen (int, exclusive cursor; 0 = tail)","limit":"rows, 1..5"}},{"name":"' + drive_top_name + '","input":{"limit":"rows ≤5","page":"window","caller":"visibility ledger"}}]}'
+}
+
+fn ai_observe_followup_body(adapter string, model string, prompt string, first_text string, temperature f64, max_tokens int) string {
+	tool_json := ai_observe_tool_json()
+	mut sys := 'You are observing a shared terminal. Reply with exactly one line `<tool full-name single-line-json-args>` using only: ' + tool_json + ' Never emit shell.exec or shell.send_input; observation only.'
+	tail := transcript_tail(5)
+	if tail != '' {
+		sys += '\nRecent terminal transcript (context, not a tool result):\n' + tail
+	}
+	user := 'User asked: ' + prompt + '\nAssistant said: ' + first_text + '\nNow emit the single observe tool-call line.'
+	if adapter == 'openrouter' {
+		return '{"model":' + json.encode(model) + ',"stream":false,"messages":[{"role":"system","content":' + json.encode(sys) + '},{"role":"user","content":' + json.encode(user) + '}]' + ai_openrouter_extra(temperature, max_tokens) + '}'
+	}
+	if adapter == 'openai' {
+		return '{"model":' + json.encode(model) + ',"input":[{"role":"system","content":' + json.encode(sys) + '},{"role":"user","content":' + json.encode(user) + '}]' + ai_openai_extra(temperature, max_tokens) + '}'
+	}
+	max_tok := if max_tokens > 0 { max_tokens } else { 128 }
+	mut body := '{"model":' + json.encode(model) + ',"max_tokens":' + max_tok.str() + ',"messages":[{"role":"user","content":' + json.encode(user) + '}],"system":' + json.encode(sys)
+	if temperature >= 0 {
+		body += ',"temperature":' + temperature.str()
+	}
+	return body + '}'
+}
+
+// Parse one `<tool name {json}>` line: full tool name + single-line JSON
+// args, or '' when absent so the turn degrades to plain text.
+fn ai_parse_observe_call(text string) (string, string) {
+	for line in text.split('\n') {
+		trimmed := line.trim_space()
+		if !trimmed.starts_with('<tool ') || !trimmed.ends_with('>') {
+			continue
+		}
+		inner := trimmed[6..trimmed.len - 1].trim_space()
+		sp := inner.index(' ') or { continue }
+		name := inner[..sp].trim_space()
+		args := inner[sp + 1..].trim_space()
+		if name == '' || !args.starts_with('{') || !args.ends_with('}') {
+			continue
+		}
+		if args.contains('\n') {
+			continue
+		}
+		return name, args
+	}
+	return '', ''
+}
+
+// Stage B driving tail (§2 Stage B / §10.2 fixtures 1–2): same two-pass
+// shape as the observe tail, but the turn holds `shell:driver =
+// ai:<holder>` before the text pass, so a parked `tool_shell_exec` /
+// `tool_shell_send_input` line dispatches holder-bound (caller 'ai') from
+// inside the generated dispatch table against the per-turn allowlist
+// (all three) + exact-args approval + live lease. A parked call publishes
+// the dispatch-table `approval.request` frame (terminal-styled in the
+// pane) instead of resolving: the SSE stream closes `waiting_approval`
+// (see §6 — never held open); the human approves/denies over the legacy
+// `approve`/`deny` RPCs, and `shell_tool_resume` drains the recorded
+// decision, dispatches exactly once, and paints the exec frame + result
+// back to the run narrative. Human `exec`/`send_input` preempt the lease,
+// so a post-flip resume fails closed as superseded.
+const drive_exec_name = 'backend.shell_tools.tool_shell_exec'
+const drive_input_name = 'backend.shell_tools.tool_shell_send_input'
+
+pub struct ToolResumeArgs {
+pub:
+	op_id     string
+	holder    string
+	tool      string
+	args_json string
+}
+
+pub struct ToolResumeResult {
+pub:
+	ok     bool
+	output string
+	seq    int
+	status string
+}
+
+// Resume a parked driving call after the human decides: re-check the
+// holder lease incl. expiry (a flip or TTL lapse since parking fails closed),
+// record the human decision on the dispatch-table record, dispatch once
+// through the generated table (replay-safe on duplicate resume), and return
+// the bounded result. Unknown/decided-pending/mismatch op ids are actionable
+// errors, never hangs. The frontend passes back the parked tool + args it
+// already holds — the backend never trusts them alone: dispatch re-checks
+// caller + tool + exact args + op id against the recorded triple.
+@[rpc]
+pub fn shell_tool_resume(args ToolResumeArgs) !ToolResumeResult {
+	driver := stream_held_driver()
+	expires := (backend.kv_get(driver_expires_key) or { '0' }).int()
+	if !shell_driver_holds(driver, args.holder, expires) {
+		return error('shell: drive superseded (driver=' + driver + '); in-flight AI call denied')
+	}
+	tools.swelte_tool_approval_decide(args.op_id, 'approved')
+	res := tools.swelte_tool_dispatch([drive_read_name, drive_top_name, drive_exec_name, drive_input_name], args.tool, args.args_json, 'ai', args.op_id) or {
+		return error(err.msg())
+	}
+	out, seq := shell_tool_resume_shape(res)
+	return ToolResumeResult{ ok: true, output: out, seq: seq, status: 'approved' }
+}
+
+// Deny a parked driving call after the human refuses it: re-check the
+// holder lease incl. expiry, mark the dispatch-table record denied (so any
+// late resume fails closed as denied instead of dispatching), and return the
+// denial. A flipped/expired lease simply drops the call (deny is idempotent).
+@[rpc]
+pub fn shell_tool_deny(args ToolResumeArgs) !ToolResumeResult {
+	driver := stream_held_driver()
+	expires := (backend.kv_get(driver_expires_key) or { '0' }).int()
+	if !shell_driver_holds(driver, args.holder, expires) {
+		tools.swelte_tool_approval_decide(args.op_id, 'denied')
+		return ToolResumeResult{ ok: true, output: 'denied (superseded)', seq: 0, status: 'denied' }
+	}
+	tools.swelte_tool_approval_decide(args.op_id, 'denied')
+	return ToolResumeResult{ ok: true, output: 'denied by human', seq: 0, status: 'denied' }
+}
+// Shape the dispatch result for the run narrative: exec rows surface
+// `{output, seq}`, input rows `{ok}` — substring scan, no full decode.
+fn shell_tool_resume_shape(res_json string) (string, int) {
+	mut out := res_json
+	mut seq := 0
+	oi := res_json.index('"output"') or { -1 }
+	if oi >= 0 {
+		rest := res_json[oi + 8..].trim_space()
+		colon := rest.index(':') or { -1 }
+		if colon >= 0 {
+			val := rest[colon + 1..].trim_space()
+			if val.starts_with('"') {
+				end := val[1..].index('"') or { -1 }
+				if end >= 0 {
+					out = val[1..end + 1]
+				}
+			} else {
+				end := val.index(',') or { val.index('}') or { -1 } }
+				if end >= 0 {
+					out = val[..end].trim_space()
+				}
+			}
+		}
+	}
+	si := res_json.index('"seq"') or { -1 }
+	if si >= 0 {
+		rest := res_json[si + 5..].trim_space()
+		colon := rest.index(':') or { -1 }
+		if colon >= 0 {
+			num := rest[colon + 1..].trim_space()
+			mut digits := ''
+			for ch in num {
+				if ch >= `0` && ch <= `9` {
+					digits += ch.ascii_str()
+				} else {
+					break
+				}
+			}
+			if digits != '' {
+				seq = digits.int()
+			}
+		}
+	}
+	return out, seq
+}
+
+
+// Driving schema line: all three shell tools (exec/input/read) so a
+// handed-off turn can act; the backend allowlist + lease + approval still
+// gate every call.
+fn ai_drive_tool_json() string {
+	return '{"tools":[{"name":"' + drive_read_name + '","input":{"since_seq":"last seq seen (int, exclusive cursor; 0 = tail)","limit":"rows, 1..5"}},{"name":"' + drive_exec_name + '","input":{"cmd":"allowlisted command","holder":"this turn holder","op_id":"approval op id"}},{"name":"' + drive_input_name + '","input":{"keys":"keystrokes","holder":"this turn holder","op_id":"approval op id"}}]}'
+}
+
+fn ai_drive_followup_body(adapter string, model string, prompt string, first_text string, holder string, temperature f64, max_tokens int) string {
+	tool_json := ai_drive_tool_json()
+	mut sys := 'You hold this turn-only terminal lease. Reply with exactly one line `<tool full-name single-json-args>` using only: ' + tool_json
+	tail := transcript_tail(5)
+	if tail != '' {
+		sys += '\nRecent terminal transcript (context, not a tool result):\n' + tail
+	}
+	user := 'User asked: ' + prompt + '\nLease holder: ' + holder + '\nAssistant said: ' + first_text
+	if adapter == 'openrouter' {
+		return '{"model":' + json.encode(model) + ',"stream":false,"messages":[{"role":"system","content":' + json.encode(sys) + '},{"role":"user","content":' + json.encode(user) + '}]' + ai_openrouter_extra(temperature, max_tokens) + '}'
+	}
+	if adapter == 'openai' {
+		return '{"model":' + json.encode(model) + ',"input":[{"role":"system","content":' + json.encode(sys) + '},{"role":"user","content":' + json.encode(user) + '}]' + ai_openai_extra(temperature, max_tokens) + '}'
+	}
+	max_tok := if max_tokens > 0 { max_tokens } else { 128 }
+	mut body := '{"model":' + json.encode(model) + ',"max_tokens":' + max_tok.str() + ',"messages":[{"role":"user","content":' + json.encode(user) + '}],"system":' + json.encode(sys)
+	if temperature >= 0 {
+		body += ',"temperature":' + temperature.str()
+	}
+	return body + '}'
+}
+
+fn ai_drive_args_field(args_json string, field string) string {
+	needle := '"' + field + '"'
+	fi := args_json.index(needle) or { return '' }
+	rest := args_json[fi + needle.len..].trim_space()
+	colon := rest.index(':') or { return '' }
+	val := rest[colon + 1..].trim_space()
+	if val.starts_with('"') {
+		end := val[1..].index('"') or { return '' }
+		return val[1..end + 1]
+	}
+	end := val.index(',') or { val.index('}') or { return '' } }
+	return val[..end].trim_space()
+}
+
+// Stage B turn tail: same two-pass shape as Stage A, but the caller holds
+// the lease and the allowlist covers all three tools. Read-only calls
+// resolve inline (observe path); exec/input park one dispatch-table
+// record, publish approval.request, close waiting_approval.
+fn ai_drive_turn_tail(stream SwelteStream, mut ctx AiStreamCtx, adapter string, model string, prompt string, first_text string, holder string, temperature f64, max_tokens int, _key string, header http.Header) {
+	held := stream_held_driver()
+	if shell_driver_holder(held) != holder {
+		ai_sse_emit(stream, ctx.run_id, 'out-text', 'tool.progress', new_tool_seq(mut ctx), '{"tool":{"name":"shell.exec"},"label":"drive superseded"}')
+		return
+	}
+	body := ai_drive_followup_body(adapter, model, prompt, first_text, holder, temperature, max_tokens)
+	resp := http.fetch(url: ai_base_url_for_adapter(adapter) + ai_chat_path_for_adapter(adapter), method: .post, header: header, data: body) or {
+		ai_sse_emit(stream, ctx.run_id, 'out-text', 'tool.progress', new_tool_seq(mut ctx), '{"tool":{"name":"shell.exec"},"label":"drive skipped"}')
+		return
+	}
+	if resp.status_code != 200 {
+		ai_sse_emit(stream, ctx.run_id, 'out-text', 'tool.progress', new_tool_seq(mut ctx), '{"tool":{"name":"shell.exec"},"label":"drive skipped"}')
+		return
+	}
+	reply := ai_extract_text_blobs(resp.body)
+	name, args := ai_parse_observe_call(reply)
+	if name == '' {
+		return
+	}
+	allowed := [drive_read_name, drive_top_name, drive_exec_name, drive_input_name]
+	if name !in allowed {
+		ai_sse_emit(stream, ctx.run_id, 'out-text', 'tool.progress', new_tool_seq(mut ctx), '{"tool":{"name":"shell.exec"},"label":"drive rejected"}')
+		return
+	}
+	if name == drive_read_name || name == drive_top_name {
+		result := tools.swelte_tool_dispatch(allowed, name, args, 'ai-observe', '') or {
+			ai_sse_emit(stream, ctx.run_id, 'out-text', 'tool.progress', new_tool_seq(mut ctx), '{"tool":{"name":"shell.read_output"},"label":"observe failed"}')
+			return
+		}
+		ai_sse_emit(stream, ctx.run_id, 'out-text', 'tool.progress', new_tool_seq(mut ctx), '{"tool":{"name":"shell.read_output"},"label":"shell.read_output","detail":' + json.encode(short_tool_text(result)) + '}')
+		ai_sse_delta(stream, mut ctx, '\n[observed ' + name + ': ' + short_tool_text(result) + ']')
+		return
+	}
+	op_id := ai_drive_args_field(args, 'op_id')
+	call_holder := ai_drive_args_field(args, 'holder')
+	if op_id == '' || call_holder == '' {
+		ai_sse_emit(stream, ctx.run_id, 'out-text', 'tool.progress', new_tool_seq(mut ctx), '{"tool":{"name":"shell.exec"},"label":"drive rejected"}')
+		return
+	}
+	if call_holder != holder {
+		ai_sse_emit(stream, ctx.run_id, 'out-text', 'tool.progress', new_tool_seq(mut ctx), '{"tool":{"name":"shell.exec"},"label":"drive rejected"}')
+		return
+	}
+	// Stage C scoped pre-approval (§6): a `send_input` citing the live `cat`
+	// exec `op_id` (same holder, lease still held) auto-records + dispatches
+	// inline — no parked `waiting_approval`, no fresh human decision. The
+	// scope row dies with the turn/flip, so a stale cite falls through to
+	// the parked per-keystroke path below.
+	if name == drive_input_name && backend.shell_stdin_scope_holds(op_id, holder) {
+		tools.swelte_tool_approval_record('ai', name, args, op_id)
+		tools.swelte_tool_approval_decide(op_id, 'approved')
+		result := tools.swelte_tool_dispatch(allowed, name, args, 'ai', op_id) or {
+			ai_sse_emit(stream, ctx.run_id, 'out-text', 'tool.progress', new_tool_seq(mut ctx), '{"tool":{"name":"shell.send_input"},"label":"stdin failed","detail":' + json.encode(err.msg()) + '}')
+			return
+		}
+		ai_sse_emit(stream, ctx.run_id, 'out-text', 'tool.progress', new_tool_seq(mut ctx), '{"tool":{"name":"shell.send_input"},"label":"shell.send_input (scoped)","detail":' + json.encode(short_tool_text(result)) + '}')
+		ai_sse_delta(stream, mut ctx, '\n[stdin scoped ' + op_id + ': ' + short_tool_text(result) + ']')
+		return
+	}
+	tools.swelte_tool_approval_record('ai', name, args, op_id)
+	ai_sse_emit(stream, ctx.run_id, 'out-text', 'approval.request', new_tool_seq(mut ctx), '{"cmd":' + json.encode(name) + ',"op_id":' + json.encode(op_id) + ',"tool":' + json.encode(name) + ',"args":' + json.encode(args) + ',"holder":' + json.encode(holder) + '}')
+	ai_sse_delta(stream, mut ctx, '\n[parked ' + name + ' ' + op_id + ' waiting_approval]')
+}
+
+// Stage A turn tail: one non-streaming tool-call pass (observe tools
+// only), dispatch, `tool.progress` + bounded result text back into the
+// same turn. Never throws: every failure degrades to plain text.
+fn ai_observe_turn_tail(stream SwelteStream, mut ctx AiStreamCtx, adapter string, model string, prompt string, first_text string, temperature f64, max_tokens int, _key string, header http.Header) {
+	body := ai_observe_followup_body(adapter, model, prompt, first_text, temperature, max_tokens)
+	resp := http.fetch(url: ai_base_url_for_adapter(adapter) + ai_chat_path_for_adapter(adapter), method: .post, header: header, data: body) or {
+		ai_sse_emit(stream, ctx.run_id, 'out-text', 'tool.progress', new_tool_seq(mut ctx), '{"tool":{"name":"shell.read_output"},"label":"observe skipped","detail":' + json.encode('tool pass failed: ' + err.msg()) + '}')
+		return
+	}
+	if resp.status_code != 200 {
+		ai_sse_emit(stream, ctx.run_id, 'out-text', 'tool.progress', new_tool_seq(mut ctx), '{"tool":{"name":"shell.read_output"},"label":"observe skipped","detail":' + json.encode(adapter + ': HTTP ' + resp.status_code.str()) + '}')
+		return
+	}
+	reply := ai_extract_text_blobs(resp.body)
+	name, args := ai_parse_observe_call(reply)
+	if name == '' {
+		return
+	}
+	allowed := [drive_read_name, drive_top_name]
+	if name !in allowed {
+		ai_sse_emit(stream, ctx.run_id, 'out-text', 'tool.progress', new_tool_seq(mut ctx), '{"tool":{"name":"shell.read_output"},"label":"observe rejected","detail":' + json.encode('tool not selected for this run: ' + name) + '}')
+		return
+	}
+	result := tools.swelte_tool_dispatch(allowed, name, args, 'ai-observe', '') or {
+		ai_sse_emit(stream, ctx.run_id, 'out-text', 'tool.progress', new_tool_seq(mut ctx), '{"tool":{"name":"shell.read_output"},"label":"observe failed","detail":' + json.encode(err.msg()) + '}')
+		return
+	}
+	ai_sse_emit(stream, ctx.run_id, 'out-text', 'tool.progress', new_tool_seq(mut ctx), '{"tool":{"name":"shell.read_output"},"label":"shell.read_output","detail":' + json.encode(short_tool_text(result)) + '}')
+	ai_sse_delta(stream, mut ctx, '\n[observed ' + name + ': ' + short_tool_text(result) + ']')
+}
+
+fn ai_chat_path_for_adapter(adapter string) string {
+	if adapter == 'openrouter' {
+		return '/chat/completions'
+	}
+	if adapter == 'openai' {
+		return '/responses'
+	}
+	return '/v1/messages'
+}
+
+// Bounded tool text for the turn: ≤1024B, truncation marked (spec §5).
+fn short_tool_text(s string) string {
+	if s.len <= 1024 {
+		return s
+	}
+	return s[..1021] + '...'
+}
+
+// Separate tool-row cursor so `tool.progress` rows never collide with
+// `text.delta` seqs in the chat pane's replay guard.
+fn new_tool_seq(mut ctx AiStreamCtx) int {
+	ctx.seq++
+	return ctx.seq
+}
+
+// Stage B: the provider text streams first (pane keeps its incremental
+// path); the observe-turn tail then runs one tool-call pass and feeds the
+// bounded result back into the same turn. `first_text` is the streamed
+// reply, collected alongside the deltas; the tail degrades to plain text
+// on any failure — the terminal event below always closes the turn.
+// `holder` is '' for observe turns; a driving turn passes its
+// `runId/turnId`, which must already hold `shell:driver = ai:<holder>`
+// (handed off before the text pass).
+fn ai_stream_provider(stream SwelteStream, mut ctx AiStreamCtx, adapter string, model string, prompt string, temperature f64, max_tokens int, system string, key string, holder string) !bool {
 	if adapter == 'openrouter' {
 		body := '{"model":' + json.encode(model) + ',"stream":true,"stream_options":{"include_usage":true},"messages":[' + ai_msg_list(prompt, system) + ']' + ai_openrouter_extra(temperature, max_tokens) + '}'
-		return ai_stream_sse_post(stream, 'https://openrouter.ai/api/v1/chat/completions', key, adapter, body, mut ctx)
+		step := ai_stream_sse_post(stream, 'https://openrouter.ai/api/v1/chat/completions', key, adapter, body, mut ctx) or {
+			return error(err.msg())
+		}
+		first_text := step.collected
+		if step.cont {
+			if holder != '' {
+				ai_drive_turn_tail(stream, mut ctx, adapter, model, prompt, first_text, holder, temperature, max_tokens, key, ai_bearer_json(key, adapter))
+			} else {
+				ai_observe_turn_tail(stream, mut ctx, adapter, model, prompt, first_text, temperature, max_tokens, key, ai_bearer_json(key, adapter))
+			}
+		}
+		return step.cont
 	}
 	if adapter == 'openai' {
 		body := '{"model":' + json.encode(model) + ',"stream":true,"input":[' + ai_msg_list(prompt, system) + ']' + ai_openai_extra(temperature, max_tokens) + '}'
 		mut header := http.new_header(key: .authorization, value: 'Bearer ' + key)
 		header.add(.content_type, 'application/json')
-		return ai_stream_fetch(stream, 'https://api.openai.com/v1/responses', header, body, adapter, mut ctx)
+		step := ai_stream_fetch(stream, 'https://api.openai.com/v1/responses', header, body, adapter, mut ctx) or {
+			return error(err.msg())
+		}
+		first_text := step.collected
+		if step.cont {
+			if holder != '' {
+				ai_drive_turn_tail(stream, mut ctx, adapter, model, prompt, first_text, holder, temperature, max_tokens, key, header)
+			} else {
+				ai_observe_turn_tail(stream, mut ctx, adapter, model, prompt, first_text, temperature, max_tokens, key, header)
+			}
+		}
+		return step.cont
 	}
 	max_tok := if max_tokens > 0 { max_tokens } else { 1024 }
 	mut body := '{"model":' + json.encode(model) + ',"stream":true,"max_tokens":' + max_tok.str() + ',"messages":[{"role":"user","content":' + json.encode(prompt) + '}]'
@@ -450,7 +1023,18 @@ fn ai_stream_provider(stream SwelteStream, mut ctx AiStreamCtx, adapter string, 
 	mut header := http.new_header(key: .content_type, value: 'application/json')
 	header.add_custom('x-api-key', key) or { return error('anthropic: bad key header') }
 	header.add_custom('anthropic-version', '2023-06-01') or { return error('anthropic: bad version header') }
-	return ai_stream_fetch(stream, 'https://api.anthropic.com/v1/messages', header, body, adapter, mut ctx)
+	step := ai_stream_fetch(stream, 'https://api.anthropic.com/v1/messages', header, body, adapter, mut ctx) or {
+		return error(err.msg())
+	}
+	first_text := step.collected
+	if step.cont {
+		if holder != '' {
+			ai_drive_turn_tail(stream, mut ctx, adapter, model, prompt, first_text, holder, temperature, max_tokens, key, header)
+		} else {
+			ai_observe_turn_tail(stream, mut ctx, adapter, model, prompt, first_text, temperature, max_tokens, key, header)
+		}
+	}
+	return step.cont
 }
 
 fn ai_bearer_json(key string, adapter string) http.Header {
@@ -468,8 +1052,15 @@ fn ai_bearer_json(key string, adapter string) http.Header {
 // emits once the provider completes — the pane still paints one bubble
 // that grows per delta instead of a single wait-then-all flash. OpenRouter
 // honors `stream:true`; OpenAI/Anthropic fall back to the chunked full
-// reply below when their SSE shape differs.
-fn ai_stream_sse_post(stream SwelteStream, url string, key string, adapter string, body string, mut ctx AiStreamCtx) !bool {
+// reply below when their SSE shape differs. Returns collected text next to
+// the keep-going flag (V forbids `mut string` params).
+pub struct StreamStep {
+pub:
+	cont      bool
+	collected string
+}
+
+fn ai_stream_sse_post(stream SwelteStream, url string, key string, adapter string, body string, mut ctx AiStreamCtx) !StreamStep {
 	resp := http.fetch(url: url, method: .post, header: ai_bearer_json(key, adapter), data: body) or {
 		return error(adapter + ': request failed: ' + err.msg())
 	}
@@ -477,6 +1068,7 @@ fn ai_stream_sse_post(stream SwelteStream, url string, key string, adapter strin
 		return error(adapter + ': HTTP ' + resp.status_code.str())
 	}
 	mut pending := resp.body
+	mut collected := ''
 	for {
 		nl := pending.index('\n') or { break }
 		line := pending[..nl].trim_space()
@@ -490,17 +1082,18 @@ fn ai_stream_sse_post(stream SwelteStream, url string, key string, adapter strin
 		}
 		chunk := ai_extract_provider_delta(adapter, data)
 		if chunk != '' {
+			collected += chunk
 			if !ai_sse_delta(stream, mut ctx, chunk) {
-				return false
+				return StreamStep{ cont: false, collected: collected }
 			}
 		}
 	}
-	return true
+	return StreamStep{ cont: true, collected: collected }
 }
 
 // Non-SSE providers: split the full reply into chunks so the pane still
 // paints incrementally instead of wait-then-all.
-fn ai_stream_fetch(stream SwelteStream, url string, header http.Header, body string, adapter string, mut ctx AiStreamCtx) !bool {
+fn ai_stream_fetch(stream SwelteStream, url string, header http.Header, body string, adapter string, mut ctx AiStreamCtx) !StreamStep {
 	mut hdr := header
 	resp := http.fetch(url: url, method: .post, header: hdr, data: body) or {
 		return error(adapter + ': request failed: ' + err.msg())
@@ -514,12 +1107,12 @@ fn ai_stream_fetch(stream SwelteStream, url string, header http.Header, body str
 		for rest.len > 0 {
 			cut := if rest.len > 120 { 120 } else { rest.len }
 			if !ai_sse_delta(stream, mut ctx, rest[..cut]) {
-				return false
+				return StreamStep{ cont: false, collected: text }
 			}
 			rest = rest[cut..]
 		}
 	}
-	return true
+	return StreamStep{ cont: true, collected: text }
 }
 
 

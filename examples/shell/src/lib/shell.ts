@@ -1,6 +1,7 @@
-// shell frontend helper: optimistic gating + in-memory approvals.
+// shell frontend helper: optimistic gating + in-memory approvals + driver lease.
 // Consumer-side only — the authoritative backend allowlist + approval
-// records live in the shell route backend (src/routes/+page.v);
+// records live in the dispatch table (generated `tools` module) and the
+// driver lease + scrollback live in route KV (`src/routes/+page.v`);
 // this mirrors them for instant UI feedback and offline tests.
 export type ShellCaller = 'human' | 'ai'
 
@@ -12,6 +13,31 @@ export interface ShellDecision {
 }
 
 const ALLOWLIST = new Set(['echo', 'pwd', 'whoami', 'help', 'cat'])
+
+/** Turn-scoped driver lease TTL seconds — must match `shell_driver_ttl_s`. */
+export const DRIVER_TTL_S = 90
+
+export type ShellDriver = { kind: 'human' } | { kind: 'ai'; holder: string; expiresAt: number }
+
+/**
+ * Parse a `shell:driver` KV value (`human` | `ai:<holder>`) with its expiry
+ * into advisory frontend state. Expired or malformed leases read as human.
+ */
+export function parseDriver(
+	driver: string,
+	expiresUnix: number,
+	nowS = Date.now() / 1000
+): ShellDriver {
+	if (!driver.startsWith('ai:') || driver.length <= 3) return { kind: 'human' }
+	const holder = driver.slice(3)
+	if (!holder || nowS > expiresUnix) return { kind: 'human' }
+	return { kind: 'ai', holder, expiresAt: expiresUnix }
+}
+
+/** True when `holder` owns the drive right now (advisory — backend decides). */
+export function driverHolds(driver: ShellDriver, holder: string): boolean {
+	return driver.kind === 'ai' && driver.holder === holder && Date.now() / 1000 <= driver.expiresAt
+}
 
 export function authorizeShellCall(caller: ShellCaller, cmd: string): ShellDecision {
 	const name = cmd.trim().split(/\s+/)[0] ?? ''

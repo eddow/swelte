@@ -75,6 +75,7 @@ JSON body. No `?fn=` anywhere (removed with the old model).
 | `#routes/` | `@[before]` / `@[after]` (only in `+route.v`) | — (subtree middleware; root `+route.v` is the global head, chains into every leaf) | `@[before]`: root→leaf, `SwelteRequest -> !SwelteRequest`; `@[after]`: leaf→root, `(SwelteRequest, SwelteResponse) -> !SwelteResponse`; middleware fns never exported to TS, but the wrapper's `pub struct`s are (+layout-shaped shared types) |
 | `#routes/` leaf + `+route.v` | `@[load]` | — (page data, `Hand` HTML navigations only) | `(SwelteRequest[, parent T]) -> !R` (or `!SwelteLoadResult`). Zero/one per file, never stacked, no qualifier. Level 0 takes `(req)`; deeper levels take `(req, parent T)` where T is the previous level's return struct (short or prefixed spelling — mismatch is a build error). The cascade threads typed values root-first; the leaf's return is encoded once at the edge → `props_json` for SSR. `SwelteLoadResult{ status, headers, cookies, body }` (built with pre-encoded `body = json.encode(props)`) opts the load into status/headers/cookies on the HTML navigation (SvelteKit `load` setHeaders/cookies lite) — plain values wrap in a 200 default envelope. Non-200 envelope status renders `+error` with the status. No JSON in `.v` files (except the envelope `body`). Throw → `+error` props (use `swelte_error(status, msg)` to preserve the status). On-click stubs stay — `load` is initial paint only |
 | `#lib/` | `@[rpc]` | local WASM call | none (direct dispatch) |
+| `src/lib/**/backend/*.v` (or `*_backend.v`) | `@[tool]` (AI `toolsPlugin`) / `@[tool('side-effect')]` | none (backend dispatch, no transport) | app-selected subset per run; `swelte_tool_dispatch(allowed, name, args_json, caller, op_id)`; side-effect tools require a recorded `approved` decision (caller + tool + exact args + op id), fail closed otherwise, replay the stored result on duplicates |
 
 - No attribute = internal helper, never exported, never routed.
 - Verbs stack across methods (`@[get; post]`), one default per verb
@@ -98,7 +99,13 @@ JSON body. No `?fn=` anywhere (removed with the old model).
   the inbound frame channel, and the frame emitter. Hub messages
   stream out via `emit`; client frames stream back via `recv`.
 - `@[get]`/`@[post]` in `#lib/` warn and still expose as RPC.
-- Unknown `@[...]` on a `pub fn` warns (`file:line: unknown @[name] — fn ignored`)
+- `@[tool]` in `src/lib/**/backend/*.v` (or `*_backend.v`) declares an agent
+  tool (see [the AI spec](specs/ai.md) §C; live example: `examples/shell`
+  `tool_shell_exec` / `tool_shell_send_input` / `tool_shell_read_output`).
+  Plain `@[tool]` = read-only (no approval touch); `@[tool('side-effect')]`
+  = approval-gated at the dispatch boundary (unknown / mismatched /
+  denied / pending → actionable error, never a run; executed op ids
+  replay). Unknown `@[...]` on a `pub fn` warns (`file:line: unknown @[name] — fn ignored`)
   and the fn is skipped — same in `swelte check` (`unknown-attr` diagnostic).
   Register the owning plugin (`cron` → Plus `jobsPlugin`, `tool` → AI
   `toolsPlugin`) or fix the typo. V-native attrs (`@[heap]`, `@[unsafe]`,

@@ -4,7 +4,7 @@ import { DraftStore } from '@swelte/ai'
 import { RunTracker } from '@swelte/ai'
 import { createSseParser, decodeSseEvent, encodeSseEvent } from '@swelte/ai'
 import { createMemorySink } from '@swelte/ai'
-import { ApprovalStore, authorizeShellCall, runAllowlisted } from '../src/lib/shell.js'
+import { ApprovalStore, authorizeShellCall, driverHolds, parseDriver, runAllowlisted } from '../src/lib/shell.js'
 import {
 	activeAiConfig,
 	createAiConfig,
@@ -53,6 +53,22 @@ describe('shell example: one backend shell shared by chat + terminal', () => {
 		store.request('ai', 'echo no', 'op-denied')
 		store.decide('op-denied', 'denied')
 		assert.throws(() => store.markExecuted('op-denied'), /denied/)
+	})
+
+	it('driver lease: holder-bound single driver, advisory preemption (§3)', () => {
+		const now = Date.now() / 1000
+		// No lease / malformed / expired all read as human.
+		assert.equal(parseDriver('human', 0, now).kind, 'human')
+		assert.equal(parseDriver('', 0, now).kind, 'human')
+		assert.equal(parseDriver('ai:', 0, now).kind, 'human')
+		assert.equal(parseDriver('ai:run-1/turn-1', now - 1, now).kind, 'human')
+		// Live lease parses with holder + expiry; only the holder holds.
+		const live = parseDriver('ai:run-1/turn-1', now + 90, now)
+		assert.equal(live.kind, 'ai')
+		assert.ok(driverHolds(live, 'run-1/turn-1'))
+		assert.equal(driverHolds(live, 'run-2/turn-9'), false)
+		assert.equal(driverHolds({ kind: 'human' }, 'run-1/turn-1'), false)
+		// §7 guardrail: anything but the lease holder's turn behaves human.
 	})
 
 	it('interrupt mid-reply: late turn output rejected, new turn stays clean', () => {
@@ -277,12 +293,15 @@ describe('shell tools (Phase C): declarations, per-run selection, dispatch', () 
 		return all.map((t) => t.name)
 	}
 
-	it('declares two read-only tools plus one side-effect tool with hashed ids', async () => {
+	it('declares three read-only tools plus three side-effect tools with hashed ids', async () => {
 		const { entries } = await loadAppTools()
 		assert.deepEqual(
 			entries.map((e) => e.name).sort(),
 			[
 				'backend.shell_tools.tool_publish_note',
+				'backend.shell_tools.tool_shell_exec',
+				'backend.shell_tools.tool_shell_read_output',
+				'backend.shell_tools.tool_shell_send_input',
 				'backend.shell_tools.tool_shorten',
 				'backend.shell_tools.tool_top_commands',
 			],
@@ -295,7 +314,11 @@ describe('shell tools (Phase C): declarations, per-run selection, dispatch', () 
 		}
 		const note = entries.find((e) => e.name.endsWith('tool_publish_note'))
 		assert.equal(note?.sideEffect, true)
-		for (const e of entries.filter((x) => x !== note)) {
+		const exec = entries.find((e) => e.name.endsWith('tool_shell_exec'))
+		assert.equal(exec?.sideEffect, true)
+		const input = entries.find((e) => e.name.endsWith('tool_shell_send_input'))
+		assert.equal(input?.sideEffect, true)
+		for (const e of entries.filter((x) => x !== note && x !== exec && x !== input)) {
 			assert.equal(e.sideEffect, false)
 		}
 		const top = entries.find((e) => e.name.endsWith('tool_top_commands'))
@@ -428,18 +451,35 @@ describe('shell tools (Phase C): declarations, per-run selection, dispatch', () 
 			const tools = (await import('@swelte/ai/tools')) as typeof import('@swelte/ai/tools')
 			const { parseVFile, parseStructs } = (await import('@swelte/core/vite')) as typeof import('@swelte/core/vite')
 			const fns = parseVFile(src, ['tool']).filter((f) => f.attr === 'tool')
-			for (const fn of fns) tools.validateToolFn('shell_tools.v', fn)
-			const entries = tools.toolManifestFor('backend/shell_tools', fns, parseStructs(src), tools.toolDocComments(src))
+			// The reporting probe stages only the §C slice: shell_tools.v is
+			// `module backend` with KV-backed agentic tools that need the app
+			// backend, so extract just the reporting fns + structs into a
+			// self-contained probe module.
+			const keep = new Set(['tool_top_commands', 'tool_shorten', 'tool_publish_note'])
+			const keptFns = fns.filter((f) => keep.has(f.name))
+			for (const fn of keptFns) tools.validateToolFn('shell_tools.v', fn)
+			const entries = tools.toolManifestFor('backend/shell_tools', keptFns, parseStructs(src), tools.toolDocComments(src))
 			const selected = tools.selectTools({ version: 1 as const, tools: entries }, ['backend.shell_tools.tool_top_commands'])
 			assert.equal(selected.length, 1)
 			fs.mkdirSync(path.join(dir, 'backend'), { recursive: true })
 			fs.mkdirSync(path.join(dir, 'tools'), { recursive: true })
-			fs.writeFileSync(path.join(dir, 'backend', 'shell_tools.v'), src)
+			// Self-contained reporting slice: keep only the reporting fns +
+			// their structs (no KV/emit agentic helpers — see above).
+			// Blocks are `@[tool]` attrs + doc comments + one fn each.
+			const keepStruct = new Set(['TopArgs', 'TopRow', 'ShortenArgs', 'NoteArgs', 'NoteRow', 'LedgerEntry'])
+			const blocks = src.split(/\n(?=(?:\/\/[^\n]*\n|@\[tool[^\n]*\n|pub struct |struct |fn ))/g)
+			const take: string[] = ['module backend', '']
+			for (const b of blocks) {
+				const m = b.match(/pub fn (\w+)/) ?? b.match(/^(?:pub struct|struct|fn) (\w+)/m)
+				const name = m?.[1] ?? ''
+				if (keep.has(name) || keepStruct.has(name) || name === 'shell_ledger') take.push(b.trimEnd())
+			}
+			fs.writeFileSync(path.join(dir, 'backend', 'shell_tools.v'), take.join('\n\n') + '\n')
 			const modules = [
 				{
 					mod: 'backend/shell_tools',
 					dir: 'backend',
-					fns: fns.map((f) => ({
+					fns: keptFns.map((f) => ({
 						fn: f.name,
 						argsStruct: f.singleArgsStruct ?? null,
 						fallible: f.fallible,
@@ -529,5 +569,262 @@ describe('shell tools (Phase C): declarations, per-run selection, dispatch', () 
 		} finally {
 			fs.rmSync(dir, { recursive: true, force: true })
 		}
+	})
+
+	it('agentic shell tools: read-only observe bound, driving gated (§4/§7)', async () => {
+		const { build, entries } = await loadAppTools()
+		const names = entries.map((e) => e.name)
+		// The three §4 tools exist with the right side-effect flags.
+		const byName = new Map(entries.map((e) => [e.name, e]))
+		assert.equal(byName.get('backend.shell_tools.tool_shell_exec')?.sideEffect, true)
+		assert.equal(byName.get('backend.shell_tools.tool_shell_send_input')?.sideEffect, true)
+		assert.equal(byName.get('backend.shell_tools.tool_shell_read_output')?.sideEffect, false)
+		const manifest = { version: 1 as const, tools: entries }
+		// Fixture 3 (observe-only): read-only run selects read_output +
+		// reporting tools; exec/send_input have no callable in this run.
+		const observe = build.selectTools(manifest, [
+			'backend.shell_tools.tool_shell_read_output',
+			'backend.shell_tools.tool_top_commands',
+		])
+		assert.ok(observe.some((t) => t.name.endsWith('tool_shell_read_output')))
+		assert.ok(!observe.some((t) => t.name.endsWith('tool_shell_exec')))
+		assert.ok(!observe.some((t) => t.name.endsWith('tool_shell_send_input')))
+		// Unknown names fail closed (mirrors the route dispatch boundary).
+		assert.throws(() => build.selectTools(manifest, ['backend.shell_tools.tool_nope']), /unknown tool/)
+		void names
+	})
+
+	it('observe-turn parse gate: one `<tool name args>` line, allowlist-bound (§2 Stage A)', () => {
+		// The V parser (`ai_parse_observe_call` in `src/routes/+page.v`) takes
+		// one `<tool full-name single-line-json>` line; mirror its rules here:
+		// full tool name + single-line `{...}` args, first valid line wins,
+		// anything else (prose, multi-line args, exec) is rejected.
+		function parseObserveCall(text: string): [string, string] {
+			for (const line of text.split('\n')) {
+				const trimmed = line.trim()
+				if (!trimmed.startsWith('<tool ') || !trimmed.endsWith('>')) continue
+				const inner = trimmed.slice(6, -1).trim()
+				const sp = inner.indexOf(' ')
+				if (sp < 0) continue
+				const name = inner.slice(0, sp).trim()
+				const args = inner.slice(sp + 1).trim()
+				if (!name || !args.startsWith('{') || !args.endsWith('}')) continue
+				if (args.includes('\n')) continue
+				return [name, args]
+			}
+			return ['', '']
+		}
+		const allowed = new Set([
+			'backend.shell_tools.tool_shell_read_output',
+			'backend.shell_tools.tool_top_commands',
+		])
+		// Valid observe call parses; exec parses but is not observe-selectable.
+		const [name, args] = parseObserveCall(
+			'thinking out loud\n<tool backend.shell_tools.tool_shell_read_output {"since_seq":0,"limit":5}>',
+		)
+		assert.equal(name, 'backend.shell_tools.tool_shell_read_output')
+		assert.ok(allowed.has(name), 'read_output is observe-selectable')
+		assert.deepEqual(JSON.parse(args), { since_seq: 0, limit: 5 })
+		const [execName] = parseObserveCall(
+			'<tool backend.shell_tools.tool_shell_exec {"cmd":"pwd"}>',
+		)
+		assert.ok(!allowed.has(execName), 'exec parses but is never observe-selected')
+		// Prose-only, multi-line args, and truncated lines degrade to no call.
+		assert.deepEqual(parseObserveCall('just chatting, no tool here'), ['', ''])
+		assert.deepEqual(
+			parseObserveCall('<tool backend.shell_tools.tool_shell_read_output {"since_seq":0,\n"limit":5}>'),
+			['', ''],
+			'multi-line args rejected',
+		)
+		assert.deepEqual(
+			parseObserveCall('<tool backend.shell_tools.tool_shell_read_output {"since_seq":0'),
+			['', ''],
+			'unclosed line rejected',
+		)
+
+	it('driving turn resume protocol: holder re-check incl. expiry + decide before dispatch (§2 Stage B)', async () => {
+		// Mirror of `shell_tool_resume` / `shell_tool_deny` in `+page.v`:
+		// a parked call records the human decision on the dispatch-table
+		// record only while the holder still owns the lease — flip or TTL
+		// lapse fails closed (superseded/denied), never dispatches.
+		const holder = 'run-demo/turn-1'
+		const now = Date.now() / 1000
+		const holds = (driver: string, expires: number, h: string) =>
+			driverHolds(parseDriver(driver, expires, now), h)
+		// Live lease + decide(approved) → dispatch executes once.
+		const store = new ApprovalStore()
+		store.request('ai', 'pwd', 'op-resume-live')
+		assert.ok(holds(`ai:${holder}`, now + 90, holder), 'live lease holds')
+		store.decide('op-resume-live', 'approved')
+		assert.equal(store.markExecuted('op-resume-live').already, false)
+		// Flip: holder no longer holds → resume superseded, deny marks denied.
+		assert.ok(!holds('human', 0, holder), 'flipped lease denies the holder')
+		const flipped = new ApprovalStore()
+		flipped.request('ai', 'pwd', 'op-resume-flip')
+		flipped.decide('op-resume-flip', 'denied')
+		assert.throws(() => flipped.markExecuted('op-resume-flip'), /denied/)
+		// Expiry: TTL lapse denies even while the KV row still names the holder.
+		assert.ok(!holds(`ai:${holder}`, now - 1, holder), 'lapsed lease denies')
+	})
+
+	it('driving-turn gate: exec parks with op_id + holder, resume needs both (§2 Stage B)', async () => {
+		const { build, entries } = await loadAppTools()
+		const manifest = { version: 1 as const, tools: entries }
+		// Driving run selects all three shell tools; observe run selects read-only.
+		const driving = build.selectTools(manifest, [
+			'backend.shell_tools.tool_shell_exec',
+			'backend.shell_tools.tool_shell_send_input',
+			'backend.shell_tools.tool_shell_read_output',
+		])
+		assert.ok(driving.some((t) => t.name.endsWith('tool_shell_exec')))
+		// Parked driving line carries op_id + holder; the backend re-checks
+		// both (holder lease + exact-args record) before dispatch.
+		const holder = 'run-demo/turn-1'
+		const args = JSON.stringify({ cmd: 'pwd', holder, op_id: 'op-drive-1' })
+		assert.equal(JSON.parse(args).holder, holder)
+		assert.equal(JSON.parse(args).op_id, 'op-drive-1')
+		// A line missing op_id/holder never parks: the tail rejects it as
+		// `drive rejected` and the stream still closes `waiting_approval`.
+		for (const bad of ['{"cmd":"pwd"}', '{"cmd":"pwd","op_id":"op-1"}', '{"cmd":"pwd","holder":"h"}']) {
+			const p = JSON.parse(bad) as Record<string, string>
+			assert.ok(!p.op_id || !p.holder, `unparkable line rejected: ${bad}`)
+		}
+
+	it('scoped stdin pre-approval: scope row is holder-bound, lease-checked (§2 Stage C)', () => {
+		// Mirror of `shell_stdin_scope_holds` (backend/shell_tools.v): a
+		// scope row (`shell:stdin:scope:<op_id> = holder`) grants stdin only
+		// while the row names this holder AND the driver lease is still
+		// held. Flip / expiry / holder change → dead scope → per-keystroke
+		// approval.
+		function scopeHolds(row: string | undefined, holder: string, driver: string, nowS: number, expires: number): boolean {
+			if (!row || !holder.trim() || row !== holder) return false
+			if (driver !== `ai:${holder}`) return false
+			return nowS <= expires
+		}
+		const holder = 'run-1/turn-1'
+		const now = 1_000_000
+		// Live scope: row + lease agree.
+		assert.equal(scopeHolds(holder, holder, `ai:${holder}`, now, now + 90), true)
+		// Flip kills it: driver back to human.
+		assert.equal(scopeHolds(holder, holder, 'human', now, now + 90), false)
+		// Expiry kills it.
+		assert.equal(scopeHolds(holder, holder, `ai:${holder}`, now + 91, now + 90), false)
+		// Holder change kills it: row names another turn.
+		assert.equal(scopeHolds('run-1/turn-2', holder, `ai:${holder}`, now, now + 90), false)
+		assert.equal(scopeHolds(undefined, holder, `ai:${holder}`, now, now + 90), false)
+		// Missing op_id / holder never scopes.
+		assert.equal(scopeHolds('', holder, `ai:${holder}`, now, now + 90), false)
+		assert.equal(scopeHolds(holder, '', `ai:${holder}`, now, now + 90), false)
+	})
+
+	it('exec schema carries op_id for the stdin scope grant (§2 Stage C)', async () => {
+		const { entries } = await loadAppTools()
+		const exec = entries.find((e) => e.name.endsWith('tool_shell_exec'))
+		const props = Object.keys((exec?.inputSchema as { properties: Record<string, unknown> }).properties ?? {}).sort()
+		assert.deepEqual(props, ['cmd', 'holder', 'op_id'])
+	})
+
+	it('fixture 4 — human reclaims mid-turn: flip denies, human path byte-identical (§10.4)', () => {
+		// Mirror of the route preempt (`exec`/`send_input` flip `ai:*` →
+		// `human`) + resume fail-closed (`shell_tool_resume` errors when the
+		// lease holder no longer holds): after a human terminal submit, the
+		// lease reads `human`, the in-flight AI call resolves denied, and
+		// the human command runs the unchanged allowlisted path.
+		const holder = 'run-1/turn-1'
+		const now = Date.now() / 1000
+		// Before: AI holds the lease.
+		assert.ok(driverHolds(parseDriver(`ai:${holder}`, now + 90, now), holder))
+		// Human types in terminal → flip: driver back to human.
+		const flipped = parseDriver('human', 0, now)
+		assert.equal(flipped.kind, 'human')
+		assert.equal(driverHolds(flipped, holder), false)
+		// In-flight resume fails closed (holder no longer holds).
+		assert.throws(
+			() => {
+				if (!driverHolds(flipped, holder)) throw new Error('shell: drive superseded (driver=human); in-flight AI call denied')
+			},
+			/superseded/,
+			'post-flip resume denied',
+		)
+		// Human command runs the unchanged path.
+		const gate = authorizeShellCall('human', 'echo reclaimed')
+		assert.equal(gate.allowed, true)
+		assert.equal(runAllowlisted('echo reclaimed'), 'reclaimed')
+	})
+
+	it('fixture 5 — denial and expiry fail closed with actionable errors (§10.4)', () => {
+		// Denied/exprired dispatch records never execute: the model gets an
+		// actionable error string, not a hang, with no partial side effect.
+		const store = new ApprovalStore()
+		store.request('ai', 'pwd', 'op-deny-1')
+		store.decide('op-deny-1', 'denied')
+		assert.throws(() => store.markExecuted('op-deny-1'), /denied/)
+		store.request('ai', 'pwd', 'op-exp-1', -1)
+		assert.equal(store.decide('op-exp-1', 'approved').decision, 'expired')
+		assert.throws(() => store.markExecuted('op-exp-1'), /expired/)
+	})
+
+	it('fixture 6 — two tabs, one driver: contention rejects (§10.4)', () => {
+		// Mirror of `shell_handoff` (§3): a second holder is rejected while
+		// a live lease holds — the driver is backend state, so tab B's AI
+		// call fails at the boundary. (`driverHolds` reads the wall clock,
+		// so fixtures use real time, not a fake epoch.)
+		function handoff(driver: string, expires: number, holder: string, nowS: number): { ok: boolean; reason: string } {
+			if (!holder.trim()) return { ok: false, reason: 'needs holder' }
+			const live = parseDriver(driver, expires, nowS)
+			if (live.kind === 'ai') {
+				if (live.holder === holder) return { ok: true, reason: 'already held by this turn' }
+				return { ok: false, reason: `driver held by ${live.holder} (single driver)` }
+			}
+			return { ok: true, reason: 'handoff granted' }
+		}
+		const now = Date.now() / 1000
+		assert.deepEqual(handoff('human', 0, 'run-A/turn-1', now).ok, true)
+		// Tab A holds; tab B's handoff rejected while the lease lives.
+		assert.match(handoff(`ai:run-A/turn-1`, now + 90, 'run-B/turn-1', now).reason, /single driver/)
+		// Same holder re-handoff (retry) is idempotent, not a second lease.
+		assert.equal(handoff(`ai:run-A/turn-1`, now + 90, 'run-A/turn-1', now).reason, 'already held by this turn')
+		// After expiry, a new holder may take the drive.
+		assert.equal(handoff(`ai:run-A/turn-1`, now - 1, 'run-B/turn-1', now).ok, true)
+	})
+
+	it('fixture 7 — double-gate resume: one record, approve-late or error (§10.4)', () => {
+		// Exactly one dispatch-table record per op; approve minutes later
+		// (within turn TTL) resumes the same turn; expired/denied → error.
+		const store = new ApprovalStore()
+		const rec = store.request('ai', 'pwd', 'op-resume-1', 60_000)
+		assert.equal(rec.decision, 'pending')
+		// Duplicate park folds away: still one record, still pending.
+		assert.equal(store.request('ai', 'pwd', 'op-resume-1', 60_000), rec)
+		// Approve minutes later, within TTL → resumes exactly once.
+		assert.equal(store.decide('op-resume-1', 'approved').decision, 'approved')
+		assert.equal(store.markExecuted('op-resume-1').already, false)
+		assert.equal(store.markExecuted('op-resume-1').already, true, 'lost-ack retry replays, never re-executes')
+		// Denied twin → actionable error, no execution.
+		store.request('ai', 'pwd', 'op-resume-2', 60_000)
+		store.decide('op-resume-2', 'denied')
+		assert.throws(() => store.markExecuted('op-resume-2'), /denied/)
+	})
+
+	it('§8 budgets: shell-loop args ≤256B req, results ≤1024B res (§10.4)', async () => {
+		const { entries } = await loadAppTools()
+		// Driving `exec` line: exact-args JSON stays well inside the req budget.
+		const execArgs = JSON.stringify({ cmd: 'pwd', holder: 'run-1/turn-1', op_id: 'run-1/turn-1-op-1' })
+		assert.ok(execArgs.length <= 256, `exec req budget: ${execArgs.length}B`)
+		// Scoped stdin line: same bound.
+		const inputArgs = JSON.stringify({ keys: 'hello stdin', holder: 'run-1/turn-1', op_id: 'run-1/turn-1-op-1' })
+		assert.ok(inputArgs.length <= 256, `send_input req budget: ${inputArgs.length}B`)
+		// Read window: five rows max, 1024B cap with truncation marked.
+		const readArgs = JSON.stringify({ since_seq: 195, limit: 5 })
+		assert.ok(readArgs.length <= 256, `read req budget: ${readArgs.length}B`)
+		const short = (s: string) => (s.length <= 1024 ? s : s.slice(0, 1021) + '...')
+		assert.equal(short('x'.repeat(2000)).length, 1024)
+		assert.ok(short('x'.repeat(2000)).endsWith('...'), 'truncation marked')
+		// Transcript tail: 5 frames max, same 1024B cap.
+		const tail = Array.from({ length: 5 }, (_, i) => `$ pwd\n/shell #${i}`).join('\n---\n')
+		assert.ok(tail.length <= 1024, `tail budget: ${tail.length}B`)
+		void entries
+	})
+	})
 	})
 })

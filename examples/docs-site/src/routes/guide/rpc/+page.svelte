@@ -118,6 +118,17 @@ import DocsNav from '#lib/DocsNav.svelte'
 				<td>— (middleware, <code>+route.v</code> only)</td>
 				<td>root→leaf / leaf→root; never exported to TS</td>
 			</tr>
+			<tr>
+				<td>
+					<code>@&#91;tool]</code>
+					<span class="badge badge-sm">AI toolsPlugin</span>
+				</td>
+				<td>— (backend dispatch, <code>src/lib/**/backend/*.v</code>)</td>
+				<td>
+					app-selected per-run subset; <code>@&#91;tool('side-effect')]</code> needs a recorded
+					approval — live in the shell example (<code>tool_shell_exec</code>)
+				</td>
+			</tr>
 		</tbody>
 	</table>
 </div>

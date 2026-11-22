@@ -25,6 +25,10 @@ import {
 	deny,
 	exec,
 	send_input,
+	shell_handoff,
+	shell_release,
+	shell_tool_deny,
+	shell_tool_resume,
 	stream,
 } from '#routes/+page.v'
 
@@ -67,6 +71,14 @@ let approvalTtl = $state('300000')
 let termLines: TermLine[] = $state([])
 let messages: ChatMsg[] = $state([])
 let approvals: PendingApproval[] = $state([])
+// Per-turn terminal scope (spec §2 Stage B): checked → this chat turn
+// Parked driving call for this turn (spec §2 Stage B): the SSE stream
+// closes `waiting_approval`; the human decision resumes it via
+// `shell_tool_resume` (approve) or drops it (deny).
+let parkedDrive: { opId: string; tool: string; args: string; holder: string } | null = $state(null)
+// hands off `shell:driver` to the AI before the text pass, so the
+// driving tail may park `shell.exec`/`shell.send_input` for approval.
+let driveScope = $state(false)
 let streaming = $state(false)
 // Exec lifecycle: while an exec is in flight the input forwards keystrokes
 // to its stdin (send_input) instead of starting a new command; the run
@@ -436,6 +448,7 @@ async function sendChat() {
 			temperature: String(cfg.run.temperature ?? -1),
 			max_tokens: String(cfg.run.maxTokens ?? -1),
 			system: cfg.run.system ?? '',
+			drive: driveScope ? '1' : '0',
 		})
 		const res = await fetch('/?q=ai_stream', {
 			method: 'POST',
@@ -476,11 +489,14 @@ async function sendChat() {
 						text?: string
 						reason?: string
 						error?: string
-						tool?: { name?: string; decision?: string }
+						tool?: string | { name?: string; decision?: string }
 						callId?: string
 						label?: string
 						detail?: string
 						step?: string
+						op_id?: string
+						args?: string
+						holder?: string
 					}
 				}
 				try {
@@ -505,16 +521,17 @@ async function sendChat() {
 					}
 				} else if (event === 'tool.progress') {
 					const p = parsed.payload ?? {}
-					const id = p.callId ?? p.tool?.name ?? `tool-${seq ?? Date.now()}`
+					const progressTool = typeof p.tool === 'string' ? p.tool : p.tool?.name
+					const id = p.callId ?? progressTool ?? `tool-${seq ?? Date.now()}`
 					resolveMsg(waitId, {
 						thinking: [
 							{ label: 'Contacting provider', status: 'done' },
-							{ label: p.label ?? p.tool?.name ?? 'Running tool', status: 'active' },
+							{ label: p.label ?? progressTool ?? 'Running tool', status: 'active' },
 						],
 						tools: upsertTool(waitId, {
 							id,
-							label: p.label ?? p.tool?.name ?? 'tool call',
-							chip: p.tool?.name ?? id,
+							label: p.label ?? progressTool ?? 'tool call',
+							chip: progressTool ?? id,
 							status: 'active',
 							detail: p.detail ? [p.detail] : [],
 						}),
@@ -522,6 +539,31 @@ async function sendChat() {
 					followChat()
 				} else if (event === 'approval.request') {
 					const p = parsed.payload ?? {}
+					const toolName = typeof p.tool === 'string' ? p.tool : p.tool?.name
+					// Parked driving call carries the full tool triple, so the
+					// human decision can resume it (approve) or drop it (deny).
+					// Mirror it into the approvals queue too — the queue is the
+					// clickable surface (`decide`), the thread row is narrative.
+					if (
+						p.op_id &&
+						toolName &&
+						p.args &&
+						p.holder &&
+						!approvals.some((a) => a.opId === p.op_id)
+					) {
+						parkedDrive = { opId: p.op_id, tool: toolName, args: p.args, holder: p.holder }
+						approvals = [
+							...approvals,
+							{
+								opId: p.op_id,
+								cmd: typeof p.args === 'string' ? p.args : JSON.stringify(p.args),
+								status: 'pending',
+								note: `parked ${typeof p.tool === 'string' ? p.tool : 'tool'} — approve resumes, deny drops`,
+							},
+						]
+					} else if (p.op_id && toolName && p.args && p.holder) {
+						parkedDrive = { opId: p.op_id, tool: toolName, args: p.args, holder: p.holder }
+					}
 					resolveMsg(waitId, {
 						tools: upsertTool(waitId, {
 							id: p.callId ?? `approval-${seq ?? Date.now()}`,
@@ -579,7 +621,17 @@ async function sendChat() {
 	}
 }
 
-function interrupt() {
+async function interrupt() {
+	// Stop press while the AI drives: release the lease (backend flips to
+	// `human`), drop any parked call, and bump the turn so late output
+	// rejects. Spec §3 preempt.
+	try {
+		await shell_release({ holder: parkedDrive?.holder ?? '' })
+	} catch {
+		/* no live lease — the turn bump below still rejects stale output */
+	}
+	parkedDrive = null
+	driveScope = false
 	tracker.endOutput('out-text')
 	sink.record({
 		runId: 'run-shell',
@@ -597,6 +649,9 @@ function interrupt() {
 }
 
 async function proposeAi(cmd: string) {
+	// Legacy manual path (offline/test): parks on the retired `exec(caller:'ai')`
+	// gate, which now fails actionably pointing at `tool_shell_exec`. The live
+	// AI path dispatches through the tools route approval table instead (§6).
 	const gate = authorizeShellCall('ai', cmd)
 	if (!gate.needsApproval) {
 		await runHumanCommand(cmd)
@@ -626,8 +681,48 @@ async function decide(opId: string, allow: boolean) {
 		if (allow) await approve({ cmd: item.cmd, op_id: opId, caller: 'ai' })
 		else await deny({ cmd: item.cmd, op_id: opId, caller: 'ai' })
 		store.decide(opId, allow ? 'approved' : 'denied')
+		// Stage B resume: a parked driving call resumes through the
+		// dispatch table (holder-bound, exact-args, replay-safe).
+		if (parkedDrive && parkedDrive.opId === opId) {
+			const parked = parkedDrive
+			parkedDrive = null
+			if (allow) {
+				try {
+					const res = await shell_tool_resume({
+						op_id: opId,
+						holder: parked.holder,
+						tool: parked.tool,
+						args_json: parked.args,
+					})
+					store.decide(opId, 'approved')
+					paintExec(parked.tool, `${res.output} ✓ approved`)
+					pushMsg('assistant', `approved + ran: ${parked.tool} → ${res.output}`)
+				} catch (e) {
+					pushMsg('assistant', `resume failed: ${e instanceof Error ? e.message : String(e)}`)
+				}
+			} else {
+				try {
+					await shell_tool_deny({
+						op_id: opId,
+						holder: parked.holder,
+						tool: parked.tool,
+						args_json: parked.args,
+					})
+				} catch {
+					/* advisory record may not exist — the drop is what matters */
+				}
+				pushMsg('assistant', `denied: ${parked.tool}`)
+			}
+			item.status = allow ? 'approved' : 'denied'
+			item.note = allow ? 'resumed through the dispatch table' : 'denied by human'
+			approvals = [...approvals]
+			return
+		}
 		if (allow) {
-			const res = await exec({ cmd: item.cmd, op_id: opId, caller: 'ai' })
+			// Legacy demo path: the human `exec` RPC AI gate is retired, so
+			// approval confirms the advisory record and paints the queued
+			// command as a human run (double-gate note in spec §4).
+			const res = await exec({ cmd: item.cmd, op_id: opId, caller: 'human' })
 			paintExec(item.cmd, `${res.output} ✓ approved`)
 			pushMsg('assistant', `approved + ran: ${item.cmd} → ${res.output}`)
 		} else {
@@ -1068,6 +1163,14 @@ function toggleTheme(next: boolean) {
 				<button class="btn btn-ghost btn-sm" type="button" onclick={aiDemo}>
 					AI: echo hello-from-ai
 				</button>
+				<label class="pane-hint drive">
+					<input
+						type="checkbox"
+						bind:checked={driveScope}
+						aria-label="let AI use the terminal this turn"
+					>
+					let AI use terminal this turn
+				</label>
 			</form>
 			{#if verdict}
 				<p class="pane-hint">capability probe: {verdict}</p>

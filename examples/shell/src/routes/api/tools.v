@@ -19,6 +19,12 @@ const short_name = 'backend.shell_tools.tool_shorten'
 
 const note_name = 'backend.shell_tools.tool_publish_note'
 
+const shell_exec_name = 'backend.shell_tools.tool_shell_exec'
+
+const shell_input_name = 'backend.shell_tools.tool_shell_send_input'
+
+const shell_read_name = 'backend.shell_tools.tool_shell_read_output'
+
 fn run_selected(allowed []string, name string, args_json string, caller string, op_id string) string {
 	res := tools.swelte_tool_dispatch(allowed, name, args_json, caller, op_id) or {
 		return '{"ok":false,"error":"' + err.msg() + '"}'
@@ -53,6 +59,25 @@ pub fn tools_demo(req SwelteRequest) string {
 		tools.swelte_tool_approval_record('human', note_name, args_json, op_id)
 		tools.swelte_tool_approval_decide(op_id, 'approved')
 		return run_selected([note_name], note_name, args_json, 'human', op_id)
+	}
+	if only == 'shell_exec' {
+		cmd := req.query['cmd'] or { 'pwd' }
+		holder := req.query['holder'] or { 'run-demo/turn-1' }
+		op_id := req.query['op'] or { 'op-shell-exec-1' }
+		args_json := '{"cmd":' + json.encode(cmd) + ',"holder":' + json.encode(holder) + ',"op_id":' + json.encode(op_id) + '}'
+		caller := req.query['caller'] or { 'ai' }
+		if (req.query['approve'] or { '' }) != '1' {
+			return run_selected([shell_exec_name], shell_exec_name, args_json, caller, op_id)
+		}
+		tools.swelte_tool_approval_record(caller, shell_exec_name, args_json, op_id)
+		tools.swelte_tool_approval_decide(op_id, 'approved')
+		return run_selected([shell_exec_name], shell_exec_name, args_json, caller, op_id)
+	}
+	if only == 'shell_read' {
+		since := (req.query['since'] or { '0' }).int()
+		limit := (req.query['limit'] or { '5' }).int()
+		args_json := '{"since_seq":' + since.str() + ',"limit":' + limit.str() + '}'
+		return run_selected([shell_read_name], shell_read_name, args_json, '', '')
 	}
 	top := run_selected([top_name, short_name], top_name, '{"limit":2}', '', '')
 	short := run_selected([top_name, short_name], short_name, '{"text":"hello shell","limit":5}', '', '')

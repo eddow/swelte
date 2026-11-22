@@ -28,7 +28,7 @@ export function defineParityContract(getState, label = 'parity') {
   it(`${label}: typed verb error keeps 403 (plain stays 400)`, async () => {
     const { base, runnable } = getState()
     if (!runnable) return
-    const typed = await get(base + '/typed?deny', json)
+    const typed = await get(base + '/typed?/deny', json)
     assert.equal(typed.status, 403)
     assert.ok((await typed.text()).includes('forbidden-typed'))
     const plain = await get(base + '/boom', json)
@@ -39,7 +39,7 @@ export function defineParityContract(getState, label = 'parity') {
   it(`${label}: @[error] sanitizes JSON error bodies`, async () => {
     const { base, runnable } = getState()
     if (!runnable) return
-    const j = await get(base + '/typed?deny', json)
+    const j = await get(base + '/typed?/deny', json)
     assert.ok((await j.text()).includes('safe:forbidden-typed'))
   })
 
