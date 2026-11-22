@@ -35,7 +35,10 @@ export function stageBackendModules(
 			) {
 				throw new Error(`[swelte] ${file}: invalid or reserved native module directory`)
 			}
-			if (pluginFiles.has(target) && !(target === 'backend/db.v' && shadowable.has(target.split('/').pop() ?? ''))) {
+			if (
+				pluginFiles.has(target) &&
+				!(target === 'backend/db.v' && shadowable.has(target.split('/').pop() ?? ''))
+			) {
 				throw new Error(`[swelte] ${file}: native module file collides with plugin ${target}`)
 			}
 			files.set(target, source)

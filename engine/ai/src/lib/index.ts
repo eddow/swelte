@@ -1,8 +1,3 @@
-export type { ToolDispatchModule, ToolDispatchTarget, ToolManifest, ToolManifestEntry } from './build.js'
-export { emitToolBindings, emitToolDispatcher, emitToolManifest } from './build.js'
-export { schemaHash, selectTools, toolDocComments, toolImportPath, toolManifestFor } from './build.js'
-export { validateAgainstSchema, validateToolFn } from './build.js'
-export { createToolsPlugin, toolsPlugin } from './tools.js'
 export type { AiAdapter, CostModel, RouteOptions } from './adapters.js'
 export { DeterministicAdapter, routeAdapter } from './adapters.js'
 export type {
@@ -20,6 +15,24 @@ export {
 } from './anthropic.js'
 export type { MediaAssetRef, MediaEventPayload, MediaTrackRef } from './boundary.js'
 export { isTrackPayload } from './boundary.js'
+export type {
+	ToolDispatchModule,
+	ToolDispatchTarget,
+	ToolManifest,
+	ToolManifestEntry,
+} from './build.js'
+export {
+	emitToolBindings,
+	emitToolDispatcher,
+	emitToolManifest,
+	schemaHash,
+	selectTools,
+	toolDocComments,
+	toolImportPath,
+	toolManifestFor,
+	validateAgainstSchema,
+	validateToolFn,
+} from './build.js'
 export type {
 	AdapterCaps,
 	AdapterSelection,
@@ -72,6 +85,7 @@ export type {
 export { generateSchema, schemaId } from './schema.js'
 export type { WireEvent } from './sse.js'
 export { createSseParser, decodeSseEvent, encodeSseEvent } from './sse.js'
+export { createToolsPlugin, toolsPlugin } from './tools.js'
 export type { CostEstimate, PriceTable, ProviderUsage, TraceEvent, TraceSink } from './trace.js'
 export { createMemorySink, estimateCost } from './trace.js'
 export { VERSION } from './version.js'

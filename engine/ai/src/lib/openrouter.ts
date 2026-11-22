@@ -199,7 +199,15 @@ export class OpenRouterAdapter implements AiAdapter {
 		}
 		seq += 1
 		const estimatedCost = estimateCost(usage, this.pricing)
-		trace({ runId, outputId, seq, kind: 'terminal', usage, ...(estimatedCost ? { estimatedCost } : {}), terminal })
+		trace({
+			runId,
+			outputId,
+			seq,
+			kind: 'terminal',
+			usage,
+			...(estimatedCost ? { estimatedCost } : {}),
+			terminal,
+		})
 		yield {
 			envelope: { runId, outputId, kind: 'terminal', seq },
 			payload: { reason: terminal, ...(usage ? { usage } : {}) },

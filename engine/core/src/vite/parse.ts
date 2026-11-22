@@ -73,7 +73,7 @@ export const NATIVE_ATTRS = [
  *  raw text so typos like `@[get('q]` still warn. */
 export function collectUnknownAttrs(
 	src: string,
-	extraAttrs: string[] = [],
+	extraAttrs: string[] = []
 ): { name: string; line: number }[] {
 	const known = new Set<string>([...CORE_ATTRS, ...extraAttrs, ...NATIVE_ATTRS])
 	const out: { name: string; line: number }[] = []
@@ -230,9 +230,8 @@ export function parseVFile(src: string, extraAttrs: string[] = []): RpcFn[] {
 		if (
 			verbs.some(
 				(vb) =>
-					['matcher', 'startup', 'shutdown', 'report', 'reroute', 'error'].includes(
-						vb.verb
-					) || extraAttrs.includes(vb.verb)
+					['matcher', 'startup', 'shutdown', 'report', 'reroute', 'error'].includes(vb.verb) ||
+					extraAttrs.includes(vb.verb)
 			)
 		) {
 			const afterRet = i + (retMatch?.[0].length ?? 0)

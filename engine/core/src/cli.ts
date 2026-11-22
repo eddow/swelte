@@ -1,12 +1,13 @@
 // `swelte` CLI entry. Dispatches to src/commands/*; bin/swelte.js is a
 // ~5-line shim importing this module's main() (npm needs a runnable file
 // before tsc runs — the shim is that file, nothing more).
+
+import { resolve } from 'node:path'
 import { COMMANDS, commandHelp, VERSION } from './commands/index.js'
 import type { Command } from './commands/types.js'
 import { parseArgs } from './commands/types.js'
-import { resolve } from 'node:path'
-import type { SweltePlugin } from './vite/types.js'
 import { assertPluginCli, assertPluginName, dedupPlugins } from './vite/plugins.js'
+import type { SweltePlugin } from './vite/types.js'
 
 /** Resolve the active command list: core COMMANDS + configured plugin
  *  commands (deduped by plugin `name`, first wins — same rule as generate()).

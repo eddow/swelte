@@ -3,15 +3,14 @@ import { execFileSync } from 'node:child_process'
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { defineSweltePlugin } from '@swelte/core/vite'
 import type { SweltePlugin } from '@swelte/core/vite'
+import { defineSweltePlugin } from '@swelte/core/vite'
 
 /** Default SQLite path when SWELTE_DB_PATH is unset. */
 export const PLUS_DB_DEFAULT_PATH = 'data/app.db'
 
 /** Migration tracking table. */
 export const PLUS_DB_MIGRATIONS_TABLE = '_swelte_migrations'
-
 
 /** Resolve the DB path: env wins, else default (absolute). */
 export function plusDbPath(root: string, env?: NodeJS.ProcessEnv): string {
@@ -169,8 +168,8 @@ export const migrateCommand: NonNullable<SweltePlugin['cli']>[number] = {
 }
 
 /** Plus `db` plugin: stages `backend/db.v` (KV/SQLite) and owns `migrate`.
- * Augment-only: no attrs (room-SSE/WS shapes stay core-parsed; the hub copy
- * is core-gated on this plugin's presence, §3 box 3 moves it here). */
+ * Augment-only: no attrs — the room hub (`backend/{hub,ws}.v`) is staged by
+ * the separate `rooms` plugin, not by this one (§3 box 3). */
 export const dbPlugin: SweltePlugin = defineSweltePlugin({
 	name: 'db',
 	attrs: [],
@@ -178,4 +177,3 @@ export const dbPlugin: SweltePlugin = defineSweltePlugin({
 	includes: () => [{ module: 'backend', absDir: plusDbVlibDir() }],
 	cli: [migrateCommand],
 })
-

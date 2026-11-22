@@ -1,4 +1,3 @@
-export { default as ToolChips } from "./tool-chips.svelte";
-export { type ToolDetailLine, type ToolStep, type ToolDiffLine, type ToolDiff, type ToolChipsLabels } from "./types";
-export { toolChips, type ToolChipsSize } from "./variants";
-export { default as Root } from "./tool-chips.svelte";
+export { default as ToolChips, default as Root } from './tool-chips.svelte'
+export type { ToolChipsLabels, ToolDetailLine, ToolDiff, ToolDiffLine, ToolStep } from './types'
+export { type ToolChipsSize, toolChips } from './variants'

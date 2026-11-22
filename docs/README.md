@@ -23,7 +23,7 @@ Documentation for users of Swelte (all describe built behavior):
 - `deploy.md` — `swelte deploy init|status`: setup-only deploy-config automater (vercel/docker P0), drift check (implemented)
 - `ssr.md` — SSR, built (ownership, request path, `@[load]` cascade, `+error` contract, measured budgets, gate)
 - `mcp.md` — Agents: MCP server + skills install (implemented)
-- `plus.md` — Plus jobs/db plugins (`swelte({ plugins: [jobsPlugin, dbPlugin] })`): `@[cron]` ticks (wiring, retry, durable schedules); embedded backend (SQLite/KV, `swelte migrate`); rooms/WS hub rides the Plus `db` plugin (core keeps only HTTP/SSE/WS transport primitives)
+- `plus.md` — Plus jobs/db/rooms plugins (`swelte({ plugins: [jobsPlugin, dbPlugin, roomsPlugin] })`): `@[cron]` ticks (wiring, retry, durable schedules); embedded backend (SQLite/KV, `swelte migrate`); rooms/WS hub + `@[ws]`/room-SSE dispatch arrive with the `rooms` plugin (core keeps only HTTP/SSE/WS transport primitives)
 - `example.md` — the `something` example (implemented; browseable twin: `examples/docs-site/`)
 - `versus.md` — Swelte vs. other full-stack paradigms (positioning)
 - `coming-from-sveltekit.md` — SvelteKit → Swelte migration map (built behavior)
@@ -40,3 +40,6 @@ Internal docs to modify Swelte (design rationale, decisions, ephemeral notes):
 
 - [Framework roadmap](specs/future.md) — proposed work and acceptance criteria.
 - [Multimodal AI sessions](specs/ai.md) — typed media streams, schema management, provider adapters, tracing and programmatic tools.
+- [Explicit plugins and Plus restoration](specs/plugins.md) — completed roadmap record: plugin contract, AI on explicit registration, Plus feature restoration, release boundary.
+- [Proposed package versioning](specs/versioning.md) — shared release lines, per-package patches and the registry gate.
+- [Media proposal](specs/media.md) — the optional `@swelte/media` capture/playback/transport package.

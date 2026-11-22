@@ -14,6 +14,7 @@
 
 export type { SwelteConfig, SwelteOptions } from './gen/config.js'
 export { defineConfig } from './gen/config.js'
+export { loadBuildPhases } from './vite/build.js'
 export type { ErrorBoundary } from './vite/error-boundaries.js'
 export {
 	collectErrorBoundaries,
@@ -23,16 +24,24 @@ export {
 export { loadServerHooks } from './vite/hooks.js'
 export { dynSegPattern, loadMatchers, transpileMatcherBody } from './vite/matchers.js'
 export {
-	collectUnknownAttrs,
 	CORE_ATTRS,
+	collectUnknownAttrs,
+	NATIVE_ATTRS,
 	narrowArgParts,
 	narrowCall,
-	NATIVE_ATTRS,
 	parseStructs,
 	parseVFile,
 	tsTypeFor,
 } from './vite/parse.js'
 export { swelte, swelte as default } from './vite/plugin.js'
+export {
+	assertPluginCli,
+	assertPluginName,
+	collectPluginDeclarations,
+	dedupPlugins,
+	pluginAttrOwners,
+	writePluginOutputs,
+} from './vite/plugins.js'
 export {
 	assertChunkHint,
 	assertLayoutHint,
@@ -97,19 +106,9 @@ export type {
 	SweltePluginHarness,
 	SweltePluginInclude,
 	SweltePluginOptions,
-	SweltePluginRouteCtx,
 	SweltePluginResolved,
+	SweltePluginRouteCtx,
 	VStruct,
 	WrapperMw,
 } from './vite/types.js'
 export { defineSweltePlugin } from './vite/types.js'
-export {
-	assertPluginCli,
-	assertPluginName,
-	collectPluginDeclarations,
-	dedupPlugins,
-	pluginAttrOwners,
-	writePluginOutputs,
-} from './vite/plugins.js'
-
-export { loadBuildPhases } from './vite/build.js'

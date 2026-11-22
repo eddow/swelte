@@ -1,51 +1,53 @@
 <script lang="ts">
-import { cn } from "#lib/cn.js";
-import {
-	type ReasoningRow,
-	type ReasoningRowsKind,
-	reasoningRows,
-	SOURCE_TONES,
-} from "./variants";
+import { cn } from '#lib/cn.js'
+import { type ReasoningRow, type ReasoningRowsKind, reasoningRows, SOURCE_TONES } from './variants'
 
 let {
 	rows,
-	kind = "steps",
+	kind = 'steps',
 	query,
 	value = $bindable(),
 	defaultValue = null,
 	onValueChange,
 	class: classProp,
 }: {
-	rows: readonly ReasoningRow[];
-	kind?: ReasoningRowsKind;
+	rows: readonly ReasoningRow[]
+	kind?: ReasoningRowsKind
 	/** Search: the query shown above the sources. */
-	query?: string;
+	query?: string
 	/** Coding: the selected row's `primary`. Bindable. */
-	value?: string | null;
-	defaultValue?: string | null;
-	onValueChange?: (value: string | null) => void;
-	class?: string;
-} = $props();
+	value?: string | null
+	defaultValue?: string | null
+	onValueChange?: (value: string | null) => void
+	class?: string
+} = $props()
 
-const s = $derived(reasoningRows({ kind }));
-const selected = $derived(value === undefined ? defaultValue : value);
+const s = $derived(reasoningRows({ kind }))
+const selected = $derived(value === undefined ? defaultValue : value)
 
 function pick(next: string | null) {
-	value = next;
-	onValueChange?.(next);
+	value = next
+	onValueChange?.(next)
 }
 </script>
 
 {#snippet content(r: ReasoningRow, i: number)}
-	{#if kind === "search"}
+	{#if kind === 'search'}
 		<span class={cn(s.source(), SOURCE_TONES[i % SOURCE_TONES.length])}>
-			<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true" class="size-2.5">
+			<svg
+				viewBox="0 0 24 24"
+				fill="none"
+				stroke="currentColor"
+				stroke-width="2.5"
+				aria-hidden="true"
+				class="size-2.5"
+			>
 				<circle cx="12" cy="12" r="9" />
 				<path d="M3.5 12h17M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18" />
 			</svg>
 		</span>
-	{:else if kind === "steps"}
-		{#if r.status === "active"}
+	{:else if kind === 'steps'}
+		{#if r.status === 'active'}
 			<span aria-hidden="true" class={s.spinner()}></span>
 		{:else}
 			<svg
@@ -64,7 +66,7 @@ function pick(next: string | null) {
 	{/if}
 	<span class={s.label()}>{r.primary}</span>
 	{#if r.secondary}
-		<span class={cn(s.secondary(), r.mono && "font-mono")}>{r.secondary}</span>
+		<span class={cn(s.secondary(), r.mono && 'font-mono')}>{r.secondary}</span>
 	{/if}
 	{#if r.add !== undefined}
 		<span class={s.diff()}>
@@ -94,11 +96,17 @@ function pick(next: string | null) {
 		</div>
 	{/if}
 	{#each rows as r, i (`${i}-${r.primary}`)}
-		{#if kind === "search"}
-			<a href={r.href} target="_blank" rel="noreferrer" style="animation-delay: {i * 80}ms" class={s.row()}>
+		{#if kind === 'search'}
+			<a
+				href={r.href}
+				target="_blank"
+				rel="noreferrer"
+				style="animation-delay: {i * 80}ms"
+				class={s.row()}
+			>
 				{@render content(r, i)}
 			</a>
-		{:else if kind === "coding"}
+		{:else if kind === 'coding'}
 			<button
 				type="button"
 				aria-pressed={selected === r.primary}

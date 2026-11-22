@@ -2,8 +2,8 @@
 // and named-file ownership. Core owns discovery/source parsing/staging.
 import { mkdirSync, readdirSync, readFileSync, rmSync } from 'node:fs'
 import { dirname, join } from 'node:path'
-import { parseStructs, parseVFile } from './parse.js'
 import { writeIfChanged } from './fs.js'
+import { parseStructs, parseVFile } from './parse.js'
 import type { RpcFn, SweltePlugin, SweltePluginDeclaration } from './types.js'
 
 /** Plugin names double as `.swelte/<name>/` output dirs and CLI owners.
@@ -14,7 +14,7 @@ const PLUGIN_NAME_RE = /^[A-Za-z0-9][A-Za-z0-9_-]*$/
 export function assertPluginName(name: unknown): string {
 	if (typeof name !== 'string' || !PLUGIN_NAME_RE.test(name))
 		throw new Error(
-			`[swelte] plugin needs a safe name (single path segment: letters, digits, '-' or '_') — got ${JSON.stringify(name)}`,
+			`[swelte] plugin needs a safe name (single path segment: letters, digits, '-' or '_') — got ${JSON.stringify(name)}`
 		)
 	return name
 }
@@ -26,7 +26,10 @@ export function assertPluginName(name: unknown): string {
  *  a name, a summary and a `run` fn. Shared by `resolveCommands` and
  *  `swelte check` (validate-only, no side effects). Lives here (not cli.ts)
  *  so `gen/diagnostics.ts` can import it without a cli<->diagnostics cycle. */
-export function assertPluginCli(name: string, cli: unknown): asserts cli is { name: string; summary: string; run: (ctx: never) => unknown }[] {
+export function assertPluginCli(
+	name: string,
+	cli: unknown
+): asserts cli is { name: string; summary: string; run: (ctx: never) => unknown }[] {
 	if (!Array.isArray(cli)) throw new Error(`[swelte] plugin ${name}: cli must be an array`)
 	for (const cmd of cli) {
 		if (!cmd || typeof cmd !== 'object')
@@ -73,7 +76,7 @@ export function collectPluginDeclarations(
 		libs: { kind: 'backend' | 'lib'; file: string; modulePath: string; source: string }[]
 	},
 	parse: (source: string, extraAttrs: string[]) => RpcFn[] = parseVFile,
-	structsOf: (source: string) => SweltePluginDeclaration['structs'] = parseStructs,
+	structsOf: (source: string) => SweltePluginDeclaration['structs'] = parseStructs
 ): Map<string, SweltePluginDeclaration[]> {
 	const byAttr = pluginAttrOwners(plugins)
 	const out = new Map<string, SweltePluginDeclaration[]>()
@@ -81,7 +84,7 @@ export function collectPluginDeclarations(
 		kind: SweltePluginDeclaration['kind'],
 		file: string,
 		modulePath: string,
-		source: string,
+		source: string
 	) => {
 		const structs = structsOf(source)
 		for (const fn of parse(source, [...byAttr.keys()])) {
@@ -98,8 +101,6 @@ export function collectPluginDeclarations(
 	return out
 }
 
-
-
 /** Emit `plugin.generate()` outputs under `.swelte/<name>/`. Validates file
  *  names, rejects collisions (across plugins and reserved core dirs),
  *  writes changed files only and prunes stale output when a plugin stops
@@ -112,7 +113,7 @@ export function writePluginOutputs(
 		declarations: SweltePluginDeclaration[]
 		config: unknown
 	},
-	reservedTop: Set<string>,
+	reservedTop: Set<string>
 ): Map<string, string[]> {
 	// Validate names BEFORE any output or cleanup: names become `.swelte/`
 	// dirs, so `../escape` would otherwise write outside the output root.
@@ -128,7 +129,10 @@ export function writePluginOutputs(
 			throw new Error(`[swelte] plugin ${plugin.name} generate failed: ${(e as Error).message}`)
 		}
 		for (const [file, body] of Object.entries(outputs)) {
-			if (!/^[A-Za-z0-9][\w.-]*(\/[\w.-]+)*\.[A-Za-z0-9]+$/.test(file) || file.split('/').includes('..')) {
+			if (
+				!/^[A-Za-z0-9][\w.-]*(\/[\w.-]+)*\.[A-Za-z0-9]+$/.test(file) ||
+				file.split('/').includes('..')
+			) {
 				throw new Error(`[swelte] plugin ${plugin.name}: invalid output file '${file}'`)
 			}
 			const rel = `${plugin.name}/${file}`
@@ -137,7 +141,7 @@ export function writePluginOutputs(
 			}
 			if (owned.has(rel)) {
 				throw new Error(
-					`[swelte] plugin output '${rel}' claimed twice (by ${owned.get(rel)} and ${plugin.name})`,
+					`[swelte] plugin output '${rel}' claimed twice (by ${owned.get(rel)} and ${plugin.name})`
 				)
 			}
 			if (typeof body !== 'string') {
@@ -169,7 +173,12 @@ export function writePluginOutputs(
 			}
 		}
 		prune(dir, '')
-		emitted.set(plugin.name, Object.keys(outputs).map((f) => `${plugin.name}/${f}`).sort())
+		emitted.set(
+			plugin.name,
+			Object.keys(outputs)
+				.map((f) => `${plugin.name}/${f}`)
+				.sort()
+		)
 	}
 	try {
 		const markerPath = join(genAbs, 'plugin_outputs.json')

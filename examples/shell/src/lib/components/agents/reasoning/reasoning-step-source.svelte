@@ -1,21 +1,21 @@
 <script lang="ts">
-import type { Snippet } from "svelte";
-import Badge from "#lib/components/ui/badge/badge.svelte";
-import { cn } from "#lib/cn.js";
-import { reasoningExtras } from "./variants";
+import type { Snippet } from 'svelte'
+import Badge from '#lib/components/ui/badge/badge.svelte'
+import { cn } from '#lib/cn.js'
+import { reasoningExtras } from './variants'
 
 let {
 	children,
 	href,
 	class: classProp,
 }: {
-	children?: Snippet;
+	children?: Snippet
 	/** Opens in a new tab when set. */
-	href?: string;
-	class?: string;
-} = $props();
+	href?: string
+	class?: string
+} = $props()
 
-const styles = reasoningExtras();
+const styles = reasoningExtras()
 </script>
 
 {#snippet pill()}

@@ -1,19 +1,19 @@
 <script lang="ts">
-import { cn } from "#lib/cn.js";
-import { reasoningExtras } from "./variants";
+import { cn } from '#lib/cn.js'
+import { reasoningExtras } from './variants'
 
 let {
 	src,
-	alt = "",
+	alt = '',
 	caption,
 	class: classProp,
-}: { src: string; alt?: string; caption?: string; class?: string } = $props();
+}: { src: string; alt?: string; caption?: string; class?: string } = $props()
 
-const styles = reasoningExtras();
+const styles = reasoningExtras()
 </script>
 
 <figure class={cn(styles.figure(), classProp)}>
-	<img {src} {alt} width="220" height="140" class={styles.image()} />
+	<img {src} {alt} width="220" height="140" class={styles.image()}>
 	{#if caption}
 		<figcaption class={styles.caption()}>{caption}</figcaption>
 	{/if}

@@ -1073,7 +1073,9 @@ describe('item 11 — codegen golden project (sample-overlay variant + routes.js
 		const incDir = join(root, 'fake-plus-db')
 		mkdirSync(incDir, { recursive: true })
 		writeFileSync(join(incDir, 'db.v'), 'module backend\n')
-		const dbLike = [{ name: 'db', attrs: [], includes: () => [{ module: 'backend', absDir: incDir }] }]
+		const dbLike = [
+			{ name: 'db', attrs: [], includes: () => [{ module: 'backend', absDir: incDir }] },
+		]
 		await generate(root, { plugins: dbLike })
 		assert.equal(readFileSync(join(root, '.swelte', 'plugin_modules.json'), 'utf8'), '["backend"]')
 		await generate(root, { plugins: dbLike })
@@ -1093,7 +1095,10 @@ describe('item 11 — codegen golden project (sample-overlay variant + routes.js
 			threw = e as Error
 		}
 		assert.ok(threw, 'room sse without roomsPlugin throws')
-		assert.ok(threw?.message.includes('roomsPlugin'), `names roomsPlugin (got ${threw?.message.slice(0, 120)})`)
+		assert.ok(
+			threw?.message.includes('roomsPlugin'),
+			`names roomsPlugin (got ${threw?.message.slice(0, 120)})`
+		)
 	})
 
 	it('classic emit SSE unchanged (room stubs present but inert without rooms fns)', async () => {
@@ -1129,7 +1134,9 @@ describe('item 11 — codegen golden project (sample-overlay variant + routes.js
 			threw = e as Error
 		}
 		assert.ok(threw, 'ws without roomsPlugin throws')
-		assert.ok(threw?.message.includes('roomsPlugin'), `names roomsPlugin (got ${threw?.message.slice(0, 120)})`)
+		assert.ok(
+			threw?.message.includes('roomsPlugin'),
+			`names roomsPlugin (got ${threw?.message.slice(0, 120)})`
+		)
 	})
-
 })

@@ -19,9 +19,10 @@ import { codeHtml } from '#lib/snippets.gen.js'
 	>
 </h1>
 <p class="py-4 opacity-80">
-	Scheduled <code>@[cron]</code> ticks — the <code>@swelte/plus</code> jobs plugin, no <code>@[cron]</code>
-	emission without the <code>plugins:</code> entry.
-	Zero ticks or no plugin emit empty harness fragments (byte-identical).
+	Scheduled <code>@[cron]</code> ticks — the <code>@swelte/plus</code> jobs plugin, no
+	<code>@[cron]</code>
+	emission without the <code>plugins:</code> entry. Zero ticks or no plugin emit empty harness
+	fragments (byte-identical).
 </p>
 
 <div class="mt-2">
@@ -125,8 +126,9 @@ import { codeHtml } from '#lib/snippets.gen.js'
 <ul class="list-disc list-inside opacity-80 space-y-1 mt-2">
 	<li>
 		<code>loadAppHooks</code>
-		(Plus `jobs` plugin) reads <code>src/app.v</code>, validates every <code>@[cron]</code> fn, and emits two fragments
-		into the V harness. Jobs start after app startup succeeds and remain lifecycle-tracked.
+		(Plus `jobs` plugin) reads <code>src/app.v</code>, validates every <code>@[cron]</code> fn, and
+		emits two fragments into the V harness. Jobs start after app startup succeeds and remain
+		lifecycle-tracked.
 	</li>
 	<li>
 		<code>main</code>: top-level <code>swelte_cron_N</code> fns (user bodies verbatim, so fallible
@@ -182,8 +184,8 @@ import { codeHtml } from '#lib/snippets.gen.js'
 	</li>
 	<li>Shutdown stops scheduling and releases the connection/transaction as tracked work exits.</li>
 	<li>
-		Default <code>jobsPlugin</code> (plain, non-durable Plus registration) remains process-local best effort: two containers run
-		two schedulers.
+		Default <code>jobsPlugin</code> (plain, non-durable Plus registration) remains process-local
+		best effort: two containers run two schedulers.
 	</li>
 	<li>Duration qualifiers are supported; cron expressions are not parsed.</li>
 </ul>

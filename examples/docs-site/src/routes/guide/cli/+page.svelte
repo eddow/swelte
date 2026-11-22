@@ -100,9 +100,9 @@ import DocsNav from '#lib/DocsNav.svelte'
 		<div class="collapse-content text-sm opacity-80">
 			<p>
 				Resolved from the project's configured
-				<code>swelte(&#123; plugins: [dbPlugin] &#125;)</code> entry
-				(<code>@swelte/plus/db</code>) — see the <a href="/plus/db" class="link">Database</a> page. Core
-				alone ships no <code>migrate</code>.
+				<code>swelte(&#123; plugins: [dbPlugin] &#125;)</code> entry (<code>@swelte/plus/db</code>)
+				— see the <a href="/plus/db" class="link">Database</a> page. Core alone ships no
+				<code>migrate</code>.
 			</p>
 		</div>
 	</div>

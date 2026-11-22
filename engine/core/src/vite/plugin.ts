@@ -9,6 +9,7 @@ import { resolveV } from '../toolchain.js'
 import type { SweltePlugin } from '../vite/types.js'
 
 import { stageBackendModules } from './backend.js'
+import { loadBuildPhases } from './build.js'
 import { emitClientRouter } from './client-router.js'
 import { collectErrorBoundaries } from './error-boundaries.js'
 import { list, writeIfChanged } from './fs.js'
@@ -17,7 +18,8 @@ import { loadMatchers } from './matchers.js'
 import { materializeNpmV, type NpmVExport, parseNpmVSpecifier } from './npm-v.js'
 import { normalizeOutbox, type OutboxOptions } from './outbox.js'
 import { reactivePropsSource, reactiveStateSource } from './page-state.js'
-import { parseStructs, parseVFile, pascal, collectUnknownAttrs, CORE_ATTRS } from './parse.js'
+import { collectUnknownAttrs, parseStructs, parseVFile, pascal } from './parse.js'
+import { collectPluginDeclarations, dedupPlugins, writePluginOutputs } from './plugins.js'
 import {
 	collectPrerenderEntries,
 	collectSvelteManifest,
@@ -25,7 +27,6 @@ import {
 	listVFiles,
 	modulePath,
 	relPosix,
-	relPosixTop,
 	routeFor,
 	routeParams,
 	routeParamTs,
@@ -47,8 +48,6 @@ import {
 	validateVerbFn,
 	vType,
 } from './server-gen.js'
-import { loadBuildPhases } from './build.js'
-import { collectPluginDeclarations, dedupPlugins, writePluginOutputs } from './plugins.js'
 import {
 	renderServiceWorker,
 	renderServiceWorkerRegister,
@@ -387,7 +386,9 @@ export function swelte(options: SweltePluginOptions = {}): Plugin {
 										const appBackend = resolve(root, libDir, 'backend')
 										if (existsSync(appBackend)) {
 											const shadowed = new Set(
-												listVFiles(appBackend).map((f) => relPosix(appBackend, f).split('/').pop() ?? '')
+												listVFiles(appBackend).map(
+													(f) => relPosix(appBackend, f).split('/').pop() ?? ''
+												)
 											)
 											earlyFiles = earlyFiles.filter((f) => !shadowed.has(f))
 										}
@@ -438,7 +439,7 @@ export function swelte(options: SweltePluginOptions = {}): Plugin {
 					for (const u of collectUnknownAttrs(src, extraAttrs)) {
 						if (u.name === 'ws') {
 							throw new Error(
-								`[swelte] ${file}:${u.line}: @[ws] needs the Plus rooms plugin: swelte({ plugins: [roomsPlugin] }) from '@swelte/plus/rooms' — core has no socket dispatch without it.`,
+								`[swelte] ${file}:${u.line}: @[ws] needs the Plus rooms plugin: swelte({ plugins: [roomsPlugin] }) from '@swelte/plus/rooms' — core has no socket dispatch without it.`
 							)
 						}
 						const hint =
@@ -447,7 +448,9 @@ export function swelte(options: SweltePluginOptions = {}): Plugin {
 								: u.name === 'tool'
 									? ' (AI tools: register toolsPlugin via swelte({ plugins: [...] }))'
 									: ''
-						warnings.push(`${file}:${u.line}: unknown @[${u.name}] — fn ignored (typo or missing plugin?)${hint}`)
+						warnings.push(
+							`${file}:${u.line}: unknown @[${u.name}] — fn ignored (typo or missing plugin?)${hint}`
+						)
 					}
 				}
 				const hooks = loadServerHooks(root)
@@ -461,77 +464,87 @@ export function swelte(options: SweltePluginOptions = {}): Plugin {
 				const routesAbs = resolve(root, routesDir)
 				const libAbs = resolve(root, libDir)
 				const loadedCfg = await loadConfig(root)
-				const claims = collectPluginDeclarations(
-					plugins,
-					{
-						app: (() => {
-							try {
-								const src = readFileSync(join(root, 'src', 'app.v'), 'utf8')
-								return { file: 'src/app.v', modulePath: 'app', source: src }
-							} catch {
-								return null
-							}
-						})(),
-						routes: (() => {
-							const out: { file: string; modulePath: string; source: string }[] = []
-							try {
-								for (const file of listVFiles(routesAbs)) {
-									const abs = file
-									const rel = relPosix(routesAbs, abs)
-									try {
-										out.push({
-											file: `${routesDir}/${rel}`,
-											modulePath: modulePath(routesAbs, abs),
-											source: readFileSync(abs, 'utf8'),
-										})
-									} catch {
-										/* unreadable — main loop handles */
-									}
+				const claims = collectPluginDeclarations(plugins, {
+					app: (() => {
+						try {
+							const src = readFileSync(join(root, 'src', 'app.v'), 'utf8')
+							return { file: 'src/app.v', modulePath: 'app', source: src }
+						} catch {
+							return null
+						}
+					})(),
+					routes: (() => {
+						const out: { file: string; modulePath: string; source: string }[] = []
+						try {
+							for (const file of listVFiles(routesAbs)) {
+								const abs = file
+								const rel = relPosix(routesAbs, abs)
+								try {
+									out.push({
+										file: `${routesDir}/${rel}`,
+										modulePath: modulePath(routesAbs, abs),
+										source: readFileSync(abs, 'utf8'),
+									})
+								} catch {
+									/* unreadable — main loop handles */
 								}
-							} catch {
-								/* no routes dir */
 							}
-							return out
-						})(),
-						libs: (() => {
-							const out: { kind: 'backend' | 'lib'; file: string; modulePath: string; source: string }[] = []
-							try {
-								for (const file of listVFiles(libAbs)) {
-									const abs = file
-									const rel = relPosix(libAbs, abs)
-									const mod = modulePath(libAbs, abs)
-									try {
-										out.push({
-											kind: isBackendMod(mod) ? 'backend' : 'lib',
-											file: `${libDir}/${rel}`,
-											modulePath: mod,
-											source: readFileSync(abs, 'utf8'),
-										})
-									} catch {
-										/* unreadable — main loop handles */
-									}
+						} catch {
+							/* no routes dir */
+						}
+						return out
+					})(),
+					libs: (() => {
+						const out: {
+							kind: 'backend' | 'lib'
+							file: string
+							modulePath: string
+							source: string
+						}[] = []
+						try {
+							for (const file of listVFiles(libAbs)) {
+								const abs = file
+								const rel = relPosix(libAbs, abs)
+								const mod = modulePath(libAbs, abs)
+								try {
+									out.push({
+										kind: isBackendMod(mod) ? 'backend' : 'lib',
+										file: `${libDir}/${rel}`,
+										modulePath: mod,
+										source: readFileSync(abs, 'utf8'),
+									})
+								} catch {
+									/* unreadable — main loop handles */
 								}
-							} catch {
-								/* no lib dir */
 							}
-							return out
-						})(),
-					},
-				)
+						} catch {
+							/* no lib dir */
+						}
+						return out
+					})(),
+				})
 				// Box 3: room-ness comes from plugin claims (rooms plugin owns
 				// `ws` + room-mode `sse`). `import backend` in app source also
 				// needs the hub staged (backend.emit from plain routes).
-				hasRoomSse =
-					plugins.some((pl) => (claims.get(pl.name) ?? []).some((d) => {
+				hasRoomSse = plugins.some((pl) =>
+					(claims.get(pl.name) ?? []).some((d) => {
 						if (d.fn.attr === 'ws') return true
 						if (d.fn.attr !== 'sse' || d.fn.params.length < 2) return false
 						const ps = d.fn.params
 						const tail1 = ps[ps.length - 2].vtype.trim()
 						const tail0 = ps[ps.length - 1].vtype.trim()
-						return /^fn\s*\(\s*string\s*\)\s*chan\s+string$/.test(tail1) && /^fn\s*\(\s*string\s*\)(\s*bool)?$/.test(tail0)
-					}))
-				const appHookFragments: { imports?: string; main?: string; mainInner?: string; shutdown?: string }[] =
-					hooks.imports ? [{ imports: hooks.imports }] : []
+						return (
+							/^fn\s*\(\s*string\s*\)\s*chan\s+string$/.test(tail1) &&
+							/^fn\s*\(\s*string\s*\)(\s*bool)?$/.test(tail0)
+						)
+					})
+				)
+				const appHookFragments: {
+					imports?: string
+					main?: string
+					mainInner?: string
+					shutdown?: string
+				}[] = hooks.imports ? [{ imports: hooks.imports }] : []
 				for (const plug of plugins) {
 					if (!plug.loadAppHooks) continue
 					const got = plug.loadAppHooks(root, 'src', claims.get(plug.name) ?? [])
@@ -917,7 +930,7 @@ ${list(st.fields, (fld) => `\t${fld.name}${fld.optional ? '?' : ''}: ${fld.tstyp
 					genAbsEarly,
 					plugins,
 					pluginGenCtx,
-					new Set(['routes', 'generated', 'types', 'app', 'dev']),
+					new Set(['routes', 'generated', 'types', 'app', 'dev'])
 				)
 				// Deterministic input order: listVFiles sorts per-dir, but
 				// `dispatched` (hence server_gen route order) must be fully
@@ -972,7 +985,10 @@ ${list(st.fields, (fld) => `\t${fld.name}${fld.optional ? '?' : ''}: ${fld.tstyp
 							for (const fn of allFns.filter((x) => pl.attrs.includes(x.attr))) {
 								const decls = claims.get(pl.name) ?? []
 								const decl = decls.find(
-									(d) => d.file === `${routesDir}/${rel}` && d.fn.name === fn.name && d.fn.attr === fn.attr,
+									(d) =>
+										d.file === `${routesDir}/${rel}` &&
+										d.fn.name === fn.name &&
+										d.fn.attr === fn.attr
 								)
 								pl.validate?.(`${routesDir}/${rel}`, fn, decl)
 							}
@@ -1118,7 +1134,7 @@ ${list(st.fields, (fld) => `\t${fld.name}${fld.optional ? '?' : ''}: ${fld.tstyp
 						if (!roomsRegistered)
 							for (const w of fns.filter((x) => x.attr === 'ws')) {
 								throw new Error(
-									`[swelte] ${routesDir}/${rel}: @[ws] ${w.name} needs the Plus rooms plugin: swelte({ plugins: [roomsPlugin] }) from '@swelte/plus/rooms' — core has no socket dispatch without it.`,
+									`[swelte] ${routesDir}/${rel}: @[ws] ${w.name} needs the Plus rooms plugin: swelte({ plugins: [roomsPlugin] }) from '@swelte/plus/rooms' — core has no socket dispatch without it.`
 								)
 							}
 						const route = routeFor(routesDir, routesAbs, f, knownMatchers)
@@ -1252,11 +1268,20 @@ ${list(st.fields, (fld) => `\t${fld.name}${fld.optional ? '?' : ''}: ${fld.tstyp
 						// leaf compiles before the plugin pass).
 						const roomDecls = (claims.get('rooms') ?? []).filter((c) => c.modulePath === d.mod)
 						const roomsOwned =
-							roomDecls.length > 0 &&
-							plugins.some((pl) => pl.name === 'rooms' && pl.emitRoute)
-						let leafSrc = emitRouteFile(d.mod, d.route, d.prefix, src, fns, chain, loads, emittedWrappers, {
-							roomsOwned,
-						})
+							roomDecls.length > 0 && plugins.some((pl) => pl.name === 'rooms' && pl.emitRoute)
+						let leafSrc = emitRouteFile(
+							d.mod,
+							d.route,
+							d.prefix,
+							src,
+							fns,
+							chain,
+							loads,
+							emittedWrappers,
+							{
+								roomsOwned,
+							}
+						)
 						for (const plug of plugins) {
 							if (!plug.emitRoute) continue
 							const decls = (claims.get(plug.name) ?? []).filter((c) => c.modulePath === d.mod)
@@ -1269,9 +1294,9 @@ ${list(st.fields, (fld) => `\t${fld.name}${fld.optional ? '?' : ''}: ${fld.tstyp
 									qualifier: c.fn.qualifier,
 									params: c.fn.params,
 									fallible: c.fn.fallible,
-								})),
+								}))
 							)
-							if (extra.trim()) leafSrc += '\n' + extra
+							if (extra.trim()) leafSrc += `\n${extra}`
 						}
 						mkdirSync(routesGenDir, { recursive: true })
 						writeIfChanged(join(routesGenDir, `${vFileSafe(d.mod)}.v`), leafSrc)
@@ -1397,9 +1422,9 @@ ${list(st.fields, (fld) => `\t${fld.name}${fld.optional ? '?' : ''}: ${fld.tstyp
 							// appends the real fan-out below.
 							new Set(
 								[...(claims.get('rooms') ?? [])]
-									.filter((c) => plugins.some((pl) => pl.name === 'rooms' && pl.emitServerGen))
-									.map((c) => c.modulePath),
-							),
+									.filter((_c) => plugins.some((pl) => pl.name === 'rooms' && pl.emitServerGen))
+									.map((c) => c.modulePath)
+							)
 						)
 						// Hook emitServerGen: plugin-owned fan-out tables (Plus rooms
 						// appends sse_is_room / sse_room_for / ws_is / ws_open_for for
@@ -1415,7 +1440,9 @@ ${list(st.fields, (fld) => `\t${fld.name}${fld.optional ? '?' : ''}: ${fld.tstyp
 									c.fn.attr === 'ws' ||
 									(c.fn.attr === 'sse' &&
 										ps.length >= 2 &&
-										/^fn\s*\(\s*string\s*\)\s*chan\s+string$/.test(ps[ps.length - 2].vtype.trim()) &&
+										/^fn\s*\(\s*string\s*\)\s*chan\s+string$/.test(
+											ps[ps.length - 2].vtype.trim()
+										) &&
 										/^fn\s*\(\s*string\s*\)(\s*bool)?$/.test(ps[ps.length - 1].vtype.trim()))
 								list.push({ attr: c.fn.attr, room })
 							}
@@ -1433,12 +1460,9 @@ ${list(st.fields, (fld) => `\t${fld.name}${fld.optional ? '?' : ''}: ${fld.tstyp
 								})
 							if (!plugRoutes.length) continue
 							const extra = plug.emitServerGen(plugRoutes)
-							if (extra.trim()) serverGenSrc += '\n' + extra
+							if (extra.trim()) serverGenSrc += `\n${extra}`
 						}
-						writeIfChanged(
-							join(routesGenDir, `server_gen.v`),
-							serverGenSrc
-						)
+						writeIfChanged(join(routesGenDir, `server_gen.v`), serverGenSrc)
 					}
 					// Leaf-vs-index clash: foo.v + foo/index.v (or +page.v) both exist.
 					// Warn-only here (the hard build error lives in the per-file
@@ -1515,7 +1539,11 @@ ${list(st.fields, (fld) => `\t${fld.name}${fld.optional ? '?' : ''}: ${fld.tstyp
 						// warn-and-expose-RPC behavior for verbs, extend it to
 						// @[before]/@[after].
 						const verbFns = parseVFile(src, extraAttrs).filter(
-							(x) => x.attr !== 'rpc' && x.attr !== 'before' && x.attr !== 'after' && !extraAttrs.includes(x.attr)
+							(x) =>
+								x.attr !== 'rpc' &&
+								x.attr !== 'before' &&
+								x.attr !== 'after' &&
+								!extraAttrs.includes(x.attr)
 						)
 						for (const vf of [
 							...verbFns,
@@ -2060,8 +2088,9 @@ export declare const dev: boolean
 								}
 							}
 							if (inc.module === 'backend') {
-								// Merge core hub files ({hub,ws}.v) into the same
-								// dir the Plus include staged `db.v` into.
+								// Merge every plugin's `backend/*.v` (Plus `db` →
+								// `db.v`, Plus `rooms` → `hub.v` + `ws.v`) into
+								// the same `.swelte/backend/` dir.
 								for (const [k, body] of stagedBackendFiles) {
 									if (!k.startsWith('backend/')) continue
 									if (k === `backend/db.v`) continue
@@ -2071,9 +2100,9 @@ export declare const dev: boolean
 										/* ignore */
 									}
 								}
-								// Prune staged files the gate dropped (e.g. `hub.v`
-								// when room routes go away, `db.v` when the
-								// Plus plugin is removed). App-owned files
+								// Prune staged files a plugin no longer stages
+								// (e.g. `hub.v`/`ws.v` after the Plus `rooms`
+								// plugin is removed, `db.v` after `db`). App-owned files
 								// (scaffolded `db.v`, user modules) are never
 								// pruned here — `stageBackendModules` owns them.
 								try {
@@ -2101,7 +2130,7 @@ export declare const dev: boolean
 					let generatedOwners = new Set<string>()
 					try {
 						const marker = JSON.parse(
-							readFileSync(join(genDir, 'plugin_outputs.json'), 'utf8'),
+							readFileSync(join(genDir, 'plugin_outputs.json'), 'utf8')
 						) as Record<string, string[]>
 						generatedOwners = new Set(Object.keys(marker))
 					} catch {
@@ -2150,7 +2179,7 @@ export declare const dev: boolean
 					// containing both don't render twice.
 					const cfgRecord = cfg as unknown as Record<string, unknown>
 					const evaluated = plugins.map((pp) =>
-						pp.harness?.(cfgRecord[pp.configKey ?? ''], claims.get(pp.name) ?? []),
+						pp.harness?.(cfgRecord[pp.configKey ?? ''], claims.get(pp.name) ?? [])
 					)
 					const pluginHarness = [
 						...evaluated
@@ -2160,7 +2189,9 @@ export declare const dev: boolean
 								return startup
 							}),
 						...appHookFragments,
-						...[...evaluated].reverse().flatMap((h) => (h?.shutdown !== undefined ? [{ shutdown: h.shutdown }] : [])),
+						...[...evaluated]
+							.reverse()
+							.flatMap((h) => (h?.shutdown !== undefined ? [{ shutdown: h.shutdown }] : [])),
 					]
 					writeIfChanged(
 						join(genDir, 'server.v'),

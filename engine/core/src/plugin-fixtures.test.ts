@@ -8,7 +8,6 @@ import { join } from 'node:path'
 import { describe, it } from 'node:test'
 import type { SweltePlugin } from './vite/types.js'
 
-
 function scaffold(): string {
 	const root = mkdtempSync(join(tmpdir(), 'swelte-fixtures-'))
 	mkdirSync(join(root, 'src', 'routes', 'api'), { recursive: true })
@@ -34,11 +33,11 @@ describe('§1 two fixture plugins + app startup hook', () => {
 		try {
 			writeFileSync(
 				join(root, 'src', 'app.v'),
-				'module app\n@[startup]\npub fn boot() {\n\tprintln(\'app-boot\')\n}\n@[shutdown]\npub fn down() {\n\tprintln(\'app-down\')\n}\n',
+				"module app\n@[startup]\npub fn boot() {\n\tprintln('app-boot')\n}\n@[shutdown]\npub fn down() {\n\tprintln('app-down')\n}\n"
 			)
 			writeFileSync(
 				join(root, 'src', 'routes', 'api', 'ping.v'),
-				'module api_ping\n@[get]\npub fn ping() string {\n\treturn "pong"\n}\n',
+				'module api_ping\n@[get]\npub fn ping() string {\n\treturn "pong"\n}\n'
 			)
 			const mk = (name: string): SweltePlugin => ({
 				name,
@@ -51,17 +50,24 @@ describe('§1 two fixture plugins + app startup hook', () => {
 			})
 			await generate(root, [mk('first'), mk('second')])
 			const server = readFileSync(join(root, '.swelte', 'server.v'), 'utf8')
-			for (const marker of ['app-boot', 'first-start', 'second-start', 'second-stop', 'first-stop', 'app-down'])
+			for (const marker of [
+				'app-boot',
+				'first-start',
+				'second-start',
+				'second-stop',
+				'first-stop',
+				'app-down',
+			])
 				assert.ok(server.includes(marker), `harness contains ${marker}`)
 			assert.ok(
 				server.indexOf('app-boot') < server.indexOf('first-start') &&
 					server.indexOf('first-start') < server.indexOf('second-start'),
-				'startup precedes plugin init in registration order',
+				'startup precedes plugin init in registration order'
 			)
 			assert.ok(
 				server.indexOf('second-stop') < server.indexOf('first-stop') &&
 					server.indexOf('first-stop') < server.indexOf('app-down'),
-				'reverse cleanup precedes app shutdown',
+				'reverse cleanup precedes app shutdown'
 			)
 			assert.equal(readFileSync(join(root, '.swelte', 'first', 'out.txt'), 'utf8'), 'first\n')
 			assert.equal(readFileSync(join(root, '.swelte', 'second', 'out.txt'), 'utf8'), 'second\n')
@@ -89,11 +95,11 @@ describe('§1 two fixture plugins + app startup hook', () => {
 		try {
 			writeFileSync(
 				join(root, 'src', 'app.v'),
-				'module app\npub struct Cfg {\n\tflag bool\n}\n@[tick(\'60s\')]\npub fn every() {}\n',
+				"module app\npub struct Cfg {\n\tflag bool\n}\n@[tick('60s')]\npub fn every() {}\n"
 			)
 			writeFileSync(
 				join(root, 'src', 'lib', 'jobs.v'),
-				'module jobs\npub struct Job {\n\tname string\n}\n@[tick(\'60s\')]\npub fn helper() {}\n',
+				"module jobs\npub struct Job {\n\tname string\n}\n@[tick('60s')]\npub fn helper() {}\n"
 			)
 			let got: { file: string; modulePath: string; kind: string; structs: string[] }[] = []
 			const probe: SweltePlugin = {

@@ -15,7 +15,7 @@ import { codeHtml } from '#lib/snippets.gen.js'
 <h1 class="text-4xl font-bold mt-2">
 	Realtime
 	<span class="text-sm font-normal opacity-60"
-		>(Plus <code>db</code> plugin — hub stages via <code>plugins: [dbPlugin]</code>)</span
+		>(Plus <code>rooms</code> plugin — hub stages via <code>plugins: [roomsPlugin]</code>)</span
 	>
 </h1>
 <p class="py-4 opacity-80">

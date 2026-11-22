@@ -6,23 +6,28 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, it } from 'node:test'
 import { renderHarness } from './gen/config.js'
-import { assertPluginCli, assertPluginName, collectPluginDeclarations, dedupPlugins, writePluginOutputs } from './vite/plugins.js'
-import type { SweltePlugin, SweltePluginDeclaration } from './vite/types.js'
 import { parseStructs, parseVFile } from './vite/parse.js'
-
+import {
+	assertPluginName,
+	collectPluginDeclarations,
+	dedupPlugins,
+	writePluginOutputs,
+} from './vite/plugins.js'
+import type { SweltePlugin, SweltePluginDeclaration } from './vite/types.js'
 
 function declSources() {
 	return {
 		app: {
 			file: 'src/app.v',
 			modulePath: 'app',
-			source: 'module app\n@[cron(\'60s\')]\npub fn tick() {}\n',
+			source: "module app\n@[cron('60s')]\npub fn tick() {}\n",
 		},
 		routes: [
 			{
 				file: 'src/routes/api/rooms.v',
 				modulePath: 'api/rooms',
-				source: 'module api_rooms\n@[cron(\'60s\')]\npub fn tick() {}\n@[get]\npub fn list() string { return "" }\n',
+				source:
+					'module api_rooms\n@[cron(\'60s\')]\npub fn tick() {}\n@[get]\npub fn list() string { return "" }\n',
 			},
 		],
 		libs: [
@@ -30,13 +35,14 @@ function declSources() {
 				kind: 'backend' as const,
 				file: 'src/lib/backend/jobs.v',
 				modulePath: 'backend/jobs',
-				source: 'module jobs\npub struct Job {\n\tname string\n}\n@[note(\'x\')]\npub fn helper() {}\n',
+				source:
+					"module jobs\npub struct Job {\n\tname string\n}\n@[note('x')]\npub fn helper() {}\n",
 			},
 			{
 				kind: 'lib' as const,
 				file: 'src/lib/text.v',
 				modulePath: 'text',
-				source: 'module text\n@[note(\'y\')]\npub fn helper() {}\n',
+				source: "module text\n@[note('y')]\npub fn helper() {}\n",
 			},
 		],
 	}
@@ -54,7 +60,7 @@ describe('§1 plugin declarations', () => {
 			[
 				['app', 'src/app.v', 'app', 2],
 				['route', 'src/routes/api/rooms.v', 'api/rooms', 2],
-			],
+			]
 		)
 		assert.equal(crons[0].fn.line, 2, 'RpcFn carries the attribute line')
 		for (const d of crons) assert.ok(d.source.includes('@[cron'), 'keeps raw source')
@@ -65,12 +71,12 @@ describe('§1 plugin declarations', () => {
 			[
 				['backend', 'src/lib/backend/jobs.v'],
 				['lib', 'src/lib/text.v'],
-			],
+			]
 		)
 		const backendNote = notes.find((d) => d.kind === 'backend') as SweltePluginDeclaration
 		assert.deepEqual(
 			backendNote.structs.map((s) => s.name),
-			['Job'],
+			['Job']
 		)
 		assert.ok(backendNote.source.includes('pub struct Job'), 'keeps source with structs')
 	})
@@ -80,11 +86,10 @@ describe('§1 plugin declarations', () => {
 		const b: SweltePlugin = { name: 'jobs', attrs: ['note'] }
 		assert.deepEqual(
 			dedupPlugins([a, b]).map((p) => p.attrs),
-			[['cron']],
+			[['cron']]
 		)
 	})
 })
-
 
 describe('§1 plugin generate ownership', () => {
 	it('emits named files and prunes stale output on regeneration or removal', () => {
@@ -105,7 +110,12 @@ describe('§1 plugin generate ownership', () => {
 			}
 			writePluginOutputs(genAbs, [cli], ctxFor, reserved)
 			assert.ok(readFileSync(join(genAbs, 'cliplug', 'cmd.mjs'), 'utf8').includes('export'))
-			writePluginOutputs(genAbs, [{ ...cli, generate: () => ({ 'cmd.mjs': 'export {}\n' }) }], ctxFor, reserved)
+			writePluginOutputs(
+				genAbs,
+				[{ ...cli, generate: () => ({ 'cmd.mjs': 'export {}\n' }) }],
+				ctxFor,
+				reserved
+			)
 			assert.equal(existsSync(join(genAbs, 'cliplug', 'nested', 'help.txt')), false)
 			writePluginOutputs(genAbs, [], ctxFor, reserved)
 			assert.equal(existsSync(join(genAbs, 'cliplug')), false)
@@ -125,10 +135,14 @@ describe('§1 plugin generate ownership', () => {
 					writePluginOutputs(
 						genAbs,
 						[bad],
-						() => ({ dirs: { routesDir: 'r', libDir: 'l', outDir: 'o' }, declarations: [], config: undefined }),
-						new Set(['routes']),
+						() => ({
+							dirs: { routesDir: 'r', libDir: 'l', outDir: 'o' },
+							declarations: [],
+							config: undefined,
+						}),
+						new Set(['routes'])
 					),
-				/collides with a core dir/,
+				/collides with a core dir/
 			)
 		} finally {
 			rmSync(root, { recursive: true, force: true })
@@ -136,22 +150,39 @@ describe('§1 plugin generate ownership', () => {
 	})
 })
 
-
 describe('§1 review fixes (1–4)', () => {
 	it('rejects unsafe plugin names before any output or cleanup', () => {
 		for (const bad of ['../escaped', 'a/b', '..', '', '.hidden', 'has space', 'semi;colon']) {
 			assert.throws(() => assertPluginName(bad), /safe name/, `rejects ${bad}`)
-			assert.throws(() => dedupPlugins([{ name: bad, attrs: [] }]), /safe name/, `dedup rejects ${bad}`)
+			assert.throws(
+				() => dedupPlugins([{ name: bad, attrs: [] }]),
+				/safe name/,
+				`dedup rejects ${bad}`
+			)
 		}
 		// Path escape end-to-end: must throw, must not write outside .swelte/.
 		const root = mkdtempSync(join(tmpdir(), 'swelte-plugin-escape-'))
 		try {
 			const genAbs = join(root, '.swelte')
 			mkdirSync(genAbs, { recursive: true })
-			const evil = { name: '../escaped', attrs: [], generate: () => ({ 'pwn.txt': 'x' }) } as unknown as SweltePlugin
+			const evil = {
+				name: '../escaped',
+				attrs: [],
+				generate: () => ({ 'pwn.txt': 'x' }),
+			} as unknown as SweltePlugin
 			assert.throws(
-				() => writePluginOutputs(genAbs, [evil], () => ({ dirs: { routesDir: 'r', libDir: 'l', outDir: 'o' }, declarations: [], config: undefined }), new Set()),
-				/safe name/,
+				() =>
+					writePluginOutputs(
+						genAbs,
+						[evil],
+						() => ({
+							dirs: { routesDir: 'r', libDir: 'l', outDir: 'o' },
+							declarations: [],
+							config: undefined,
+						}),
+						new Set()
+					),
+				/safe name/
 			)
 			assert.equal(existsSync(join(root, 'escaped', 'pwn.txt')), false)
 			assert.equal(existsSync(join(root, 'pwn.txt')), false)
@@ -169,24 +200,34 @@ describe('§1 review fixes (1–4)', () => {
 		const { resolveCommands } = await import('./cli.js')
 		assert.throws(
 			() => resolveCommands([{ cli: [{ name: 'x', summary: 'y', run: () => {} }] }]),
-			/safe name|command provider/,
+			/safe name|command provider/
 		)
 		assert.throws(
 			() => resolveCommands([{ name: 'ok', cli: [{ name: '', summary: '', run: null }] } as never]),
-			/needs a (name|summary|run)/,
+			/needs a (name|summary|run)/
 		)
-		const cmds = resolveCommands([{ name: 'good', cli: [{ name: 'hello', summary: 'hi', run: () => {} }] }])
-		assert.ok(cmds.some((c) => c.name === 'hello'), 'named provider registers')
+		const cmds = resolveCommands([
+			{ name: 'good', cli: [{ name: 'hello', summary: 'hi', run: () => {} }] },
+		])
+		assert.ok(
+			cmds.some((c) => c.name === 'hello'),
+			'named provider registers'
+		)
 	})
 
 	it('swelte check reports plugin validate/generate failures read-only', async () => {
-		const { mkdtempSync: mk, mkdirSync: mkd, writeFileSync: wfs, existsSync: ex } = await import('node:fs')
+		const {
+			mkdtempSync: mk,
+			mkdirSync: mkd,
+			writeFileSync: wfs,
+			existsSync: ex,
+		} = await import('node:fs')
 		const root = mk(join(tmpdir(), 'swelte-check-plugins-'))
 		try {
 			mkd(join(root, 'src', 'routes'), { recursive: true })
 			wfs(join(root, 'package.json'), '{"name":"t","type":"module"}')
 			wfs(join(root, 'svelte.config.js'), 'export default {}')
-			wfs(join(root, 'src', 'app.v'), 'module app\n@[boom(\'x\')]\npub fn bad() {}\n')
+			wfs(join(root, 'src', 'app.v'), "module app\n@[boom('x')]\npub fn bad() {}\n")
 			const { collectDiagnostics } = await import('./gen/diagnostics.js')
 			// No plugins configured: check passes with no plugin diagnostics.
 			let diags = await collectDiagnostics(root)
@@ -198,11 +239,18 @@ describe('§1 review fixes (1–4)', () => {
 			const failing: SweltePlugin = {
 				name: 'failer',
 				attrs: ['boom'],
-				validate: () => { throw new Error('[swelte] boom is bad') },
-				generate: () => { throw new Error('[swelte] gen blew up') },
+				validate: () => {
+					throw new Error('[swelte] boom is bad')
+				},
+				generate: () => {
+					throw new Error('[swelte] gen blew up')
+				},
 				cli: [{ name: 'bad', summary: '', run: () => {} }] as never,
 			}
-			diags = await collectPluginDiagnostics(root, [failing], { routesDir: 'src/routes', libDir: 'src/lib' })
+			diags = await collectPluginDiagnostics(root, [failing], {
+				routesDir: 'src/routes',
+				libDir: 'src/lib',
+			})
 			const kinds = diags.map((d) => d.kind).sort()
 			assert.ok(kinds.includes('plugin-validate'), `validate failure reported (got ${kinds})`)
 			assert.ok(kinds.includes('plugin-generate'), `generate failure reported (got ${kinds})`)
@@ -232,20 +280,34 @@ describe('§1 lifecycle ordering vs the app startup hook', () => {
 				{ mainInner: "\tprintln('second-start')" },
 				{ shutdown: "println('second-stop')" },
 				{ shutdown: "println('first-stop')" },
-			],
+			]
 		)
 		// Startup: @[startup] body first, then plugins registration-ordered.
 		const startOrder = ['app-start', 'first-start', 'second-start'].map((s) => source.indexOf(s))
-		assert.ok(startOrder.every((i) => i >= 0), 'startup calls emitted')
-		assert.deepEqual([...startOrder].sort((a, b) => a - b), startOrder, 'registration init order')
+		assert.ok(
+			startOrder.every((i) => i >= 0),
+			'startup calls emitted'
+		)
+		assert.deepEqual(
+			[...startOrder].sort((a, b) => a - b),
+			startOrder,
+			'registration init order'
+		)
 		// Cleanup: plugin shutdown fragments (LIFO) run before the app
 		// @[shutdown] body inside swelte_app_shutdown.
 		const stopOrder = ['second-stop', 'first-stop', 'app-stop'].map((s) => source.indexOf(s))
-		assert.ok(stopOrder.every((i) => i >= 0), 'shutdown calls emitted')
-		assert.deepEqual([...stopOrder].sort((a, b) => a - b), stopOrder, 'reverse cleanup order')
+		assert.ok(
+			stopOrder.every((i) => i >= 0),
+			'shutdown calls emitted'
+		)
+		assert.deepEqual(
+			[...stopOrder].sort((a, b) => a - b),
+			stopOrder,
+			'reverse cleanup order'
+		)
 		assert.ok(
 			source.indexOf('swelte_app_shutdown') < source.indexOf('first-start'),
-			'shutdown hook section precedes main (cleanup runs at shutdown)',
+			'shutdown hook section precedes main (cleanup runs at shutdown)'
 		)
 	})
 })

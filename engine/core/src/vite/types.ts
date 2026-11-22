@@ -294,7 +294,7 @@ export interface SweltePlugin {
 	validate?: (
 		rel: string,
 		fn: { name: string; attr: string; qualifier?: string },
-		declaration?: SweltePluginDeclaration,
+		declaration?: SweltePluginDeclaration
 	) => void
 	/** V fragments appended to the route leaf file (e.g. Plus rooms emits
 	 *  the `sse_room` / `swelte_ws_open` accessors for claimed room/WS fns).
@@ -308,7 +308,7 @@ export interface SweltePlugin {
 			qualifier?: string
 			params?: { name: string; vtype: string }[]
 			fallible?: boolean
-		}[],
+		}[]
 	) => string
 	/** V fragment appended to server_gen.v (e.g. Plus rooms emits the
 	 *  `sse_is_room` / `sse_room_for` / `ws_is` / `ws_open_for` fan-out
@@ -319,7 +319,7 @@ export interface SweltePlugin {
 	 *  out per capability — a room-only file has no `swelte_ws_open`
 	 *  accessor and must not appear in the socket tables. */
 	emitServerGen?: (
-		routes: { route: string; prefix: string; attrs: string[]; room: boolean; socket: boolean }[],
+		routes: { route: string; prefix: string; attrs: string[]; room: boolean; socket: boolean }[]
 	) => string
 	harness?: (config: unknown, declarations?: SweltePluginDeclaration[]) => SweltePluginHarness
 	/** App-level hooks from `src/app.v`: called with the parsed fns carrying
@@ -329,7 +329,7 @@ export interface SweltePlugin {
 	loadAppHooks?: (
 		root: string,
 		srcDir?: string,
-		declarations?: SweltePluginDeclaration[],
+		declarations?: SweltePluginDeclaration[]
 	) => {
 		fragment?: SweltePluginHarness
 		errors?: string[]

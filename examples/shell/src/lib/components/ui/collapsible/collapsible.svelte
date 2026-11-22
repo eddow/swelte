@@ -1,7 +1,7 @@
 <script lang="ts">
-import { Collapsible as CollapsiblePrimitive } from "bits-ui";
-import type { Snippet } from "svelte";
-import { cn } from "#lib/cn.js";
+import { Collapsible as CollapsiblePrimitive } from 'bits-ui'
+import type { Snippet } from 'svelte'
+import { cn } from '#lib/cn.js'
 
 let {
 	children,
@@ -10,11 +10,11 @@ let {
 	class: classProp,
 	...rest
 }: {
-	children?: Snippet;
-	open?: boolean;
-	disabled?: boolean;
-	class?: string;
-} = $props();
+	children?: Snippet
+	open?: boolean
+	disabled?: boolean
+	class?: string
+} = $props()
 </script>
 
 <CollapsiblePrimitive.Root
@@ -22,7 +22,7 @@ let {
 	bind:open
 	{disabled}
 	data-slot="collapsible"
-	class={cn("w-full", classProp)}
+	class={cn('w-full', classProp)}
 >
 	{@render children?.()}
 </CollapsiblePrimitive.Root>

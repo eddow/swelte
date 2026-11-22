@@ -33,7 +33,9 @@ function listVFiles(dir: string): string[] {
 export async function runTest(ctx: Ctx): Promise<void> {
 	const root = resolve(String(ctx.opts.root ?? process.cwd()))
 	const { resolveV, vVersion, toolchainEnv, needsGlobals } = await import('../toolchain.js')
-	const { loadConfig, loadProjectSwelteOptions, loadProjectSweltePlugins } = await import('../gen/config.js')
+	const { loadConfig, loadProjectSwelteOptions, loadProjectSweltePlugins } = await import(
+		'../gen/config.js'
+	)
 	const v = resolveV(import.meta.url)
 	ctx.log(`V toolchain: ${vVersion(v)} (${v})`)
 	ctx.log(`root ${root}`)

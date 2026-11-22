@@ -17,9 +17,8 @@
 import { readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { parseVFile } from '@swelte/core/vite'
-import { defineSweltePlugin } from '@swelte/core/vite'
 import type { SweltePlugin } from '@swelte/core/vite'
+import { defineSweltePlugin, parseVFile } from '@swelte/core/vite'
 
 /** Duration literal for `@[cron]`: digits + s|m|h, nonzero (`'60s'`, `'5m'`, `'1h'`). */
 export function plusCronSeconds(every: string): number {
@@ -328,5 +327,6 @@ export function createJobsPlugin(options: { durable?: boolean } = {}): SweltePlu
 	})
 }
 
-/** Legacy name kept for the `@swelte/plus` shim and existing configs. */
+/** Default instance for `swelte({ plugins: [jobsPlugin] })` — process-local
+ *  (non-durable). Use `createJobsPlugin({ durable: true })` for persistence. */
 export const jobsPlugin = createJobsPlugin()

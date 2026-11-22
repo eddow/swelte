@@ -63,19 +63,13 @@ describe('attr fan-out + validation errors (parse level)', () => {
 			['cron']
 		)
 		// Registered via extraAttrs (jobs plugin on) → known, silent.
-		assert.deepEqual(
-			collectUnknownAttrs(`@[cron('60s')] pub fn tick() { }`, ['cron']),
-			[]
-		)
+		assert.deepEqual(collectUnknownAttrs(`@[cron('60s')] pub fn tick() { }`, ['cron']), [])
 		// Typo'd core attr warns with the fn's line.
 		assert.deepEqual(collectUnknownAttrs(`module p\n@[gett]\npub fn a() string { return '' }`), [
 			{ name: 'gett', line: 2 },
 		])
 		// Core attrs + stacked mixes stay silent.
-		assert.deepEqual(
-			collectUnknownAttrs(`@[rpc]\n@[sse]\npub fn tick() string { return '' }`),
-			[]
-		)
+		assert.deepEqual(collectUnknownAttrs(`@[rpc]\n@[sse]\npub fn tick() string { return '' }`), [])
 		// V-native attrs (`@[heap]`, `@[unsafe]`, `@[required]`, `@[json: ...]`)
 		// are never dispatch — silent, and never consume the fn.
 		assert.deepEqual(collectUnknownAttrs(`@[heap]\npub fn tick() string { return '' }`), [])
@@ -83,10 +77,7 @@ describe('attr fan-out + validation errors (parse level)', () => {
 			collectUnknownAttrs(`@[required]\n@[get]\npub fn g() string { return '' }`),
 			[]
 		)
-		assert.deepEqual(
-			collectUnknownAttrs(`@[json: 'name']\npub fn tick() string { return '' }`),
-			[]
-		)
+		assert.deepEqual(collectUnknownAttrs(`@[json: 'name']\npub fn tick() string { return '' }`), [])
 		// `// @[sse]` comment lines never warn (parse-level merge guard).
 		assert.deepEqual(
 			collectUnknownAttrs(`// @[bogus]\n@[get]\npub fn g() string { return '' }`),

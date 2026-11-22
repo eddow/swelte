@@ -7,7 +7,7 @@
 import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { join, resolve, sep } from 'node:path'
 import { validateNpmVExports } from '../vite/npm-v.js'
-import { parseStructs, parseVFile, collectUnknownAttrs } from '../vite/parse.js'
+import { collectUnknownAttrs, parseStructs, parseVFile } from '../vite/parse.js'
 import { assertPluginCli, assertPluginName, collectPluginDeclarations } from '../vite/plugins.js'
 import type { SweltePlugin } from '../vite/types.js'
 import { loadConfig, loadProjectSweltePlugins } from './config.js'
@@ -548,9 +548,8 @@ export function collectLibDiagnostics(
 export async function collectPluginDiagnostics(
 	root: string,
 	plugins: SweltePlugin[],
-	opts: { routesDir: string; libDir: string },
+	opts: { routesDir: string; libDir: string }
 ): Promise<Diagnostic[]> {
-
 	const out: Diagnostic[] = []
 	const routesAbs = resolve(root, opts.routesDir)
 	const libAbs = resolve(root, opts.libDir)
@@ -564,20 +563,33 @@ export async function collectPluginDiagnostics(
 					modulePath: rel.replace(/\.v$/, ''),
 					source: readFileSync(f, 'utf8'),
 				})
-			} catch { /* unreadable — generate reports */ }
+			} catch {
+				/* unreadable — generate reports */
+			}
 		}
 		return found
 	}
 	try {
 		for (const plugin of plugins) assertPluginName(plugin?.name)
 	} catch (e) {
-		out.push({ file: 'svelte.config.js', line: 1, kind: 'plugin-config', message: (e as Error).message.replace(/^\[swelte\] /, '') })
+		out.push({
+			file: 'svelte.config.js',
+			line: 1,
+			kind: 'plugin-config',
+			message: (e as Error).message.replace(/^\[swelte\] /, ''),
+		})
 		return out.sort((a, b) => a.file.localeCompare(b.file) || a.kind.localeCompare(b.kind))
 	}
 	let app: { file: string; modulePath: string; source: string } | null = null
 	try {
-		app = { file: 'src/app.v', modulePath: 'app', source: readFileSync(join(root, 'src', 'app.v'), 'utf8') }
-	} catch { /* absent — no app declarations */ }
+		app = {
+			file: 'src/app.v',
+			modulePath: 'app',
+			source: readFileSync(join(root, 'src', 'app.v'), 'utf8'),
+		}
+	} catch {
+		/* absent — no app declarations */
+	}
 	const routes = readAll(routesAbs)
 	const libFiles = readAll(libAbs)
 	const claims = collectPluginDeclarations(
@@ -585,43 +597,69 @@ export async function collectPluginDiagnostics(
 		{
 			app,
 			routes,
-			libs: libFiles.map((l) => ({ kind: (isBackendMod(l.modulePath) ? 'backend' : 'lib') as 'backend' | 'lib', ...l })),
+			libs: libFiles.map((l) => ({
+				kind: (isBackendMod(l.modulePath) ? 'backend' : 'lib') as 'backend' | 'lib',
+				...l,
+			})),
 		},
 		parseVFile,
-		parseStructs,
+		parseStructs
 	)
 	for (const plugin of plugins) {
 		const decls = claims.get(plugin.name) ?? []
 		try {
 			assertPluginCli(plugin.name, plugin.cli ?? [])
 		} catch (e) {
-		out.push({ file: 'svelte.config.js', line: 1, kind: 'plugin-cli', message: (e as Error).message.replace(/^\[swelte\] /, '') })
+			out.push({
+				file: 'svelte.config.js',
+				line: 1,
+				kind: 'plugin-cli',
+				message: (e as Error).message.replace(/^\[swelte\] /, ''),
+			})
 		}
 		for (const decl of decls) {
 			try {
 				plugin.validate?.(decl.file, { name: decl.fn.name, attr: decl.fn.attr }, decl as never)
 			} catch (e) {
-				out.push({ file: decl.file, line: decl.line, kind: 'plugin-validate', message: (e as Error).message.replace(/^\[swelte\] /, '') })
+				out.push({
+					file: decl.file,
+					line: decl.line,
+					kind: 'plugin-validate',
+					message: (e as Error).message.replace(/^\[swelte\] /, ''),
+				})
 			}
 		}
 		if (plugin.generate) {
 			try {
-				const outputs = plugin.generate({ dirs: { routesDir: opts.routesDir, libDir: opts.libDir, outDir: '.swelte' }, declarations: decls as never, config: undefined } as never) ?? {}
+				const outputs =
+					plugin.generate({
+						dirs: { routesDir: opts.routesDir, libDir: opts.libDir, outDir: '.swelte' },
+						declarations: decls as never,
+						config: undefined,
+					} as never) ?? {}
 				const seen = new Set<string>()
 				for (const [file, body] of Object.entries(outputs)) {
-					if (!/^[A-Za-z0-9][\w.-]*(\/[\w.-]+)*\.[A-Za-z0-9]+$/.test(file) || file.split('/').includes('..'))
+					if (
+						!/^[A-Za-z0-9][\w.-]*(\/[\w.-]+)*\.[A-Za-z0-9]+$/.test(file) ||
+						file.split('/').includes('..')
+					)
 						throw new Error(`plugin ${plugin.name}: invalid output file '${file}'`)
 					if (['routes', 'generated', 'types', 'app', 'dev'].includes(file.split('/')[0] ?? ''))
 						throw new Error(`plugin ${plugin.name}: output '${file}' collides with a core dir`)
-					if (typeof body !== 'string') throw new Error(`plugin ${plugin.name}: output '${file}' must be a string`)
+					if (typeof body !== 'string')
+						throw new Error(`plugin ${plugin.name}: output '${file}' must be a string`)
 					if (seen.has(file)) throw new Error(`plugin ${plugin.name}: duplicate output '${file}'`)
 					seen.add(file)
 				}
 			} catch (e) {
-				out.push({ file: `plugin:${plugin.name}`, line: 1, kind: 'plugin-generate', message: (e as Error).message.replace(/^\[swelte\] /, '') })
+				out.push({
+					file: `plugin:${plugin.name}`,
+					line: 1,
+					kind: 'plugin-generate',
+					message: (e as Error).message.replace(/^\[swelte\] /, ''),
+				})
 			}
 		}
 	}
 	return out.sort((a, b) => a.file.localeCompare(b.file) || a.kind.localeCompare(b.kind))
 }
-

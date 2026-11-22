@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, it } from 'node:test'
@@ -204,7 +204,10 @@ describe('generate() validation errors (tmp scaffold, no V binary)', () => {
 			console.warn = origWarn
 		}
 		const svNoJobs = readFileSync(join(root, '.swelte', 'server.v'), 'utf8')
-		assert.ok(!svNoJobs.includes('swelte_cron'), 'core must emit no cron loops without the Plus jobs plugin')
+		assert.ok(
+			!svNoJobs.includes('swelte_cron'),
+			'core must emit no cron loops without the Plus jobs plugin'
+		)
 		assert.ok(
 			warns.some((w) => /src\/app\.v:2: unknown @\[cron\].*jobsPlugin/.test(w)),
 			`expected unknown-@[cron] warn with jobsPlugin hint, got: ${JSON.stringify(warns)}`
@@ -473,13 +476,21 @@ it('retired auto-discovery refuses to generate: register toolsPlugin explicitly'
 	t.after(() => rmSync(root, { recursive: true, force: true }))
 	const dep = join(root, 'node_modules', 'fixture')
 	mkdirSync(dep, { recursive: true })
-	writeFileSync(join(dep, 'package.json'), JSON.stringify({
-		name: 'fixture', type: 'module', exports: { './swelte/build': './phase.js' },
-	}))
-	writeFileSync(join(dep, 'phase.js'), `export default {
+	writeFileSync(
+		join(dep, 'package.json'),
+		JSON.stringify({
+			name: 'fixture',
+			type: 'module',
+			exports: { './swelte/build': './phase.js' },
+		})
+	)
+	writeFileSync(
+		join(dep, 'phase.js'),
+		`export default {
 		attrs: ['fixture'], module: 'fixture_out',
 		generate(files) { return { 'names.json': JSON.stringify(files.flatMap(f => f.declarations.map(d => d.name))) } }
-	}`)
+	}`
+	)
 	const backend = join(root, 'src/lib/backend')
 	mkdirSync(backend)
 	const source = join(backend, 'example.v')

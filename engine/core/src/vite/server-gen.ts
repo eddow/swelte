@@ -134,27 +134,27 @@ export function validateSseFn(rel: string, m: RpcFn): void {
 		/^fn\s*\(\s*string\s*\)\s*chan\s+string$/.test(second.vtype.trim())
 	if (isRoomTail) {
 		throw new Error(
-			`[swelte] ${rel}: @[sse] ${m.name} is room mode (sub, emit) — register the Plus rooms plugin: swelte({ plugins: [roomsPlugin] }) from '@swelte/plus/rooms'.`,
+			`[swelte] ${rel}: @[sse] ${m.name} is room mode (sub, emit) — register the Plus rooms plugin: swelte({ plugins: [roomsPlugin] }) from '@swelte/plus/rooms'.`
 		)
 	}
 	if (!isEmitTail) {
 		if (m.vret !== '[]string') {
 			throw new Error(
-				`[swelte] ${rel}: @[sse] ${m.name} must return []string (event list) or take a trailing emit fn (string) bool param (got ${m.vret || '(none)'}).`,
+				`[swelte] ${rel}: @[sse] ${m.name} must return []string (event list) or take a trailing emit fn (string) bool param (got ${m.vret || '(none)'}).`
 			)
 		}
 		return
 	}
 	if (m.vret !== 'void') {
 		throw new Error(
-			`[swelte] ${rel}: @[sse] ${m.name} with emit param must return void (emit flushes per-event; got ${m.vret || '(none)'}).`,
+			`[swelte] ${rel}: @[sse] ${m.name} with emit param must return void (emit flushes per-event; got ${m.vret || '(none)'}).`
 		)
 	}
 	const userParams = ps.slice(0, -1)
 	for (const p of userParams) {
 		if (/^fn\s*\(/.test(p.vtype.trim())) {
 			throw new Error(
-				`[swelte] ${rel}: @[sse] ${m.name} param ${p.name} is a closure (${p.vtype}) — only the trailing emit closure is harness-injected.`,
+				`[swelte] ${rel}: @[sse] ${m.name} param ${p.name} is a closure (${p.vtype}) — only the trailing emit closure is harness-injected.`
 			)
 		}
 	}
@@ -360,7 +360,7 @@ export function emitServerGen(
 	serializedHeaders: { route: string; headers: string[] }[] = [],
 	wsMods: Set<string> = new Set(),
 	lifecycle: { compat?: boolean; namedActions?: boolean; pages?: string[] } = {},
-	claimedMods: Set<string> = new Set(),
+	claimedMods: Set<string> = new Set()
 ): string {
 	// Plugin-claimed route files (rooms `sse`/`ws` mods): core skips its own
 	// room/WS/socket dispatch tables for those mods — the owning plugin
@@ -843,73 +843,78 @@ pub fn swelte_sse_emit_for(prefix string, qualifier string, req SwelteRequest, e
 		`\treturn error('no sse route for prefix: ' + prefix)
 }
 `,
-		...(roomsOwnTables ? [] : [
-			`pub fn swelte_sse_is_room(prefix string) bool {`,
-			...dispatched
-				.filter((d) => sseMods.has(d.mod) && !roomWsMods(d.mod))
-				.map((d) => `\tif prefix == ${vJsonStr(d.prefix)} { return ${d.prefix}sse_is_room() }`),
-			`\treturn false
+		...(roomsOwnTables
+			? []
+			: [
+					`pub fn swelte_sse_is_room(prefix string) bool {`,
+					...dispatched
+						.filter((d) => sseMods.has(d.mod) && !roomWsMods(d.mod))
+						.map((d) => `\tif prefix == ${vJsonStr(d.prefix)} { return ${d.prefix}sse_is_room() }`),
+					`\treturn false
 }
 `,
-		]),
+				]),
 
-...(roomsOwnTables ? [] : [
-			`pub fn swelte_sse_room_for(prefix string, qualifier string, req SwelteRequest, sub fn (string) chan string, emit fn (string) bool) ! {`,
-			...dispatched
-				.filter((d) => sseMods.has(d.mod) && !roomWsMods(d.mod))
-				.map(
-					(d) =>
-						`\tif prefix == ${vJsonStr(d.prefix)} { ${d.prefix}sse_room(qualifier, req, sub, emit) or { return err } return }`
-				),
-			`\treturn error('no sse room route for prefix: ' + prefix)
+		...(roomsOwnTables
+			? []
+			: [
+					`pub fn swelte_sse_room_for(prefix string, qualifier string, req SwelteRequest, sub fn (string) chan string, emit fn (string) bool) ! {`,
+					...dispatched
+						.filter((d) => sseMods.has(d.mod) && !roomWsMods(d.mod))
+						.map(
+							(d) =>
+								`\tif prefix == ${vJsonStr(d.prefix)} { ${d.prefix}sse_room(qualifier, req, sub, emit) or { return err } return }`
+						),
+					`\treturn error('no sse room route for prefix: ' + prefix)
 }
 `,
-		]),
-		...(roomsOwnTables ? [] : [
-			// WS route predicate + fan-out tables (future.md #3). `swelte_ws_route`
-			// answers: upgrade request on a `@[ws]` file? Returns the dispatch
-			// prefix or '' (GET + Upgrade: websocket on an @[ws] file). The
-			// `is` / `open` tables route prefix → per-file accessors (same shape
-			// as the SSE tables).
-			`pub fn swelte_ws_route(path string, method string, headers map[string]string) string {`,
-			`	if method != 'GET' { return '' }`,
-			`	if (headers['Upgrade'] or { headers['upgrade'] or { '' } }).to_lower() != 'websocket' { return '' }`,
-			// No unclaimed @[ws] routes: skip the normalize (unused var
-			// warning) — the table below is empty and the fn always returns ''.
-			...(
-				[...wsMods].filter((m) => !roomWsMods(dispatched.find((d) => d.mod === m)?.mod ?? m)).length > 0
-					? [`\tnorm_path := swelte_normalize_path(path)`]
-					: [`\t_ = path`]
-			),
-			...dispatched
-				.filter((d) => wsMods.has(d.mod) && !roomWsMods(d.mod))
-				.map(
-					(d) =>
-						`	if swelte_route_hit(${vJsonStr(d.route)}, norm_path) { return ${vJsonStr(d.prefix)} }`
-				),
-			`	return ''`,
-			`}`,
-		``,
-		`pub fn swelte_ws_is(prefix string) bool {`,
-			...[...wsMods]
-				.filter((m) => !roomWsMods(dispatched.find((d) => d.mod === m)?.mod ?? m))
-				.map(
-			(mod) =>
-				`	if prefix == ${vJsonStr(dispatched.find((d) => d.mod === mod)?.prefix ?? mod)} { return ${vPrefix(mod)}swelte_ws_is() }`
-		),
-		`	return false`,
-		`}`,
-		``,
-		`pub fn swelte_ws_open_for(prefix string, req SwelteRequest, sub fn (string) chan string, recv chan string, emit fn (string) bool) ! {`,
-			...[...wsMods]
-				.filter((m) => !roomWsMods(dispatched.find((d) => d.mod === m)?.mod ?? m))
-				.map(
-			(mod) =>
-				`	if prefix == ${vJsonStr(dispatched.find((d) => d.mod === mod)?.prefix ?? mod)} { ${vPrefix(mod)}swelte_ws_open('', req, sub, recv, emit) or { return err } return }`
-		),
-		`	return error('no ws route for prefix: ' + prefix)`,
-		`}`,
-		]),
+				]),
+		...(roomsOwnTables
+			? []
+			: [
+					// WS route predicate + fan-out tables (future.md #3). `swelte_ws_route`
+					// answers: upgrade request on a `@[ws]` file? Returns the dispatch
+					// prefix or '' (GET + Upgrade: websocket on an @[ws] file). The
+					// `is` / `open` tables route prefix → per-file accessors (same shape
+					// as the SSE tables).
+					`pub fn swelte_ws_route(path string, method string, headers map[string]string) string {`,
+					`	if method != 'GET' { return '' }`,
+					`	if (headers['Upgrade'] or { headers['upgrade'] or { '' } }).to_lower() != 'websocket' { return '' }`,
+					// No unclaimed @[ws] routes: skip the normalize (unused var
+					// warning) — the table below is empty and the fn always returns ''.
+					...([...wsMods].filter((m) => !roomWsMods(dispatched.find((d) => d.mod === m)?.mod ?? m))
+						.length > 0
+						? [`\tnorm_path := swelte_normalize_path(path)`]
+						: [`\t_ = path`]),
+					...dispatched
+						.filter((d) => wsMods.has(d.mod) && !roomWsMods(d.mod))
+						.map(
+							(d) =>
+								`	if swelte_route_hit(${vJsonStr(d.route)}, norm_path) { return ${vJsonStr(d.prefix)} }`
+						),
+					`	return ''`,
+					`}`,
+					``,
+					`pub fn swelte_ws_is(prefix string) bool {`,
+					...[...wsMods]
+						.filter((m) => !roomWsMods(dispatched.find((d) => d.mod === m)?.mod ?? m))
+						.map(
+							(mod) =>
+								`	if prefix == ${vJsonStr(dispatched.find((d) => d.mod === mod)?.prefix ?? mod)} { return ${vPrefix(mod)}swelte_ws_is() }`
+						),
+					`	return false`,
+					`}`,
+					``,
+					`pub fn swelte_ws_open_for(prefix string, req SwelteRequest, sub fn (string) chan string, recv chan string, emit fn (string) bool) ! {`,
+					...[...wsMods]
+						.filter((m) => !roomWsMods(dispatched.find((d) => d.mod === m)?.mod ?? m))
+						.map(
+							(mod) =>
+								`	if prefix == ${vJsonStr(dispatched.find((d) => d.mod === mod)?.prefix ?? mod)} { ${vPrefix(mod)}swelte_ws_open('', req, sub, recv, emit) or { return err } return }`
+						),
+					`	return error('no ws route for prefix: ' + prefix)`,
+					`}`,
+				]),
 		``,
 		// Loader fan-out: `before_request` resolves the page route to a
 		// dispatch prefix; this maps prefix → per-file `swelte_load`.
@@ -1059,7 +1064,7 @@ export function emitRouteFile(
 	chain: WrapperMw[],
 	loads: LoadFn[],
 	emittedWrappers = new Set<string>(),
-	opts: { roomsOwned?: boolean } = {},
+	opts: { roomsOwned?: boolean } = {}
 ): string {
 	// Hoisted-source note: `generate()` + `load()` call the single
 	// exported `routeFor`/`jsFetchFor`/`jsWasmFor` above (no closure copy).
@@ -1276,7 +1281,7 @@ export function emitSseEvents(
 	prefix: string,
 	_mod: string,
 	fns: RpcFn[],
-	opts: { roomsOwned?: boolean } = {},
+	opts: { roomsOwned?: boolean } = {}
 ): string {
 	const SUB_RE = /^fn\s*\(\s*string\s*\)\s*chan\s+string$/
 	const isRoomTail = (h: RpcFn): boolean => {
@@ -1324,7 +1329,7 @@ export function emitSseEvents(
 	)
 	const checkArms = list(
 		fns.filter((f) => f.attr === 'sse'),
-		(h) => `\tif ${condFor(h)} { return }`,
+		(h) => `\tif ${condFor(h)} { return }`
 	)
 	const emitArms = list(
 		sseFns.filter((h) => emitTail(h).kind === 'emit'),
@@ -1398,7 +1403,7 @@ export function emitWsEvents(
 	prefix: string,
 	_mod: string,
 	fns: RpcFn[],
-	opts: { roomsOwned?: boolean } = {},
+	opts: { roomsOwned?: boolean } = {}
 ): string {
 	const wsFns = fns.filter((f) => f.attr === 'ws')
 	if (!wsFns.length) return ''

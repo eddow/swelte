@@ -25,9 +25,10 @@ export default defineConfig({
     svelte(svelteOptions as Parameters<typeof svelte>[0]),
     swelte({
       vBackendUrl,
-      // Explicit framework extensions: the AI tools plugin claims `@[tool]`,
-      // the Plus rooms plugin claims room-mode `@[sse]` (shell stream).
-      // and generates `.swelte/tools/` (jobs + DB live in `@swelte/plus`).
+      // Explicit framework extensions: the AI tools plugin claims `@[tool]`
+      // and generates `.swelte/tools/`; the Plus rooms plugin claims
+      // room-mode `@[sse]` (shell stream). Jobs + DB live in `@swelte/plus`
+      // — add `jobsPlugin`/`dbPlugin` here when the shell needs them.
       plugins: [toolsPlugin, roomsPlugin],
     }),
   ],

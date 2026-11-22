@@ -19,8 +19,8 @@ import { codeHtml } from '#lib/snippets.gen.js'
 	>
 </h1>
 <p class="py-4 opacity-80">
-	Embedded SQLite/KV — the Plus <code>db</code> plugin. A single SQLite
-	file (WAL mode) lives next to the binary;
+	Embedded SQLite/KV — the Plus <code>db</code> plugin. A single SQLite file (WAL mode) lives next
+	to the binary;
 	<code>swelte migrate</code>
 	is a Plus command (resolved from
 	<code>swelte(&#123; plugins: [dbPlugin] &#125;)</code>).
@@ -29,9 +29,10 @@ import { codeHtml } from '#lib/snippets.gen.js'
 <div class="alert alert-info text-sm">
 	<span
 		>Rooms + sockets on the hub transport — register the Plus
-		<code>db</code> plugin (<code>swelte(&#123; plugins: [dbPlugin] &#125;)</code>). The
+		<code>rooms</code> plugin (<code>swelte(&#123; plugins: [roomsPlugin] &#125;)</code>). The
 		<code>backend.emit</code>
-		hub rides that plugin entry; core keeps only the HTTP/SSE/WebSocket transport primitives.</span
+		hub ships with that plugin entry; core keeps only the HTTP/SSE/WebSocket transport
+		primitives.</span
 	>
 </div>
 

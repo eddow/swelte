@@ -1,9 +1,9 @@
 <script lang="ts">
-import { Collapsible as CollapsiblePrimitive } from "bits-ui";
-import { type Snippet, untrack } from "svelte";
-import { cn } from "#lib/cn.js";
-import { type ReasoningVariant, reasoning } from "./variants";
-import { type ActiveStep, setReasoningContext } from "./context";
+import { Collapsible as CollapsiblePrimitive } from 'bits-ui'
+import { type Snippet, untrack } from 'svelte'
+import { cn } from '#lib/cn.js'
+import { type ReasoningVariant, reasoning } from './variants'
+import { type ActiveStep, setReasoningContext } from './context'
 
 let {
 	children,
@@ -12,47 +12,47 @@ let {
 	open = $bindable(),
 	defaultOpen = false,
 	onOpenChange,
-	variant = "outline",
-	thinkingLabel = "Thinking",
+	variant = 'outline',
+	thinkingLabel = 'Thinking',
 	formatDuration = (seconds: number) => `Thought for ${seconds}s`,
 	class: classProp,
 }: {
-	children?: Snippet;
+	children?: Snippet
 	/** Model is still reasoning: the title shimmers and the panel auto-opens. */
-	thinking?: boolean;
+	thinking?: boolean
 	/** Seconds spent reasoning, passed in by the caller. */
-	duration?: number;
+	duration?: number
 	/** Controlled open state. Omit to open while thinking and close when done. */
-	open?: boolean;
-	defaultOpen?: boolean;
-	onOpenChange?: (open: boolean) => void;
-	variant?: ReasoningVariant;
+	open?: boolean
+	defaultOpen?: boolean
+	onOpenChange?: (open: boolean) => void
+	variant?: ReasoningVariant
 	/** Title while thinking. */
-	thinkingLabel?: string;
+	thinkingLabel?: string
 	/** Title once done, from the duration in seconds. */
-	formatDuration?: (seconds: number) => string;
-	class?: string;
-} = $props();
+	formatDuration?: (seconds: number) => string
+	class?: string
+} = $props()
 
-let touched = $state(false);
-let manual = $state(untrack(() => defaultOpen));
-let active = $state<ActiveStep | null>(null);
+let touched = $state(false)
+let manual = $state(untrack(() => defaultOpen))
+let active = $state<ActiveStep | null>(null)
 // Auto-open while thinking, auto-close when it ends, unless the reader has chosen.
-const isOpen = $derived(open ?? (touched ? manual : thinking || defaultOpen));
-const styles = $derived(reasoning({ variant }));
-const preview = $derived(thinking && !isOpen ? active : null);
+const isOpen = $derived(open ?? (touched ? manual : thinking || defaultOpen))
+const styles = $derived(reasoning({ variant }))
+const preview = $derived(thinking && !isOpen ? active : null)
 
 setReasoningContext({
 	setActive(step, id) {
-		active = step ? step : active?.id === id ? null : active;
+		active = step ? step : active?.id === id ? null : active
 	},
-});
+})
 
 function setOpen(next: boolean) {
-	touched = true;
-	manual = next;
-	if (open !== undefined) open = next;
-	onOpenChange?.(next);
+	touched = true
+	manual = next
+	if (open !== undefined) open = next
+	onOpenChange?.(next)
 }
 </script>
 
@@ -82,7 +82,7 @@ function setOpen(next: boolean) {
 			{#if preview}
 				{#key preview.id}
 					<span
-						class={cn(styles.preview(), "text-transition-unit")}
+						class={cn(styles.preview(), 'text-transition-unit')}
 						style="--tt-duration: 220ms; --tt-from-opacity: 0; --tt-from-y: 8px; --tt-from-blur: 3px;"
 						>{preview.label}</span
 					>

@@ -16,7 +16,7 @@ export async function loadBuildPhases(root: string, _pluginAttrs: string[] = [])
 		const entry = readJson(manifest).exports?.['./swelte/build']
 		if (entry === undefined) continue
 		throw new Error(
-			`[swelte] ${name}: automatic ./swelte/build discovery is retired — register explicitly via swelte({ plugins: [...] }) (see docs/specs/plugins.md §2).`,
+			`[swelte] ${name}: automatic ./swelte/build discovery is retired — register explicitly via swelte({ plugins: [...] }) (see docs/specs/plugins.md §2).`
 		)
 	}
 	return []
@@ -27,7 +27,7 @@ export function phaseDeclarations(
 	_kind: 'backend' | 'lib' | 'route',
 	_path: string,
 	_mod: string,
-	_source: string,
+	_source: string
 ): void {
 	// Retired with auto-discovery: explicit plugins receive claimed
 	// declarations through `collectPluginDeclarations` instead.
@@ -37,7 +37,7 @@ export function writePhaseOutputs(
 	_phases: never[],
 	_root: string,
 	_wanted: Set<string>,
-	_reserved: Set<string>,
+	_reserved: Set<string>
 ): void {
 	// Retired with auto-discovery: explicit plugins emit through
 	// `writePluginOutputs` (`.swelte/<name>/...`) instead.

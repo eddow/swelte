@@ -6,9 +6,9 @@
 // Run via `npm test --workspace=@swelte/core` (tsconfig.test.json -> dist-test).
 
 import assert from 'node:assert/strict'
-import { describe, it } from 'node:test'
 import { existsSync, readdirSync } from 'node:fs'
 import { dirname, join } from 'node:path'
+import { describe, it } from 'node:test'
 import { fileURLToPath } from 'node:url'
 
 function coreBackendVlibDir(): string {

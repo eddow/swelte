@@ -27,7 +27,7 @@ export interface ToolManifest {
 function fieldSchema(
 	field: { name: string; vtype: string; tstype: string; optional: boolean },
 	toolName: string,
-	structName: string,
+	structName: string
 ): Record<string, unknown> {
 	const fail = (): never => {
 		throw new Error(
@@ -69,7 +69,7 @@ function structSchema(
 	toolName: string,
 	structs: Map<string, VStruct>,
 	structName: string,
-	seen: Set<string>,
+	seen: Set<string>
 ): Record<string, unknown> {
 	const st = structs.get(structName)
 	if (!st)
@@ -108,7 +108,7 @@ function structSchema(
 function outputSchemaFor(
 	toolName: string,
 	structs: Map<string, VStruct>,
-	vret: string,
+	vret: string
 ): Record<string, unknown> {
 	const t = vret.trim().replace(/^!/, '')
 	if (/^string$/.test(t)) return { type: 'string' }
@@ -129,7 +129,6 @@ function outputSchemaFor(
 	)
 }
 
-
 /** Short content hash (12 hex chars of SHA-256 over the canonical JSON).
  *  The schema `$id` embeds this hash, so a wire-contract change publishes a
  *  different identity instead of silently reusing the old one. */
@@ -145,7 +144,7 @@ export function toolManifestFor(
 	mod: string,
 	fns: RpcFn[],
 	structs: VStruct[],
-	docComments: Record<string, string> = {},
+	docComments: Record<string, string> = {}
 ): ToolManifestEntry[] {
 	const byName = new Map(structs.map((s) => [s.name, s]))
 	const dotted = mod.split('/').join('.')
@@ -199,7 +198,7 @@ export function toolDocComments(src: string): Record<string, string> {
 /** Emit the canonical `tool_manifest.json` body for one app. */
 export function emitToolManifest(entries: ToolManifestEntry[]): string {
 	const manifest: ToolManifest = { version: 1, tools: entries }
-	return JSON.stringify(manifest, null, 2) + '\n'
+	return `${JSON.stringify(manifest, null, 2)}\n`
 }
 
 /** Per-run tool selection: resolve the app's chosen subset against the
@@ -309,49 +308,49 @@ export function emitToolBindings(entries: ToolManifestEntry[]): string {
 		'\tconst walk = (s, v, path) => {',
 		'\t\tconst types = (Array.isArray(s.type) ? s.type : [s.type]);',
 		'\t\tif (v === null) {',
-		'\t\t\tif (!types.includes(\'null\')) errs.push(`${path}: expected non-null`);',
+		"\t\t\tif (!types.includes('null')) errs.push(`${path}: expected non-null`);",
 		'\t\t\treturn;',
 		'\t\t}',
 		'\t\tif (v === undefined) {',
 		'\t\t\terrs.push(`${path}: expected value, got undefined`);',
 		'\t\t\treturn;',
 		'\t\t}',
-		'\t\tif (types.includes(\'array\')) {',
+		"\t\tif (types.includes('array')) {",
 		'\t\t\tif (!Array.isArray(v)) { errs.push(`${path}: expected array`); return; }',
 		'\t\t\tconst items = s.items;',
 		'\t\t\tif (items) v.forEach((item, i) => walk(items, item, `${path}[${i}]`));',
 		'\t\t\treturn;',
 		'\t\t}',
-		'\t\tif (types.includes(\'object\')) {',
-		'\t\t\tif (typeof v !== \'object\' || Array.isArray(v)) { errs.push(`${path}: expected object`); return; }',
+		"\t\tif (types.includes('object')) {",
+		"\t\t\tif (typeof v !== 'object' || Array.isArray(v)) { errs.push(`${path}: expected object`); return; }",
 		'\t\t\tconst o = v;',
 		'\t\t\tfor (const key of (s.required ?? [])) {',
-			'\t\t\t\tif (!(key in o) || o[key] === undefined) errs.push(`${path}: missing required property ${key}`);',
-			'\t\t\t}',
-			'\t\t\tconst props = (s.properties ?? {});',
-			'\t\t\tfor (const [key, prop] of Object.entries(props)) {',
-			'\t\t\t\tif (key in o && o[key] !== undefined) walk(prop, o[key], path ? `${path}.${key}` : key);',
-			'\t\t\t}',
-			'\t\t\tif (s.additionalProperties === false) {',
-			'\t\t\t\tfor (const key of Object.keys(o)) {',
-			'\t\t\t\t\tif (!(key in props)) errs.push(`${path}: unexpected property ${key}`);',
-			'\t\t\t\t}',
-			'\t\t\t} else if (typeof s.additionalProperties === \'object\' && s.additionalProperties !== null) {',
-			'\t\t\t\tfor (const key of Object.keys(o)) {',
-			'\t\t\t\t\tif (key in props || o[key] === undefined) continue;',
-			'\t\t\t\t\twalk(s.additionalProperties, o[key], path ? `${path}.${key}` : key);',
-			'\t\t\t\t}',
-			'\t\t\t}',
+		'\t\t\t\tif (!(key in o) || o[key] === undefined) errs.push(`${path}: missing required property ${key}`);',
+		'\t\t\t}',
+		'\t\t\tconst props = (s.properties ?? {});',
+		'\t\t\tfor (const [key, prop] of Object.entries(props)) {',
+		'\t\t\t\tif (key in o && o[key] !== undefined) walk(prop, o[key], path ? `${path}.${key}` : key);',
+		'\t\t\t}',
+		'\t\t\tif (s.additionalProperties === false) {',
+		'\t\t\t\tfor (const key of Object.keys(o)) {',
+		'\t\t\t\t\tif (!(key in props)) errs.push(`${path}: unexpected property ${key}`);',
+		'\t\t\t\t}',
+		"\t\t\t} else if (typeof s.additionalProperties === 'object' && s.additionalProperties !== null) {",
+		'\t\t\t\tfor (const key of Object.keys(o)) {',
+		'\t\t\t\t\tif (key in props || o[key] === undefined) continue;',
+		'\t\t\t\t\twalk(s.additionalProperties, o[key], path ? `${path}.${key}` : key);',
+		'\t\t\t\t}',
+		'\t\t\t}',
 		'\t\t\treturn;',
 		'\t\t}',
-		'\t\tconst scalar = types.find((t) => t !== \'null\') ?? \'null\';',
-		'\t\tif (scalar === \'string\' && typeof v !== \'string\') errs.push(`${path}: expected string`);',
-		'\t\tif (scalar === \'boolean\' && typeof v !== \'boolean\') errs.push(`${path}: expected boolean`);',
-		'\t\tif (scalar === \'number\' && typeof v !== \'number\') errs.push(`${path}: expected number`);',
-		'\t\tif (scalar === \'integer\' && (typeof v !== \'number\' || !Number.isInteger(v))) errs.push(`${path}: expected integer`);',
+		"\t\tconst scalar = types.find((t) => t !== 'null') ?? 'null';",
+		"\t\tif (scalar === 'string' && typeof v !== 'string') errs.push(`${path}: expected string`);",
+		"\t\tif (scalar === 'boolean' && typeof v !== 'boolean') errs.push(`${path}: expected boolean`);",
+		"\t\tif (scalar === 'number' && typeof v !== 'number') errs.push(`${path}: expected number`);",
+		"\t\tif (scalar === 'integer' && (typeof v !== 'number' || !Number.isInteger(v))) errs.push(`${path}: expected integer`);",
 		'\t};',
 		'\twalk(schema, value, what);',
-		'\tif (errs.length) throw new Error(`invalid ${what}: ${errs.join(\'; \')}`);',
+		"\tif (errs.length) throw new Error(`invalid ${what}: ${errs.join('; ')}`);",
 		'}',
 		'',
 	]
@@ -372,9 +371,13 @@ export function emitToolBindings(entries: ToolManifestEntry[]): string {
 	out.push('	return result;')
 	out.push('}')
 	out.push('/** Invoke a selected tool by manifest name (fails closed on unknown).')
-	out.push(' * @param {ToolManifestEntry[]} selected @param {string} name @param {unknown} args @param {ToolTransport} transport */')
+	out.push(
+		' * @param {ToolManifestEntry[]} selected @param {string} name @param {unknown} args @param {ToolTransport} transport */'
+	)
 	out.push('export async function callSelectedTool(selected, name, args, transport) {')
-	out.push(`\tif (!selected.some((t) => t.name === name)) throw new Error(\`tool not selected for this run: \${name}\`);`)
+	out.push(
+		`\tif (!selected.some((t) => t.name === name)) throw new Error(\`tool not selected for this run: \${name}\`);`
+	)
 	out.push(`\tconst entry = byName.get(name);`)
 	out.push(`\tif (!entry) throw new Error(\`unknown tool: \${name}\`);`)
 	out.push('	return invoke(entry, args, transport);')
@@ -443,7 +446,9 @@ export function emitToolDispatcher(modules: ToolDispatchModule[]): string {
 			const dotted = `${m.mod.split('/').join('.')}.${target.fn}`
 			out.push(`\tif name == '${dotted}' {`)
 			if (target.argsStruct) {
-				out.push(`\t\targs := json.decode(${qual}.${target.argsStruct}, args_json) or { return error('bad args for ${dotted}') }`)
+				out.push(
+					`\t\targs := json.decode(${qual}.${target.argsStruct}, args_json) or { return error('bad args for ${dotted}') }`
+				)
 				if (target.fallible) {
 					out.push(`\t\tres := ${qual}.${target.fn}(args) or { return error(err.msg()) }`)
 				} else {
@@ -452,7 +457,9 @@ export function emitToolDispatcher(modules: ToolDispatchModule[]): string {
 			} else {
 				// The only valid zero-argument payload is an empty JSON object.
 				out.push(`\t\tpayload := args_json.trim(' \\t\\r\\n')`)
-				out.push(`\t\tif payload.len < 2 || !payload.starts_with('{') || !payload.ends_with('}') || payload[1..payload.len - 1].trim(' \\t\\r\\n') != '' {`)
+				out.push(
+					`\t\tif payload.len < 2 || !payload.starts_with('{') || !payload.ends_with('}') || payload[1..payload.len - 1].trim(' \\t\\r\\n') != '' {`
+				)
 				out.push(`\t\t\treturn error('bad args for ${dotted}: expected empty object')`)
 				out.push(`\t\t}`)
 				if (target.fallible) {
@@ -510,14 +517,13 @@ export function validateToolFn(rel: string, m: RpcFn): void {
 		)
 }
 
-
 const TOOL_PLUGIN_NAME = 'tools'
 
 function toolsForFile(
 	mod: string,
 	declarations: { name: string; attr: string }[],
 	structs: VStruct[],
-	source: string,
+	source: string
 ): { entries: ToolManifestEntry[]; module: ToolDispatchModule | null } {
 	const fns = declarations.filter((fn) => fn.attr === 'tool') as RpcFn[]
 	if (!fns.length) return { entries: [], module: null }
@@ -525,14 +531,20 @@ function toolsForFile(
 	const moduleName = dir.split('/').pop()
 	const actual = source.match(/^\s*module\s+(\w+)/m)?.[1]
 	if (actual !== moduleName)
-		throw new Error(`[swelte:ai] ${mod}.v: expected module ${moduleName} (got ${actual ?? '(none)'})`)
+		throw new Error(
+			`[swelte:ai] ${mod}.v: expected module ${moduleName} (got ${actual ?? '(none)'})`
+		)
 	for (const fn of fns) validateToolFn(`${mod}.v`, fn)
 	return {
 		entries: toolManifestFor(mod, fns, structs, toolDocComments(source)),
 		module: {
 			mod,
 			dir,
-			fns: fns.map((fn) => ({ fn: fn.name, argsStruct: fn.singleArgsStruct ?? null, fallible: fn.fallible })),
+			fns: fns.map((fn) => ({
+				fn: fn.name,
+				argsStruct: fn.singleArgsStruct ?? null,
+				fallible: fn.fallible,
+			})),
 		},
 	}
 }
@@ -558,19 +570,22 @@ export function createToolsPlugin(): SweltePlugin {
 			const byFile = new Map<string, SweltePluginDeclaration[]>()
 			for (const decl of ctx.declarations) {
 				if (decl.fn.attr !== 'tool') continue
-				if (decl.kind !== 'backend') throw new Error(`[swelte:ai] ${decl.file}: @[tool] requires a backend V module`)
+				if (decl.kind !== 'backend')
+					throw new Error(`[swelte:ai] ${decl.file}: @[tool] requires a backend V module`)
 				const list = byFile.get(decl.file) ?? []
 				list.push(decl)
 				byFile.set(decl.file, list)
 			}
-			for (const [file, decls] of [...byFile.entries()].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))) {
+			for (const [file, decls] of [...byFile.entries()].sort(([a], [b]) =>
+				a < b ? -1 : a > b ? 1 : 0
+			)) {
 				const first = decls[0]
 				const structs = first.structs
 				const { entries: fileEntries, module } = toolsForFile(
 					first.modulePath,
 					decls.map((d) => d.fn),
 					structs,
-					first.source,
+					first.source
 				)
 				entries.push(...fileEntries)
 				if (module) targets.push(module)

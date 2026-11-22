@@ -1,4 +1,4 @@
-# `@swelte/plus` — jobs scheduler + embedded SQLite/KV backend plugins
+# `@swelte/plus` — jobs scheduler + embedded SQLite/KV + rooms/sockets plugins
 
 Explicit registration — no builtins. SQLite/KV + `migrate` live here since
 §3 box 2 (`dbPlugin`); rooms/hub + `@[ws]`/room-SSE dispatch live here since

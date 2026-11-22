@@ -1,14 +1,14 @@
 <script lang="ts">
-import { LinkPreview as HoverCardPrimitive } from "bits-ui";
-import { cn } from "#lib/cn.js";
-import { ANCHORED } from "#lib/anchor.js";
+import { LinkPreview as HoverCardPrimitive } from 'bits-ui'
+import { cn } from '#lib/cn.js'
+import { ANCHORED } from '#lib/anchor.js'
 
 let {
 	class: classProp,
-	align = "center",
+	align = 'center',
 	sideOffset = 4,
 	...rest
-}: HoverCardPrimitive.ContentProps = $props();
+}: HoverCardPrimitive.ContentProps = $props()
 </script>
 
 <HoverCardPrimitive.Portal>
@@ -19,8 +19,8 @@ let {
 		data-slot="hover-card-content"
 		class={cn(
 			ANCHORED,
-			"static z-50 w-64 rounded-xl bg-popover p-3 text-sm shadow-(--overlay-shadow)",
-			classProp,
+			'static z-50 w-64 rounded-xl bg-popover p-3 text-sm shadow-(--overlay-shadow)',
+			classProp
 		)}
 	/>
 </HoverCardPrimitive.Portal>

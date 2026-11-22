@@ -92,11 +92,7 @@
     "vite",
     "rpc",
     "wasm",
-    "fullstack",
-    "cron",
-    "jobs",
-    "sqlite",
-    "websocket"
+    "fullstack"
   ],
   "npmSkills": {
     "publish": {
