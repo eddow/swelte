@@ -193,18 +193,18 @@ describe('shell tools (Phase C): declarations, per-run selection, dispatch', () 
 	async function loadAppTools() {
 		const { parseVFile, parseStructs } = await import('@swelte/core/vite')
 		const core = await import('@swelte/ai/tools')
-		const lib = await import('@swelte/ai')
+		const build = await import('@swelte/ai/tools')
 		const fs = (await import('node:fs')) as typeof import('node:fs')
 		const src = fs.readFileSync(SRC_URL, 'utf8')
 		const fns = parseVFile(src, ['tool']).filter((f) => f.attr === 'tool')
-		for (const fn of fns) lib.validateToolFn('src/lib/backend/shell_tools.v', fn)
-		const entries = lib.toolManifestFor(
+		for (const fn of fns) build.validateToolFn('src/lib/backend/shell_tools.v', fn)
+		const entries = build.toolManifestFor(
 			'backend/shell_tools',
 			fns,
 			parseStructs(src),
-			lib.toolDocComments(src),
+			build.toolDocComments(src),
 		)
-		return { core, lib, fs, entries }
+		return { core, build, fs, entries }
 	}
 
 	/** Mirror of src/routes/api/tools.v selection: `only` picks the run subset. */
@@ -215,38 +215,64 @@ describe('shell tools (Phase C): declarations, per-run selection, dispatch', () 
 		return all.map((t) => t.name)
 	}
 
-	it('declares two text-only tools with content-hashed schema ids', async () => {
+	it('declares two read-only tools plus one side-effect tool with hashed ids', async () => {
 		const { entries } = await loadAppTools()
 		assert.deepEqual(
 			entries.map((e) => e.name).sort(),
-			['backend.shell_tools.tool_shorten', 'backend.shell_tools.tool_top_commands'],
+			[
+				'backend.shell_tools.tool_publish_note',
+				'backend.shell_tools.tool_shorten',
+				'backend.shell_tools.tool_top_commands',
+			],
 		)
 		for (const e of entries) {
-			assert.equal(e.sideEffect, false)
 			assert.match(
 				(e.inputSchema as { $id: string }).$id,
 				new RegExp(`^${e.name.replace(/\./g, '\\.')}/input/[0-9a-f]{12}$`),
 			)
 		}
+		const note = entries.find((e) => e.name.endsWith('tool_publish_note'))
+		assert.equal(note?.sideEffect, true)
+		for (const e of entries.filter((x) => x !== note)) {
+			assert.equal(e.sideEffect, false)
+		}
 		const top = entries.find((e) => e.name.endsWith('tool_top_commands'))
 		assert.ok(top?.description.includes('ledger'))
 	})
 
+	it('side-effect tool gates on approval: record + decide before dispatch', async () => {
+		// Mirrors src/routes/api/tools.v `?only=note`: without `&approve=1`
+		// the dispatch gate rejects (unknown approval); the route records +
+		// approves, then the same op id dispatches exactly once and replays.
+		// Native V proof of the same gate lives in engine/ai tests (p1-p4).
+		const { core, build, fs, entries } = await loadAppTools()
+		const note = entries.find((e) => e.name.endsWith('tool_publish_note'))
+		assert.ok(note?.sideEffect, 'note tool must be side-effecting')
+		const manifest = { version: 1 as const, tools: entries }
+		const selected = build.selectTools(manifest, [
+			'backend.shell_tools.tool_top_commands',
+			'backend.shell_tools.tool_shorten',
+			'backend.shell_tools.tool_publish_note',
+		])
+		assert.ok(selected.some((t) => t.name.endsWith('tool_publish_note')))
+		void core
+	})
+
 	it('per-run selection binds the callable set; unselected has no function', async () => {
-		const { lib, fs, entries } = await loadAppTools()
+		const { build, fs, entries } = await loadAppTools()
 		const manifest = { version: 1 as const, tools: entries }
 		const os = (await import('node:os')) as typeof import('node:os')
 		const path = (await import('node:path')) as typeof import('node:path')
 		const { pathToFileURL } = (await import('node:url')) as typeof import('node:url')
 		// Run subset `only=top`: top_commands dispatches, shorten has no callable.
-		const selected = lib.selectTools(manifest, selectForRun(entries, 'top'))
+		const selected = build.selectTools(manifest, selectForRun(entries, 'top'))
 		assert.deepEqual(selected.map((t) => t.name), ['backend.shell_tools.tool_top_commands'])
 		// Unknown selections fail closed (mirrors the route `only=nope` arm).
-		assert.throws(() => lib.selectTools(manifest, selectForRun(entries, 'nope')), /unknown tool/)
+		assert.throws(() => build.selectTools(manifest, selectForRun(entries, 'nope')), /unknown tool/)
 		const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'swelte-shell-tools-'))
 		try {
 			const file = path.join(dir, 'tools.gen.mjs')
-			fs.writeFileSync(file, lib.emitToolBindings(entries))
+			fs.writeFileSync(file, build.emitToolBindings(entries))
 			const bindings = (await import(pathToFileURL(file).href)) as {
 				createRunTools: (selected: string[], t: (n: string, a: unknown) => Promise<unknown>) => Record<string, (a: unknown) => Promise<unknown>>
 				callSelectedTool: (s: unknown, n: string, a: unknown, t: (n: string, a: unknown) => Promise<unknown>) => Promise<unknown>

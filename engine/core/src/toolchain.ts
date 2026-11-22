@@ -87,48 +87,93 @@ export function needsGlobals(genAbs: string): boolean {
 	return false
 }
 
-/** Whether `.swelte/` holds the REAL QJS bridge (adapter-emitted, contains
- *  `__global`) as opposed to core's no-op stub or nothing. Decides the
- *  `-cc` override (only quickjs.c needs a real C compiler). */
+/** Whether `.swelte/` holds a REAL QJS bridge — adapter-emitted (contains
+ *  `__global`) — as opposed to core's no-op stub or nothing. Two bridge
+ *  shapes count: the SSR bridge (`routes/swelte_qjs_bridge.v`, render
+ *  contract) and the PTC agent bridge (`agent/agent_bridge.v`, eval
+ *  contract). Either one needs the real C compiler (only quickjs.c does)
+ *  and the single shared `.swelte/qjs/libqjs.a`. Provider-only apps emit
+ *  neither: native link, no QJS. Decides the `-cc` override. */
 export function hasRealBridge(genAbs: string): boolean {
-	try {
-		const bridge = join(genAbs, 'routes', 'swelte_qjs_bridge.v')
-		return existsSync(bridge) && readFileSync(bridge, 'utf8').includes('__global')
-	} catch {
-		return false
-	}
+	return needsQjsLink(genAbs).length > 0
 }
 
-/** Absolute `#flag`-linked archive paths a real bridge needs to link.
- *  Parsed from the bridge's `#flag <abs>@START_LIBS` lines. Empty for the
- *  stub (no C deps) or when unreadable. Used to detect DANGLING bridges
- *  (real bridge, missing archive — e.g. `.swelte/qjs/` cleaned without a
- *  rebuild) so dev/build can self-heal instead of dying in the linker. */
-export function bridgeLinkedArchives(genAbs: string): string[] {
+/** Absolute `#flag`-linked archive paths every real bridge needs to link.
+ *  Parsed from each bridge's `#flag <abs>@START_LIBS` lines. Empty when no
+ *  real bridge exists (stub has no C deps) or when unreadable. Used to
+ *  detect DANGLING bridges (a real bridge whose archive is missing — e.g.
+ *  `.swelte/qjs/` cleaned without a rebuild) so dev/build can self-heal
+ *  instead of dying in the linker.
+ *
+ *  Deduplicated: SSR + PTC reference the SAME archive (one QuickJS build,
+ *  linked once no matter how many bridges consume it). */
+/** Which QJS consumer bridges exist in `.swelte/`: subset of
+ *  `['ssr', 'agent']`. A bridge counts only when real (adapter/plugin
+ *  emitted, contains `__global`) — core's no-op stub never counts.
+ *  Provider-only apps get `[]`: native link, no QJS. */
+export function needsQjsLink(genAbs: string): ('ssr' | 'agent')[] {
+	const out: ('ssr' | 'agent')[] = []
 	try {
-		const bridge = readFileSync(join(genAbs, 'routes', 'swelte_qjs_bridge.v'), 'utf8')
-		if (!bridge.includes('__global')) return []
-		const out: string[] = []
-		for (const line of bridge.split('\n')) {
-			const m = /#flag\s+(\S+)@START_LIBS/.exec(line)
-			if (m) out.push(m[1])
-		}
-		return out
+		const ssr = readFileSync(join(genAbs, 'routes', 'swelte_qjs_bridge.v'), 'utf8')
+		if (ssr.includes('__global')) out.push('ssr')
 	} catch {
-		return []
+		/* no SSR bridge */
 	}
+	try {
+		const agent = readFileSync(join(genAbs, 'agent', 'agent_bridge.v'), 'utf8')
+		if (agent.includes('__global')) out.push('agent')
+	} catch {
+		/* no agent bridge */
+	}
+	return out
+}
+
+export function bridgeLinkedArchives(genAbs: string): string[] {
+	const files: string[] = []
+	if (needsQjsLink(genAbs).includes('ssr'))
+		files.push(join(genAbs, 'routes', 'swelte_qjs_bridge.v'))
+	if (needsQjsLink(genAbs).includes('agent')) files.push(join(genAbs, 'agent', 'agent_bridge.v'))
+	const out: string[] = []
+	for (const file of files) {
+		try {
+			for (const line of readFileSync(file, 'utf8').split('\n')) {
+				const m = /#flag\s+(\S+)@START_LIBS/.exec(line)
+				if (m && !out.includes(m[1])) out.push(m[1])
+			}
+		} catch {
+			/* unreadable — skip */
+		}
+	}
+	return out
 }
 
 /** Delete a dangling bridge (real bridge whose linked archives are missing)
  *  so generate() rewrites the no-op stub. Returns true when a heal happened.
+ *  Heals each dangling bridge independently (SSR + agent heal separately).
  *  Never touches a healthy bridge or the stub. Dev calls this before spawn;
  *  build is left strict (a missing archive there is a real build bug). */
 export function healDanglingBridge(genAbs: string): boolean {
 	try {
 		const missing = bridgeLinkedArchives(genAbs).filter((a) => !existsSync(a))
 		if (missing.length === 0) return false
-		rmSync(join(genAbs, 'routes', 'swelte_qjs_bridge.v'))
-		return true
+		let healed = false
+		if (needsQjsLink(genAbs).includes('ssr')) {
+			try {
+				rmSync(join(genAbs, 'routes', 'swelte_qjs_bridge.v'))
+				healed = true
+			} catch {
+				/* ignore */
+			}
+		}
+		if (needsQjsLink(genAbs).includes('agent')) {
+			try {
+				rmSync(join(genAbs, 'agent', 'agent_bridge.v'))
+				healed = true
+			} catch {
+				/* ignore */
+			}
+		}
+		return healed
 	} catch {
 		return false
 	}

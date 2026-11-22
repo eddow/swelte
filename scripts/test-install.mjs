@@ -86,7 +86,7 @@ execSync('npm run build --workspace=@swelte/create && npm run build --workspace=
 
 const PACK = join(TMP, 'packs')
 mkdirSync(PACK, { recursive: true })
-for (const pkg of ['core', 'vvm', 'ssr-qjs', 'mcp', 'ai', 'plus', 'create']) {
+for (const pkg of ['qjs', 'core', 'vvm', 'ssr-qjs', 'mcp', 'ai', 'plus', 'create']) {
 	const out = run('npm', ['pack', `--workspace=engine/${pkg}`, '--pack-destination', PACK, '--silent'])
 		.trim()
 		.split('\n')
@@ -108,8 +108,10 @@ async function installCase(name, initArgs) {
 	// Rewrite every @swelte/* dep to its packed tarball BEFORE the first
 	// install — a scaffolded `^0.2.0` range may not exist on the registry
 	// yet (unpublished bump), and npm would fail resolving it. Same template
-	// bytes, local resolution, no publish needed.
-	for (const dep of ['core', 'vvm', 'ssr-qjs', 'mcp', 'ai', 'plus']) {
+	// bytes, local resolution, no publish needed. Transitive deps the
+	// template never names (e.g. `@swelte/ssr-qjs` → `@swelte/qjs`) are
+	// pinned via `overrides` so packed-resolution stays registry-free.
+	for (const dep of ['qjs', 'core', 'vvm', 'ssr-qjs', 'mcp', 'ai', 'plus']) {
 		if (!existsSync(tgz(dep))) continue
 		const pjFile = join(dir, 'package.json')
 		const pj = JSON.parse(readFileSync(pjFile, 'utf8'))
@@ -117,6 +119,13 @@ async function installCase(name, initArgs) {
 		for (const s of ['dependencies', 'devDependencies', 'peerDependencies', 'optionalDependencies']) {
 			if (pj[s]?.[`@swelte/${dep}`]) {
 				pj[s][`@swelte/${dep}`] = `file:${tgz(dep)}`
+				touched = true
+			}
+		}
+		if (dep === 'qjs') {
+			pj.overrides ??= {}
+			if (!pj.overrides['@swelte/qjs']) {
+				pj.overrides['@swelte/qjs'] = `file:${tgz(dep)}`
 				touched = true
 			}
 		}

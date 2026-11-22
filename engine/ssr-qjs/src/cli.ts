@@ -254,6 +254,8 @@ export async function runSsrCheck(opts: SsrCheckOptions = {}): Promise<void> {
 					toolchainEnv?: (e?: Record<string, string>) => NodeJS.ProcessEnv
 					resolveCC?: () => string
 					resolveV?: (u: string) => string
+					needsQjsLink?: (genAbs: string) => unknown[]
+					needsGlobals?: (genAbs: string) => boolean
 				} = {}
 				try {
 					toolchain = (await import('@swelte/core/toolchain')) as unknown as typeof toolchain
@@ -262,25 +264,42 @@ export async function runSsrCheck(opts: SsrCheckOptions = {}): Promise<void> {
 				}
 				if (toolchain.resolveV && toolchain.toolchainEnv) {
 					const vBin = toolchain.resolveV(import.meta.url)
-					// Real bridge → embed flags; plugins → globals only; stub
-					// bridge / neither → plain run (symbol always resolves).
+					// Any real QJS bridge (SSR and/or agent) → embed flags;
+					// plugins → globals only; stub bridge / neither → plain
+					// run (symbol always resolves). Prefer the shared
+					// needsQjsLink helper (agent-bridge aware); fall back to
+					// the inline SSR-bridge read on old core installs.
+					const genAbs = join(root, outDir)
 					let hasBridge = false
 					let hasPlugins = false
-					try {
-						const bridge = readFileSyncV(
-							join(root, outDir, 'routes', 'swelte_qjs_bridge.v'),
-							'utf8'
-						)
-						hasBridge = bridge.includes('__global')
-					} catch {
-						/* no bridge */
-					}
-					try {
-						const raw = readFileSyncV(join(root, outDir, 'plugin_modules.json'), 'utf8')
-						const mods = JSON.parse(raw) as unknown
-						hasPlugins = Array.isArray(mods) && mods.length > 0
-					} catch {
-						/* no marker */
+					if (typeof toolchain.needsQjsLink === 'function') {
+						try {
+							hasBridge = toolchain.needsQjsLink(genAbs).length > 0
+						} catch {
+							/* no bridges */
+						}
+						try {
+							hasPlugins = toolchain.needsGlobals?.(genAbs) ?? false
+						} catch {
+							/* no marker */
+						}
+					} else {
+						try {
+							const bridge = readFileSyncV(
+								join(root, outDir, 'routes', 'swelte_qjs_bridge.v'),
+								'utf8'
+							)
+							hasBridge = bridge.includes('__global')
+						} catch {
+							/* no bridge */
+						}
+						try {
+							const raw = readFileSyncV(join(root, outDir, 'plugin_modules.json'), 'utf8')
+							const mods = JSON.parse(raw) as unknown
+							hasPlugins = Array.isArray(mods) && mods.length > 0
+						} catch {
+							/* no marker */
+						}
 					}
 					const cc = typeof toolchain.resolveCC === 'function' ? toolchain.resolveCC() : 'gcc'
 					const vArgs = hasBridge

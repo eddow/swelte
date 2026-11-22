@@ -17,7 +17,8 @@ record: what SSR does, how it runs, and the measured budgets.
   environment is the only bridge — `Hand` proxies when set, skips when
   not. Default is SPA/static + JSON, always.
 * `@swelte/ssr-qjs` (optional engine — `npm install @swelte/ssr-qjs`) owns: the SSR compiler, the
-  vendored QuickJS prod embed, the dev sidecar (Node HTTP, dev-only),
+  QuickJS prod embed (shared `@swelte/qjs` package — the vendored engine lives there as joint
+  SSR+PTC infrastructure), the dev sidecar (Node HTTP, dev-only),
   and the CI gate (`runSsrCheck`). Dev needs no separate command:
   `swelte dev` auto-boots the sidecar when the adapter is installed
   (emits `.swelte/dev/render.js`, sets `SWELTE_SSR_URL` for `Hand`);
@@ -225,6 +226,8 @@ compiles `render.js` once per distinct bundle bytes (`JS_Eval` +
 in a ring of 4) and reuses it across renders (`JS_ReadObject` +
 return-the-module — the driver import resolves/links/evals exactly
 once; the loader must NOT pre-eval or the link assertion fires).
-Compile failure → source path, same render. See `c/swelte_qjs.c`
-`swelte_qjs_ensure_bytecode` / `swelte_qjs_loader`. `qjsc` the binary
+Compile failure → source path, same render. See `engine/qjs/c/swelte_qjs.c`
+`swelte_qjs_ensure_bytecode` / `swelte_qjs_loader` (the shared QuickJS
+package lives in `engine/qjs/` (`@swelte/qjs`) — joint SSR+PTC infrastructure, see the
+[AI spec](specs/ai.md) Phase C). `qjsc` the binary
 remains unvendored and unnecessary.

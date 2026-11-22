@@ -7,6 +7,7 @@
   "types": "./dist/index.d.ts",
   "exports": {
     ".": "./dist/index.js",
+    "./package.json": "./package.json",
     "./vite": "./dist/vite.js",
     "./dev": "./dist/dev.js",
     "./cli": "./dist/cli.js",
@@ -38,6 +39,7 @@
   "dependencies": {
     "@rollup/plugin-commonjs": "^29.0.3",
     "@swelte/core": "^0.2.0",
+    "@swelte/qjs": "^0.2.0",
     "typescript": "^5.0.0"
   },
   "devDependencies": {

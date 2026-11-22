@@ -1,15 +1,20 @@
 import assert from 'node:assert/strict'
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, it } from 'node:test'
 import {
 	assertTargetArch,
 	assertTargetOs,
+	bridgeLinkedArchives,
 	ensureSqliteForBuild,
+	hasRealBridge,
 	hasSystemSqlite,
+	healDanglingBridge,
 	hostTargetArch,
 	hostTargetOs,
+	needsGlobals,
+	needsQjsLink,
 	needsSqliteAmalgamation,
 	normalizeTargetArch,
 	normalizeTargetOs,
@@ -171,6 +176,96 @@ describe('lazy sqlite amalgamation (db.sqlite builds only)', () => {
 		try {
 			const out = await ensureSqliteForBuild('/nonexistent/v', gen, () => {})
 			assert.deepEqual(out, { needed: false, cached: true })
+		} finally {
+			rmSync(gen, { recursive: true, force: true })
+		}
+	})
+})
+
+describe('shared QJS link matrix (SSR and/or agent bridge)', () => {
+	const mkGen = (): string => mkdtempSync(join(tmpdir(), 'gen-qjs-'))
+	const realBridge = (flag: string) =>
+		[
+			'// Auto-generated',
+			'module routes',
+			'',
+			'__global x bool',
+			`#flag ${flag}@START_LIBS`,
+			'',
+		].join('\n')
+	const stubBridge = ['module routes', '', 'pub fn swelte_qjs_render_page() {}', ''].join('\n')
+
+	it('provider-only: no bridges → no link, native toolchain', () => {
+		const gen = mkGen()
+		try {
+			assert.deepEqual(needsQjsLink(gen), [])
+			assert.equal(hasRealBridge(gen), false)
+			assert.equal(needsGlobals(gen), false)
+			assert.deepEqual(bridgeLinkedArchives(gen), [])
+			assert.equal(healDanglingBridge(gen), false)
+		} finally {
+			rmSync(gen, { recursive: true, force: true })
+		}
+	})
+
+	it('SSR-only and agent-only each link; stub bridge never counts', () => {
+		for (const shape of ['ssr', 'agent'] as const) {
+			const gen = mkGen()
+			try {
+				const file =
+					shape === 'ssr'
+						? join(gen, 'routes', 'swelte_qjs_bridge.v')
+						: join(gen, 'agent', 'agent_bridge.v')
+				mkdirSync(join(gen, shape === 'ssr' ? 'routes' : 'agent'), { recursive: true })
+				// Stub first: core's no-op must never trigger the QJS link.
+				writeFileSync(file, stubBridge)
+				assert.deepEqual(needsQjsLink(gen), [])
+				assert.equal(hasRealBridge(gen), false)
+				// Real bridge: this consumer links.
+				writeFileSync(file, realBridge('/abs/libqjs.a'))
+				assert.deepEqual(needsQjsLink(gen), [shape])
+				assert.equal(hasRealBridge(gen), true)
+				assert.equal(needsGlobals(gen), true)
+				assert.deepEqual(bridgeLinkedArchives(gen), ['/abs/libqjs.a'])
+			} finally {
+				rmSync(gen, { recursive: true, force: true })
+			}
+		}
+	})
+
+	it('both bridges reference the SAME archive: linked once', () => {
+		const gen = mkGen()
+		try {
+			mkdirSync(join(gen, 'routes'), { recursive: true })
+			mkdirSync(join(gen, 'agent'), { recursive: true })
+			writeFileSync(join(gen, 'routes', 'swelte_qjs_bridge.v'), realBridge('/abs/libqjs.a'))
+			writeFileSync(join(gen, 'agent', 'agent_bridge.v'), realBridge('/abs/libqjs.a'))
+			assert.deepEqual(needsQjsLink(gen), ['ssr', 'agent'])
+			// One archive on the link line no matter how many bridges
+			// consume it — never linked twice.
+			assert.deepEqual(bridgeLinkedArchives(gen), ['/abs/libqjs.a'])
+			assert.equal(hasRealBridge(gen), true)
+		} finally {
+			rmSync(gen, { recursive: true, force: true })
+		}
+	})
+
+	it('dangling bridges heal independently; healthy bridges untouched', () => {
+		const gen = mkGen()
+		try {
+			mkdirSync(join(gen, 'routes'), { recursive: true })
+			mkdirSync(join(gen, 'agent'), { recursive: true })
+			writeFileSync(join(gen, 'routes', 'swelte_qjs_bridge.v'), realBridge('/abs/missing.a'))
+			writeFileSync(join(gen, 'agent', 'agent_bridge.v'), realBridge('/abs/missing.a'))
+			assert.equal(healDanglingBridge(gen), true)
+			assert.equal(existsSync(join(gen, 'routes', 'swelte_qjs_bridge.v')), false)
+			assert.equal(existsSync(join(gen, 'agent', 'agent_bridge.v')), false)
+			assert.deepEqual(needsQjsLink(gen), [])
+			// Healing is idempotent: nothing dangling → false, stub kept.
+			mkdirSync(join(gen, 'routes'), { recursive: true })
+			writeFileSync(join(gen, 'routes', 'swelte_qjs_bridge.v'), stubBridge)
+			assert.equal(healDanglingBridge(gen), false)
+			assert.equal(existsSync(join(gen, 'routes', 'swelte_qjs_bridge.v')), true)
 		} finally {
 			rmSync(gen, { recursive: true, force: true })
 		}

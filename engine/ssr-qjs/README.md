@@ -25,9 +25,10 @@ src/   compose (ssr.ts) · swelte() wrapper (vite.ts) · QJS link (qjs.ts)
        dev sidecar (dev.ts) · runSsrCheck + ssrPlugin (cli.ts, vite.ts)
 shims/ QJS-safe substitutes (2 svelte internals + SDK shim)
 
-The vendored QuickJS engine + shared V module live in `../qjs/`
+The vendored QuickJS engine + shared V module live in `@swelte/qjs`
 (`engine/qjs/`): `c/` sources, `swelte_qjs.*` render glue, `qjs.v` +
-`agent.v`. This package consumes them via `qjsCDir()` — it owns the
+`agent.v`. This package consumes them via `buildQjsProd` (over the
+`buildQjsLib` archive builder from `@swelte/qjs`) — it owns the
 SSR compiler and adapter, not the engine.
 ```
 

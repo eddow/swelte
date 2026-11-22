@@ -123,7 +123,8 @@ export function swelte(options: SsrQjsOptions = {}): Plugin[] {
 			// wrapper (resolveTargetCc — dependency-free, never imports core
 			// from the adapter's build path).
 			try {
-				const { buildQjsProd, resolveTargetCc } = await import('./qjs.js')
+				const { buildQjsProd } = await import('./qjs.js')
+				const { resolveTargetCc } = await import('@swelte/qjs')
 				const targetCc = resolveTargetCc(import.meta.url)
 				const prod = buildQjsProd({
 					root,

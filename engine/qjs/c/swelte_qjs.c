@@ -96,6 +96,16 @@ void swelte_qjs_free_runtime(int handle) {
     JS_FreeRuntime(rt);
 }
 
+// Sibling-glue lookup: the agent eval entry shares this table.
+JSRuntime *swelte_qjs_rt_at(int handle) {
+    pthread_mutex_lock(&swelte_qjs_mu);
+    int i = handle - 1;
+    int valid = (i >= 0 && i < SWELTE_QJS_MAX_RUNTIMES && swelte_qjs_rt_used[i]);
+    JSRuntime *rt = valid ? swelte_qjs_rts[i] : NULL;
+    pthread_mutex_unlock(&swelte_qjs_mu);
+    return rt;
+}
+
 typedef struct {
     uint64_t start_ms;
     int timeout_ms;

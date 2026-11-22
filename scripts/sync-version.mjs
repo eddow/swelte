@@ -1,7 +1,7 @@
 // Version tooling for the shared-line / independent-patch policy
 // (docs/specs/versioning.md).
 //
-// Active release line: 0.2 — participants core, vvm, ssr-qjs, mcp, ai, create, plus
+// Active release line: 0.2 — participants core, vvm, ssr-qjs, mcp, ai, create, plus, qjs
 // share major.minor, each owns its patch counter.
 //
 // Usage:
@@ -21,9 +21,10 @@ import { readFileSync, writeFileSync } from 'node:fs'
 
 const ROOT = 'package.json'
 // Line participants: every active package on the shared major.minor line
-// (plus is an active 0.2 participant — jobs + db plugins).
-const ACTIVE = ['core', 'vvm', 'ssr-qjs', 'mcp', 'ai', 'create', 'plus']
-const ALL_DIRS = ['engine/core', 'engine/vvm', 'engine/ssr-qjs', 'engine/mcp', 'engine/ai', 'engine/create', 'engine/plus']
+// (plus is an active 0.2 participant — jobs + db plugins;
+// qjs is an active 0.2 participant — shared QuickJS engine, leaf-first).
+const ACTIVE = ['qjs', 'core', 'vvm', 'ssr-qjs', 'mcp', 'ai', 'create', 'plus']
+const ALL_DIRS = ['engine/qjs', 'engine/core', 'engine/vvm', 'engine/ssr-qjs', 'engine/mcp', 'engine/ai', 'engine/create', 'engine/plus']
 const EXAMPLES = ['examples/tests', 'examples/something', 'examples/docs-site']
 const TEMPLATE = 'engine/create/templates/base'
 // Shared pins aligned on core (single truth for the whole repo).
@@ -108,7 +109,7 @@ function plan({ json = false } = {}) {
 			console.log('plan: no publish (docs-only or no engine changes)')
 		} else {
 			console.log(`plan: publish ${selection.length} tarball(s): ${selection.join(', ')}`)
-			console.log(`order: ${['vvm', 'core', 'plus', 'ai', 'mcp', 'ssr-qjs', 'create'].filter((p) => touched.has(p)).join(' -> ')}`)
+			console.log(`order: ${['qjs', 'vvm', 'core', 'plus', 'ai', 'mcp', 'ssr-qjs', 'create'].filter((p) => touched.has(p)).join(' -> ')}`)
 		}
 	} else {
 		console.log(JSON.stringify({ selection, status }))
@@ -189,7 +190,7 @@ function checkCommand(args) {
 	}
 	const targets = wantRaw ? selected : [...ACTIVE]
 	// Dependency order so ^ranges resolve to the just-published version.
-	const ORDER = ['vvm', 'core', 'plus', 'ai', 'mcp', 'ssr-qjs', 'create']
+	const ORDER = ['qjs', 'vvm', 'core', 'plus', 'ai', 'mcp', 'ssr-qjs', 'create']
 	targets.sort((a, b) => ORDER.indexOf(a) - ORDER.indexOf(b))
 	const rows = targets.map((p) => {
 		const local = readJson(`engine/${p}/package.json`).version

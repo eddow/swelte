@@ -15,24 +15,29 @@ export {
 } from './anthropic.js'
 export type { MediaAssetRef, MediaEventPayload, MediaTrackRef } from './boundary.js'
 export { isTrackPayload } from './boundary.js'
+// NOTE: the plugin entry points (`toolsPlugin`, `agentPlugin`,
+// `createToolsPlugin`, `createAgentPlugin`) and the build-time generator
+// values (`emitTool*`, `toolManifestFor`, `validateToolFn`, `selectTools`,
+// `schemaHash`, `agentBridgeSrc`, …) live exclusively behind the
+// `@swelte/ai/tools` subpath (node-only: vite plugin registration +
+// `./build.js`). They are intentionally NOT re-exported here: `./tools.js`
+// imports `./build.js` (node-only: `node:*` + the `@swelte/core/vite`
+// plugin barrel), and this browser-safe index must never pull that chain
+// into client bundles — Rollup retains the module-scope plugin
+// instantiation and its toolchain chain, breaking browser builds. The
+// type-only `./build.js` exports below erase at compile time and are safe.
 export type {
 	ToolDispatchModule,
 	ToolDispatchTarget,
 	ToolManifest,
 	ToolManifestEntry,
 } from './build.js'
-export {
-	emitToolBindings,
-	emitToolDispatcher,
-	emitToolManifest,
-	schemaHash,
-	selectTools,
-	toolDocComments,
-	toolImportPath,
-	toolManifestFor,
-	validateAgainstSchema,
-	validateToolFn,
-} from './build.js'
+// NOTE: the plugin entry points (`toolsPlugin`, `agentPlugin`,
+// `createToolsPlugin`, `createAgentPlugin`) and the build-time generator
+// values (`emitTool*`, `toolManifestFor`, `validateToolFn`, `selectTools`,
+// `schemaHash`, `agentBridgeSrc`, …) live exclusively behind the
+// `@swelte/ai/tools` subpath (node-only). The type-only tool shapes below
+// erase at compile time and are safe.
 export type {
 	AdapterCaps,
 	AdapterSelection,
@@ -85,7 +90,6 @@ export type {
 export { generateSchema, schemaId } from './schema.js'
 export type { WireEvent } from './sse.js'
 export { createSseParser, decodeSseEvent, encodeSseEvent } from './sse.js'
-export { createToolsPlugin, toolsPlugin } from './tools.js'
 export type { CostEstimate, PriceTable, ProviderUsage, TraceEvent, TraceSink } from './trace.js'
 export { createMemorySink, estimateCost } from './trace.js'
 export { VERSION } from './version.js'

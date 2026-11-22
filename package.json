@@ -9,9 +9,9 @@
   ],
   "scripts": {
     "build": "npm run build:engine",
-    "build:engine": "npm run build --workspace=@swelte/vvm --workspace=@swelte/core --workspace=@swelte/mcp --workspace=@swelte/plus --workspace=@swelte/ssr-qjs --workspace=@swelte/create --if-present && npm run package --workspace=@swelte/ai",
+    "build:engine": "npm run build --workspace=@swelte/qjs --workspace=@swelte/vvm --workspace=@swelte/core --workspace=@swelte/mcp --workspace=@swelte/plus --workspace=@swelte/ssr-qjs --workspace=@swelte/create --if-present && npm run package --workspace=@swelte/ai",
     "test": "npm run test:unit && npm run test:e2e && npm run test:dogfood && npm run test:examples",
-    "test:unit": "npm run test --workspace=@swelte/core && npm run test --workspace=@swelte/plus && npm run test --workspace=@swelte/mcp && npm run test --workspace=@swelte/ssr-qjs && npm run test --workspace=@swelte/create && npm run test --workspace=@swelte/ai",
+    "test:unit": "npm run test --workspace=@swelte/qjs && npm run test --workspace=@swelte/core && npm run test --workspace=@swelte/plus && npm run test --workspace=@swelte/mcp && npm run test --workspace=@swelte/ssr-qjs && npm run test --workspace=@swelte/create && npm run test --workspace=@swelte/ai",
     "test:e2e": "npm run build:engine && node scripts/test-e2e.mjs",
     "test:examples": "npm run test:full --workspace=examples/tests",
     "test:dogfood": "node scripts/test-dogfood.mjs",

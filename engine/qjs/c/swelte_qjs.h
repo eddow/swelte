@@ -54,6 +54,10 @@ typedef struct JSRuntime JSRuntime;
 int swelte_qjs_new_runtime(void);
 void swelte_qjs_free_runtime(int handle);
 
+// Lookup helper for sibling glue (agent eval): return the runtime for a
+// live handle, or NULL. Locks the shared table; never blocks on JS.
+JSRuntime *swelte_qjs_rt_at(int handle);
+
 // Render into the caller buffer. Returns needed length (>=0, excl. NUL),
 // or negative on failure (-1 js, -5 timeout, -6 memory, -2 no export, -3 load,
 // -4 empty body: rendered, nothing inside — caller keeps the SPA shell).

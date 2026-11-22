@@ -1,0 +1,54 @@
+{
+  "name": "@swelte/qjs",
+  "version": "0.2.0",
+  "description": "Swelte embedded-QuickJS engine: vendored C sources, shared V module, and the consumer-agnostic archive builder.",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": "./dist/index.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "README.md",
+    "dist",
+    "c",
+    "qjs.v",
+    "agent.v",
+    "LICENSE-MIT",
+    "package.json"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "tsc -p tsconfig.json --watch",
+    "test": "node --test --test-reporter=spec \"dist-test/**/*.test.js\"",
+    "pretest": "tsc -p tsconfig.test.json",
+    "prepublishOnly": "npm run build"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.6",
+    "typescript": "^5.0.0"
+  },
+  "license": "MIT",
+  "author": {
+    "name": "François Marie De Mey",
+    "email": "fmdm@emedware.dev",
+    "url": "https://github.com/eddow"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/eddow/swelte.git"
+  },
+  "homepage": "https://github.com/eddow/swelte",
+  "publishConfig": {
+    "access": "public"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "keywords": [
+    "svelte",
+    "quickjs",
+    "ssr"
+  ]
+}

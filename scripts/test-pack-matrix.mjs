@@ -25,10 +25,10 @@ function run(cmd, args, opts = {}) {
 }
 
 const VERSION = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8')).version
-console.log(`packing core/plus/ai @ ${VERSION} ...`)
+console.log(`packing core/plus/ai/qjs @ ${VERSION} ...`)
 const PACK = join(TMP, 'packs')
 mkdirSync(PACK, { recursive: true })
-for (const pkg of ['core', 'vvm', 'plus', 'ai']) {
+for (const pkg of ['qjs', 'core', 'vvm', 'plus', 'ai']) {
   const out = run('npm', ['pack', `--workspace=engine/${pkg}`, '--pack-destination', PACK, '--silent']).trim().split('\n').pop()
   console.log(`  ${out}`)
 }
@@ -41,7 +41,7 @@ function pinLocal(dir) {
   const pj = JSON.parse(readFileSync(pjFile, 'utf8'))
   let touched = false
   for (const s of ['dependencies', 'devDependencies', 'peerDependencies', 'optionalDependencies']) {
-    for (const dep of ['core', 'vvm']) {
+    for (const dep of ['qjs', 'core', 'vvm']) {
       if (pj[s]?.[`@swelte/${dep}`]) {
         pj[s][`@swelte/${dep}`] = `file:${tgz(dep)}`
         touched = true
@@ -58,7 +58,15 @@ function pinLocal(dir) {
 function installConsumer(name, deps) {
   const dir = join(TMP, name)
   mkdirSync(dir, { recursive: true })
-  writeFileSync(join(dir, 'package.json'), JSON.stringify({ name, private: true, type: 'module', dependencies: deps }, null, 2))
+  // Transitive engine deps (e.g. `@swelte/ssr-qjs` → `@swelte/qjs`) resolve
+  // from the packed tarballs, never the registry (qjs is unpublished until
+  // the first release-train run).
+  const pkg = { name, private: true, type: 'module', dependencies: deps, overrides: {} }
+  for (const dep of ['qjs', 'core', 'vvm']) {
+    if (existsSync(tgz(dep))) pkg.overrides[`@swelte/${dep}`] = `file:${tgz(dep)}`
+  }
+  if (Object.keys(pkg.overrides).length === 0) delete pkg.overrides
+  writeFileSync(join(dir, 'package.json'), JSON.stringify(pkg, null, 2))
   run('npm', ['install', '--no-audit', '--no-fund', '--package-lock=false'], { cwd: dir })
   return dir
 }

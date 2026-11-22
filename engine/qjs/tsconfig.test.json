@@ -1,0 +1,17 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": "dist-test",
+    "rootDir": "src",
+    "noEmit": false,
+    "declaration": false,
+    "declarationMap": false,
+    "sourceMap": false,
+    // Trick for *.test.ts / *.spec.ts importing `node:*`: list `node`
+    // explicitly so @types/node stays visible even if an app config with a
+    // restrictive `types` is picked by the editor. `src/**/*.ts` already
+    // covers specs co-located in src.
+    "types": ["node"]
+  },
+  "include": ["src/**/*.test.ts", "src/**/*.spec.ts", "src/**/*.ts"]
+}

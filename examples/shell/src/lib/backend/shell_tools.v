@@ -1,4 +1,5 @@
-// Shell reporting tools (Phase C): read-only, deterministic, text-only.
+// Shell reporting tools (Phase C): read-only, deterministic, text-only,
+// plus one side-effect tool exercising the dispatch-boundary approval gate.
 // No KV, no OS shell — same stance as the demo allowlist in `src/lib/shell.ts`.
 // The route `src/routes/api/tools.v` selects a subset per run and dispatches
 // through the generated `tools` module.
@@ -50,4 +51,25 @@ pub fn tool_shorten(args ShortenArgs) string {
 		return args.text
 	}
 	return args.text[..args.limit]
+}
+
+pub struct NoteArgs {
+pub:
+	text string
+}
+
+pub struct NoteRow {
+pub:
+	note string
+}
+
+// Side-effecting demo note (needs backend approval at the dispatch
+// boundary). No-op body: the gate is the point — record + decide before
+// dispatch, deny/expiry/duplicates/lost-ack without executing.
+@[tool('side-effect')]
+pub fn tool_publish_note(args NoteArgs) !NoteRow {
+	if args.text.len == 0 {
+		return error('note must not be empty')
+	}
+	return NoteRow{ note: args.text }
 }

@@ -3,6 +3,9 @@
 // which emits manifest + run bindings + native dispatcher. No runtime deps —
 // pure TS over parse output.
 import { createHash } from 'node:crypto'
+import { existsSync } from 'node:fs'
+import { createRequire } from 'node:module'
+import { dirname, join, resolve } from 'node:path'
 import type { RpcFn, SweltePlugin, SweltePluginDeclaration, VStruct } from '@swelte/core/vite'
 import { defineSweltePlugin } from '@swelte/core/vite'
 
@@ -396,15 +399,21 @@ export function emitToolBindings(entries: ToolManifestEntry[]): string {
  *
  *  Per-run selection is enforced at this boundary: `allowed` is the run's
  *  tool-name subset and a name outside it fails before any V fn runs.
- *  `swelte_tool_dispatch(allowed, name, args_json)` decodes args, calls
- *  the V fn, encodes the result; unknown tools, unselected tools and bad
- *  args fail closed. Approval is enforced by the caller (the QuickJS host
- *  / route backend checks the manifest `sideEffect` flag + the approval
- *  record before dispatching). */
+ *  `swelte_tool_dispatch(allowed, name, args_json, caller, op_id)` decodes
+ *  args, calls the V fn, encodes the result; unknown tools, unselected
+ *  tools and bad args fail closed. `caller`/`op_id` carry the run's
+ *  authenticated caller and operation id (read-only tools ignore them —
+ *  pass `'',''`). `@[tool('side-effect')]` arms additionally require a
+ *  recorded approval bound to caller + tool + exact args + op id (see the
+ *  emitted approval table): unknown, mismatched, non-approved or expired
+ *  op ids fail closed before the V fn runs, and executed op ids replay
+ *  the stored result (lost-ack recovery, no re-execution). */
 export interface ToolDispatchTarget {
 	fn: string
 	argsStruct: string | null
 	fallible: boolean
+	/** True when declared `@[tool('side-effect')]` — needs backend approval. */
+	sideEffect?: boolean
 }
 
 export interface ToolDispatchModule {
@@ -436,14 +445,50 @@ export function emitToolDispatcher(modules: ToolDispatchModule[]): string {
 		out.push(`import ${toolImportPath(dir)} as ${alias}`)
 	}
 	out.push('')
-	out.push('pub fn swelte_tool_dispatch(allowed []string, name string, args_json string) !string {')
+	out.push(
+		'pub fn swelte_tool_dispatch(allowed []string, name string, args_json string, caller string, op_id string) !string {'
+	)
 	out.push(`\tif name !in allowed {`)
 	out.push(`\t\treturn error('tool not selected for this run: ' + name)`)
 	out.push(`\t}`)
+	// Approval gate (backend dispatch boundary — spec §C). Side-effect
+	// tools stay unexecuted until the application records a valid decision
+	// bound to caller + tool + exact args + op id (see
+	// `swelte_tool_approval_record` below). Read-only tools ignore
+	// caller/op_id entirely (pass '' — no approval flow needed, no
+	// QJS involved either). Unknown op ids fail closed; expired or denied
+	// decisions fail closed; executed op ids replay the stored result
+	// without re-running the side effect (lost-ack recovery).
+	const sideArms = modules.flatMap((m) =>
+		m.fns.filter((t) => t.sideEffect).map((t) => `${m.mod.split('/').join('.')}.${t.fn}`)
+	)
+	const needsGate = sideArms.length > 0
+	if (needsGate) {
+		out.push(`\tif name in [${sideArms.map((s) => `'${s}'`).join(', ')}] {`)
+		out.push(`\t\tif op_id == '' {`)
+		out.push(`\t\t\treturn error('approval required for side-effect tool: ' + name)`)
+		out.push(`\t\t}`)
+		out.push(`\t\trec := swelte_tool_approval_lookup(op_id) or {`)
+		out.push(`\t\t\treturn error('unknown approval: ' + op_id + ' for tool ' + name)`)
+		out.push(`\t\t}`)
+		out.push(`\t\tif rec.caller != caller || rec.tool != name || rec.args_json != args_json {`)
+		out.push(
+			`\t\t\treturn error('approval mismatch for op ' + op_id + ': bound to a different caller/tool/args')`
+		)
+		out.push(`\t\t}`)
+		out.push(`\t\tif rec.decision != 'approved' {`)
+		out.push(`\t\t\treturn error('approval not granted for op ' + op_id + ': ' + rec.decision)`)
+		out.push(`\t\t}`)
+		out.push(`\t\tif rec.executed {`)
+		out.push(`\t\t\treturn rec.result_json`)
+		out.push(`\t\t}`)
+		out.push(`\t}`)
+	}
 	for (const m of modules) {
 		const qual = aliases.get(m.dir)!
 		for (const target of m.fns) {
 			const dotted = `${m.mod.split('/').join('.')}.${target.fn}`
+			const isSide = !!target.sideEffect
 			out.push(`\tif name == '${dotted}' {`)
 			if (target.argsStruct) {
 				out.push(
@@ -468,13 +513,90 @@ export function emitToolDispatcher(modules: ToolDispatchModule[]): string {
 					out.push(`\t\tres := ${qual}.${target.fn}()`)
 				}
 			}
-			out.push(`\t\treturn json.encode(res)`)
+			if (isSide) {
+				// Record the result against the op id BEFORE returning it:
+				// a duplicate delivery (lost ack retry) replays the stored
+				// result without re-running the side effect.
+				out.push(`\t\tswelte_tool_approval_complete(op_id, json.encode(res))`)
+				out.push(`\t\treturn json.encode(res)`)
+			} else {
+				out.push(`\t\treturn json.encode(res)`)
+			}
 			out.push(`\t}`)
 		}
 	}
 	out.push(`\treturn error('unknown tool: ' + name)`)
 	out.push('}')
 	out.push('')
+	if (needsGate) {
+		out.push('// Approval table (backend dispatch boundary — spec §C).')
+		out.push('// Decisions are recorded by the application backend (route/')
+		out.push('// approval flow) and bound to caller + tool + exact args + op')
+		out.push('// id. Unknown, mismatched, denied or expired op ids fail')
+		out.push('// closed; executed op ids replay their stored result.')
+		out.push('struct SwelteToolApproval {')
+		out.push('pub mut:')
+		out.push('\tcaller      string')
+		out.push('\ttool        string')
+		out.push('\targs_json   string')
+		out.push('\tdecision    string')
+		out.push('\tresult_json string')
+		out.push('\texecuted    bool')
+		out.push('}')
+		out.push('')
+		out.push('__global swelte_tool_approvals map[string]SwelteToolApproval')
+		out.push('')
+		out.push(
+			'pub fn swelte_tool_approval_record(caller string, tool string, args_json string, op_id string) {'
+		)
+		out.push("\tif op_id == '' {")
+		out.push('\t\treturn')
+		out.push('\t}')
+		out.push('\tif op_id in swelte_tool_approvals {')
+		out.push('\t\treturn')
+		out.push('\t}')
+		out.push('\tswelte_tool_approvals[op_id] = SwelteToolApproval{')
+		out.push('\t\tcaller: caller')
+		out.push('\t\ttool: tool')
+		out.push('\t\targs_json: args_json')
+		out.push("\t\tdecision: 'pending'")
+		out.push('\t}')
+		out.push('}')
+		out.push('')
+		out.push('pub fn swelte_tool_approval_decide(op_id string, decision string) bool {')
+		out.push('\tif op_id !in swelte_tool_approvals {')
+		out.push('\t\treturn false')
+		out.push('\t}')
+		out.push("\tif decision != 'approved' && decision != 'denied' && decision != 'expired' {")
+		out.push('\t\treturn false')
+		out.push('\t}')
+		out.push('\tmut rec := swelte_tool_approvals[op_id]')
+		out.push("\tif rec.decision != 'pending' {")
+		out.push('\t\treturn true')
+		out.push('\t}')
+		out.push('\trec.decision = decision')
+		out.push('\tswelte_tool_approvals[op_id] = rec')
+		out.push('\treturn true')
+		out.push('}')
+		out.push('')
+		out.push('fn swelte_tool_approval_lookup(op_id string) !SwelteToolApproval {')
+		out.push('\tif op_id !in swelte_tool_approvals {')
+		out.push("\t\treturn error('unknown approval: ' + op_id)")
+		out.push('\t}')
+		out.push('\treturn swelte_tool_approvals[op_id]')
+		out.push('}')
+		out.push('')
+		out.push('fn swelte_tool_approval_complete(op_id string, result_json string) {')
+		out.push('\tif op_id !in swelte_tool_approvals {')
+		out.push('\t\treturn')
+		out.push('\t}')
+		out.push('\tmut rec := swelte_tool_approvals[op_id]')
+		out.push('\trec.executed = true')
+		out.push('\trec.result_json = result_json')
+		out.push('\tswelte_tool_approvals[op_id] = rec')
+		out.push('}')
+		out.push('')
+	}
 	return out.join('\n')
 }
 
@@ -544,9 +666,89 @@ function toolsForFile(
 				fn: fn.name,
 				argsStruct: fn.singleArgsStruct ?? null,
 				fallible: fn.fallible,
+				sideEffect: fn.qualifier === 'side-effect',
 			})),
 		},
 	}
+}
+
+/** Absolute dir of the shared QuickJS V module (`qjs.v` + `agent.v`,
+ *  `module qjs` — budgets, failure taxonomy, `agent_eval`). Single
+ *  resolution: the installed `@swelte/qjs` package root (assert `qjs.v`
+ *  exists, else throw naming the install). */
+export function agentQjsModuleDir(fromUrl: string = import.meta.url): string {
+	const pkgFile = createRequire(fromUrl).resolve('@swelte/qjs/package.json')
+	const dir = dirname(pkgFile)
+	if (!existsSync(join(dir, 'qjs.v'))) {
+		throw new Error(
+			`[swelte:ai] shared QuickJS module not found at ${dir} — install @swelte/qjs for PTC agent eval`
+		)
+	}
+	return dir
+}
+
+/** Agent bridge source (`agent/agent_bridge.v`): `module agent` importing
+ *  the shared `module qjs`, exposing `agent_run_eval` (program + selected
+ *  bindings + budgets → `AgentResult`) behind the run allowlist. The V
+ *  host owns approval: side-effect tools stay unexecuted until the
+ *  application records a valid decision (see the spec §C). The bridge
+ *  carries `__global` + archive `#flag`s so core's `needsQjsLink` fires
+ *  the shared QJS link exactly once. */
+export function agentBridgeSrc(
+	lib: string,
+	cDir: string,
+	timeoutMs: number,
+	memoryMB: number
+): string {
+	return `// Auto-generated by @swelte/ai (agent plugin). Do not edit.
+// PTC agent bridge (module agent): programmatic tool calls via the shared
+// QuickJS engine (@swelte/qjs, same archive the SSR adapter links).
+// Named tool calls never touch this path — they go through the native
+// dispatcher with no JS runtime involved.
+//
+// OWNERSHIP: same rule as the render glue — C never returns malloc'd
+// pointers. V passes heap buffers; C copies the outcome in and reports
+// the needed length. Runtimes are per-eval C-side ints (V truncates u64
+// C values to 32b).
+module agent
+
+import qjs
+
+#include "swelte_agent.h"
+#flag -I ${cDir}
+#flag ${lib}@START_LIBS
+#flag -lm -lpthread -ldl
+
+__global agent_qjs_ready bool
+
+pub fn agent_qjs_timeout_ms() int {
+	return ${timeoutMs}
+}
+
+pub fn agent_qjs_mem_cap_mb() u32 {
+	return u32(${memoryMB})
+}
+
+// Evaluate one agent program. Fresh runtime per call (freed before
+// return); the shared module owns budgets + failure taxonomy. Returns
+// the program's JSON completion value, or '' with the failure reason.
+// Approval + arg/budget/caller validation happen in the V host around
+// this call (route/backend layer), never inside JS.
+pub fn agent_run_eval(source string, bindings_json string, timeout_ms int, mem_cap_mb u32, max_calls int, max_result_b int) (string, bool, string) {
+	agent_qjs_ready = true
+	budgets := qjs.AgentBudgets{
+		timeout_ms: timeout_ms
+		mem_cap_mb: mem_cap_mb
+		max_calls: max_calls
+		max_result_b: max_result_b
+	}
+	res := qjs.agent_eval(source, bindings_json, budgets)
+	if !res.ok {
+		return '', false, res.reason
+	}
+	return res.result, true, ''
+}
+`
 }
 
 /** Explicit `@[tool]` plugin (replaces the `./swelte/build` auto-discovery
@@ -602,3 +804,82 @@ export function createToolsPlugin(): SweltePlugin {
 
 /** Default instance for `swelte({ plugins: [toolsPlugin] })`. */
 export const toolsPlugin: SweltePlugin = createToolsPlugin()
+
+const AGENT_PLUGIN_NAME = 'agent'
+
+/** PTC agent plugin (separate from `toolsPlugin`, opt-in per app).
+ *  Augment-only: no attrs claimed. `includes()` stages the shared
+ *  `module qjs` (`@swelte/qjs/*.v`) into `.swelte/qjs/` — the same source
+ *  dir the SSR adapter stages, same bytes, compiled once by V.
+ *  `generate()` emits `agent_bridge.v` (`module agent`: `agent_run_eval`
+ *  over the shared engine) and builds the shared `.swelte/qjs/libqjs.a`
+ *  via `@swelte/qjs` (mtime-guarded — an SSR co-consumer no-ops,
+ *  one archive linked once). Without `@swelte/qjs` installed the
+ *  archive step fails actionably naming the install; named tool calls
+ *  stay QJS-free regardless (they dispatch through `swelte_tool_dispatch`
+ *  with no JS runtime).
+ *  Register alongside the tools plugin for programmatic calls:
+ *  `swelte({ plugins: [toolsPlugin, agentPlugin] })`. */
+export function createAgentPlugin(opts?: { timeoutMs?: number; memoryMB?: number }): SweltePlugin {
+	const timeoutMs = opts?.timeoutMs ?? 1000
+	const memoryMB = opts?.memoryMB ?? 16
+	return defineSweltePlugin({
+		name: AGENT_PLUGIN_NAME,
+		attrs: [],
+		includes: () => [{ module: 'qjs', absDir: agentQjsModuleDir() }],
+		generate: (ctx) => {
+			// Root recovery: plugin ctx carries the outDir OPTION (`.swelte`,
+			// relative), not the Vite root. Resolve the gen dir against the
+			// process cwd — real `vite build`/`dev` always run with cwd at
+			// the app root (same assumption core's `resolve(root, outDir)`
+			// makes with root = Vite root = cwd in practice).
+			const genAbs = resolve(ctx.dirs.outDir)
+			const root = dirname(genAbs)
+			// The archive builder lives in `@swelte/qjs` (hard dep of both
+			// consumers — provider-only / named-call apps never install
+			// this plugin). `generate()` is sync, so invoke it in a child
+			// node process (cwd = app root, so package resolution starts at
+			// the app) and read back `{ lib, cDir }` as JSON. The build
+			// itself is mtime-guarded: an SSR co-consumer's archive is
+			// reused, so SSR + PTC link one `.swelte/qjs/libqjs.a` exactly
+			// once.
+			const { execFileSync } = createRequire(import.meta.url)(
+				'node:child_process'
+			) as typeof import('node:child_process')
+			const script = [
+				`const q = await import('@swelte/qjs');`,
+				`const out = q.buildQjsLib({ root: ${JSON.stringify(root)}, outDir: '.swelte' });`,
+				`console.log(JSON.stringify({ lib: out.lib, cDir: out.cDir }));`,
+			].join('\n')
+			let lib: string
+			let cDir: string
+			try {
+				const raw = execFileSync(process.execPath, ['--input-type=module', '-e', script], {
+					cwd: root,
+					stdio: ['ignore', 'pipe', 'pipe'],
+					env: { ...process.env },
+				})
+				const parsed = JSON.parse(String(raw)) as { lib?: unknown; cDir?: unknown }
+				if (typeof parsed.lib !== 'string' || typeof parsed.cDir !== 'string') {
+					throw new Error('archive builder returned no lib/cDir')
+				}
+				lib = parsed.lib
+				cDir = parsed.cDir
+			} catch (e) {
+				throw new Error(
+					`[swelte:ai] agent plugin needs @swelte/qjs (shared QuickJS archive builder): ` +
+						`${(e as Error).message}. Install @swelte/qjs for PTC agent eval — ` +
+						`named tool calls are unaffected.`
+				)
+			}
+			// The bridge is a generated file (like the SSR bridge in
+			// `routes/`): core writes it to `.swelte/agent/agent_bridge.v`
+			// (plugin name = dir). `__global` + archive `#flag`s make
+			// core's `needsQjsLink` fire the shared QJS link.
+			return { 'agent_bridge.v': agentBridgeSrc(lib, cDir, timeoutMs, memoryMB) }
+		},
+	})
+}
+
+/** Default instance for `swelte({ plugins: [toolsPlugin, agentPlugin] })`. */
+export const agentPlugin: SweltePlugin = createAgentPlugin()

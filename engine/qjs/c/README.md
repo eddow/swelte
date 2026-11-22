@@ -31,16 +31,17 @@
 ## Why vendored (not a submodule / system package)
 
 The V binary links this C directly (`#flag` on the prebuilt `libqjs.a`,
-see `@swelte/ssr-qjs` `src/qjs.ts`). A vendored copy keeps the prod build hermetic — no
+see `@swelte/qjs` `src/qjs.ts`). A vendored copy keeps the prod build hermetic — no
 apt/npm step, no network at `swelte build` time, exact-version pinned.
 `qjs`/`qjsc` dev binaries are NOT vendored (build them from the same
 tarball when needed: `make qjs qjsc`).
 
 ## Build
 
-`src/qjs.ts` (`buildQjsLib`) compiles each `.c` with gcc
+The owning consumer's TS (`@swelte/qjs` `src/qjs.ts` → `dist/qjs.js`, consumed via
+`buildQjsLib`) compiles each `.c` with gcc
 (`-O2 -D_GNU_SOURCE -DCONFIG_VERSION="2026-06-04" -fwrapv -fPIC`)
 and archives them + the glue objects into the shared
 `.swelte/qjs/libqjs.a` (mtime-guarded — the second consumer no-ops).
-cannot compile `quickjs.c`, hence the prebuilt archive (V links one
-`.a` per `#flag` — multiple `.o` files are not accepted).
+V's bundled tcc cannot compile `quickjs.c`, hence the prebuilt archive
+(V links one `.a` per `#flag` — multiple `.o` files are not accepted).

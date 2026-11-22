@@ -4,9 +4,10 @@ import { existsSync, mkdtempSync, rmSync, statSync, writeFileSync } from 'node:f
 import { tmpdir } from 'node:os'
 import { delimiter, join } from 'node:path'
 import { describe, it } from 'node:test'
-import { bridgeSrc, buildQjsProd, qjsCDir, whichCC } from './qjs.js'
+import { qjsCDir, whichCC } from '@swelte/qjs'
+import { bridgeSrc, buildQjsProd } from './qjs.js'
 
-describe('item 25 — QJS prod link (gcc-gated)', () => {
+describe('item 25 — QJS prod bridge (gcc-gated)', () => {
 	const cc = whichCC()
 	const gate = cc ? it : (it.skip ?? it)
 

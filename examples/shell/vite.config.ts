@@ -3,6 +3,7 @@ import tailwindcss from '@tailwindcss/vite';
 import { svelte } from '@sveltejs/vite-plugin-svelte';
 import { swelte } from '@swelte/ssr-qjs';
 import { toolsPlugin } from '@swelte/ai/tools';
+import { dbPlugin } from '@swelte/plus/db';
 import { roomsPlugin } from '@swelte/plus/rooms';
 import svelteConfig from './svelte.config.js';
 
@@ -27,9 +28,11 @@ export default defineConfig({
       vBackendUrl,
       // Explicit framework extensions: the AI tools plugin claims `@[tool]`
       // and generates `.swelte/tools/`; the Plus rooms plugin claims
-      // room-mode `@[sse]` (shell stream). Jobs + DB live in `@swelte/plus`
-      // — add `jobsPlugin`/`dbPlugin` here when the shell needs them.
-      plugins: [toolsPlugin, roomsPlugin],
+      // room-mode `@[sse]` (shell stream); the Plus db plugin stages the
+      // KV/SQLite backend (`backend/db.v`) the shell approvals, stdin queue
+      // and scrollback persist in. Jobs + DB migrations beyond the KV table
+      // live in `@swelte/plus` — add `jobsPlugin` here when the shell needs it.
+      plugins: [toolsPlugin, dbPlugin, roomsPlugin],
     }),
   ],
 });
