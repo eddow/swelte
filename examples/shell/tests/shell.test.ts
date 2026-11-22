@@ -186,3 +186,99 @@ describe('shell example: one backend shell shared by chat + terminal', () => {
 		}
 	})
 })
+
+describe('shell tools (Phase C): declarations, per-run selection, dispatch', () => {
+	const SRC_URL = new URL('../../src/lib/backend/shell_tools.v', import.meta.url)
+
+	async function loadAppTools() {
+		const { parseVFile, parseStructs } = await import('@swelte/core/vite')
+		const core = await import('@swelte/ai/swelte/build')
+		const fs = (await import('node:fs')) as typeof import('node:fs')
+		const src = fs.readFileSync(SRC_URL, 'utf8')
+		const fns = parseVFile(src, ['tool']).filter((f) => f.attr === 'tool')
+		for (const fn of fns) core.validateToolFn('src/lib/backend/shell_tools.v', fn)
+		const entries = core.toolManifestFor(
+			'backend/shell_tools',
+			fns,
+			parseStructs(src),
+			core.toolDocComments(src),
+		)
+		return { core, fs, entries }
+	}
+
+	/** Mirror of src/routes/api/tools.v selection: `only` picks the run subset. */
+	function selectForRun(all: { name: string }[], only: string): string[] {
+		if (only === 'top') return ['backend.shell_tools.tool_top_commands']
+		if (only === 'short') return ['backend.shell_tools.tool_shorten']
+		if (only === 'nope') return ['backend.shell_tools.tool_nope']
+		return all.map((t) => t.name)
+	}
+
+	it('declares two text-only tools with content-hashed schema ids', async () => {
+		const { entries } = await loadAppTools()
+		assert.deepEqual(
+			entries.map((e) => e.name).sort(),
+			['backend.shell_tools.tool_shorten', 'backend.shell_tools.tool_top_commands'],
+		)
+		for (const e of entries) {
+			assert.equal(e.sideEffect, false)
+			assert.match(
+				(e.inputSchema as { $id: string }).$id,
+				new RegExp(`^${e.name.replace(/\./g, '\\.')}/input/[0-9a-f]{12}$`),
+			)
+		}
+		const top = entries.find((e) => e.name.endsWith('tool_top_commands'))
+		assert.ok(top?.description.includes('ledger'))
+	})
+
+	it('per-run selection binds the callable set; unselected has no function', async () => {
+		const { core, fs, entries } = await loadAppTools()
+		const manifest = { version: 1 as const, tools: entries }
+		const os = (await import('node:os')) as typeof import('node:os')
+		const path = (await import('node:path')) as typeof import('node:path')
+		const { pathToFileURL } = (await import('node:url')) as typeof import('node:url')
+		// Run subset `only=top`: top_commands dispatches, shorten has no callable.
+		const selected = core.selectTools(manifest, selectForRun(entries, 'top'))
+		assert.deepEqual(selected.map((t) => t.name), ['backend.shell_tools.tool_top_commands'])
+		// Unknown selections fail closed (mirrors the route `only=nope` arm).
+		assert.throws(() => core.selectTools(manifest, selectForRun(entries, 'nope')), /unknown tool/)
+		const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'swelte-shell-tools-'))
+		try {
+			const file = path.join(dir, 'tools.gen.mjs')
+			fs.writeFileSync(file, core.emitToolBindings(entries))
+			const bindings = (await import(pathToFileURL(file).href)) as {
+				createRunTools: (selected: string[], t: (n: string, a: unknown) => Promise<unknown>) => Record<string, (a: unknown) => Promise<unknown>>
+				callSelectedTool: (s: unknown, n: string, a: unknown, t: (n: string, a: unknown) => Promise<unknown>) => Promise<unknown>
+			}
+			const calls: [string, unknown][] = []
+			const transport = async (name: string, args: unknown) => {
+				calls.push([name, args])
+				if (name === 'backend.shell_tools.tool_top_commands') {
+					const { limit } = args as { limit: number }
+					if (limit <= 0) throw new Error('limit must be positive')
+					return [
+						{ command: 'echo hi', count: 3 },
+						{ command: 'pwd', count: 2 },
+					].slice(0, limit)
+				}
+				throw new Error(`unexpected transport call: ${name}`)
+			}
+			const run = bindings.createRunTools(['backend.shell_tools.tool_top_commands'], transport)
+			assert.deepEqual(Object.keys(run), ['backend.shell_tools.tool_top_commands'])
+			const got = await run['backend.shell_tools.tool_top_commands']({ limit: 2 })
+			assert.deepEqual(got, [
+				{ command: 'echo hi', count: 3 },
+				{ command: 'pwd', count: 2 },
+			])
+			assert.equal(run['backend.shell_tools.tool_shorten'], undefined)
+			assert.equal(calls.length, 1, 'unselected tool must never reach the transport')
+			await assert.rejects(
+				() => bindings.callSelectedTool(selected, 'backend.shell_tools.tool_shorten', { text: 'hi', limit: 5 }, transport),
+				/not selected for this run/,
+			)
+			assert.equal(calls.length, 1, 'rejected call must never reach the transport')
+		} finally {
+			fs.rmSync(dir, { recursive: true, force: true })
+		}
+	})
+})

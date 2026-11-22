@@ -80,6 +80,10 @@ export function parseVFile(src: string, extraAttrs: string[] = []): RpcFn[] {
 	const re = /@\[([^\]]*)\]\s*pub\s+fn\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(/g
 	let m: RegExpExecArray | null
 	while ((m = re.exec(merged)) !== null) {
+		// 1-based line of the attribute in the ORIGINAL source. The merge
+		// above only replaces `]\n@[` separators with `; ` (no newlines
+		// added/removed), so offsets map back onto `src` directly.
+		const line = src.slice(0, m.index).split('\n').length
 		// Paren-aware param scan: `emit fn (string) bool` contains
 		// parens, so `([^)]*)` truncates. Walk balanced from the open
 		// paren instead; the return type follows `)` up to `{`/`\n`.
@@ -203,6 +207,7 @@ export function parseVFile(src: string, extraAttrs: string[] = []): RpcFn[] {
 				tsret: tsTypeFor(vret),
 				fallible,
 				singleArgsStruct,
+				line,
 				...(body !== undefined ? { body } : {}),
 				...(hookBody !== undefined ? { hookBody } : {}),
 			})

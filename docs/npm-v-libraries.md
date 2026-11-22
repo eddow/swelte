@@ -179,3 +179,31 @@ Only installed packages in the application's npm dependency graph are
 considered. Physical hoisting under `node_modules` is not part of the public
 contract.
 
+
+## Library build phases
+
+A direct app dependency can register a build phase through its package exports.
+For a library that packages `src/lib/build.ts` as JavaScript, add
+`"./swelte/build": "./package/build.js"` to its `exports` object.
+Swelte imports this module in Node during generation. Installing the library
+as a direct dependency enables discovery for CLI builds and dev generation.
+
+```ts
+import type { SwelteBuildPhase } from '@swelte/core/vite'
+
+export default {
+  attrs: ['catalog'],
+  module: 'catalog',
+  generate(files) {
+    const names = files.flatMap(file => file.declarations.map(fn => fn.name))
+    return { 'names.json': JSON.stringify(names) }
+  },
+} satisfies SwelteBuildPhase
+```
+
+Each phase claims its attributes and owns one directory under the app’s
+generated output. The hook receives matching route and library files with
+their source, module path, location kind, declarations and structs. It runs
+when at least one declaration matches. Return the complete set of output
+files on each run so Swelte can update changed files and remove stale ones.
+For example, `@swelte/ai` owns `@[tool]` and generates the `tools` module.

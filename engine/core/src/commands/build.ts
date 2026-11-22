@@ -171,6 +171,9 @@ export async function runBuild(ctx: Ctx): Promise<void> {
 	// which the CLI never loads — recover them so generate() sees the
 	// same options as `vite build` (else backend-hub build errors).
 	const projectSwelteOpts = await loadProjectSwelteOptions(root)
+	// §1: resolved plugins identical for build/dev/check/test/CLI.
+	const { loadProjectSweltePlugins } = await import('../gen/config.js')
+	const projectPlugins = await loadProjectSweltePlugins(root)
 	// 1. generate into .swelte/ (routes/*.v + server_gen.v + .swelte/server.v harness).
 	try {
 		const mod = (await import('../vite.js')) as unknown as {
@@ -179,7 +182,7 @@ export async function runBuild(ctx: Ctx): Promise<void> {
 		}
 		const swelte = mod.default ?? mod.swelte
 		if (typeof swelte !== 'function') throw new Error('vite.js has no swelte export')
-		const plug = swelte({ ...projectSwelteOpts }) as unknown as {
+		const plug = swelte({ ...projectSwelteOpts, plugins: projectPlugins }) as unknown as {
 			buildStart?: () => Promise<void> | void
 			configResolved?: (c: { root: string }) => void
 		}

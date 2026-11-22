@@ -29,6 +29,7 @@ export interface NpmVExport {
 }
 
 interface PackageJson {
+	exports?: Record<string, unknown>
 	name?: unknown
 	version?: unknown
 	dependencies?: Record<string, unknown>
@@ -75,7 +76,7 @@ function packageSpecifier(packageName: string, exportKey: string): string {
 	return `${packageName}/v/${exportKey.slice(2)}`
 }
 
-function readJson(file: string): PackageJson {
+export function readJson(file: string): PackageJson {
 	try {
 		return JSON.parse(readFileSync(file, 'utf8')) as PackageJson
 	} catch (error) {
@@ -88,7 +89,7 @@ function contains(root: string, candidate: string): boolean {
 	return rel === '' || (!rel.startsWith(`..${sep}`) && rel !== '..' && !isAbsolute(rel))
 }
 
-function findDependencyPackage(fromRoot: string, packageName: string): string | null {
+export function findDependencyPackage(fromRoot: string, packageName: string): string | null {
 	let cursor = resolve(fromRoot)
 	for (;;) {
 		const candidate = join(cursor, 'node_modules', ...packageName.split('/'), 'package.json')
@@ -99,7 +100,7 @@ function findDependencyPackage(fromRoot: string, packageName: string): string | 
 	}
 }
 
-function dependencyNames(pkg: PackageJson, includeDev: boolean): string[] {
+export function dependencyNames(pkg: PackageJson, includeDev: boolean): string[] {
 	return [
 		...Object.keys(pkg.dependencies ?? {}),
 		...Object.keys(pkg.optionalDependencies ?? {}),

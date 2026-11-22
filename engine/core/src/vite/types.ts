@@ -103,6 +103,8 @@ export interface RpcFn {
 	body?: string
 	/** Raw V body of a server lifecycle/reporting hook. */
 	hookBody?: string
+	/** 1-based source line of the `@[...]` attribute in its file. */
+	line?: number
 }
 
 /** A `@[load]` page-data loader with its source file for error messages. */
@@ -213,6 +215,35 @@ export interface SweltePluginInclude {
 	absDir: string
 }
 
+/** One parsed V declaration a plugin claims, with its source context.
+ *  `kind` separates route/backend/shared-lib/app origins; `file` is the
+ *  project-relative path (`src/app.v`, `src/routes/...`, `src/lib/...`);
+ *  `modulePath` is the core mod (`api/rooms`, `backend/db`, `app`);
+ *  `line` is the 1-based `@[...]` line in that file (from `RpcFn.line`);
+ *  `source` is the full file text and `structs` its parsed `pub struct`s. */
+export interface SweltePluginDeclaration {
+	kind: 'app' | 'route' | 'backend' | 'lib'
+	file: string
+	modulePath: string
+	line: number
+	source: string
+	fn: RpcFn
+	structs: VStruct[]
+}
+
+/** Named generated files a plugin contributes (e.g. CLI helpers, runtime
+ *  includes). Core owns the output dir (`.swelte/<plugin.name>/`), validates
+ *  ownership, rejects collisions and prunes stale output on regeneration or
+ *  plugin removal — even when the app declares no matching attributes. */
+export interface SweltePluginGenerateCtx {
+	/** Resolved dirs (`src/routes`, `src/lib`, `.swelte`). */
+	dirs: { routesDir: string; libDir: string; outDir: string }
+	/** Claimed declarations across app/routes/backend/lib (may be empty). */
+	declarations: SweltePluginDeclaration[]
+	/** Raw `swelte[configKey]` value (absent key = undefined). */
+	config: unknown
+}
+
 /** V+TS plugin contract (consumed by core, implemented by plugin packages).
  * Core stays standalone: an app using only parity features (verbs/rpc/sse
  * per-request, serviceWorker/prerender/isr/offline literal)
@@ -231,8 +262,19 @@ export interface SweltePluginHarness {
 	main?: string
 	/** V emitted INSIDE `fn main()` after app startup succeeds. */
 	mainInner?: string
+	/** V emitted INSIDE the shutdown path (reverse plugin order). */
+	shutdown?: string
 	beforeRequest?: string
 	protect?: string[]
+}
+
+/** Outcome of resolving the configured plugins for one generate/CLI run:
+ *  deduped registration order (first wins per `name`), per-plugin claimed
+ *  declarations, and any resolution failure. Ordering: `plugins` run in
+ *  registration order at startup; shutdown fragments emit in reverse. */
+export interface SweltePluginResolved {
+	plugins: SweltePlugin[]
+	claims: Map<string, SweltePluginDeclaration[]>
 }
 
 export interface SweltePlugin {
@@ -247,12 +289,16 @@ export interface SweltePlugin {
 	 *  Zero-arg: the plugin resolves its own package root internally
 	 *  (createRequire self-reference works from src and dist). */
 	includes?: () => SweltePluginInclude[]
-	validate?: (rel: string, fn: { name: string; attr: string; qualifier?: string }) => void
+	validate?: (
+		rel: string,
+		fn: { name: string; attr: string; qualifier?: string },
+		declaration?: SweltePluginDeclaration,
+	) => void
 	/** V fragment appended to the route leaf file. */
 	emitRoute?: (ctx: SweltePluginRouteCtx, fns: { name: string; attr: string }[]) => string
 	/** V fragment appended to server_gen.v. */
 	emitServerGen?: (routes: { route: string; prefix: string }[]) => string
-	harness?: (config: unknown) => SweltePluginHarness
+	harness?: (config: unknown, declarations?: SweltePluginDeclaration[]) => SweltePluginHarness
 	/** App-level hooks from `src/app.v`: called with the parsed fns carrying
 	 *  plugin attrs. Core builtins (`cron`) read `src/app.v` directly via
 	 *  `readJobsCrons`; third-party attrs arrive through owning plugins.
@@ -260,11 +306,17 @@ export interface SweltePlugin {
 	 *  through; the owner parses+validates+emits. */
 	loadAppHooks?: (
 		root: string,
-		srcDir?: string
+		srcDir?: string,
+		declarations?: SweltePluginDeclaration[],
 	) => {
 		fragment?: SweltePluginHarness
 		errors?: string[]
 	}
+	/** Named output files owned by this plugin (`.swelte/<name>/...`).
+	 *  Runs even when the app declares no matching attributes (CLI helpers,
+	 *  runtime includes). Core validates names, rejects collisions across
+	 *  plugins/core and prunes stale output on regeneration or removal. */
+	generate?: (ctx: SweltePluginGenerateCtx) => Record<string, string>
 	/** TS declarations appended to types/<mod>.d.ts. */
 	clientDts?: (mod: string, fns: { name: string; attr: string }[]) => string
 	/** CLI commands merged into `swelte` (see `commands/types.ts` Command). */

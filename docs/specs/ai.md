@@ -39,12 +39,10 @@ Build the common structure once (designed for text + media + tools), ship the te
 
 ### C — Programmatic tools and approvals (still text-only)
 
-- [ ] Server-only V tool declarations generating callable bindings + input/output schemas; app selects tools per run.
-  - [ ] Shared shell tools (`shell.exec`, `shell.sendInput`, web fetch) first: bounded commands, PTY keystroke injection, per-call authorization.
-- [ ] Pre-execution validation (names, types, references, budgets); measure round trips and bytes vs one-call-per-turn baseline.
-- [ ] Bounded reporting plan: page authorized records, aggregate in V, return top five with source IDs.
-- [ ] Persist side-effect approvals against caller + exact args + operation ID; exercise expiry, duplicate, lost-ack recovery.
-- [ ] Dogfood proves it: human approves AI shell commands in-chat (approval gate), duplicate/expiry/lost-ack via the shared shell.
+- [x] Generate a tool manifest, JS bindings and native dispatch from explicit backend V declarations. Let the app select tools per run.
+- [ ] Run agent-authored JavaScript in a bounded backend QuickJS runtime. Validate and authorize each resolved call before dispatch.
+- [ ] Exercise a read-only reporting tool: page authorized records, aggregate in V and return the top five with source IDs. Measure model round trips and bytes against one call per turn.
+- [ ] Enforce approval requirements at the backend dispatch boundary. Use the shell example to exercise approval, expiry, duplicates and lost acknowledgements. Defer a common browser approval protocol until another application needs it.
 
 ### D — Media last (`@swelte/ai/media` + `@swelte/media` composition)
 
@@ -89,9 +87,17 @@ Offer an optional SQLite recorder with retention controls. Default to metadata. 
 
 ## Programmatic tools and approvals
 
-Explore server-only V tool declarations that generate callable bindings and input/output schemas. An app selects tools for each run and supplies the authenticated caller. The IDE's project MCP server remains a separate surface. [Project MCP](../mcp.md)
+Phase C uses `@[tool]` on application functions in `src/lib/backend/`. The attribute is independent of `@[rpc]` and HTTP routes. Shared V code can be called by a backend tool. All agent tool calls execute on the backend in this phase. Browser TS tools, browser WASM dispatch and a backend-to-browser tool bridge are deferred. The browser talks to the application backend, which owns the provider session and credentials. The IDE's project MCP server is a separate surface. [Project MCP](../mcp.md)
 
-A bounded plan can page through authorized records, aggregate in V and return the top five with source IDs. Validate tool names, types, references and declared budgets before execution, then authorize each resolved call. Measure model round trips and result bytes against a one-call-per-turn baseline. For side effects, persist approval against the caller, exact arguments and operation ID. Exercise expiry, duplicate approval and recovery after an external action succeeds but its acknowledgement is lost.
+The current prototype uses automatic discovery. The agreed migration to explicit registration is tracked in the [plugin and Plus roadmap](plugins.md). Swelte discovers a library build phase when a direct dependency (including dev and installed optional dependencies) exports `./swelte/build` as a path to compiled JavaScript. The library can author it in TypeScript. During generation, core collects route and library V declarations matching the phase’s attributes. The phase receives their location, source, parsed functions and structs. It returns files for its generated module. Generation runs only when matching declarations exist, and removing the last declaration or dependency prunes the module.
+
+The AI package owns the `tool` attribute, its backend placement rules, schemas, bindings and native dispatcher. Adding `@swelte/ai` to the app’s dependencies enables discovery without a Vite config entry. An app using only provider adapters emits no tools module. For tool declarations the phase writes `tool_manifest.json`, `tools.gen.mjs` and `tools.gen.v` under `.swelte/tools/`. For each run, the app selects a subset of the manifest and supplies the authenticated caller. The adapter translates the selected definitions into the provider's format for ordinary named calls.
+
+For programmatic calls, the proposed provider-facing tool accepts a JavaScript source string, and the model receives signatures for the selected bindings. TypeScript declarations describe those bindings. The backend evaluates the program as async JavaScript in a dedicated QuickJS context with time, memory, call-count and result-size limits. Each binding calls the native host dispatcher. The host resolves or rejects the binding's promise and advances the QuickJS job queue. Check syntax and statically known references before starting. Immediately before each native call, validate its resolved arguments, remaining budget and caller authorization. Validate the result before returning it to the program.
+
+Tools are application-defined. Shell execution and stdin handling belong to the shell example. Phase C defines no default tool catalog, including web fetch. An application may publish SSE progress or UI events when useful. Tool declarations and calls have no required event transport.
+
+For human approval, keep the execution decision on the backend. A call requiring approval stays unexecuted until the application records a valid decision bound to the authenticated caller, tool, exact arguments and operation ID. Denial or expiry prevents execution. Duplicate decisions and lost acknowledgements must be recoverable without repeating a side effect. If the application provides no approval flow, reject calls requiring one. The shell example can use its own UI and events. Defer standardizing how a frontend receives pending requests, submits decisions and resynchronizes after reconnecting.
 
 ## First end-to-end fixture
 

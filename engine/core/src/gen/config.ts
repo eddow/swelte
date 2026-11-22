@@ -7,6 +7,8 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 import type { SvelteConfig as SvelteBaseConfig } from '@sveltejs/vite-plugin-svelte'
 import { type ImageOptions, normalizeImages } from '../commands/images.js'
 import { normalizeOutbox, type OutboxOptions } from '../vite/outbox.js'
+import type { SweltePlugin } from '../vite/types.js'
+import { dedupPlugins } from '../vite/plugins.js'
 
 export interface SwelteOptions {
 	compat?: 'none' | 'sveltekit'
@@ -357,6 +359,22 @@ export async function loadProjectSwelteOptions(root: string): Promise<Record<str
 	}
 }
 
+/** Resolve configured plugins consistently for dev/check/build/CLI.
+ *  Reads `swelte.plugins` from the project config (Vite entry), dedupes by
+ *  `name` (first wins) and returns registration order: init order for
+ *  startup (`mainInner`), reverse for cleanup (`shutdown`), failure when a
+ *  plugin entry is malformed. `SWELTE_PLUGINS` env is CLI-only discovery
+ *  (see `cli.ts loadPluginPackages`) — never merged here. */
+export async function loadProjectSweltePlugins(root: string): Promise<SweltePlugin[]> {
+	const opts = await loadProjectSwelteOptions(root)
+	const plugins = (opts?.plugins ?? []) as SweltePlugin[]
+	for (const plugin of plugins) {
+		if (!plugin || typeof plugin.name !== 'string' || !plugin.name)
+			throw new Error('[swelte] plugin needs a name')
+	}
+	return dedupPlugins(plugins)
+}
+
 /** Read `<dir>/package.json`'s `swelte` key (deploy-target declaration).
  *  Never throws — missing/malformed = {}. */
 function readPackageSwelte(dir: string): SwelteOptions {
@@ -426,7 +444,7 @@ export function renderHarness(
 		 *  hub module so `swelte_sse_produce` can own subscriptions. */
 		roomSse?: boolean
 	},
-	fragments?: { imports?: string; main?: string; mainInner?: string }[]
+	fragments?: { imports?: string; main?: string; mainInner?: string; shutdown?: string }[]
 ): string {
 	const file = join(templatesDir(fromUrl), 'harness', 'server.v')
 	let src = readFileSync(file, 'utf8')
@@ -627,11 +645,75 @@ export function renderHarness(
 		}
 		// Plugin jobs start only after app startup has initialized shared
 		// dependencies. A failed startup must not execute these fragments.
+		// mainInner runs registration-ordered (startup order); shutdown
+		// fragments below run inside the shutdown hook in the order given —
+		// the caller passes them reversed (LIFO: last started, first stopped).
 		if (frag.mainInner) {
 			const anchor = '\t// [swelte] background-start: app startup must finish before plugin jobs.'
-			if (src.includes(anchor)) src = src.replace(anchor, `${frag.mainInner}\n${anchor}`)
+			// Failure behavior: each plugin init runs in its own fallible block
+		// AFTER @[startup] succeeded. A throw reports phase=startup-error,
+		// aborts boot (exit 1) and skips later inits — earlier inits'
+		// shutdown still runs via swelte_app_shutdown.
+		const block =
+			'\t// [swelte] plugin init (registration order; throw aborts boot, skips later inits)\n' +
+			'\t(fn () ! {\n' +
+			indent(frag.mainInner) +
+			'\n\t})() or {\n' + "\t\tswelte_report(SwelteReport{phase: 'startup-error', status: 500, message: err.msg()})\n" + "\t\teprintln('[swelte:startup] status=error')\n" + '\t\texit(1)\n\t}'
+		if (src.includes(anchor)) src = src.replace(anchor, `${block}\n${anchor}`)
 			else src += `\n// [swelte] plugin mainInner anchor missing — harness template changed.\n`
 		}
+		if ((frag as { shutdown?: string }).shutdown) {
+			const raw = (frag as { shutdown?: string }).shutdown ?? ''
+			const anchor = '\t// [swelte] shutdown-hook'
+			// Failure behavior: each plugin cleanup runs in its own fallible
+			// block (LIFO input reads top-down in the hook). ALL fragments run
+			// even when one throws: each error is reported immediately and
+			// recorded; the hook returns the FIRST error AFTER the rest
+			// complete (swelte_run_shutdown then reports phase=shutdown-error).
+			// Insert BEFORE the anchor and keep it for the next fragment. When
+			// the app has its own @[shutdown] body the anchor is gone (replaced
+			// above): append after the body instead.
+			const needAcc = !src.includes('mut swelte_plug_first_err')
+			const accDecl = needAcc ? '\tmut swelte_plug_first_err := \'\'\n' : ''
+			const inject =
+				'\t// [swelte] plugin shutdown (LIFO; all run, first error rethrown after)\n' +
+				accDecl +
+				'\t{\n' +
+				'\t\t(fn () ! {\n' +
+				indent(indent(raw)) +
+				'\n\t\t})() or { if swelte_plug_first_err == \'\' { swelte_plug_first_err = err.msg() } swelte_report(SwelteReport{phase: \'shutdown-error\', status: 500, message: err.msg()}) eprintln(\'[swelte:shutdown] status=error phase=hook\') }\n' +
+				'\t}' +
+				`\n${anchor}`
+			if (src.includes(anchor)) src = src.replace(anchor, inject)
+			else if (hooks?.shutdownBody !== undefined && src.includes(hooks.shutdownBody))
+			{
+				const appFrag = indent(indent(raw))
+				const wrapped =
+					'\t// [swelte] plugin shutdown (LIFO; all run, first error rethrown after)\n' +
+					(accDecl) +
+					'\t{\n' +
+					'\t\t(fn () ! {\n' +
+					appFrag +
+					'\n\t\t})() or { if swelte_plug_first_err == \'\' { swelte_plug_first_err = err.msg() } swelte_report(SwelteReport{phase: \'shutdown-error\', status: 500, message: err.msg()}) eprintln(\'[swelte:shutdown] status=error phase=hook\') }\n' +
+					'\t}'
+				src = src.replace(hooks.shutdownBody, `${wrapped}\n${hooks.shutdownBody}`)
+			}
+			else src += `\n// [swelte] plugin shutdown anchor missing — harness template changed.\n`
+		}
+	}
+	// §1: rethrow the first plugin-cleanup error AFTER all fragments ran.
+	// The accumulator is declared by the first shutdown fragment above;
+	// with no shutdown fragments this is a no-op (no accumulator present).
+	if (src.includes('mut swelte_plug_first_err')) {
+		const anchor = '\t// [swelte] shutdown-hook'
+		const rethrow =
+			'\tif swelte_plug_first_err != \'\' {\n' +
+			'\t\tswelte_report(SwelteReport{phase: \'shutdown-error\', status: 500, message: swelte_plug_first_err})\n' +
+			'\t\teprintln(\'[swelte:shutdown] status=error phase=hook\')\n' +
+			'\t\treturn error(swelte_plug_first_err)\n' +
+			'\t}\n' +
+			`\t// [swelte] shutdown-hook`
+		if (src.includes(anchor)) src = src.replace(anchor, rethrow)
 	}
 	return src
 }

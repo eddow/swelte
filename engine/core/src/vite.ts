@@ -112,11 +112,24 @@ export type {
 	ServerHooks,
 	SvelteRouteEntry,
 	SweltePlugin,
+	SweltePluginDeclaration,
+	SweltePluginGenerateCtx,
 	SweltePluginHarness,
 	SweltePluginInclude,
 	SweltePluginOptions,
 	SweltePluginRouteCtx,
+	SweltePluginResolved,
 	VStruct,
 	WrapperMw,
 } from './vite/types.js'
 export { defineSweltePlugin } from './vite/types.js'
+export {
+	assertPluginCli,
+	assertPluginName,
+	collectPluginDeclarations,
+	dedupPlugins,
+	pluginAttrOwners,
+	writePluginOutputs,
+} from './vite/plugins.js'
+
+export type { SwelteBuildPhase, BuildPhaseFile } from './vite/build.js'

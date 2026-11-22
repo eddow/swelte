@@ -9,18 +9,6 @@ import { isBackendMod, SWELTE_GEN_CORE_DIRS } from '../gen/paths.js'
 import { resolveV } from '../toolchain.js'
 import type { SweltePlugin } from '../vite/types.js'
 
-/** First registration wins (by plugin `name`): explicit user plugins come
- *  first and take precedence to an explicit user instance of the same name — e.g.
- *  `createJobsPlugin({ durable: true })` overrides the builtin default. */
-function dedupPlugins(all: SweltePlugin[]): SweltePlugin[] {
-	const seen = new Set<string>()
-	return all.filter((pl) => {
-		if (seen.has(pl.name)) return false
-		seen.add(pl.name)
-		return true
-	})
-}
-
 import { stageBackendModules } from './backend.js'
 import { emitClientRouter } from './client-router.js'
 import { collectErrorBoundaries } from './error-boundaries.js'
@@ -38,6 +26,7 @@ import {
 	listVFiles,
 	modulePath,
 	relPosix,
+	relPosixTop,
 	routeFor,
 	routeParams,
 	routeParamTs,
@@ -60,6 +49,8 @@ import {
 	validateWsFn,
 	vType,
 } from './server-gen.js'
+import { loadBuildPhases, phaseDeclarations, writePhaseOutputs } from './build.js'
+import { collectPluginDeclarations, dedupPlugins, writePluginOutputs } from './plugins.js'
 import {
 	renderServiceWorker,
 	renderServiceWorkerRegister,
@@ -322,6 +313,7 @@ export function swelte(options: SweltePluginOptions = {}): Plugin {
 					}
 				}
 				const warnings: string[] = []
+				const phases = await loadBuildPhases(root, extraAttrs)
 				const dispatched: { route: string; mod: string; prefix: string }[] = []
 				// Room-mode SSE (future.md #4) or @[ws] (future.md #3) present
 				// in any route file → harness imports the backend hub module.
@@ -462,14 +454,91 @@ export function swelte(options: SweltePluginOptions = {}): Plugin {
 				// into the harness fragments. Zero `@[cron]` ticks emit empty
 				// fragments (byte-identical harness).
 				const hooks = loadServerHooks(root)
-				const appHookFragments: { imports?: string; main?: string; mainInner?: string }[] =
+				// §1: resolved plugin declarations (app + routes + lib) shared
+				// by validate/loadAppHooks/harness/generate below.
+				const routesAbs = resolve(root, routesDir)
+				const libAbs = resolve(root, libDir)
+				const loadedCfg = await loadConfig(root)
+				const claims = collectPluginDeclarations(
+					plugins,
+					{
+						app: (() => {
+							try {
+								const src = readFileSync(join(root, 'src', 'app.v'), 'utf8')
+								return { file: 'src/app.v', modulePath: 'app', source: src }
+							} catch {
+								return null
+							}
+						})(),
+						routes: (() => {
+							const out: { file: string; modulePath: string; source: string }[] = []
+							try {
+								for (const file of listVFiles(routesAbs)) {
+									const abs = file
+									const rel = relPosix(routesAbs, abs)
+									try {
+										out.push({
+											file: `${routesDir}/${rel}`,
+											modulePath: modulePath(routesAbs, abs),
+											source: readFileSync(abs, 'utf8'),
+										})
+									} catch {
+										/* unreadable — main loop handles */
+									}
+								}
+							} catch {
+								/* no routes dir */
+							}
+							return out
+						})(),
+						libs: (() => {
+							const out: { kind: 'backend' | 'lib'; file: string; modulePath: string; source: string }[] = []
+							try {
+								for (const file of listVFiles(libAbs)) {
+									const abs = file
+									const rel = relPosix(libAbs, abs)
+									const mod = modulePath(libAbs, abs)
+									try {
+										out.push({
+											kind: isBackendMod(mod) ? 'backend' : 'lib',
+											file: `${libDir}/${rel}`,
+											modulePath: mod,
+											source: readFileSync(abs, 'utf8'),
+										})
+									} catch {
+										/* unreadable — main loop handles */
+									}
+								}
+							} catch {
+								/* no lib dir */
+							}
+							return out
+						})(),
+					},
+				)
+				const appHookFragments: { imports?: string; main?: string; mainInner?: string; shutdown?: string }[] =
 					hooks.imports ? [{ imports: hooks.imports }] : []
 				for (const plug of plugins) {
 					if (!plug.loadAppHooks) continue
-					const got = plug.loadAppHooks(root)
+					const got = plug.loadAppHooks(root, 'src', claims.get(plug.name) ?? [])
 					if (got.errors?.length) throw new Error(got.errors[0])
 					if (got.fragment) appHookFragments.push(got.fragment)
 				}
+				// §1 generate hook: named output files owned per plugin
+				// (`.swelte/<name>/...`), even with zero declarations.
+				// NOTE: included plugin module dirs are collected below
+				// (include staging). They are just module dirs (`extra/x.v`),
+				// not top-level dirs, so the reserved set here only guards
+				// core top-level dirs — collisions surface when the module
+				// dir itself is copied (existing error path).
+				// NOTE: early write REMOVED — this spot runs before `.swelte/`
+				// exists (buildStart creates it). The single emission lives
+				// next to the include staging below, before server.v render.
+				const pluginGenCtx = (plug: SweltePlugin) => ({
+					dirs: { routesDir, libDir, outDir },
+					declarations: claims.get(plug.name) ?? [],
+					config: (loadedCfg as unknown as Record<string, unknown>)?.[plug.configKey ?? ''],
+				})
 
 				function emitTypes(
 					sub: string,
@@ -825,8 +894,17 @@ ${list(st.fields, (fld) => `\t${fld.name}${fld.optional ? '?' : ''}: ${fld.tstyp
 				// Layout (spec v-imports.md §2): routes → server fetch stubs,
 				// lib → isomorphic WASM stubs. Types land under types/routes|lib so
 				// the *.v resolveId/load below can re-export them 1:1.
-				const routesAbs = resolve(root, routesDir)
-				const libAbs = resolve(root, libDir)
+				// (§1: routesAbs/libAbs resolved once above with claims. The
+				// generate() outputs below run unconditionally — incl. plugin
+				// generate() — even when the app has no .svelte routes.)
+				const genAbsEarly = resolve(root, outDir)
+				mkdirSync(genAbsEarly, { recursive: true })
+				writePluginOutputs(
+					genAbsEarly,
+					plugins,
+					pluginGenCtx,
+					new Set(['routes', 'generated', 'types', 'app', 'dev']),
+				)
 				// Deterministic input order: listVFiles sorts per-dir, but
 				// `dispatched` (hence server_gen route order) must be fully
 				// sorted by mod too — readdir order otherwise leaks into output.
@@ -868,14 +946,21 @@ ${list(st.fields, (fld) => `\t${fld.name}${fld.optional ? '?' : ''}: ${fld.tstyp
 						const verbFns = fns.filter((x) => x.attr !== 'rpc')
 						const mod = modulePath(routesAbs, f)
 						const rel = relPosix(routesAbs, f)
+						phaseDeclarations(phases, 'route', f, mod, src)
 						rejectReservedNpmModule(src, `${routesDir}/${rel}`)
 						// V+TS plugins: the parser only emits core attrs + plugin-claimed
 						// attrs (extraAttrs), so every fn here is known. Dispatch
-						// plugin-claimed fns to the owning plugin's validate(); core
-						// attrs fall through to the shape checks below.
+						// plugin-claimed fns to the owning plugin's validate()
+						// with the declaration context (source/structs/location);
+						// core attrs fall through to the shape checks below.
 						for (const pl of plugins)
-							for (const fn of allFns.filter((x) => pl.attrs.includes(x.attr)))
-								pl.validate?.(`${routesDir}/${rel}`, fn)
+							for (const fn of allFns.filter((x) => pl.attrs.includes(x.attr))) {
+								const decls = claims.get(pl.name) ?? []
+								const decl = decls.find(
+									(d) => d.file === `${routesDir}/${rel}` && d.fn.name === fn.name && d.fn.attr === fn.attr,
+								)
+								pl.validate?.(`${routesDir}/${rel}`, fn, decl)
+							}
 						for (const bad of allFns.filter(
 							(x) =>
 								x.attr === 'matcher' ||
@@ -1340,7 +1425,9 @@ ${list(st.fields, (fld) => `\t${fld.name}${fld.optional ? '?' : ''}: ${fld.tstyp
 						rejectReservedNpmModule(src, `${libDir}/${mod}.v`)
 						// #lib/backend convention (spec §7): backend-only, no stub, no
 						// browser import — record types for V-to-V reference only.
-						if (isBackendMod(mod)) continue
+						const backend = isBackendMod(mod)
+						phaseDeclarations(phases, backend ? 'backend' : 'lib', f, mod, src)
+						if (backend) continue
 						rejectServerNpmImport(src, `${libDir}/${mod}.v`)
 						// Roadmap 16-remainder: only #routes/*.v may import backend.
 						// A #lib/*.v (non-backend) file importing backend fails here
@@ -1804,9 +1891,15 @@ export declare const dev: boolean
 				// copied only when room-SSE/WS fns need it: `hasRoomSse` is set
 				// by the route loop above; an unused builtin copies nothing).
 				// Stale module dirs pruned below.
+				// (§1: genAbsEarly emitted plugin generate() outputs above,
+				// unconditionally — even with zero .svelte routes.)
+				const genAbs = resolve(root, outDir)
+				mkdirSync(genAbs, { recursive: true })
+				const includeModules = new Set<string>()
 				const pluginFiles = new Set<string>()
 				for (const plugin of plugins)
 					for (const include of plugin.includes?.() ?? []) {
+						includeModules.add(include.module)
 						// Builtin `db` backend is usage-gated: skip here when no room/WS
 						// fn needs it — the `hasRoomSse` copy below handles the used case.
 						if (
@@ -1828,6 +1921,7 @@ export declare const dev: boolean
 					}
 				}
 				const wanted = new Set(stageBackendModules(libAbs, genDir, pluginFiles))
+				writePhaseOutputs(phases, genDir, wanted, includeModules)
 				try {
 					for (const pp of plugins) {
 						let incs: { module: string; absDir: string }[] = []
@@ -1878,7 +1972,19 @@ export declare const dev: boolean
 					// `qjs/` is adapter-owned (ssr-qjs archive lives here) —
 					// never prune it: the QJS-bridge-pass regenerate runs
 					// AFTER vite build created the archive.
+					// (§1: plugin generate() outputs (`.swelte/<name>/`) are
+					// owned by writePluginOutputs — never prune a dir listed
+					// there, even when it holds no V include module.)
 					const ADAPTER_OWNED_DIRS = new Set(['qjs'])
+					let generatedOwners = new Set<string>()
+					try {
+						const marker = JSON.parse(
+							readFileSync(join(genDir, 'plugin_outputs.json'), 'utf8'),
+						) as Record<string, string[]>
+						generatedOwners = new Set(Object.keys(marker))
+					} catch {
+						/* no marker yet */
+					}
 					try {
 						for (const e of readdirSync(genDir, { withFileTypes: true })) {
 							if (!e.isDirectory()) continue
@@ -1886,6 +1992,7 @@ export declare const dev: boolean
 							if (e.name.startsWith('npm_')) continue
 							if (ADAPTER_OWNED_DIRS.has(e.name)) continue
 							if (e.name.startsWith('.')) continue
+							if (generatedOwners.has(e.name)) continue
 							if (!wanted.has(e.name)) {
 								try {
 									rmSync(join(genDir, e.name), { recursive: true, force: true })
@@ -1913,9 +2020,25 @@ export declare const dev: boolean
 				}
 				try {
 					const cfg = await loadConfig(root)
+					// §1 lifecycle: mainInner runs registration-ordered
+					// (startup order); shutdown runs reversed (LIFO). One
+					// harness() call per plugin (side-effect safe). The
+					// shutdown key is consumed ONLY by the reversed pass
+					// below — strip it from the startup pass so fragments
+					// containing both don't render twice.
+					const cfgRecord = cfg as unknown as Record<string, unknown>
+					const evaluated = plugins.map((pp) =>
+						pp.harness?.(cfgRecord[pp.configKey ?? ''], claims.get(pp.name) ?? []),
+					)
 					const pluginHarness = [
-						...plugins.map((pp) => pp.harness?.({})).filter((h) => h !== undefined),
+						...evaluated
+							.filter((h) => h !== undefined)
+							.map((h) => {
+								const { shutdown: _omit, ...startup } = h as { shutdown?: string }
+								return startup
+							}),
 						...appHookFragments,
+						...[...evaluated].reverse().flatMap((h) => (h?.shutdown !== undefined ? [{ shutdown: h.shutdown }] : [])),
 					]
 					writeIfChanged(
 						join(genDir, 'server.v'),
