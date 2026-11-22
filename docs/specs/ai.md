@@ -89,9 +89,18 @@ Offer an optional SQLite recorder with retention controls. Default to metadata. 
 
 Phase C uses `@[tool]` on application functions in `src/lib/backend/`. The attribute is independent of `@[rpc]` and HTTP routes. Shared V code can be called by a backend tool. All agent tool calls execute on the backend in this phase. Browser TS tools, browser WASM dispatch and a backend-to-browser tool bridge are deferred. The browser talks to the application backend, which owns the provider session and credentials. The IDE's project MCP server is a separate surface. [Project MCP](../mcp.md)
 
-The current prototype uses automatic discovery. The agreed migration to explicit registration is tracked in the [plugin and Plus roadmap](plugins.md). Swelte discovers a library build phase when a direct dependency (including dev and installed optional dependencies) exports `./swelte/build` as a path to compiled JavaScript. The library can author it in TypeScript. During generation, core collects route and library V declarations matching the phase’s attributes. The phase receives their location, source, parsed functions and structs. It returns files for its generated module. Generation runs only when matching declarations exist, and removing the last declaration or dependency prunes the module.
+Explicit registration replaced the automatic discovery prototype ([plugin and Plus roadmap](plugins.md) §2). The app registers the tools plugin in its Vite config — installing `@swelte/ai` alone no longer enables codegen:
 
-The AI package owns the `tool` attribute, its backend placement rules, schemas, bindings and native dispatcher. Adding `@swelte/ai` to the app’s dependencies enables discovery without a Vite config entry. An app using only provider adapters emits no tools module. For tool declarations the phase writes `tool_manifest.json`, `tools.gen.mjs` and `tools.gen.v` under `.swelte/tools/`. For each run, the app selects a subset of the manifest and supplies the authenticated caller. The adapter translates the selected definitions into the provider's format for ordinary named calls.
+```ts
+import { toolsPlugin } from '@swelte/ai/tools'
+import { swelte } from '@swelte/core/vite'
+
+export default defineConfig({
+	plugins: [svelte(), swelte({ plugins: [toolsPlugin] })],
+})
+```
+
+The plugin claims `tool`, validates backend placement + tool shape per file, and writes `tool_manifest.json`, `tools.gen.mjs` and `tools.gen.v` under `.swelte/tools/` on every run — so removing the plugin or the last declaration prunes the module. An app using only provider adapters (no plugin) emits no tools module. For each run, the app selects a subset of the manifest and supplies the authenticated caller. The adapter translates the selected definitions into the provider's format for ordinary named calls.
 
 For programmatic calls, the proposed provider-facing tool accepts a JavaScript source string, and the model receives signatures for the selected bindings. TypeScript declarations describe those bindings. The backend evaluates the program as async JavaScript in a dedicated QuickJS context with time, memory, call-count and result-size limits. Each binding calls the native host dispatcher. The host resolves or rejects the binding's promise and advances the QuickJS job queue. Check syntax and statically known references before starting. Immediately before each native call, validate its resolved arguments, remaining budget and caller authorization. Validate the result before returning it to the program.
 

@@ -13,7 +13,9 @@ export interface SweltePluginOptions {
 	 * Falls back to SWELTE_V_BACKEND_URL (injected by `swelte dev`). Unset = no proxy. */
 	vBackendUrl?: string
 	/** V+TS plugins (contracted in core, implemented outside it).
-	 * Default [] = parity-only output, byte-identical to today. */
+	 * Default [] = parity-only output, byte-identical to today.
+	 * Explicit registration replaces the retired `./swelte/build`
+	 * auto-discovery prototype. */
 	plugins?: SweltePlugin[]
 	/** URL trailing-slash policy ('always'|'never'|'ignore'). Env SWELTE_TRAILING_SLASH wins. */
 	trailingSlash?: 'always' | 'never' | 'ignore'
@@ -300,10 +302,9 @@ export interface SweltePlugin {
 	emitServerGen?: (routes: { route: string; prefix: string }[]) => string
 	harness?: (config: unknown, declarations?: SweltePluginDeclaration[]) => SweltePluginHarness
 	/** App-level hooks from `src/app.v`: called with the parsed fns carrying
-	 *  plugin attrs. Core builtins (`cron`) read `src/app.v` directly via
-	 *  `readJobsCrons`; third-party attrs arrive through owning plugins.
-	 *  Returns V spliced into the harness (e.g. cron spawn loops). Core passes
-	 *  through; the owner parses+validates+emits. */
+	 *  plugin attrs (e.g. Plus `cron`). The owner parses+validates+emits;
+	 *  core passes through. Returns V spliced into the harness
+	 *  (e.g. cron spawn loops). */
 	loadAppHooks?: (
 		root: string,
 		srcDir?: string,

@@ -1,13 +1,10 @@
-import type { SwelteBuildPhase } from '@swelte/core/vite'
-// Phase C: `@[tool]` manifest projection. Build-time only — reads parsed
-// `@[tool]` fns (`RpcFn` with `singleArgsStruct`) plus the file's V structs
-// and projects them into a versioned JSON-Schema manifest the backend
-// dispatcher and the adapter's provider translation share. One identity per
-// tool (`<file-mod>.<fn-name>/<schema-version>`); unsupported V wire types
-// fail the build instead of degrading silently (same rule as the AI schema
-// identity in `engine/ai`). No runtime deps — pure TS over parse output.
+// `@swelte/ai` tools plugin: explicit `@[tool]` registration. Build-time
+// only: core hands claimed declarations to `createToolsPlugin().generate`,
+// which emits manifest + run bindings + native dispatcher. No runtime deps —
+// pure TS over parse output.
 import { createHash } from 'node:crypto'
-import type { RpcFn, VStruct } from '@swelte/core/vite'
+import type { RpcFn, SweltePlugin, SweltePluginDeclaration, VStruct } from '@swelte/core/vite'
+import { defineSweltePlugin } from '@swelte/core/vite'
 
 export interface ToolManifestEntry {
 	/** Manifest tool name: `<mod-path-dots>.<fn>` (e.g. `reports.top_pages`). */
@@ -514,31 +511,79 @@ export function validateToolFn(rel: string, m: RpcFn): void {
 }
 
 
-const phase: SwelteBuildPhase = {
-	attrs: ['tool'],
-	module: 'tools',
-	generate(files) {
-		const entries: ToolManifestEntry[] = []
-		const targets: ToolDispatchModule[] = []
-		for (const file of files) {
-			const { mod, source, declarations, structs } = file
-			if (file.kind !== 'backend')
-				throw new Error(`[swelte:ai] ${file.path}: @[tool] requires a backend V module`)
-			const dir = mod.includes('/') ? mod.slice(0, mod.lastIndexOf('/')) : mod
-			const moduleName = dir.split('/').pop()
-			if (source.match(/^\s*module\s+(\w+)/m)?.[1] !== moduleName)
-				throw new Error(`[swelte:ai] ${file.path}: expected module ${moduleName}`)
-			for (const fn of declarations) validateToolFn(file.path, fn)
-			entries.push(...toolManifestFor(mod, declarations, structs, toolDocComments(source)))
-			targets.push({ mod, dir, fns: declarations.map(fn => ({
-				fn: fn.name, argsStruct: fn.singleArgsStruct ?? null, fallible: fn.fallible,
-			})) })
-		}
-		return {
-			'tool_manifest.json': emitToolManifest(entries),
-			'tools.gen.mjs': emitToolBindings(entries),
-			'tools.gen.v': emitToolDispatcher(targets),
-		}
-	},
+const TOOL_PLUGIN_NAME = 'tools'
+
+function toolsForFile(
+	mod: string,
+	declarations: { name: string; attr: string }[],
+	structs: VStruct[],
+	source: string,
+): { entries: ToolManifestEntry[]; module: ToolDispatchModule | null } {
+	const fns = declarations.filter((fn) => fn.attr === 'tool') as RpcFn[]
+	if (!fns.length) return { entries: [], module: null }
+	const dir = mod.includes('/') ? mod.slice(0, mod.lastIndexOf('/')) : mod
+	const moduleName = dir.split('/').pop()
+	const actual = source.match(/^\s*module\s+(\w+)/m)?.[1]
+	if (actual !== moduleName)
+		throw new Error(`[swelte:ai] ${mod}.v: expected module ${moduleName} (got ${actual ?? '(none)'})`)
+	for (const fn of fns) validateToolFn(`${mod}.v`, fn)
+	return {
+		entries: toolManifestFor(mod, fns, structs, toolDocComments(source)),
+		module: {
+			mod,
+			dir,
+			fns: fns.map((fn) => ({ fn: fn.name, argsStruct: fn.singleArgsStruct ?? null, fallible: fn.fallible })),
+		},
+	}
 }
-export default phase
+
+/** Explicit `@[tool]` plugin (replaces the `./swelte/build` auto-discovery
+ *  prototype). Claims `tool`; validates backend placement + tool shape per
+ *  file; generates `.swelte/tools/` (manifest + run bindings + native
+ *  dispatcher) unconditionally so removal prunes stale output.
+ *  One file per plugin-declaration group keeps backend V modules separate. */
+export function createToolsPlugin(): SweltePlugin {
+	return defineSweltePlugin({
+		name: TOOL_PLUGIN_NAME,
+		attrs: ['tool'],
+		validate: (rel, fn, declaration) => {
+			if (fn.attr !== 'tool') return
+			if (declaration?.kind !== 'backend')
+				throw new Error(`[swelte:ai] ${rel}: @[tool] requires a backend V module`)
+			validateToolFn(rel, declaration.fn)
+		},
+		generate: (ctx) => {
+			const entries: ToolManifestEntry[] = []
+			const targets: ToolDispatchModule[] = []
+			const byFile = new Map<string, SweltePluginDeclaration[]>()
+			for (const decl of ctx.declarations) {
+				if (decl.fn.attr !== 'tool') continue
+				if (decl.kind !== 'backend') throw new Error(`[swelte:ai] ${decl.file}: @[tool] requires a backend V module`)
+				const list = byFile.get(decl.file) ?? []
+				list.push(decl)
+				byFile.set(decl.file, list)
+			}
+			for (const [file, decls] of [...byFile.entries()].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))) {
+				const first = decls[0]
+				const structs = first.structs
+				const { entries: fileEntries, module } = toolsForFile(
+					first.modulePath,
+					decls.map((d) => d.fn),
+					structs,
+					first.source,
+				)
+				entries.push(...fileEntries)
+				if (module) targets.push(module)
+				void file
+			}
+			return {
+				'tool_manifest.json': emitToolManifest(entries),
+				'tools.gen.mjs': emitToolBindings(entries),
+				'tools.gen.v': emitToolDispatcher(targets),
+			}
+		},
+	})
+}
+
+/** Default instance for `swelte({ plugins: [toolsPlugin] })`. */
+export const toolsPlugin: SweltePlugin = createToolsPlugin()

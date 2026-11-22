@@ -1,26 +1,26 @@
-# Plus — DEPRECATED (jobs + backend moved into core)
+# Plus — jobs scheduler plugin (`@[cron]` live in `@swelte/plus`)
 
-> `@swelte/plus` is an empty re-export shim. `jobs` (`@[cron]`) + embedded
-> backend (SQLite/KV, rooms/WS hub, `swelte migrate`) are core builtins now:
-> no install, no `plugins: [...]` entry. `import { jobsPlugin, dbPlugin,
-> createJobsPlugin } from '@swelte/core'` (or `@swelte/core/vite`;
-> `@swelte/plus` still resolves for existing setups).
+> `@swelte/plus` owns `jobs` (`@[cron]`, incl. durable scheduling) as an
+> explicit `swelte({ plugins: [...] })` registration. Embedded backend
+> (SQLite/KV, rooms/WS hub, `swelte migrate`) stays a core builtin until
+> §3 boxes 2–3 move it to Plus.
 > Reference below is kept — shapes and runtime semantics are unchanged.
 
 ```ts
-// vite.config.ts — no plugin wiring needed anymore
-import { swelte } from '@swelte/ssr-qjs';
+// vite.config.ts — register the jobs plugin explicitly
+import { jobsPlugin } from '@swelte/plus';
+import { swelte } from '@swelte/core/vite';
 
 export default defineConfig({
-  plugins: [svelte(svelteConfig), swelte({ vBackendUrl })],
+  plugins: [svelte(svelteConfig), swelte({ plugins: [jobsPlugin] })],
 });
 ```
 
-`src/app.v` may hold one-or-more `@[cron]` tick fns; `#routes/*.v` may
-`import backend` (room-SSE/WS). Core copies its `vlib/backend/` into
-`.swelte/` only when room-SSE/WS fns need it (unused builtin copies
-nothing). `swelte migrate` is a core command (see `cli`); ticks start at
-boot in the container (no CLI/SSH).
+`src/app.v` may hold one-or-more `@[cron]` tick fns (inert without the
+plugin); `#routes/*.v` may `import backend` (room-SSE/WS). Core copies its
+`vlib/backend/` into `.swelte/` only when room-SSE/WS fns need it (unused
+builtin copies nothing). `swelte migrate` is a core command (see `cli`);
+ticks start at boot in the container (no CLI/SSH).
 
 ## `@[cron]` ticks
 
@@ -94,16 +94,16 @@ it returns. The shutdown hook runs after tracked work drains. Original failure
 messages go to the optional server-side `@[report]` hook as `job-error` events;
 console diagnostics use generic reasons. See [lifecycle](lifecycle.md).
 
-Zero ticks → empty fragments: harness byte-identical to parity output.
+Zero ticks → no cron loops: core stays inert without the plugin.
 
 ## Durable schedules
 
 Use the factory to opt in, keeping the same `@[cron]` functions:
 
 ```ts
-import { createJobsPlugin } from '@swelte/core'
+import { createJobsPlugin } from '@swelte/plus'
 const jobs = createJobsPlugin({ durable: true })
-// Include jobs in swelte({ plugins: [jobs, ...] }) — explicit instance overrides the builtin default.
+// Include jobs in swelte({ plugins: [jobs, ...] }).
 ```
 
 `SWELTE_JOBS_PATH` selects a separate SQLite file (default `data/jobs.db`).
@@ -135,15 +135,15 @@ releases the connection/transaction on exit. `npm run test:jobs` runs the actual
 generated native harness against two processes, kills the owning worker mid-run,
 and verifies lock recovery, committed state and restart catchup.
 
-Default `jobsPlugin` (builtin) remains process-local best effort (two containers run two
+Default `jobsPlugin` (Plus-owned, not a core builtin) remains process-local best effort (two containers run two
 schedulers). Duration qualifiers are supported; cron expressions are not parsed.
 
 ## Helpers
 
-Pure-TS, importable without codegen (pinned by core backend unit tests):
+Pure-TS, importable without codegen (pinned by the Plus jobs unit tests):
 
 ```ts
-import { plusCronSeconds, plusCronParse, PLUS_CRON_MAX_RETRY, PLUS_CRON_RETRY_STEP_S } from '@swelte/core';
+import { plusCronSeconds, plusCronParse, PLUS_CRON_MAX_RETRY, PLUS_CRON_RETRY_STEP_S } from '@swelte/plus';
 
 plusCronSeconds('5m'); // 300
 plusCronParse('5m,retry=3'); // { seconds: 300, retry: 3 }

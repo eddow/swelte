@@ -2,8 +2,9 @@
 // boot); @[reroute] rewrites (host, path) before trailingSlash/CORS/dispatch
 // ('' = no-op). Exactly one fn each, no qualifier; startup takes no params
 // and returns void, reroute takes (host string, path string) and returns
-// string. @[cron] ticks run on spawn + time.sleep loops (body idempotent,
-// no watchdog); qualifier is the duration literal, one-or-more fns.
+// string. @[cron] ticks are Plus-owned (jobsPlugin registered in
+// vite.config.ts; inert without it) — one-or-more fns, duration qualifier,
+// idempotent bodies, no watchdog.
 module app
 
 @[startup]

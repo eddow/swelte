@@ -15,19 +15,20 @@ import { codeHtml } from '#lib/snippets.gen.js'
 <h1 class="text-4xl font-bold mt-2">
 	Jobs
 	<span class="text-sm font-normal opacity-60"
-		>(builtin — was <code>@swelte/plus</code>, now deprecated)</span
+		>(Plus plugin — <code>swelte(&#123; plugins: [jobsPlugin] &#125;)</code>)</span
 	>
 </h1>
 <p class="py-4 opacity-80">
-	Scheduled <code>@[cron]</code> ticks — core builtin, no install, no <code>plugins:</code> entry.
-	Zero ticks emit empty harness fragments (byte-identical).
+	Scheduled <code>@[cron]</code> ticks — the <code>@swelte/plus</code> jobs plugin, no <code>@[cron]</code>
+	emission without the <code>plugins:</code> entry.
+	Zero ticks or no plugin emit empty harness fragments (byte-identical).
 </p>
 
 <div class="mt-2">
-	<Code snippet={codeHtml['plus-install']} dense title="builtin — no install" />
+	<Code snippet={codeHtml['plus-install']} dense title="install the Plus plugin" />
 </div>
 <div class="mt-2">
-	<Code snippet={codeHtml['plus-vite-config']} dense title="vite.config.ts (no plugin entry)" />
+	<Code snippet={codeHtml['plus-vite-config']} dense title="vite.config.ts (jobs plugin entry; backend needs none)" />
 </div>
 <p class="text-sm opacity-70 mt-2">
 	<code>src/app.v</code>
@@ -124,7 +125,7 @@ import { codeHtml } from '#lib/snippets.gen.js'
 <ul class="list-disc list-inside opacity-80 space-y-1 mt-2">
 	<li>
 		<code>loadAppHooks</code>
-		reads <code>src/app.v</code>, validates every <code>@[cron]</code> fn, and emits two fragments
+		(Plus `jobs` plugin) reads <code>src/app.v</code>, validates every <code>@[cron]</code> fn, and emits two fragments
 		into the V harness. Jobs start after app startup succeeds and remain lifecycle-tracked.
 	</li>
 	<li>
@@ -181,7 +182,7 @@ import { codeHtml } from '#lib/snippets.gen.js'
 	</li>
 	<li>Shutdown stops scheduling and releases the connection/transaction as tracked work exits.</li>
 	<li>
-		Default <code>jobsPlugin</code> (builtin) remains process-local best effort: two containers run
+		Default <code>jobsPlugin</code> (plain, non-durable Plus registration) remains process-local best effort: two containers run
 		two schedulers.
 	</li>
 	<li>Duration qualifiers are supported; cron expressions are not parsed.</li>

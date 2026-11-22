@@ -1,7 +1,7 @@
 import { defineConfig } from 'vite';
 import { svelte } from '@sveltejs/vite-plugin-svelte';
 import { swelte } from '@swelte/ssr-qjs';
-// jobs + backend are core builtins now — no plugin import needed.
+import { jobsPlugin } from '@swelte/plus';
 import svelteConfig from './svelte.config.js';
 
 const vBackendUrl =
@@ -24,8 +24,9 @@ export default defineConfig({
     // the unified config for any option not passed here.
     swelte({
       vBackendUrl,
-      // Third-party plugins only — jobs + backend are always builtin.
-      plugins: [],
+      // Jobs live in `@swelte/plus` (§3 box 1: explicit registration);
+      // the embedded backend stays a core builtin (no backend entry).
+      plugins: [jobsPlugin],
     }),
   ],
 });

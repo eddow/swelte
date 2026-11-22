@@ -214,6 +214,5 @@ Apply `db/migrations/*.sql` to the embedded SQLite file (`SWELTE_DB_PATH`
 env, `--db` flag, else `data/app.db`). First run scaffolds
 `src/lib/backend/db.v` (shared conn + KV helpers) +
 `db/migrations/001_swelte_kv.sql`. Idempotent — re-runs apply only new
-files (tracked in `_swelte_migrations`). No plugin needed (was
-`@swelte/plus/db`, now deprecated — jobs + backend live in core).
+files (tracked in `_swelte_migrations`). No plugin needed (embedded backend stays a core builtin until §3 boxes 2–3 move it to Plus; jobs live in `@swelte/plus`).
 

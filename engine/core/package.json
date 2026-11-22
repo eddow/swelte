@@ -1,7 +1,7 @@
 {
   "name": "@swelte/core",
   "version": "0.2.0",
-  "description": "Swelte framework core — V + Svelte unified RPC bridge (Vite plugin, SDK generator, CLI; builtin jobs scheduler + embedded backend)",
+  "description": "Swelte framework core — V + Svelte unified RPC bridge (Vite plugin, SDK generator, CLI; embedded backend builtin, jobs via @swelte/plus)",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",

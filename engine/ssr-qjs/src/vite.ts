@@ -30,7 +30,7 @@ export interface SsrQjsOptions {
 	csrf?: 'ignore' | 'enforce'
 	methodOverride?: boolean
 	version?: string
-	/** Third-party V+TS plugins (core `SweltePlugin` contract; jobs + backend are core builtins). */
+	/** Third-party V+TS plugins (core `SweltePlugin` contract; `@swelte/plus` jobs are a plugin, backend stays a core builtin). */
 	plugins?: import('@swelte/core/vite').SweltePlugin[]
 }
 

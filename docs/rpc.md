@@ -99,6 +99,11 @@ JSON body. No `?fn=` anywhere (removed with the old model).
   the inbound frame channel, and the frame emitter. Hub messages
   stream out via `emit`; client frames stream back via `recv`.
 - `@[get]`/`@[post]` in `#lib/` warn and still expose as RPC.
+- Unknown `@[...]` on a `pub fn` warns (`file:line: unknown @[name] — fn ignored`)
+  and the fn is skipped — same in `swelte check` (`unknown-attr` diagnostic).
+  Register the owning plugin (`cron` → Plus `jobsPlugin`, `tool` → AI
+  `toolsPlugin`) or fix the typo. V-native attrs (`@[heap]`, `@[unsafe]`,
+  `@[required]`, `@[json: ...]`, …) never warn.
 - `@[before]`/`@[after]` only in `+route.v` wrappers:
   subtree middleware, never exported as callables to TS (but the
   wrapper's `pub struct`s are — +layout-shaped shared types).

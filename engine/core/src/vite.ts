@@ -5,33 +5,25 @@
  *  `@swelte/core/vite` subpath, `dist/vite.d.ts`), plus four
  *  additive chunking helpers promoted from private scope:
  *  `assertChunkHint`, `chunkKeyFor`, `readChunkHint`, `WrapperMw`.
+ *
+ *  Jobs (`@[cron]`) moved to `@swelte/plus` (§3 box 1) — import
+ *  `jobsPlugin`/`createJobsPlugin` from `@swelte/plus` (or
+ *  `@swelte/plus/jobs`).
  */
 
-export type { CronFnShape, JobsCronDef, PlusCronQualifier } from './backend/jobs-index.js'
 export {
 	builtinDbPlugin,
-	builtinJobsPlugin,
 	coreBackendVlibDir,
-	createBuiltinJobsPlugin,
-	createJobsPlugin,
-	cronHarness,
 	dbHelperTemplate,
 	dbInitialMigration,
 	dbPlugin,
-	jobsPlugin,
 	migrateCommand,
-	PLUS_CRON_MAX_RETRY,
-	PLUS_CRON_RETRY_STEP_S,
 	PLUS_DB_DEFAULT_PATH,
 	PLUS_DB_MIGRATIONS_TABLE,
-	plusCronParse,
-	plusCronSeconds,
 	plusDbPath,
 	plusDbVlibDir,
 	plusPendingMigrations,
-	readJobsCrons,
 	runMigrate,
-	validateCronFn,
 } from './backend/jobs-index.js'
 export type { SwelteConfig, SwelteOptions } from './gen/config.js'
 export { defineConfig } from './gen/config.js'
@@ -44,9 +36,11 @@ export {
 export { loadServerHooks } from './vite/hooks.js'
 export { dynSegPattern, loadMatchers, transpileMatcherBody } from './vite/matchers.js'
 export {
+	collectUnknownAttrs,
 	CORE_ATTRS,
 	narrowArgParts,
 	narrowCall,
+	NATIVE_ATTRS,
 	parseStructs,
 	parseVFile,
 	tsTypeFor,
@@ -132,4 +126,4 @@ export {
 	writePluginOutputs,
 } from './vite/plugins.js'
 
-export type { SwelteBuildPhase, BuildPhaseFile } from './vite/build.js'
+export { loadBuildPhases } from './vite/build.js'

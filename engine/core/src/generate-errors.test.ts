@@ -25,6 +25,10 @@ async function buildStart(root: string, opts?: { plugins?: never }): Promise<voi
 		configResolved?: (c: { root: string }) => void
 		buildStart?: () => Promise<void>
 	}
+	// configResolved fires a void generate() (dev pre-generate path) and
+	// buildStart awaits a second (build path); genChain serializes them.
+	// Warning assertions below use `some()` — duplicates across the two
+	// runs are expected.
 	plug.configResolved?.({ root })
 	await plug.buildStart?.()
 }
@@ -198,44 +202,42 @@ describe('generate() validation errors (tmp scaffold, no V binary)', () => {
 		assert.ok(sv.includes("if rerouted != '' { path = rerouted }"), sv.slice(0, 8000))
 	})
 
-	it('builtin cron parses everywhere; misplaced/empty ticks stay inert', async () => {
-		const { readFileSync, writeFileSync } = await import('node:fs')
+	it('unclaimed @[cron] stays inert without the Plus jobs plugin', async () => {
+		const { writeFileSync } = await import('node:fs')
 		const { parseVFile } = await import('./vite/parse.js')
-		// `cron` is a builtin core attr now: parses with body everywhere.
+		// `cron` is Plus-owned now: core parses it only via the plugin's
+		// `attrs` (unknown attrs drop without registration).
 		assert.deepEqual(
 			parseVFile('module s\n@[cron]\npub fn tick() { }').map((f) => f.attr),
+			[]
+		)
+		assert.deepEqual(
+			parseVFile('module s\n@[cron]\npub fn tick() { }', ['cron']).map((f) => f.attr),
 			['cron']
 		)
+		// `@[cron]` in app.v without the plugin → inert (no cron loops),
+		// but now loudly inert: an `unknown @[cron]` warning names the file,
+		// the line and the missing jobsPlugin.
 		let root = scaffold({ '+page.v': 'module p\n@[get] pub fn g() string { return "" }' })
-		writeFileSync(join(root, 'src', 'app.v'), 'module s\n@[cron]\npub fn tick() { }')
-		// Shape-invalid tick → build error naming the qualifier rule.
-		await assert.rejects(() => buildStart(root), /needs a duration qualifier/)
-		// Empty src/app.v → no cron harness (byte-identical).
-		root = scaffold({ '+page.v': 'module p\n@[get] pub fn g() string { return "" }' })
-		writeFileSync(join(root, 'src', 'app.v'), 'module s')
-		await buildStart(root)
-		const svCron = readFileSync(join(root, '.swelte', 'server.v'), 'utf8')
-		assert.ok(!svCron.includes('swelte_cron'), 'core must emit no cron loops with zero ticks')
-		// `@[cron]` in routes → misplaced, build error naming src/app.v.
-		root = scaffold({
-			'+page.v':
-				'module p\n@[cron(\'60s\')]\npub fn tick() { }\n@[get] pub fn g() string { return "" }',
-		})
-		writeFileSync(join(root, 'src', 'app.v'), 'module s')
-		await assert.rejects(() => buildStart(root), /only allowed in src\/app\.v/)
-		// Duplicate explicit builtin plugin instance → deduped, single scheduler.
-		root = scaffold({ '+page.v': 'module p\n@[get] pub fn g() string { return "" }' })
 		writeFileSync(
 			join(root, 'src', 'app.v'),
 			"module s\n@[cron('60s')]\npub fn tick() { println('t') }"
 		)
-		const { jobsPlugin } = await import('./vite.js')
-		await buildStart(root, { plugins: [jobsPlugin] as never })
-		const svDup = readFileSync(join(root, '.swelte', 'server.v'), 'utf8')
-		assert.equal(
-			svDup.split('fn swelte_cron_run').length - 1,
-			1,
-			'duplicate jobs plugin must dedup to a single scheduler'
+		const warns: string[] = []
+		const origWarn = console.warn
+		console.warn = (m: string) => {
+			warns.push(String(m))
+		}
+		try {
+			await buildStart(root)
+		} finally {
+			console.warn = origWarn
+		}
+		const svNoJobs = readFileSync(join(root, '.swelte', 'server.v'), 'utf8')
+		assert.ok(!svNoJobs.includes('swelte_cron'), 'core must emit no cron loops without the Plus jobs plugin')
+		assert.ok(
+			warns.some((w) => /src\/app\.v:2: unknown @\[cron\].*jobsPlugin/.test(w)),
+			`expected unknown-@[cron] warn with jobsPlugin hint, got: ${JSON.stringify(warns)}`
 		)
 		// Misplaced core hook in routes → own-file guard rejects before dispatch.
 		root = scaffold({
@@ -243,6 +245,29 @@ describe('generate() validation errors (tmp scaffold, no V binary)', () => {
 		})
 		writeFileSync(join(root, 'src', 'app.v'), 'module s')
 		await assert.rejects(() => buildStart(root), /only allowed in its own file/)
+		// Unknown attr in a route: typo warns (file+line), build continues.
+		// (`+page.v:2` — the `module` line is line 1; the warn fires once
+		// per generate() run and the helper runs both the dev pre-generate
+		// and the build generate, so duplicates are expected.)
+		root = scaffold({
+			'+page.v':
+				'module p\n@[gett] pub fn a() string { return "" }\n@[get] pub fn g() string { return "" }',
+		})
+		writeFileSync(join(root, 'src', 'app.v'), 'module s')
+		const routeWarns: string[] = []
+		const origRouteWarn = console.warn
+		console.warn = (m: string) => {
+			routeWarns.push(String(m))
+		}
+		try {
+			await buildStart(root)
+		} finally {
+			console.warn = origRouteWarn
+		}
+		assert.ok(
+			routeWarns.some((w) => /\+page\.v:2: unknown @\[gett\]/.test(w)),
+			`expected unknown-@[gett] warn, got: ${JSON.stringify(routeWarns)}`
+		)
 		// No hooks → harness has room/WS branches resolved (no backend hub):
 		// no `backend.` references, no anchors left, WS serving stubbed to 404
 		// (dispatch never matches: no @[ws] routes exist).
@@ -473,7 +498,7 @@ describe('generate() validation errors (tmp scaffold, no V binary)', () => {
 	})
 })
 
-it('automatically runs a direct dependency build phase and prunes unused outputs', async t => {
+it('retired auto-discovery refuses to generate: register toolsPlugin explicitly', async (t) => {
 	const root = scaffold({})
 	t.after(() => rmSync(root, { recursive: true, force: true }))
 	const dep = join(root, 'node_modules', 'fixture')
@@ -489,19 +514,6 @@ it('automatically runs a direct dependency build phase and prunes unused outputs
 	mkdirSync(backend)
 	const source = join(backend, 'example.v')
 	writeFileSync(source, "module backend\n@[fixture] pub fn named() string { return '' }")
-	const output = join(root, '.swelte/fixture_out/names.json')
-	await buildStart(root)
-	assert.equal(existsSync(output), false)
 	writeFileSync(join(root, 'package.json'), '{"type":"module","dependencies":{"fixture":"1"}}')
-	await buildStart(root)
-	assert.deepEqual(JSON.parse(readFileSync(output, 'utf8')), ['named'])
-	writeFileSync(join(root, 'package.json'), '{"type":"module"}')
-	await buildStart(root)
-	assert.equal(existsSync(output), false)
-	writeFileSync(join(root, 'package.json'), '{"type":"module","dependencies":{"fixture":"1"}}')
-	await buildStart(root)
-	assert.equal(existsSync(output), true)
-	rmSync(source)
-	await buildStart(root)
-	assert.equal(existsSync(output), false)
+	await assert.rejects(() => buildStart(root), /automatic \.\/swelte\/build discovery is retired/)
 })

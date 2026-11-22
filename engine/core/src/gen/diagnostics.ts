@@ -7,7 +7,7 @@
 import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { join, resolve, sep } from 'node:path'
 import { validateNpmVExports } from '../vite/npm-v.js'
-import { parseStructs, parseVFile } from '../vite/parse.js'
+import { parseStructs, parseVFile, collectUnknownAttrs } from '../vite/parse.js'
 import { assertPluginCli, assertPluginName, collectPluginDeclarations } from '../vite/plugins.js'
 import type { SweltePlugin } from '../vite/types.js'
 import { loadConfig, loadProjectSweltePlugins } from './config.js'
@@ -94,6 +94,49 @@ export async function collectDiagnostics(
 	try {
 		const plugins = await loadProjectSweltePlugins(root)
 		out.push(...(await collectPluginDiagnostics(root, plugins, { routesDir, libDir })))
+		// Unknown `@[...]` attrs on `pub fn`s: mirror the generate() warn
+		// sites (`unknown-attr`, file+line). collectDiagnostics sees the
+		// resolved plugins, so extraAttrs matches generate() exactly.
+		const extraAttrs = [...new Set(plugins.flatMap((p) => p.attrs ?? []))]
+		const unknownHint = (name: string) =>
+			name === 'cron'
+				? ' (Plus jobs: register jobsPlugin via swelte({ plugins: [...] }))'
+				: name === 'tool'
+					? ' (AI tools: register toolsPlugin via swelte({ plugins: [...] }))'
+					: ''
+		const scanUnknown = (file: string, src: string) => {
+			for (const u of collectUnknownAttrs(src, extraAttrs)) {
+				warn(
+					file,
+					'unknown-attr',
+					`unknown @[${u.name}] — fn ignored (typo or missing plugin?)${unknownHint(u.name)}`,
+					u.line
+				)
+			}
+		}
+		if (existsSync(routesAbs)) {
+			for (const f of listVFiles(routesAbs)) {
+				try {
+					scanUnknown(`${routesDir}/${relPosix(routesAbs, f)}`, readFileSync(f, 'utf8'))
+				} catch {
+					/* unreadable — generate reports */
+				}
+			}
+		}
+		if (existsSync(libAbs)) {
+			for (const f of listVFiles(libAbs)) {
+				try {
+					scanUnknown(`${libDir}/${relPosix(libAbs, f)}`, readFileSync(f, 'utf8'))
+				} catch {
+					/* unreadable — generate reports */
+				}
+			}
+		}
+		try {
+			scanUnknown('src/app.v', readFileSync(join(root, 'src', 'app.v'), 'utf8'))
+		} catch {
+			/* absent — no app declarations */
+		}
 	} catch (e) {
 		warn('svelte.config.js', 'plugin-config', (e as Error).message.replace(/^\[swelte\] /, ''))
 	}

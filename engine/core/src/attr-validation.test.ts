@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
-import { parseVFile } from './vite.js'
+import { collectUnknownAttrs, parseVFile } from './vite.js'
 
 describe('attr fan-out + validation errors (parse level)', () => {
 	it('stacked @[rpc; sse] fans out to two fns', () => {
@@ -54,5 +54,48 @@ describe('attr fan-out + validation errors (parse level)', () => {
 	it('@[sse] alone parses (sse is a verb itself)', () => {
 		const fns = parseVFile(`@[sse] pub fn tick() string { return '' }`)
 		assert.equal(fns[0]?.attr, 'sse')
+	})
+
+	it('unknown attrs: unclaimed cron + typo warn, known/plugin/native stay silent', () => {
+		// `@[cron]` with no plugin registered → unknown (would silently drop).
+		assert.deepEqual(
+			collectUnknownAttrs(`@[cron('60s')] pub fn tick() { }`).map((u) => u.name),
+			['cron']
+		)
+		// Registered via extraAttrs (jobs plugin on) → known, silent.
+		assert.deepEqual(
+			collectUnknownAttrs(`@[cron('60s')] pub fn tick() { }`, ['cron']),
+			[]
+		)
+		// Typo'd core attr warns with the fn's line.
+		assert.deepEqual(collectUnknownAttrs(`module p\n@[gett]\npub fn a() string { return '' }`), [
+			{ name: 'gett', line: 2 },
+		])
+		// Core attrs + stacked mixes stay silent.
+		assert.deepEqual(
+			collectUnknownAttrs(`@[rpc]\n@[sse]\npub fn tick() string { return '' }`),
+			[]
+		)
+		// V-native attrs (`@[heap]`, `@[unsafe]`, `@[required]`, `@[json: ...]`)
+		// are never dispatch — silent, and never consume the fn.
+		assert.deepEqual(collectUnknownAttrs(`@[heap]\npub fn tick() string { return '' }`), [])
+		assert.deepEqual(
+			collectUnknownAttrs(`@[required]\n@[get]\npub fn g() string { return '' }`),
+			[]
+		)
+		assert.deepEqual(
+			collectUnknownAttrs(`@[json: 'name']\npub fn tick() string { return '' }`),
+			[]
+		)
+		// `// @[sse]` comment lines never warn (parse-level merge guard).
+		assert.deepEqual(
+			collectUnknownAttrs(`// @[bogus]\n@[get]\npub fn g() string { return '' }`),
+			[]
+		)
+		// parseVFile still drops unknowns (the warn replaces silent loss).
+		assert.deepEqual(
+			parseVFile(`@[cron('60s')] pub fn tick() { }`).map((f) => f.attr),
+			[]
+		)
 	})
 })

@@ -536,4 +536,118 @@ pub fn ping() string {
 		fs.rmSync(dir, { recursive: true, force: true })
 		}
 	})
+
+	describe('§2 explicit plugin registration (provider-only vs tool-using)', () => {
+		const mkApp = (withTools: boolean) => {
+			const fs = require('node:fs') as typeof import('node:fs')
+			const os = require('node:os') as typeof import('node:os')
+			const path = require('node:path') as typeof import('node:path')
+			const root = fs.mkdtempSync(path.join(os.tmpdir(), 'swelte-ai-plugin-'))
+			fs.mkdirSync(path.join(root, 'src', 'routes', 'api'), { recursive: true })
+			fs.mkdirSync(path.join(root, 'src', 'lib', 'backend'), { recursive: true })
+			fs.writeFileSync(path.join(root, 'package.json'), '{"name":"t","type":"module"}')
+			fs.writeFileSync(path.join(root, 'svelte.config.js'), 'export default {}')
+			// Local install probe: a real `@swelte/ai` dependency (package.json
+			// only, no `./swelte/build` export) must stay inert without the plugin.
+			const depDir = path.join(root, 'node_modules', '@swelte', 'ai')
+			fs.mkdirSync(depDir, { recursive: true })
+			fs.writeFileSync(
+				path.join(depDir, 'package.json'),
+				JSON.stringify({ name: '@swelte/ai', version: '0.0.0-test', exports: { '.': './index.js', './tools': './tools.js' } }),
+			)
+			fs.writeFileSync(path.join(root, 'src', 'app.v'), 'module app\n')
+			fs.writeFileSync(
+				path.join(root, 'src', 'routes', 'api', 'ping.v'),
+				'module api_ping\n@[get]\npub fn ping() string {\n\treturn "pong"\n}\n',
+			)
+			if (withTools) {
+				fs.writeFileSync(
+					path.join(root, 'src', 'lib', 'backend', 'jobs.v'),
+					'module backend\npub struct JobArgs {\npub:\n\tlimit int\n}\n@[tool]\npub fn run(args JobArgs) string {\n\treturn \'n=\' + args.limit.str()\n}\n',
+				)
+			}
+			return root
+		}
+		const generateWith = async (root: string, plugins: import('@swelte/core/vite').SweltePlugin[]) => {
+			const { swelte } = await import('@swelte/core/vite')
+			const plug = swelte({ plugins }) as unknown as {
+				configResolved?: (c: { root: string }) => void
+				buildStart?: () => Promise<void>
+			}
+			plug.configResolved?.({ root })
+			await plug.buildStart?.()
+		}
+		it('provider-only app (no plugin) emits no tools module', async () => {
+			const fs = require('node:fs') as typeof import('node:fs')
+			const path = require('node:path') as typeof import('node:path')
+			const root = mkApp(false)
+			try {
+				await generateWith(root, [])
+				assert.equal(fs.existsSync(path.join(root, '.swelte', 'tools')), false)
+			} finally {
+				fs.rmSync(root, { recursive: true, force: true })
+			}
+		})
+		it('installed @swelte/ai without registration stays inert (no throw, no tools)', async () => {
+			const fs = require('node:fs') as typeof import('node:fs')
+			const path = require('node:path') as typeof import('node:path')
+			const root = mkApp(true)
+			try {
+				// Tool declarations present but the plugin not registered:
+				// core must ignore the attr (not emit, not throw) — mirrors a
+				// provider-only install where `@swelte/ai` ships no `./swelte/build`.
+				await generateWith(root, [])
+				assert.equal(fs.existsSync(path.join(root, '.swelte', 'tools')), false)
+			} finally {
+				fs.rmSync(root, { recursive: true, force: true })
+			}
+		})
+		it('tool-using app (plugin) emits bindings and a callable native tool', async () => {
+			const fs = require('node:fs') as typeof import('node:fs')
+			const os = require('node:os') as typeof import('node:os')
+			const path = require('node:path') as typeof import('node:path')
+			const { pathToFileURL } = require('node:url') as typeof import('node:url')
+			const { createToolsPlugin } = await import('../src/lib/tools.js')
+			const root = mkApp(true)
+			try {
+				await generateWith(root, [createToolsPlugin()])
+				const manifest = JSON.parse(
+					fs.readFileSync(path.join(root, '.swelte', 'tools', 'tool_manifest.json'), 'utf8'),
+				) as { tools: { name: string }[] }
+				assert.deepEqual(
+					manifest.tools.map((t) => t.name),
+					['backend.jobs.run'],
+				)
+				const bindings = await import(
+					pathToFileURL(path.join(root, '.swelte', 'tools', 'tools.gen.mjs')).href
+				)
+				const run = bindings.createRunTools(['backend.jobs.run'], async (name: string, args: unknown) => `${name}:${JSON.stringify(args)}`)
+				assert.equal(await run['backend.jobs.run']({ limit: 2 }), 'backend.jobs.run:{"limit":2}')
+				assert.equal(run['backend.jobs.nope'], undefined)
+				// The V dispatcher is the native half of the same tool: it must
+					// import the declaring dir and expose the manifest name behind the
+				// per-run allowlist (unit-level; real V execution covered above).
+				const dispatcher = fs.readFileSync(path.join(root, '.swelte', 'tools', 'tools.gen.v'), 'utf8')
+				assert.ok(dispatcher.includes('import backend as toolmod_'), 'dispatcher must import the backend dir')
+				assert.ok(dispatcher.includes("'backend.jobs.run'"), 'dispatcher must cover the manifest tool')
+				assert.ok(dispatcher.includes('tool not selected'), 'dispatcher must enforce the run allowlist')
+			} finally {
+				fs.rmSync(root, { recursive: true, force: true })
+			}
+		})
+		it('removing the plugin prunes the module in the same output dir', async () => {
+			const fs = require('node:fs') as typeof import('node:fs')
+			const path = require('node:path') as typeof import('node:path')
+			const { createToolsPlugin } = await import('../src/lib/tools.js')
+			const root = mkApp(true)
+			try {
+				await generateWith(root, [createToolsPlugin()])
+				assert.equal(fs.existsSync(path.join(root, '.swelte', 'tools', 'tool_manifest.json')), true)
+				await generateWith(root, [])
+				assert.equal(fs.existsSync(path.join(root, '.swelte', 'tools')), false)
+			} finally {
+				fs.rmSync(root, { recursive: true, force: true })
+			}
+		})
+	})
 })

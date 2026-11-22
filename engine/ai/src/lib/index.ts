@@ -1,3 +1,8 @@
+export type { ToolDispatchModule, ToolDispatchTarget, ToolManifest, ToolManifestEntry } from './build.js'
+export { emitToolBindings, emitToolDispatcher, emitToolManifest } from './build.js'
+export { schemaHash, selectTools, toolDocComments, toolImportPath, toolManifestFor } from './build.js'
+export { validateAgainstSchema, validateToolFn } from './build.js'
+export { createToolsPlugin, toolsPlugin } from './tools.js'
 export type { AiAdapter, CostModel, RouteOptions } from './adapters.js'
 export { DeterministicAdapter, routeAdapter } from './adapters.js'
 export type {

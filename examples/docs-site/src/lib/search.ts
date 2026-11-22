@@ -118,21 +118,21 @@ export const searchIndex: SearchEntry[] = [
 		label: 'Jobs',
 		group: 'Plus',
 		keywords:
-			'builtin jobs durable sqlite coordination restart catchup SWELTE_JOBS_PATH createJobsPlugin cron scheduler retry dead-letter tick log scheduled tasks app.v backoff blocking catchup (was @swelte/plus, deprecated)',
+			'plus jobs plugin jobsPlugin createJobsPlugin durable sqlite coordination restart catchup SWELTE_JOBS_PATH cron scheduler retry dead-letter tick log scheduled tasks app.v backoff blocking catchup',
 	},
 	{
 		href: '/plus/db',
 		label: 'Database',
 		group: 'Plus',
 		keywords:
-			'postgresql db.pg orm pooling transactions libpq database sqlite migrate kv backend exec_none wal swelte_kv migrations _swelte_migrations embedded database persistence builtin (was @swelte/plus, deprecated)',
+			'postgresql db.pg orm pooling transactions libpq database sqlite migrate kv backend exec_none wal swelte_kv migrations _swelte_migrations embedded database persistence builtin core (backend stays core until Plus §3 boxes 2-3)',
 	},
 	{
 		href: '/plus/realtime',
 		label: 'Realtime',
 		group: 'Plus',
 		keywords:
-			'realtime rooms broadcast emit subscribe room sse ws websocket socket wssay echo hub ping sub recv live hub fan-out backpressure builtin backend (was @swelte/plus, deprecated)',
+			'realtime rooms broadcast emit subscribe room sse ws websocket socket wssay echo hub ping sub recv live hub fan-out backpressure builtin backend core (hub stays core until Plus §3 box 3)',
 	},
 	{
 		href: '/from-sveltekit',

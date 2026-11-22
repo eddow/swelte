@@ -140,17 +140,17 @@ hashed = hash_string({ input: name })  // Promise`,
 	},
 	'plus-install': {
 		lang: 'bash',
-		code: `# builtin since 0.1.6 — no install needed
-# (legacy) npm install @swelte/plus`,
+		code: `# jobs: explicit plugin registration
+npm install @swelte/plus`,
 	},
 	'plus-vite-config': {
 		lang: 'ts',
-		code: `import { swelte } from '@swelte/ssr-qjs';
+		code: `import { jobsPlugin } from '@swelte/plus';
 import { swelte } from '@swelte/ssr-qjs';
 
-// jobs + backend are core builtins — no plugin wiring
+// jobs are the Plus plugin — backend stays a core builtin (no backend entry)
 export default defineConfig({
-  plugins: [svelte(svelteConfig), swelte({ vBackendUrl })],
+  plugins: [svelte(svelteConfig), swelte({ vBackendUrl, plugins: [jobsPlugin] })],
 });`,
 	},
 	'plus-cron': {
@@ -323,7 +323,7 @@ pub fn ws_rooms(req SwelteRequest, sub fn (string) chan string, recv chan string
 	},
 	'plus-durable': {
 		lang: 'ts',
-		code: "import { swelte } from '@swelte/ssr-qjs'\nimport { createJobsPlugin } from '@swelte/core'\n\nconst jobs = createJobsPlugin({ durable: true })\n// Include this alongside your Svelte Vite plugin:\nswelte({ plugins: [jobs] })\n// SWELTE_JOBS_PATH=data/jobs.db (default)",
+		code: "import { swelte } from '@swelte/ssr-qjs'\nimport { createJobsPlugin } from '@swelte/plus'\n\nconst jobs = createJobsPlugin({ durable: true })\n// Include this alongside your Svelte Vite plugin:\nswelte({ plugins: [jobs] })\n// SWELTE_JOBS_PATH=data/jobs.db (default)",
 	},
 	'errors-boundaries': {
 		lang: 'bash',

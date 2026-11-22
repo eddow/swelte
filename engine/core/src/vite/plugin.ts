@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync } fr
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { dirname, join, resolve, sep } from 'node:path'
 import type { Plugin } from 'vite'
-import { builtinDbPlugin, builtinJobsPlugin, coreBackendVlibDir } from '../backend/jobs-index.js'
+import { builtinDbPlugin, coreBackendVlibDir } from '../backend/jobs-index.js'
 import { loadConfig, renderAppDts, renderClientEntry, renderHarness } from '../gen/config.js'
 import { isBackendMod, SWELTE_GEN_CORE_DIRS } from '../gen/paths.js'
 import { resolveV } from '../toolchain.js'
@@ -18,7 +18,7 @@ import { loadMatchers } from './matchers.js'
 import { materializeNpmV, type NpmVExport, parseNpmVSpecifier } from './npm-v.js'
 import { normalizeOutbox, type OutboxOptions } from './outbox.js'
 import { reactivePropsSource, reactiveStateSource } from './page-state.js'
-import { parseStructs, parseVFile, pascal } from './parse.js'
+import { parseStructs, parseVFile, pascal, collectUnknownAttrs, CORE_ATTRS } from './parse.js'
 import {
 	collectPrerenderEntries,
 	collectSvelteManifest,
@@ -49,7 +49,7 @@ import {
 	validateWsFn,
 	vType,
 } from './server-gen.js'
-import { loadBuildPhases, phaseDeclarations, writePhaseOutputs } from './build.js'
+import { loadBuildPhases } from './build.js'
 import { collectPluginDeclarations, dedupPlugins, writePluginOutputs } from './plugins.js'
 import {
 	renderServiceWorker,
@@ -121,16 +121,11 @@ export function swelte(options: SweltePluginOptions = {}): Plugin {
 		options.chunking === 'single' || options.chunking === 'layout' || options.chunking === 'route'
 			? options.chunking
 			: 'layout'
-	// V+TS plugins (core contract `SweltePlugin`; third-party plugins
-	// implement it for their own attrs). Builtin jobs+backend are ALWAYS
-	// registered below, after user plugins of the same name (first
-	// registration wins: explicit user instances — e.g.
-	// `createJobsPlugin({ durable: true })` from `@swelte/core/jobs` — keep
-	// working and override the builtin default).
-	// Usage-gated emission: zero `@[cron]` ticks emit empty fragments
-	// (byte-identical harness), and the backend V module copies only when
-	// room-SSE/WS fns need it — an unused builtin changes nothing.
-	const plugins = dedupPlugins([...(options.plugins ?? []), builtinJobsPlugin, builtinDbPlugin])
+	// V+TS plugins (core contract `SweltePlugin`; e.g. `@swelte/plus`
+	// jobs or `@swelte/ai` tools implement it for their own attrs).
+	// The embedded backend stays builtin-registered below (always on:
+	// KV/SQLite, rooms hub, `migrate`) until §3 boxes 2–3 move it to Plus.
+	const plugins = dedupPlugins([...(options.plugins ?? []), builtinDbPlugin])
 	const extraAttrs = [...new Set(plugins.flatMap((p) => p.attrs))]
 	// Resolved per-generate() against the Vite root (never at construction:
 	// outDir is relative and the cwd at plugin-construction time is not the
@@ -313,7 +308,10 @@ export function swelte(options: SweltePluginOptions = {}): Plugin {
 					}
 				}
 				const warnings: string[] = []
-				const phases = await loadBuildPhases(root, extraAttrs)
+				/** Retired `./swelte/build` auto-discovery (§2): explicit
+				 *  `swelte({ plugins })` registration replaced it. This probe
+				 *  only guards already-installed legacy phases. */
+				await loadBuildPhases(root, extraAttrs)
 				const dispatched: { route: string; mod: string; prefix: string }[] = []
 				// Room-mode SSE (future.md #4) or @[ws] (future.md #3) present
 				// in any route file → harness imports the backend hub module.
@@ -448,12 +446,33 @@ export function swelte(options: SweltePluginOptions = {}): Plugin {
 				matchers = loadMatchers(root)
 				const knownMatchers = new Set(matchers.keys())
 				// Lifecycle hooks (`src/app.v`, core attrs `@[startup]`/`@[reroute]`/`@[error]`).
-				// Missing file → no-op hooks (harness byte-identical). Builtin
-				// jobs + third-party attrs arrive via loadAppHooks: collected
-				// here, errors thrown like core shape errors, fragments merged
-				// into the harness fragments. Zero `@[cron]` ticks emit empty
-				// fragments (byte-identical harness).
+				// Missing file → no-op hooks (harness byte-identical). Plugin
+				// attrs arrive via loadAppHooks: collected here, errors thrown
+				// like core shape errors, fragments merged into the harness
+				// fragments (e.g. Plus `@[cron]` spawn loops).
+				// Unknown `@[...]` attrs on `pub fn`s: warn (don't fail — V has
+				// native attrs like `@[heap]` that are never dispatch, and a
+				// typo'd qualifier still parses). Each entry names the attr
+				// + file:line and hints the owning plugin when known
+				// (`cron` → Plus jobs, `tool` → AI tools). Without this the
+				// fn silently drops (parseVFile only emits known attrs).
+				const warnUnknownAttrs = (file: string, src: string) => {
+					for (const u of collectUnknownAttrs(src, extraAttrs)) {
+						const hint =
+							u.name === 'cron'
+								? ' (Plus jobs: register jobsPlugin via swelte({ plugins: [...] }))'
+								: u.name === 'tool'
+									? ' (AI tools: register toolsPlugin via swelte({ plugins: [...] }))'
+									: ''
+						warnings.push(`${file}:${u.line}: unknown @[${u.name}] — fn ignored (typo or missing plugin?)${hint}`)
+					}
+				}
 				const hooks = loadServerHooks(root)
+				try {
+					warnUnknownAttrs('src/app.v', readFileSync(join(root, 'src', 'app.v'), 'utf8'))
+				} catch {
+					/* absent — loadServerHooks handles */
+				}
 				// §1: resolved plugin declarations (app + routes + lib) shared
 				// by validate/loadAppHooks/harness/generate below.
 				const routesAbs = resolve(root, routesDir)
@@ -942,12 +961,13 @@ ${list(st.fields, (fld) => `\t${fld.name}${fld.optional ? '?' : ''}: ${fld.tstyp
 						const allFns = parseVFile(src, extraAttrs)
 						const mwFns = allFns.filter((x) => x.attr === 'before' || x.attr === 'after')
 						const fns = allFns.filter((x) => x.attr !== 'before' && x.attr !== 'after')
+						const pluginClaimedRoutes = new Set(plugins.flatMap((p) => p.attrs))
 						const rpcFns = fns.filter((x) => x.attr === 'rpc')
-						const verbFns = fns.filter((x) => x.attr !== 'rpc')
+						const verbFns = fns.filter((x) => x.attr !== 'rpc' && !pluginClaimedRoutes.has(x.attr))
 						const mod = modulePath(routesAbs, f)
 						const rel = relPosix(routesAbs, f)
-						phaseDeclarations(phases, 'route', f, mod, src)
 						rejectReservedNpmModule(src, `${routesDir}/${rel}`)
+						warnUnknownAttrs(`${routesDir}/${rel}`, src)
 						// V+TS plugins: the parser only emits core attrs + plugin-claimed
 						// attrs (extraAttrs), so every fn here is known. Dispatch
 						// plugin-claimed fns to the owning plugin's validate()
@@ -1423,10 +1443,10 @@ ${list(st.fields, (fld) => `\t${fld.name}${fld.optional ? '?' : ''}: ${fld.tstyp
 						const src = readFileSync(f, 'utf8')
 						const mod = modulePath(libAbs, f)
 						rejectReservedNpmModule(src, `${libDir}/${mod}.v`)
+						warnUnknownAttrs(`${libDir}/${mod}.v`, src)
 						// #lib/backend convention (spec §7): backend-only, no stub, no
 						// browser import — record types for V-to-V reference only.
 						const backend = isBackendMod(mod)
-						phaseDeclarations(phases, backend ? 'backend' : 'lib', f, mod, src)
 						if (backend) continue
 						rejectServerNpmImport(src, `${libDir}/${mod}.v`)
 						// Roadmap 16-remainder: only #routes/*.v may import backend.
@@ -1444,7 +1464,7 @@ ${list(st.fields, (fld) => `\t${fld.name}${fld.optional ? '?' : ''}: ${fld.tstyp
 						// warn-and-expose-RPC behavior for verbs, extend it to
 						// @[before]/@[after].
 						const verbFns = parseVFile(src, extraAttrs).filter(
-							(x) => x.attr !== 'rpc' && x.attr !== 'before' && x.attr !== 'after'
+							(x) => x.attr !== 'rpc' && x.attr !== 'before' && x.attr !== 'after' && !extraAttrs.includes(x.attr)
 						)
 						for (const vf of [
 							...verbFns,
@@ -1921,7 +1941,15 @@ export declare const dev: boolean
 					}
 				}
 				const wanted = new Set(stageBackendModules(libAbs, genDir, pluginFiles))
-				writePhaseOutputs(phases, genDir, wanted, includeModules)
+				// §2: the AI tools plugin's generated `tools/` V module is a first-class
+				// compilation member: add it to the staged dir set so `import tools`
+				// resolves in routes/harness and stale-module pruning keeps it.
+				const toolsGenDir = join(genDir, 'tools', 'tools.gen.v')
+				try {
+					if (existsSync(toolsGenDir)) wanted.add('tools')
+				} catch {
+					/* no tools module — provider-only app */
+				}
 				try {
 					for (const pp of plugins) {
 						let incs: { module: string; absDir: string }[] = []

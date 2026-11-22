@@ -11,7 +11,7 @@
 			"types": "./package/index.d.ts",
 			"default": "./package/index.js"
 		},
-		"./swelte/build": "./package/build.js",
+		"./tools": "./package/tools.js",
 		"./package.json": "./package.json",
 		"./media": "./package/media.js",
 		"./openrouter": "./package/openrouter.js",

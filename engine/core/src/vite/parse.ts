@@ -17,10 +17,11 @@ function splitTopLevel(s: string, sep: string): string[] {
 	return out
 }
 
-/** Core attrs parsed without plugins. Third-party plugins extend via
- *  `extraAttrs` — core itself still names `cron` (builtin jobs scheduler:
- *  parsed with bodies so `src/app.v` ticks inline; route files reject it).
- *  Unknown attrs stay dropped unless registered here. */
+/** Core attrs parsed without plugins. Plus owns `cron` via its plugin
+ *  `attrs` (parsed with bodies through `extraAttrs`); register the
+ *  jobs plugin with `swelte({ plugins: [jobsPlugin] })` from
+ *  `@swelte/plus`. Route files reject stray `cron` via plugin validate;
+ *  core drops unknown attrs unless registered here. */
 export const CORE_ATTRS = [
 	'get',
 	'post',
@@ -30,7 +31,6 @@ export const CORE_ATTRS = [
 	'patch',
 	'sse',
 	'ws',
-	'cron',
 	'before',
 	'after',
 	'load',
@@ -41,6 +41,63 @@ export const CORE_ATTRS = [
 	'reroute',
 	'error',
 ] as const
+
+/** V-native attributes that legally sit on fns but are never framework
+ *  dispatch: `parseVFile` ignores them, and the unknown-attr warning must
+ *  not fire on them (e.g. `@[heap]` marks a heap struct-returning fn,
+ *  `@[unsafe]`/`@[direct_array_access]` tune codegen, `@[if ...]` gates
+ *  platform code). Framework dispatch only looks at CORE_ATTRS +
+ *  plugin-registered attrs. */
+export const NATIVE_ATTRS = [
+	'heap',
+	'unsafe',
+	'direct_array_access',
+	'noinline',
+	'inline',
+	'if',
+	'required',
+	'optional',
+	'json',
+	'deprecated',
+	'export',
+	'live',
+	'manualfree',
+	'preinit',
+	'postinit',
+] as const
+
+/** Unknown `@[...]` attrs on `pub fn`s: names that are neither core
+ *  dispatch, plugin-registered (`extraAttrs`), nor known V-native.
+ *  Returns `{ name, line }` per unknown attr occurrence (file+line for
+ *  warnings). Malformed bracket parts (no leading ident) surface as the
+ *  raw text so typos like `@[get('q]` still warn. */
+export function collectUnknownAttrs(
+	src: string,
+	extraAttrs: string[] = [],
+): { name: string; line: number }[] {
+	const known = new Set<string>([...CORE_ATTRS, ...extraAttrs, ...NATIVE_ATTRS])
+	const out: { name: string; line: number }[] = []
+	const mergeable = src
+		.split('\n')
+		.map((l) => (/^\s*\/\/\s*@\[/.test(l) ? '' : l))
+		.join('\n')
+	const merged = mergeable.replace(/\][ \t]*\r?\n[ \t]*@\[/g, '; ')
+	const re = /@\[([^\]]*)\]\s*pub\s+fn\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(/g
+	let m: RegExpExecArray | null
+	while ((m = re.exec(merged)) !== null) {
+		const line = src.slice(0, m.index).split('\n').length
+		for (const p of splitTopLevel(m[1], ';')) {
+			// `key: value` params (e.g. `@[json: 'name']`) are native
+			// payloads, never dispatch — skip without warning.
+			if (/^[A-Za-z_][A-Za-z0-9_]*\s*:/.test(p.trim())) continue
+			const pm = /^\s*([A-Za-z_][A-Za-z0-9_]*)\s*(?:\(\s*'[^']*'\s*\))?\s*$/.exec(p)
+			const name = pm ? pm[1] : p.trim()
+			if (!name || known.has(name)) continue
+			out.push({ name, line })
+		}
+	}
+	return out
+}
 
 export function parseVFile(src: string, extraAttrs: string[] = []): RpcFn[] {
 	const structs = parseStructs(src)
@@ -163,9 +220,9 @@ export function parseVFile(src: string, extraAttrs: string[] = []): RpcFn[] {
 			vret = vret.slice(1).trim() || 'void'
 		}
 		if (vret === '' || vret === 'void') vret = 'void'
-		// Raw fn bodies for hook/app/cron fns (transpiled/inlined at generate).
+		// Raw fn bodies for hook/app fns (transpiled/inlined at generate).
 		// Brace-balanced walk from the `{` that opens the fn body. Bodies are
-		// captured for matcher/core-hook/cron attrs plus any plugin-registered
+		// captured for matcher/core-hook attrs plus any plugin-registered
 		// (extraAttrs), so owning plugins can inline them; core ignores
 		// plugin-claimed fns everywhere else.
 		let body: string | undefined
@@ -173,7 +230,7 @@ export function parseVFile(src: string, extraAttrs: string[] = []): RpcFn[] {
 		if (
 			verbs.some(
 				(vb) =>
-					['matcher', 'startup', 'shutdown', 'report', 'reroute', 'error', 'cron'].includes(
+					['matcher', 'startup', 'shutdown', 'report', 'reroute', 'error'].includes(
 						vb.verb
 					) || extraAttrs.includes(vb.verb)
 			)

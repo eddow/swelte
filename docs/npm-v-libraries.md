@@ -180,30 +180,26 @@ considered. Physical hoisting under `node_modules` is not part of the public
 contract.
 
 
-## Library build phases
+## Library plugins (explicit registration)
 
-A direct app dependency can register a build phase through its package exports.
-For a library that packages `src/lib/build.ts` as JavaScript, add
-`"./swelte/build": "./package/build.js"` to its `exports` object.
-Swelte imports this module in Node during generation. Installing the library
-as a direct dependency enables discovery for CLI builds and dev generation.
+Swelte discovers no code from dependencies at generation time. A library
+exposes a `SweltePlugin` from an ordinary entry point (e.g.
+`@swelte/ai/tools` → `createToolsPlugin()` / `toolsPlugin`), and the app
+registers it in its Vite config:
 
 ```ts
-import type { SwelteBuildPhase } from '@swelte/core/vite'
+import { toolsPlugin } from '@swelte/ai/tools'
 
-export default {
-  attrs: ['catalog'],
-  module: 'catalog',
-  generate(files) {
-    const names = files.flatMap(file => file.declarations.map(fn => fn.name))
-    return { 'names.json': JSON.stringify(names) }
-  },
-} satisfies SwelteBuildPhase
+export default defineConfig({
+	plugins: [svelte(), swelte({ plugins: [toolsPlugin] })],
+})
 ```
 
-Each phase claims its attributes and owns one directory under the app’s
-generated output. The hook receives matching route and library files with
-their source, module path, location kind, declarations and structs. It runs
-when at least one declaration matches. Return the complete set of output
-files on each run so Swelte can update changed files and remove stale ones.
-For example, `@swelte/ai` owns `@[tool]` and generates the `tools` module.
+Each plugin claims its attributes and owns one directory under the app's
+generated output (`.swelte/<name>/...`). Core hands the plugin its claimed
+declarations (file, source, module path, kind, parsed functions, structs),
+validates names, rejects collisions, and prunes stale output when the plugin
+stops emitting a file or is removed. Generation runs unconditionally — even
+with zero matching declarations — so removal always cleans up.
+For example, `@swelte/ai` owns `@[tool]` and generates the `tools` module
+(see [the AI spec](specs/ai.md)).

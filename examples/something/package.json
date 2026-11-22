@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@swelte/core": "^0.2.0",
+    "@swelte/plus": "^0.2.0",
     "@swelte/ssr-qjs": "^0.2.0",
     "svelte": "^5.0.0"
   },

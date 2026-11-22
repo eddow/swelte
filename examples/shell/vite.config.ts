@@ -2,6 +2,7 @@ import { defineConfig } from 'vite';
 import tailwindcss from '@tailwindcss/vite';
 import { svelte } from '@sveltejs/vite-plugin-svelte';
 import { swelte } from '@swelte/ssr-qjs';
+import { toolsPlugin } from '@swelte/ai/tools';
 import svelteConfig from './svelte.config.js';
 
 const vBackendUrl =
@@ -23,8 +24,9 @@ export default defineConfig({
     svelte(svelteOptions as Parameters<typeof svelte>[0]),
     swelte({
       vBackendUrl,
-      // Third-party plugins only — jobs + backend are always builtin.
-      plugins: [],
+      // Explicit framework extensions: the AI tools plugin claims `@[tool]`
+      // and generates `.swelte/tools/` (jobs live in `@swelte/plus`, backend stays a core builtin).
+      plugins: [toolsPlugin],
     }),
   ],
 });

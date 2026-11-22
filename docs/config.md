@@ -304,8 +304,10 @@ export const chunk = 'eager' | 'lazy' // default: 'inherit' (follow global mode)
   (zero/one fn, no qualifier)
   runs first in `before_request` — before `trailingSlash`
   normalization, CSRF/CORS/static/dispatch
-  (`''` = no-op). Scheduled ticks (`@[cron]`) are a core builtin — zero ticks emit empty
-  fragments (byte-identical harness). The qualifier is
+  (`''` = no-op). Scheduled ticks (`@[cron]`) are owned by the `@swelte/plus`
+  jobs plugin — register `jobsPlugin` via `swelte({ plugins: [...] })`;
+  without it ticks stay inert (zero ticks / no plugin emit empty
+  fragments, byte-identical harness). The qualifier is
   the duration literal plus an optional `,retry=n` suffix: `@[cron('60s')]`,
   `@[cron('5m,retry=3')]` (`retry=1..5`, fallible `!void` fns only — `void`
   + retry is a file+line build error). One scheduler thread runs all ticks

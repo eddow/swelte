@@ -428,7 +428,7 @@ export function templatesDir(fromUrl: string): string {
 /** Render the server harness: skeleton from templates/ + user hooks from
  *  `src/app.v` (`@[startup]` runs once in main, `@[reroute]` rewrites
  *  host/path in before_request, `@[error]` sanitizes error messages)
- *  plus harness fragments (`fragments`, e.g. builtin cron spawn loops).
+ *  plus plugin harness fragments (`fragments`, e.g. Plus cron spawn loops).
  *  Absent hooks → byte-identical skeleton. */
 export function renderHarness(
 	_config: Required<SwelteOptions>,
@@ -656,7 +656,7 @@ export function renderHarness(
 		// shutdown still runs via swelte_app_shutdown.
 		const block =
 			'\t// [swelte] plugin init (registration order; throw aborts boot, skips later inits)\n' +
-			'\t(fn () ! {\n' +
+			'\t(fn [mut app] () ! {\n' + // init fragments may read app (e.g. Plus cron spawn)
 			indent(frag.mainInner) +
 			'\n\t})() or {\n' + "\t\tswelte_report(SwelteReport{phase: 'startup-error', status: 500, message: err.msg()})\n" + "\t\teprintln('[swelte:startup] status=error')\n" + '\t\texit(1)\n\t}'
 		if (src.includes(anchor)) src = src.replace(anchor, `${block}\n${anchor}`)

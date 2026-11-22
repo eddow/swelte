@@ -192,18 +192,19 @@ describe('shell tools (Phase C): declarations, per-run selection, dispatch', () 
 
 	async function loadAppTools() {
 		const { parseVFile, parseStructs } = await import('@swelte/core/vite')
-		const core = await import('@swelte/ai/swelte/build')
+		const core = await import('@swelte/ai/tools')
+		const lib = await import('@swelte/ai')
 		const fs = (await import('node:fs')) as typeof import('node:fs')
 		const src = fs.readFileSync(SRC_URL, 'utf8')
 		const fns = parseVFile(src, ['tool']).filter((f) => f.attr === 'tool')
-		for (const fn of fns) core.validateToolFn('src/lib/backend/shell_tools.v', fn)
-		const entries = core.toolManifestFor(
+		for (const fn of fns) lib.validateToolFn('src/lib/backend/shell_tools.v', fn)
+		const entries = lib.toolManifestFor(
 			'backend/shell_tools',
 			fns,
 			parseStructs(src),
-			core.toolDocComments(src),
+			lib.toolDocComments(src),
 		)
-		return { core, fs, entries }
+		return { core, lib, fs, entries }
 	}
 
 	/** Mirror of src/routes/api/tools.v selection: `only` picks the run subset. */
@@ -232,20 +233,20 @@ describe('shell tools (Phase C): declarations, per-run selection, dispatch', () 
 	})
 
 	it('per-run selection binds the callable set; unselected has no function', async () => {
-		const { core, fs, entries } = await loadAppTools()
+		const { lib, fs, entries } = await loadAppTools()
 		const manifest = { version: 1 as const, tools: entries }
 		const os = (await import('node:os')) as typeof import('node:os')
 		const path = (await import('node:path')) as typeof import('node:path')
 		const { pathToFileURL } = (await import('node:url')) as typeof import('node:url')
 		// Run subset `only=top`: top_commands dispatches, shorten has no callable.
-		const selected = core.selectTools(manifest, selectForRun(entries, 'top'))
+		const selected = lib.selectTools(manifest, selectForRun(entries, 'top'))
 		assert.deepEqual(selected.map((t) => t.name), ['backend.shell_tools.tool_top_commands'])
 		// Unknown selections fail closed (mirrors the route `only=nope` arm).
-		assert.throws(() => core.selectTools(manifest, selectForRun(entries, 'nope')), /unknown tool/)
+		assert.throws(() => lib.selectTools(manifest, selectForRun(entries, 'nope')), /unknown tool/)
 		const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'swelte-shell-tools-'))
 		try {
 			const file = path.join(dir, 'tools.gen.mjs')
-			fs.writeFileSync(file, core.emitToolBindings(entries))
+			fs.writeFileSync(file, lib.emitToolBindings(entries))
 			const bindings = (await import(pathToFileURL(file).href)) as {
 				createRunTools: (selected: string[], t: (n: string, a: unknown) => Promise<unknown>) => Record<string, (a: unknown) => Promise<unknown>>
 				callSelectedTool: (s: unknown, n: string, a: unknown, t: (n: string, a: unknown) => Promise<unknown>) => Promise<unknown>

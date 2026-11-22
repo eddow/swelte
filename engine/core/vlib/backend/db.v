@@ -3,7 +3,7 @@
 // Single SQLite file (WAL mode). Path: SWELTE_DB_PATH env, else data/app.db.
 // Hub (future.md #4): in-memory pub/sub rooms — `emit(room, msg)` fans out to
 // every live `hub_subscribe(room)` SSE stream in THIS process.
-// Single-instance best-effort (same tier as cron: two containers = two hubs,
+// Single-instance best-effort (same tier as Plus cron: two containers = two hubs,
 // no distributed lock). Backpressure-safe: cap-1 per-subscriber buffer,
 // non-blocking send — a slow subscriber drops, never stalls the publisher.
 // Unsubscribe closes + removes (no leak, no send-on-closed panic).

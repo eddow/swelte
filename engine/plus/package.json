@@ -1,7 +1,7 @@
 {
   "name": "@swelte/plus",
-  "version": "0.1.6",
-  "description": "DEPRECATED — jobs scheduler + embedded backend moved into @swelte/core (empty re-export shim).",
+  "version": "0.2.0",
+  "description": "Swelte Plus — jobs scheduler plugin (@[cron], durable scheduling).",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -13,6 +13,7 @@
   "files": [
     "README.md",
     "dist",
+    "vlib",
     "LICENSE-MIT",
     "package.json"
   ],
@@ -24,7 +25,7 @@
     "prepublishOnly": "npm run build"
   },
   "dependencies": {
-    "@swelte/core": "^0.1.5"
+    "@swelte/core": "^0.2.0"
   },
   "peerDependencies": {
     "svelte": "^5.0.0",

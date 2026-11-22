@@ -23,7 +23,7 @@ Documentation for users of Swelte (all describe built behavior):
 - `deploy.md` — `swelte deploy init|status`: setup-only deploy-config automater (vercel/docker P0), drift check (implemented)
 - `ssr.md` — SSR, built (ownership, request path, `@[load]` cascade, `+error` contract, measured budgets, gate)
 - `mcp.md` — Agents: MCP server + skills install (implemented)
-- `plus.md` — DEPRECATED (jobs + backend moved into core): `@[cron]` ticks (wiring, retry, durable schedules), `swelte migrate`, rooms/WS hub
+- `plus.md` — Plus jobs plugin (`swelte({ plugins: [jobsPlugin] })`): `@[cron]` ticks (wiring, retry, durable schedules); embedded backend (SQLite/KV, `swelte migrate`, rooms/WS hub) stays a core builtin until §3 boxes 2–3 move it to Plus
 - `example.md` — the `something` example (implemented; browseable twin: `examples/docs-site/`)
 - `versus.md` — Swelte vs. other full-stack paradigms (positioning)
 - `coming-from-sveltekit.md` — SvelteKit → Swelte migration map (built behavior)

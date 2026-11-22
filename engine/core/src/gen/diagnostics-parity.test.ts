@@ -84,6 +84,36 @@ describe('diagnostics parity (tmp fixtures)', () => {
 		assert.ok(!diags.some((d) => d.kind === 'stray'))
 	})
 
+	it('unknown-attr: unregistered plugin attrs + typos surface with hints', async () => {
+		// `@[cron]` without jobsPlugin + typo'd `@[gett]` → two
+		// `unknown-attr` diagnostics (file+line); the cron one hints the
+		// missing plugin. Native `@[heap]` stays silent.
+		const root = rootWith({
+			'src/routes/+page.v':
+				'module p\n@[gett] pub fn a() string { return "" }\n@[heap]\n@[get] pub fn g() string { return "" }',
+			'src/app.v': "module s\n@[cron('60s')]\npub fn tick() { println('t') }",
+		})
+		const diags = await collectDiagnostics(root)
+		const unknowns = diags.filter((d) => d.kind === 'unknown-attr')
+		assert.ok(
+			unknowns.some(
+				(d) => d.file === 'src/routes/+page.v' && d.line === 2 && d.message.includes('@[gett]')
+			),
+			JSON.stringify(diags)
+		)
+		assert.ok(
+			unknowns.some(
+				(d) =>
+					d.file === 'src/app.v' &&
+					d.line === 2 &&
+					d.message.includes('@[cron]') &&
+					d.message.includes('jobsPlugin')
+			),
+			JSON.stringify(diags)
+		)
+		assert.ok(!unknowns.some((d) => d.message.includes('@[heap]')), JSON.stringify(diags))
+	})
+
 	it('SSE shape stays out (documented subset)', async () => {
 		const root = rootWith({
 			'src/routes/+page.v': 'module p\n@[sse] pub fn t() string { return "" }',

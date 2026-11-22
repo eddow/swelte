@@ -41,11 +41,11 @@ src/routes/router/tags/+page.svelte + +page.v          /router/tags (item 1: dep
 src/routes/router/enhance/+page.svelte + +page.v        /router/enhance (item 15a: plain <form method=post use:enhance> → page.form publish + reset, no reload)
 src/lib/crypto/hash.v               isomorphic (hash_string @[rpc] → WASM/dev fallback; /wasm page)
 src/lib/backend/secrets.v           backend-only (never ships to browser — physical boundary)
-src/app.v                           user lifecycle — @[startup] boot stamp + @[reroute] /old → /router + @[cron('60s')] tick (builtin jobs scheduler)
+src/app.v                           user lifecycle — @[startup] boot stamp + @[reroute] /old → /router + @[cron('60s')] tick (Plus `jobsPlugin` — inert without the plugin)
 .swelte/server.v                    Hand + static + main() — calls generated routes/swelte_route
 .swelte/backend/                    copied from core vlib (db.v hub + ws.v frames) — only when room-SSE/WS fns need it
 routes/                             generated V dispatcher (regenerating, gitignored)
-vite.config.ts                     swelte({ vBackendUrl }) — jobs + backend are core builtins (no plugins entry)
+vite.config.ts                     swelte({ vBackendUrl, plugins: [jobsPlugin] }) — jobs are the `@swelte/plus` plugin; backend stays a core builtin (no backend entry)
 ```
 
 ## Run
@@ -63,7 +63,7 @@ node engine/core/dist/cli.js dev --port 5174 --backend 8131 --root examples/some
 - `/` is a nav hub (GET probe only); feature probes moved under their pages: `/rpc` GET/POST (`get_greeting`/`save_name`), `/api/greet` GET + `greet_pure @[rpc] → Session{id,user,remember,expires_at}` + `login POST → Session+cookie` (verb, HTTP) + `?pdf` (binary) + `?created` (201),
   empty payload → 400, unknown fn → 404 + available, `vite build` green.
 - Pages: `/rpc` (Greet / Save / Pure / Login / PDF / Created / Narrow / Rename / Touch / fail-lite / deserialize), `/stream` (SSE emit `tick_stream` + list `tick_items`), `/chat` (room SSE `stream`/`say` + WS echo/rooms — `import { ws_rooms, ws_echo }` URL builders + native `WebSocket`), `/store` (KV read/write/delete + `hub_listeners`), `/wasm` (`hash_string`), `/types` (row/calc/blob/raw).
-- SSE proven (true streaming via veb, both shapes): emit mode on `/api/greet` (`data: tick 1` ~0.5s pacing, `?wait_ms=500` proves zero buffering; plain JSON GETs keep hitting `@[get]` on the same URL) + list mode on `/api/ticks` (`[]string` `['a','b','c']` → `data: a/b/c` frames, identical `for await` consumption). Mixed emit+list in one file is unservable (per-file `swelte_sse_is_emit`), hence separate files — item 5 closed. Room mode (`api/rooms` `stream`/`say`, future.md #4) adds cross-request broadcast on the same hub (`backend.emit` fan-out, `(sub, emit)` tail, `__ping__` heartbeat); WS echo/rooms (future.md #3) ride the same hub over native sockets (`(sub, recv, emit)` tail, `__swelteWsUrl` builder stubs). No plugin needed (builtin backend hub).
+- SSE proven (true streaming via veb, both shapes): emit mode on `/api/greet` (`data: tick 1` ~0.5s pacing, `?wait_ms=500` proves zero buffering; plain JSON GETs keep hitting `@[get]` on the same URL) + list mode on `/api/ticks` (`[]string` `['a','b','c']` → `data: a/b/c` frames, identical `for await` consumption). Mixed emit+list in one file is unservable (per-file `swelte_sse_is_emit`), hence separate files — item 5 closed. Room mode (`api/rooms` `stream`/`say`, future.md #4) adds cross-request broadcast on the same hub (`backend.emit` fan-out, `(sub, emit)` tail, `__ping__` heartbeat); WS echo/rooms (future.md #3) ride the same hub over native sockets (`(sub, recv, emit)` tail, `__swelteWsUrl` builder stubs). No plugin needed (embedded backend hub is still a core builtin; only jobs moved to `@swelte/plus`).
 - `hash_string` compiles to real WASM (`v -b wasm -os browser`):
   dev `.swelte/dev/crypto/hash.wasm` + prod `dist/assets/app_lib-*.wasm`.
 - Generated dispatcher proven: `routes/_page.v` + `routes/api_greet.v` + `routes/api_ticks.v` +
@@ -220,9 +220,13 @@ node engine/core/dist/cli.js dev --port 5174 --backend 8131 --root examples/some
   (`/old` → `/router`, `''` = no-op); generate inlines the bodies into
   `.swelte/server.v` (startup once before `veb.run`, reroute in
   `before_request` after the path split, before
-  trailingSlash/CORS/static/dispatch). Scheduled ticks (`@[cron]`) are a
-  builtin jobs concern — core emits
-  no tick loops with zero `@[cron]` ticks.
+  trailingSlash/CORS/static/dispatch). Scheduled ticks (`@[cron]`) are
+  Plus-owned — the `@[cron('60s')] tick` below only fires with
+  `jobsPlugin` registered (verified by the core-only inert test
+  `generate-errors.test.ts` "unclaimed @[cron] stays inert" and the Plus
+  `jobs.test.ts` suite §3 "cron extraction — core + Plus generate").
+  Without the plugin core emits
+  no tick loops.
   No `v` binary in this env for a live curl — proven by the generated
   harness arms: `generate-errors.test.ts` pins startup/reroute/error
   shapes + unregistered-attr inertness; `jobsPlugin` tests (plus package)

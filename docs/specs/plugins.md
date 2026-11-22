@@ -10,12 +10,12 @@ The application will enable framework extensions through the existing `swelte({ 
 
 ## 2. Move AI onto explicit registration
 
-- [ ] Expose the AI tools generator as a Swelte plugin and enable it in the shell example. Replace the automatic `./swelte/build` lookup and update its documentation and tests.
-- [ ] Build a provider-only app without the plugin and a tool-using app with it. Verify that only the latter emits bindings and can call a selected native tool. Remove the plugin and regenerate in the same output directory to check cleanup.
+- [x] Expose the AI tools generator as a Swelte plugin and enable it in the shell example. Replace the automatic `./swelte/build` lookup and update its documentation and tests.
+- [x] Build a provider-only app without the plugin and a tool-using app with it. Verify that only the latter emits bindings and can call a selected native tool. Remove the plugin and regenerate in the same output directory to check cleanup.
 
 ## 3. Restore Plus feature by feature
 
-- [ ] Move cron parsing, schedule validation, retry and durable scheduling, V runtime and startup wiring back into `engine/plus`. Verify an app-declared tick starts once and survives the existing retry and persistence tests.
+- [x] Move cron parsing, schedule validation, retry and durable scheduling, V runtime and startup wiring back into `engine/plus`. Verify an app-declared tick starts once and survives the existing retry and persistence tests.
 - [ ] Move embedded SQLite/KV, migration helpers and the `migrate` command into Plus. Make the configured command discoverable before an app build. Verify pending and applied migrations against an existing database.
 - [ ] Move the room hub and its SSE/WebSocket integration into Plus. Core retains the HTTP, SSE and WebSocket transport primitives. Identify the route-generation hooks needed for room dispatch and native module inclusion. Exercise room broadcast and disconnect in a Plus app and ordinary streaming in a core-only app.
 - [ ] At each extraction, remove the corresponding builtin registration and feature-specific branches from core. Keep dependency direction from Plus to the core plugin API. Update the consuming examples and scaffolds in the same change.
@@ -28,4 +28,6 @@ The application will enable framework extensions through the existing `swelte({ 
 
 [Existing plugin contract](../../engine/core/src/vite/types.ts) · [Historical Plus behavior](../plus.md) · [Release policy](versioning.md)
 
-Note: at the end of the day, all the docs have to be updated: docs/*.md, skills, docs-site
+PS:
+- at the end of the day, all the docs have to be updated: docs/*.md, skills, docs-site - at best these are maintained but a final review will be needed
+- all deprecated/retired "functionalities" have to be reviewed for cleanup
