@@ -2,6 +2,7 @@ import {
 	createAgentPlugin,
 	createToolsPlugin,
 	emitToolBindings,
+	emitToolDispatcher,
 	emitToolManifest,
 	schemaHash,
 	selectTools,
@@ -22,6 +23,7 @@ export const agentPlugin = createAgentPlugin()
  *  The V-side dispatcher lives in `./build.js` (module-private). */
 export {
 	emitToolBindings,
+	emitToolDispatcher,
 	emitToolManifest,
 	schemaHash,
 	selectTools,

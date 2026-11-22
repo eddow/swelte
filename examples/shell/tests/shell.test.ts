@@ -189,6 +189,68 @@ describe('shell example: one backend shell shared by chat + terminal', () => {
 
 describe('shell tools (Phase C): declarations, per-run selection, dispatch', () => {
 	const SRC_URL = new URL('../../src/lib/backend/shell_tools.v', import.meta.url)
+	const REPORT_PROBE_MAIN = [
+		'module tools',
+		'',
+		'import json',
+		'import backend',
+		'',
+		'fn report_call(args_json string) string {',
+		"\treturn swelte_tool_dispatch(['backend.shell_tools.tool_top_commands'], 'backend.shell_tools.tool_top_commands', args_json, '', '') or { panic(err) }",
+		'}',
+		'',
+		'fn test_report_page_zero_returns_ranked_top_five() {',
+		'\tr1 := json.decode([]backend.TopRow, report_call(\'{"limit":5,"page":0,"caller":""}\')) or { panic(err) }',
+		'\tassert r1.len == 5, \'page 0 must return five rows\'',
+		"\tassert r1[0].command == 'echo hi' && r1[0].count == 4, 'echo first: ' + r1[0].str()",
+		"\tassert r1[0].source_ids == ['cmd-01', 'cmd-02', 'cmd-03', 'cmd-04'], 'echo sources: ' + r1[0].source_ids.str()",
+		"\tassert r1[1].command == 'pwd' && r1[1].count == 3, 'pwd second: ' + r1[1].str()",
+		"\tassert r1[2].command == 'help' && r1[3].command == 'whoami', 'tie by command asc: ' + r1[2].command + '/' + r1[3].command",
+		"\tassert r1[4].command == 'cat' && r1[4].count == 1, 'cat last: ' + r1[4].str()",
+		'\tresp_len := report_call(\'{"limit":5,"page":0,"caller":""}\').len',
+		'\tassert resp_len <= 1024, \'response budget exceeded: \' + resp_len.str()',
+		'}',
+		'',
+		'fn test_report_next_page_is_empty() {',
+		'\tr2 := json.decode([]backend.TopRow, report_call(\'{"limit":5,"page":1,"caller":""}\')) or { panic(err) }',
+		'\tassert r2.len == 0, \'page 1 of ranked public rows is empty\'',
+		'}',
+		'',
+		'fn test_report_caller_isolation() {',
+		'\trh := json.decode([]backend.TopRow, report_call(\'{"limit":5,"page":0,"caller":"human"}\')) or { panic(err) }',
+		'\tmut found_deploy := false',
+		'\tfor r in rh {',
+		"\t\tif r.command == 'deploy app' {",
+		'\t\t\tassert r.count == 3, \'deploy count\'',
+		"\t\t\tassert r.source_ids == ['cmd-14', 'cmd-15', 'cmd-16'], 'deploy sources'",
+		'\t\t\tfound_deploy = true',
+		'\t\t}',
+		"\t\tassert 'cmd-17' !in r.source_ids && 'cmd-18' !in r.source_ids, 'human must not see ai rows'",
+		'\t}',
+		'\tassert found_deploy, \'human window must include deploy app\'',
+		'\tra := json.decode([]backend.TopRow, report_call(\'{"limit":5,"page":0,"caller":"ai"}\')) or { panic(err) }',
+		'\tmut found_secrets := false',
+		'\tfor r in ra {',
+		"\t\tif r.command == 'cat secrets' {",
+		'\t\t\tassert r.count == 2, \'secrets count\'',
+		"\t\t\tassert r.source_ids == ['cmd-17', 'cmd-18'], 'secrets sources'",
+		'\t\t\tfound_secrets = true',
+		'\t\t}',
+		"\t\tassert 'cmd-14' !in r.source_ids, 'ai must not see human rows'",
+		'\t}',
+		'\tassert found_secrets, \'ai window must include cat secrets\'',
+		'}',
+		'',
+		'fn test_report_limit_clamps_and_legacy_args_work() {',
+		'\trc := json.decode([]backend.TopRow, report_call(\'{"limit":99,"page":0,"caller":""}\')) or { panic(err) }',
+		'\tassert rc.len == 5, \'limit clamps to five rows\'',
+		'\trl := json.decode([]backend.TopRow, report_call(\'{"limit":2}\')) or { panic(err) }',
+		"\tassert rl.len == 2 && rl[0].command == 'echo hi' && rl[1].command == 'pwd', 'legacy args still work: ' + rl.str()",
+		'}',
+		'',
+	]
+
+
 
 	async function loadAppTools() {
 		const { parseVFile, parseStructs } = await import('@swelte/core/vite')
@@ -238,7 +300,168 @@ describe('shell tools (Phase C): declarations, per-run selection, dispatch', () 
 		}
 		const top = entries.find((e) => e.name.endsWith('tool_top_commands'))
 		assert.ok(top?.description.includes('ledger'))
+		// Reporting loop args: ranked-window paging + caller visibility.
+		const topIn = top?.inputSchema as { properties: Record<string, unknown>; required: string[] }
+		assert.deepEqual(Object.keys(topIn.properties).sort(), ['caller', 'limit', 'page'])
+		assert.ok(topIn.required.includes('limit'), 'limit stays required (zero = default 5)')
+		const topOut = top?.outputSchema as { items: { properties: Record<string, unknown> } }
+		assert.deepEqual(
+			Object.keys(topOut.items.properties).sort(),
+			['command', 'count', 'source_ids'],
+			'rows carry source IDs',
+		)
 	})
+
+	it('reporting loop: one model call per turn, ranked top five with sources (offline)', async () => {
+		// Spec §C: exercise the read-only reporting tool independently and
+		// measure model round trips + bytes against one call per turn. The
+		// counting transport stands in for the backend RPC wire: exactly one
+		// dispatch per turn, and the request/response JSON must stay small.
+		const { build, fs, entries } = await loadAppTools()
+		const manifest = { version: 1 as const, tools: entries }
+		const name = 'backend.shell_tools.tool_top_commands'
+		// Mirror of the V ranking: public caller, deterministic order.
+		const ledger: [cmd: string, owner: string, id: string][] = [
+			['echo hi', '', 'cmd-01'],
+			['echo hi', '', 'cmd-02'],
+			['echo hi', '', 'cmd-03'],
+			['echo hi', '', 'cmd-04'],
+			['pwd', '', 'cmd-05'],
+			['pwd', '', 'cmd-06'],
+			['pwd', '', 'cmd-07'],
+			['whoami', '', 'cmd-08'],
+			['whoami', '', 'cmd-09'],
+			['help', '', 'cmd-10'],
+			['help', '', 'cmd-11'],
+			['cat', '', 'cmd-12'],
+			['echo hi', 'human', 'cmd-13'],
+			['deploy app', 'human', 'cmd-14'],
+			['deploy app', 'human', 'cmd-15'],
+			['deploy app', 'human', 'cmd-16'],
+			['cat secrets', 'ai', 'cmd-17'],
+			['cat secrets', 'ai', 'cmd-18'],
+		]
+		const rank = (caller: string) => {
+			const counts = new Map<string, { n: number; ids: Set<string> }>()
+			for (const [cmd, owner, id] of ledger) {
+				if (owner !== '' && owner !== caller) continue
+				const cur = counts.get(cmd) ?? { n: 0, ids: new Set<string>() }
+				cur.n += 1
+				cur.ids.add(id)
+				counts.set(cmd, cur)
+			}
+			return [...counts]
+				.map(([command, { n, ids }]) => ({ command, count: n, source_ids: [...ids].sort() }))
+				.sort((a, b) => b.count - a.count || (a.command < b.command ? -1 : 1))
+		}
+		const os = (await import('node:os')) as typeof import('node:os')
+		const path = (await import('node:path')) as typeof import('node:path')
+		const { pathToFileURL } = (await import('node:url')) as typeof import('node:url')
+		const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'swelte-shell-report-'))
+		try {
+			const file = path.join(dir, 'tools.gen.mjs')
+			fs.writeFileSync(file, build.emitToolBindings(entries))
+			const bindings = (await import(pathToFileURL(file).href)) as {
+				createRunTools: (selected: string[], t: (n: string, a: unknown) => Promise<unknown>) => Record<string, (a: unknown) => Promise<unknown>>
+			}
+			const calls: [string, unknown][] = []
+			const sizes: { req: number; res: number }[] = []
+			const transport = async (tool: string, args: unknown) => {
+				calls.push([tool, args])
+				const a = args as { limit: number; page: number; caller: string }
+				const limit = a.limit <= 0 ? 5 : Math.min(a.limit, 5)
+				const page = Math.max(a.page ?? 0, 0)
+				const rows = rank(a.caller ?? '').slice(page * limit, page * limit + limit)
+				sizes.push({ req: JSON.stringify(args).length, res: JSON.stringify(rows).length })
+				return rows
+			}
+			const run = bindings.createRunTools([name], transport)
+			const one = await run[name]({ limit: 5, page: 0, caller: '' })
+			assert.deepEqual(one, [
+				{ command: 'echo hi', count: 4, source_ids: ['cmd-01', 'cmd-02', 'cmd-03', 'cmd-04'] },
+				{ command: 'pwd', count: 3, source_ids: ['cmd-05', 'cmd-06', 'cmd-07'] },
+				{ command: 'help', count: 2, source_ids: ['cmd-10', 'cmd-11'] },
+				{ command: 'whoami', count: 2, source_ids: ['cmd-08', 'cmd-09'] },
+				{ command: 'cat', count: 1, source_ids: ['cmd-12'] },
+			])
+			assert.equal(calls.length, 1, 'one model tool call per turn')
+			assert.ok(sizes[0]!.req <= 256, `request budget exceeded: ${sizes[0]!.req} bytes`)
+			assert.ok(sizes[0]!.res <= 1024, `response budget exceeded: ${sizes[0]!.res} bytes`)
+			calls.length = 0
+			const two = await run[name]({ limit: 5, page: 1, caller: '' })
+			assert.deepEqual(two, [])
+			assert.equal(calls.length, 1, 'one model tool call per turn')
+			calls.length = 0
+			const human = (await run[name]({ limit: 5, page: 0, caller: 'human' })) as { command: string; source_ids: string[] }[]
+			assert.equal(calls.length, 1)
+			assert.ok(human.some((r) => r.command === 'deploy app'))
+			assert.ok(human.every((r) => !r.source_ids.includes('cmd-17')), 'human must not see ai rows')
+			calls.length = 0
+			const ai = (await run[name]({ limit: 5, page: 0, caller: 'ai' })) as { command: string; source_ids: string[] }[]
+			assert.equal(calls.length, 1)
+			assert.ok(ai.some((r) => r.command === 'cat secrets'))
+			assert.ok(ai.every((r) => !r.source_ids.includes('cmd-14')), 'ai must not see human rows')
+			const selected = build.selectTools(manifest, selectForRun(entries, 'top'))
+			assert.deepEqual(selected.map((t) => t.name), [name])
+		} finally {
+			fs.rmSync(dir, { recursive: true, force: true })
+		}
+	})
+
+	it('reporting loop: native V dispatch pages, authorizes and aggregates', async function () {
+		// Native proof of the same §C loop against real V fns: staged
+		// `shell_tools.v` + generated dispatcher, compiled and run with the
+		// repo V toolchain. Skips without V (offline coverage above runs).
+		const toolchain = (await import('@swelte/core/toolchain')) as typeof import('@swelte/core/toolchain')
+		const { execFileSync } = (await import('node:child_process')) as typeof import('node:child_process')
+		const fs = (await import('node:fs')) as typeof import('node:fs')
+		const os = (await import('node:os')) as typeof import('node:os')
+		const path = (await import('node:path')) as typeof import('node:path')
+		const vbin: string = toolchain.resolveV(import.meta.url)
+		if (toolchain.vVersion(vbin).startsWith('(not found')) {
+			console.log('SKIP reporting-loop V test: no V toolchain')
+			return
+		}
+		const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'swelte-shell-report-v-'))
+		try {
+			const src = fs.readFileSync(SRC_URL, 'utf8') as string
+			const tools = (await import('@swelte/ai/tools')) as typeof import('@swelte/ai/tools')
+			const { parseVFile, parseStructs } = (await import('@swelte/core/vite')) as typeof import('@swelte/core/vite')
+			const fns = parseVFile(src, ['tool']).filter((f) => f.attr === 'tool')
+			for (const fn of fns) tools.validateToolFn('shell_tools.v', fn)
+			const entries = tools.toolManifestFor('backend/shell_tools', fns, parseStructs(src), tools.toolDocComments(src))
+			const selected = tools.selectTools({ version: 1 as const, tools: entries }, ['backend.shell_tools.tool_top_commands'])
+			assert.equal(selected.length, 1)
+			fs.mkdirSync(path.join(dir, 'backend'), { recursive: true })
+			fs.mkdirSync(path.join(dir, 'tools'), { recursive: true })
+			fs.writeFileSync(path.join(dir, 'backend', 'shell_tools.v'), src)
+			const modules = [
+				{
+					mod: 'backend/shell_tools',
+					dir: 'backend',
+					fns: fns.map((f) => ({
+						fn: f.name,
+						argsStruct: f.singleArgsStruct ?? null,
+						fallible: f.fallible,
+						sideEffect: f.qualifier === 'side-effect',
+					})),
+				},
+			]
+			fs.writeFileSync(path.join(dir, 'tools', 'tools.gen.v'), tools.emitToolDispatcher(modules))
+			const probe = REPORT_PROBE_MAIN.join('\n')
+			fs.writeFileSync(path.join(dir, 'tools', 'report_test.v'), probe)
+			try {
+				execFileSync(vbin, ['-enable-globals', 'test', path.join(dir, 'tools')], { stdio: 'pipe' })
+			} catch (e) {
+				const err = e as { stderr?: Buffer; stdout?: Buffer; message?: string }
+				assert.fail(`V report-loop probe failed: ${String(err.stderr ?? err.stdout ?? err.message ?? e).slice(0, 3000)}`)
+			}
+		} finally {
+			fs.rmSync(dir, { recursive: true, force: true })
+		}
+	})
+
+
 
 	it('side-effect tool gates on approval: record + decide before dispatch', async () => {
 		// Mirrors src/routes/api/tools.v `?only=note`: without `&approve=1`
@@ -282,20 +505,19 @@ describe('shell tools (Phase C): declarations, per-run selection, dispatch', () 
 				calls.push([name, args])
 				if (name === 'backend.shell_tools.tool_top_commands') {
 					const { limit } = args as { limit: number }
-					if (limit <= 0) throw new Error('limit must be positive')
 					return [
-						{ command: 'echo hi', count: 3 },
-						{ command: 'pwd', count: 2 },
-					].slice(0, limit)
+						{ command: 'echo hi', count: 3, source_ids: ['cmd-01', 'cmd-02', 'cmd-03'] },
+						{ command: 'pwd', count: 2, source_ids: ['cmd-05', 'cmd-06'] },
+					].slice(0, limit <= 0 ? 5 : Math.min(limit, 5))
 				}
 				throw new Error(`unexpected transport call: ${name}`)
 			}
 			const run = bindings.createRunTools(['backend.shell_tools.tool_top_commands'], transport)
 			assert.deepEqual(Object.keys(run), ['backend.shell_tools.tool_top_commands'])
-			const got = await run['backend.shell_tools.tool_top_commands']({ limit: 2 })
+			const got = await run['backend.shell_tools.tool_top_commands']({ limit: 2, page: 0, caller: '' })
 			assert.deepEqual(got, [
-				{ command: 'echo hi', count: 3 },
-				{ command: 'pwd', count: 2 },
+				{ command: 'echo hi', count: 3, source_ids: ['cmd-01', 'cmd-02', 'cmd-03'] },
+				{ command: 'pwd', count: 2, source_ids: ['cmd-05', 'cmd-06'] },
 			])
 			assert.equal(run['backend.shell_tools.tool_shorten'], undefined)
 			assert.equal(calls.length, 1, 'unselected tool must never reach the transport')

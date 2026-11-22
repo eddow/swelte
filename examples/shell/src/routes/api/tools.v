@@ -30,7 +30,12 @@ fn run_selected(allowed []string, name string, args_json string, caller string, 
 pub fn tools_demo(req SwelteRequest) string {
 	only := req.query['only'] or { '' }
 	if only == 'top' {
-		return run_selected([top_name], top_name, '{"limit":2}', '', '')
+		// Paged reporting query: `page` windows the ranked rows, `caller`
+		// selects the authorized ledger subset (public-only when absent).
+		page := (req.query['page'] or { '0' }).int()
+		caller := req.query['caller'] or { '' }
+		args_json := '{"limit":2,"page":' + page.str() + ',"caller":' + json.encode(caller) + '}'
+		return run_selected([top_name], top_name, args_json, '', '')
 	}
 	if only == 'short' {
 		return run_selected([short_name], short_name, '{"text":"hello shell","limit":5}', '', '')
