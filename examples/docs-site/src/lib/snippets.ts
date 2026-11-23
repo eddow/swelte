@@ -128,8 +128,14 @@ export default defineConfig({
 	},
 	'mcp-json': {
 		lang: 'json',
-		code: `{ "mcpServers": { "swelte": { "command": "node",
-	"args": ["./node_modules/@swelte/mcp/dist/index.js"] } } }`,
+		code: `{
+  "mcpServers": {
+    "swelte": {
+      "command": "npx",
+      "args": ["@swelte/mcp"]
+    }
+  }
+}`,
 	},
 	'example-imports': {
 		lang: 'ts',

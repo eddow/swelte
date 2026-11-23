@@ -43,4 +43,4 @@ Internal docs to modify Swelte (design rationale, decisions, ephemeral notes):
 - [Explicit plugins and Plus restoration](plus.md) — completed roadmap record: plugin contract, AI on explicit registration, Plus feature restoration, release boundary.
 - [Proposed package versioning](specs/versioning.md) — shared release lines, per-package patches and the registry gate.
 - [Media proposal](specs/media.md) — the optional `@swelte/media` capture/playback/transport package.
-- [Agentic shell](specs/agentic-shell.md) — implemented in `examples/shell`: AI driving the example terminal (single-driver handoff, shell tool surface, output-delivery decision, scoped stdin approval, fixtures 1–7 + byte budgets, 27/27 suite). Example-scoped consumer of `@swelte/ai`, no framework API.
+- [Shell usability roadmap](specs/shell-usability.md) — open recovery plan for `examples/shell`: bounded tool use, truthful execution states, human control, runtime freshness, and repeatable usability acceptance gates.

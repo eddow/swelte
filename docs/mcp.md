@@ -14,7 +14,21 @@ Transport is **stdio only** — the IDE spawns the server, no ports or auth.
 
 ### Client config
 
-`.vscode/mcp.json`, Claude Code, or equivalent:
+Add the server to your MCP client configuration, usually in its global/user settings
+so it is available across projects. For clients that use a JSON `mcpServers`
+object, merge this entry into the existing configuration:
+
+```json
+{
+	"mcpServers": {
+		"swelte": {
+			"command": "npx",
+			"args": ["@swelte/mcp"]
+		}
+	}
+}
+```
+Or in `.vscode/mcp.json`, Claude Code, or equivalent:
 
 ```json
 {
@@ -26,6 +40,14 @@ Transport is **stdio only** — the IDE spawns the server, no ports or auth.
 	}
 }
 ```
+
+The config file location and schema depend on the client; use its equivalent
+server settings if it does not use `mcpServers`. Project-level configuration is
+also an option when you want the server enabled only for one workspace.
+
+Tools default to the server's working directory. With a global configuration,
+pass the Swelte project path as the tool's `root` parameter if the client starts
+the server outside that project.
 
 Or via the bin: `swelte-mcp` (stdio, takes no args).
 

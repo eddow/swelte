@@ -57,9 +57,10 @@ let {
 
 function toolSteps(calls: AiToolCall[]): ToolStep[] {
 	return calls.map((c) => ({
+		id: c.id,
 		label: c.label,
-		chip: c.chip,
-		mono: true,
+		chip: c.status === 'done' ? 'done' : c.status === 'pending' ? 'approval' : c.status === 'failed' ? 'failed' : 'running',
+		mono: false,
 		detailMono: true,
 		detail: [
 			{

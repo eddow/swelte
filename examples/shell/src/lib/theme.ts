@@ -39,9 +39,12 @@ export function preferredTheme(): Theme | null {
 	}
 }
 
-/** Set `<html data-theme>` — what daisyUI keys on. */
+/** Set `<html data-theme>` — what daisyUI keys on — plus `.dark`
+ *  for Tailwind `dark:` + Baby UI `.dark` tokens. */
 export function applyTheme(theme: Theme): void {
 	document.documentElement.dataset.theme = theme
+	document.documentElement.classList.toggle('dark', theme === 'dark')
+	document.documentElement.style.colorScheme = theme
 }
 
 /** Apply and remember — the user-initiated toggle. */

@@ -9,6 +9,8 @@
         var t = localStorage.getItem('swelte-shell-theme');
         if (!t) t = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
         document.documentElement.dataset.theme = t;
+        document.documentElement.classList.toggle('dark', t === 'dark');
+        document.documentElement.style.colorScheme = t;
       } catch (e) {
         /* private mode — default theme stands */
       }

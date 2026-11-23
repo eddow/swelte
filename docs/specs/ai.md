@@ -6,9 +6,25 @@
 
 **Portability still to prove:** direct OpenAI and Anthropic adapters are future targets. Selecting a model through OpenRouter exercises the OpenRouter API. The proposed native V provider interface, multi-turn and multimodal requests, and provider-independent cancellation still need implementation. For example, the OpenRouter adapter accepts an abort signal today through an adapter-specific third argument. The acceptance test for a second provider is to run the same text consumer against two distinct provider protocols by changing only the adapter configuration, and verify text deltas, usage when available, cancellation and terminal outcomes.
 
-The provider loop that lets a model call tools lives in the consumer, not the framework: the shell example (`examples/shell/`) sends the tool schemas for its own turn scope, parses one adapter-specific `<tool name args>` line per follow-up pass, dispatches through the generated tools table, and feeds the bounded result back into the same turn. Read-only turns stay text-first (no driver lease, no approval queue change); driving turns hand `shell:driver` to the AI holder per turn before the text pass. [@swelte/ai consumer example](../../../examples/shell/README.md)
+The shell's provider loop lives in the consumer (`examples/shell/`), not the
+framework adapter contract. It currently uses an example-local text tool
+protocol, dispatches through the generated tools table, and appends bounded
+results to subsequent model prompts. Read-only queries have no driver lease;
+actions use a per-turn lease and explicit approvals. This composition still
+has reported usability failures. The [shell usability roadmap](shell-usability.md)
+defines the required recovery and acceptance gates, including typed tool
+transport and actual per-call completion states.
+[Consumer capabilities](../../examples/shell/README.md)
 
 Package versions and publish selection follow the proposed [Swelte release policy](versioning.md).
+
+## Shell usability acceptance
+
+The shell consumer is **not usability-accepted**. Repeated live failures include
+raw tool syntax and a simple `pwd` question producing six running tool rows
+instead of an answer. The [shell usability roadmap](shell-usability.md) defines
+the open recovery milestones and acceptance evidence. Historical completion
+checkboxes and individual successful probes below do not close those gates.
 
 ## Roadmap
 

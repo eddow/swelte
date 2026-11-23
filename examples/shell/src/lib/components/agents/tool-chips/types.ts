@@ -3,6 +3,7 @@ import type { Snippet } from 'svelte'
 export type ToolDetailLine = { text: string; tone?: 'add' }
 
 export type ToolStep = {
+	id?: string
 	icon?: Snippet
 	label: string
 	chip: string

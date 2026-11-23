@@ -12,7 +12,7 @@ export interface ShellDecision {
 	needsApproval: boolean
 }
 
-const ALLOWLIST = new Set(['echo', 'pwd', 'whoami', 'help', 'cat'])
+const ALLOWLIST = new Set(['echo', 'pwd', 'whoami', 'help', 'cat', 'ls', 'cd'])
 
 /** Turn-scoped driver lease TTL seconds — must match `shell_driver_ttl_s`. */
 export const DRIVER_TTL_S = 90
@@ -42,25 +42,47 @@ export function driverHolds(driver: ShellDriver, holder: string): boolean {
 export function authorizeShellCall(caller: ShellCaller, cmd: string): ShellDecision {
 	const name = cmd.trim().split(/\s+/)[0] ?? ''
 	if (!name) return { allowed: false, reason: 'empty command', needsApproval: false }
+	// Human terminal input runs the real sandboxed shell directly — no
+	// "not allowlisted" error, not in the terminal, not in the chat.
+	// Unsupported names return an honest message from the backend.
+	if (caller === 'human') return { allowed: true, reason: 'human command runs sandboxed', needsApproval: false }
+	// AI proposals always park for human approval — even outside the demo
+	// allowlist. Point-blank refusal would deny the human any chance to
+	// confirm; the dispatch table + tool body enforce the final gate after
+	// the decision.
 	if (!ALLOWLIST.has(name))
-		return { allowed: false, reason: `command not allowlisted: ${name}`, needsApproval: false }
-	if (caller === 'ai')
-		return { allowed: false, reason: 'ai shell.exec needs human approval', needsApproval: true }
-	return { allowed: true, reason: 'human allowlisted command', needsApproval: false }
+		return { allowed: false, reason: `command needs human approval: ${name}`, needsApproval: true }
+	return { allowed: false, reason: 'ai shell.exec needs human approval', needsApproval: true }
 }
 
-/** Stateless demo execution for the allowlist (no OS shell — demo only).
- * `cat` has no stdin offline; the backend queues keystrokes for it. */
+/** Frontend mirror of the sandboxed execution (instant UI feedback +
+ * offline tests). Builtins (echo/pwd/whoami/help/cat-stdin) match the
+ * backend exactly; ls/cd/cat-file need the live backend — the mirror throws
+ * `needs backend` for them so tests stay honest. Unsupported names throw
+ * `unsupported command` — never a fake `ran:`. */
 export function runAllowlisted(cmd: string): string {
 	const parts = cmd.trim().split(/\s+/)
 	const name = parts[0] ?? ''
-	if (!ALLOWLIST.has(name)) throw new Error(`command not allowlisted: ${name}`)
+	if (!ALLOWLIST.has(name)) throw new Error(`unsupported command: ${name} (try help)`)
 	if (name === 'echo') return parts.slice(1).join(' ')
-	if (name === 'help') return 'allowlist: echo pwd whoami help cat'
-	if (name === 'pwd') return '/shell'
+	if (name === 'help') return 'commands: echo pwd whoami help ls cd cat <file>  (sandboxed to the project root; bare cat reads stdin)'
 	if (name === 'whoami') return 'swelte-shell'
-	if (name === 'cat') return '(stdin arrives over the live room)'
-	throw new Error(`command not allowlisted: ${name}`)
+	if (name === 'cat' && parts.length === 1) return '(stdin arrives over the live room)'
+	if (name === 'pwd' || name === 'ls' || name === 'cd' || name === 'cat')
+		throw new Error(`${name}: needs backend (sandboxed live execution)`)
+	throw new Error(`unsupported command: ${name} (try help)`)
+}
+
+/** Result after a human decision on this exact op: builtins resolve
+ * directly, backend-resolved commands are marked for live execution. */
+export function runApproved(cmd: string): string {
+	const parts = cmd.trim().split(/\s+/)
+	const name = parts[0] ?? ''
+	if (!name) throw new Error('empty command')
+	if (!ALLOWLIST.has(name)) throw new Error(`unsupported command: ${name} (try help)`)
+	if (name === 'pwd' || name === 'ls' || name === 'cd' || (name === 'cat' && parts.length > 1))
+		return `approved for live execution: ${cmd.trim()}`
+	return runAllowlisted(cmd)
 }
 
 export interface ApprovalRecord {
@@ -82,7 +104,10 @@ export class ApprovalStore {
 
 	request(caller: ShellCaller, cmd: string, opId: string, ttlMs = 300_000): ApprovalRecord {
 		const existing = this.records.get(opId)
-		if (existing) return existing
+		if (existing) {
+			if (existing.caller !== caller || existing.cmd !== cmd) throw new Error(`approval ${opId} binding mismatch`)
+			return existing
+		}
 		const rec: ApprovalRecord = {
 			opId,
 			caller,
@@ -112,6 +137,7 @@ export class ApprovalStore {
 		const rec = this.records.get(opId)
 		if (!rec) throw new Error(`unknown approval ${opId}`)
 		if (rec.executed) return { record: rec, already: true }
+		if (Date.now() > rec.expiresAt) rec.decision = 'expired'
 		if (rec.decision !== 'approved') throw new Error(`approval ${opId} is ${rec.decision}`)
 		rec.executed = true
 		return { record: rec, already: false }

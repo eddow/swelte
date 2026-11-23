@@ -49,29 +49,8 @@ pub fn tools_demo(req SwelteRequest) string {
 	if only == 'nope' {
 		return run_selected([]string{}, 'backend.shell_tools.tool_nope', '{}', '', '')
 	}
-	if only == 'note' {
-		text := req.query['note'] or { 'hello note' }
-		args_json := '{"text":' + json.encode(text) + '}'
-		op_id := req.query['op'] or { 'op-shell-note-1' }
-		if (req.query['approve'] or { '' }) != '1' {
-			return run_selected([note_name], note_name, args_json, 'human', op_id)
-		}
-		tools.swelte_tool_approval_record('human', note_name, args_json, op_id)
-		tools.swelte_tool_approval_decide(op_id, 'approved')
-		return run_selected([note_name], note_name, args_json, 'human', op_id)
-	}
-	if only == 'shell_exec' {
-		cmd := req.query['cmd'] or { 'pwd' }
-		holder := req.query['holder'] or { 'run-demo/turn-1' }
-		op_id := req.query['op'] or { 'op-shell-exec-1' }
-		args_json := '{"cmd":' + json.encode(cmd) + ',"holder":' + json.encode(holder) + ',"op_id":' + json.encode(op_id) + '}'
-		caller := req.query['caller'] or { 'ai' }
-		if (req.query['approve'] or { '' }) != '1' {
-			return run_selected([shell_exec_name], shell_exec_name, args_json, caller, op_id)
-		}
-		tools.swelte_tool_approval_record(caller, shell_exec_name, args_json, op_id)
-		tools.swelte_tool_approval_decide(op_id, 'approved')
-		return run_selected([shell_exec_name], shell_exec_name, args_json, caller, op_id)
+	if only == 'note' || only == 'shell_exec' {
+		return '{"ok":false,"error":"actions require the console POST approval flow"}'
 	}
 	if only == 'shell_read' {
 		since := (req.query['since'] or { '0' }).int()
@@ -80,6 +59,7 @@ pub fn tools_demo(req SwelteRequest) string {
 		return run_selected([shell_read_name], shell_read_name, args_json, '', '')
 	}
 	top := run_selected([top_name, short_name], top_name, '{"limit":2}', '', '')
-	short := run_selected([top_name, short_name], short_name, '{"text":"hello shell","limit":5}', '', '')
+	short := run_selected([top_name, short_name], short_name, '{"text":"hello shell","limit":5}',
+		'', '')
 	return '{"ok":true,"top":' + top + ',"short":' + short + '}'
 }

@@ -6,7 +6,10 @@
 // shared KV state.
 module backend
 
+import sync
 import time
+import net.http
+import net.urllib
 
 // KV keys shared with the route (`+page.v`, module shell) over the same
 // `backend.kv_*` store. `shell:driver` holds `human` (no AI in charge) or
@@ -53,37 +56,19 @@ pub fn shell_driver_holds(driver string, holder string, expires_unix int) bool {
 // Allowlisted command names (shared with the route allowlist + the
 // frontend mirror in `src/lib/shell.ts`). Single list: adding a command
 // means editing all three — deliberate, demo-explicit.
+// (`shell_cmd_name` lives in `shell_fs.v`, same `module backend`.)
 pub fn shell_allowlisted(name string) bool {
 	return name == 'echo' || name == 'pwd' || name == 'whoami' || name == 'help' || name == 'cat'
+		|| name == 'ls' || name == 'cd'
 }
 
-pub fn shell_cmd_name(cmd string) string {
-	parts := cmd.trim_space().split(' ')
-	if parts.len == 0 {
-		return ''
-	}
-	return parts[0]
-}
-
-// Stateless demo execution for the allowlist (mirrors the route body:
-// `cat` returns its placeholder — queuing/draining lives in the route).
+// AI-visible demo execution (offline shape mirror): echo/pwd/whoami/help
+// plus real sandbox listings for ls/cd/cat-file in the approval-gated path.
+// Non-allowlisted approved commands fall back to an honest `unsupported
+// command` message — reaching the body means the human already confirmed,
+// but nothing outside the sandbox list may claim to have run.
 fn shell_run_allowlisted(cmd string) string {
-	trimmed := cmd.trim_space()
-	name := shell_cmd_name(trimmed)
-	if !shell_allowlisted(name) {
-		return 'error: command not allowlisted: ' + name
-	}
-	if name == 'echo' {
-		idx := trimmed.index(' ') or { return '' }
-		return trimmed[idx + 1..].trim_space()
-	}
-	if name == 'help' {
-		return 'allowlist: echo pwd whoami help cat'
-	}
-	if name == 'pwd' {
-		return '/shell'
-	}
-	return 'swelte-shell'
+	return shell_fs_run(cmd)
 }
 
 // Publish one scrollback frame over KV + room (mirrors the route `publish`).
@@ -144,12 +129,12 @@ fn shell_split_frame(line string) (string, string) {
 
 pub struct TopArgs {
 pub:
-	limit  int
+	limit int
 	// Ranked-window paging: `page` selects the window, `limit` sizes it
 	// (default 5, clamped to 1..5 — one call never returns more than five
 	// rows). Missing fields decode to zero values, so `{"limit":2}` keeps
 	// working: page 0, public-only rows.
-	page   int
+	page int
 	// Visibility filter: a ledger row is authorized when it is public
 	// (`owner == ''`) or owned by `caller`. Unknown callers see public
 	// rows only. Read-only tools pass dispatch-level caller/op as `'',''`;
@@ -175,24 +160,96 @@ struct LedgerEntry {
 // Fixed demo ledger: public shell history plus per-caller private rows.
 fn shell_ledger() []LedgerEntry {
 	return [
-		LedgerEntry{ cmd: 'echo hi', owner: '', id: 'cmd-01' },
-		LedgerEntry{ cmd: 'echo hi', owner: '', id: 'cmd-02' },
-		LedgerEntry{ cmd: 'echo hi', owner: '', id: 'cmd-03' },
-		LedgerEntry{ cmd: 'echo hi', owner: '', id: 'cmd-04' },
-		LedgerEntry{ cmd: 'pwd', owner: '', id: 'cmd-05' },
-		LedgerEntry{ cmd: 'pwd', owner: '', id: 'cmd-06' },
-		LedgerEntry{ cmd: 'pwd', owner: '', id: 'cmd-07' },
-		LedgerEntry{ cmd: 'whoami', owner: '', id: 'cmd-08' },
-		LedgerEntry{ cmd: 'whoami', owner: '', id: 'cmd-09' },
-		LedgerEntry{ cmd: 'help', owner: '', id: 'cmd-10' },
-		LedgerEntry{ cmd: 'help', owner: '', id: 'cmd-11' },
-		LedgerEntry{ cmd: 'cat', owner: '', id: 'cmd-12' },
-		LedgerEntry{ cmd: 'echo hi', owner: 'human', id: 'cmd-13' },
-		LedgerEntry{ cmd: 'deploy app', owner: 'human', id: 'cmd-14' },
-		LedgerEntry{ cmd: 'deploy app', owner: 'human', id: 'cmd-15' },
-		LedgerEntry{ cmd: 'deploy app', owner: 'human', id: 'cmd-16' },
-		LedgerEntry{ cmd: 'cat secrets', owner: 'ai', id: 'cmd-17' },
-		LedgerEntry{ cmd: 'cat secrets', owner: 'ai', id: 'cmd-18' },
+		LedgerEntry{
+			cmd:   'echo hi'
+			owner: ''
+			id:    'cmd-01'
+		},
+		LedgerEntry{
+			cmd:   'echo hi'
+			owner: ''
+			id:    'cmd-02'
+		},
+		LedgerEntry{
+			cmd:   'echo hi'
+			owner: ''
+			id:    'cmd-03'
+		},
+		LedgerEntry{
+			cmd:   'echo hi'
+			owner: ''
+			id:    'cmd-04'
+		},
+		LedgerEntry{
+			cmd:   'pwd'
+			owner: ''
+			id:    'cmd-05'
+		},
+		LedgerEntry{
+			cmd:   'pwd'
+			owner: ''
+			id:    'cmd-06'
+		},
+		LedgerEntry{
+			cmd:   'pwd'
+			owner: ''
+			id:    'cmd-07'
+		},
+		LedgerEntry{
+			cmd:   'whoami'
+			owner: ''
+			id:    'cmd-08'
+		},
+		LedgerEntry{
+			cmd:   'whoami'
+			owner: ''
+			id:    'cmd-09'
+		},
+		LedgerEntry{
+			cmd:   'help'
+			owner: ''
+			id:    'cmd-10'
+		},
+		LedgerEntry{
+			cmd:   'help'
+			owner: ''
+			id:    'cmd-11'
+		},
+		LedgerEntry{
+			cmd:   'cat'
+			owner: ''
+			id:    'cmd-12'
+		},
+		LedgerEntry{
+			cmd:   'echo hi'
+			owner: 'human'
+			id:    'cmd-13'
+		},
+		LedgerEntry{
+			cmd:   'deploy app'
+			owner: 'human'
+			id:    'cmd-14'
+		},
+		LedgerEntry{
+			cmd:   'deploy app'
+			owner: 'human'
+			id:    'cmd-15'
+		},
+		LedgerEntry{
+			cmd:   'deploy app'
+			owner: 'human'
+			id:    'cmd-16'
+		},
+		LedgerEntry{
+			cmd:   'cat secrets'
+			owner: 'ai'
+			id:    'cmd-17'
+		},
+		LedgerEntry{
+			cmd:   'cat secrets'
+			owner: 'ai'
+			id:    'cmd-18'
+		},
 	]
 }
 
@@ -203,7 +260,13 @@ fn shell_ledger() []LedgerEntry {
 // is deterministic (count desc, command asc) so pages are stable.
 @[tool]
 pub fn tool_top_commands(args TopArgs) ![]TopRow {
-	limit := if args.limit <= 0 { 5 } else if args.limit > 5 { 5 } else { args.limit }
+	limit := if args.limit <= 0 {
+		5
+	} else if args.limit > 5 {
+		5
+	} else {
+		args.limit
+	}
 	page := if args.page < 0 { 0 } else { args.page }
 	mut counts := map[string]int{}
 	mut ids := map[string][]string{}
@@ -226,7 +289,11 @@ pub fn tool_top_commands(args TopArgs) ![]TopRow {
 	for cmd, n in counts {
 		mut sids := ids[cmd].clone()
 		sids.sort()
-		rows << TopRow{ command: cmd, count: n, source_ids: sids }
+		rows << TopRow{
+			command:    cmd
+			count:      n
+			source_ids: sids
+		}
 	}
 	rows.sort_with_compare(fn (a &TopRow, b &TopRow) int {
 		if a.count > b.count {
@@ -284,14 +351,17 @@ pub fn tool_publish_note(args NoteArgs) !NoteRow {
 	if args.text.len == 0 {
 		return error('note must not be empty')
 	}
-	return NoteRow{ note: args.text }
+	return NoteRow{
+		note: args.text
+	}
 }
 
 pub struct ShellExecArgs {
 pub:
-	// Allowlisted command to run (`echo pwd whoami help cat`).
+	// Command to run (`echo pwd whoami help cat` demo allowlist; anything
+	// else runs as a generic approved demo after human approval).
 	cmd string
-	//Owning `runId/turnId` lease holder (`shell:driver` = `ai:<holder>`).
+	// Owning `runId/turnId` lease holder (`shell:driver` = `ai:<holder>`).
 	holder string
 	// Dispatch-table approval op id for this exec (Stage C: starting `cat`
 	// writes `shell:stdin:scope:<op_id> = holder`).
@@ -306,15 +376,12 @@ pub:
 	note    string
 }
 
-// AI shell execution (spec §4): allowlisted commands only, driver-lease
-// gated. The dispatch-table approval (`caller + tool + exact args + op_id`)
-// runs before this body — approval denial/expiry never reaches here.
-// `cat` is non-blocking: it drains queued stdin and returns `{pending:true}`
-// (each `send_input` publishes its own `stdin` frame; no fake `exec` row).
-// Settled commands publish one atomic `exec` frame and return `{output, seq}`.
-// Unknown commands fail actionably without publishing.
+// AI shell execution (spec §4): driver-lease gated. The dispatch-table
+// approval (`caller + tool + exact args + op_id`) runs before this body —
+// approval denial/expiry never reaches here. Real sandboxed commands run
+// for real (`shell_fs_run`); bare `cat` drains stdin below.
 // Stage C: `args.op_id` (the dispatch-table approval op id for THIS exec)
-// travels in the tool args; starting `cat` writes a scope row
+// travels in the tool args; starting a bare `cat` writes a scope row
 // (`shell:stdin:scope:<op_id> = holder`) — the narrow §6 exception that
 // lets later `send_input` calls cite this op id without a fresh record.
 // Scope rows are advisory-only: validity is re-checked against the live
@@ -326,14 +393,10 @@ pub fn tool_shell_exec(args ShellExecArgs) !ShellExecRow {
 	if !shell_driver_holds(driver, args.holder, expires) {
 		return error('shell: driver lease not held by ' + args.holder + ' (driver=' + driver + ')')
 	}
-	name := shell_cmd_name(args.cmd)
-	if !shell_allowlisted(name) {
-		return error('command not allowlisted: ' + name)
-	}
 	if args.cmd.trim_space() == '' {
 		return error('empty command')
 	}
-	if name == 'cat' {
+	if shell_cmd_name(args.cmd) == 'cat' && shell_arg(args.cmd) == '' {
 		if args.op_id.trim_space() != '' {
 			kv_set(shell_stdin_scope_prefix + args.op_id, args.holder) or {}
 		}
@@ -354,14 +417,18 @@ pub fn tool_shell_exec(args ShellExecArgs) !ShellExecRow {
 	}
 	output := shell_run_allowlisted(args.cmd)
 	seq := shell_publish_exec(args.cmd.trim_space(), output)
-	return ShellExecRow{ output: output, seq: seq, pending: false }
+	return ShellExecRow{
+		output:  output
+		seq:     seq
+		pending: false
+	}
 }
 
 pub struct ShellInputArgs {
 pub:
 	// Raw keystrokes for the running command's stdin.
 	keys string
-	//Owning `runId/turnId` lease holder (`shell:driver` = `ai:<holder>`).
+	// Owning `runId/turnId` lease holder (`shell:driver` = `ai:<holder>`).
 	holder string
 	// Approval op id for the stdin scope (§6: per-keystroke record, or the
 	// pre-approved `exec` op id while its scope is live).
@@ -392,7 +459,9 @@ pub fn tool_shell_send_input(args ShellInputArgs) !ShellInputRow {
 	}
 	shell_stdin_push(args.keys)
 	shell_publish('stdin\n' + args.keys)
-	return ShellInputRow{ ok: true }
+	return ShellInputRow{
+		ok: true
+	}
 }
 
 // Scope check (Stage C): `op_id` grants stdin while it names a live scope
@@ -438,14 +507,24 @@ pub:
 // with truncation marked. Read-only → no approval touch.
 @[tool]
 pub fn tool_shell_read_output(args ShellReadArgs) !ShellReadRow {
-	limit := if args.limit <= 0 { 5 } else if args.limit > 5 { 5 } else { args.limit }
+	limit := if args.limit <= 0 {
+		5
+	} else if args.limit > 5 {
+		5
+	} else {
+		args.limit
+	}
 	since := if args.since_seq < 0 { 0 } else { args.since_seq }
 	last := (kv_get(shell_seq_key) or { '0' }).int()
 	mut lines := []string{}
 	mut seqs := []int{}
 	mut kinds := []string{}
 	if last > since {
-		mut start := if last - since > shell_scroll_cap { last - shell_scroll_cap } else { since + 1 }
+		mut start := if last - since > shell_scroll_cap {
+			last - shell_scroll_cap
+		} else {
+			since + 1
+		}
 		if start < 1 {
 			start = 1
 		}
@@ -476,5 +555,87 @@ pub fn tool_shell_read_output(args ShellReadArgs) !ShellReadRow {
 		}
 	}
 	next := if seqs.len > 0 { seqs[seqs.len - 1] } else { since }
-	return ShellReadRow{ lines: lines, seqs: seqs, kinds: kinds, next_seq: next }
+	return ShellReadRow{
+		lines:    lines
+		seqs:     seqs
+		kinds:    kinds
+		next_seq: next
+	}
+}
+
+// URL requests share the exact-argument approval and live driver gates.
+// This is a bounded HTTP reader, not an interactive browser.
+pub struct ShellBrowseArgs {
+pub:
+	url    string
+	holder string
+}
+
+pub struct ShellBrowseRow {
+pub:
+	url     string
+	status  int
+	content string
+}
+
+@[tool('side-effect')]
+pub fn tool_shell_browse(args ShellBrowseArgs) !ShellBrowseRow {
+	driver := kv_get(shell_driver_key) or { 'human' }
+	expires := (kv_get(shell_driver_expires_key) or { '0' }).int()
+	if !shell_driver_holds(driver, args.holder, expires) {
+		return error('shell: driver lease not held')
+	}
+	parsed := urllib.parse(args.url)!
+	if parsed.scheme != 'https' || parsed.host == '' || parsed.user != none {
+		return error('browse requires an HTTPS URL without credentials')
+	}
+	response := http.fetch(
+		url:                  args.url
+		allow_redirect:       false
+		max_retries:          0
+		read_timeout:         10 * time.second
+		stop_receiving_limit: 65536
+	)!
+	return ShellBrowseRow{
+		url:     args.url
+		status:  response.status_code
+		content: shell_fs_trunc(response.body)
+	}
+}
+
+// Serialize human decisions and dispatch receipts within this local console.
+__global shell_approval_mutex = &sync.Mutex{}
+pub fn shell_approval_lock() {
+	shell_approval_mutex.lock()
+}
+
+pub fn shell_approval_unlock() {
+	shell_approval_mutex.unlock()
+}
+
+// Native console inspection requires no driver lease or approval. This
+// deliberately excludes cwd changes, stdin and arbitrary command execution.
+pub struct ShellQueryArgs {
+pub:
+	cmd string
+}
+
+pub struct ShellQueryRow {
+pub:
+	output string
+}
+
+pub fn shell_query_allowed(cmd string) bool {
+	name := shell_cmd_name(cmd)
+	return name == 'ls' || (name in ['pwd', 'whoami', 'help'] && shell_arg(cmd) == '')
+}
+
+@[tool]
+pub fn tool_shell_query(args ShellQueryArgs) !ShellQueryRow {
+	if !shell_query_allowed(args.cmd) {
+		return error('read-only console queries support pwd, whoami, help and ls')
+	}
+	return ShellQueryRow{
+		output: shell_fs_run(args.cmd)
+	}
 }

@@ -78,13 +78,14 @@ function toggleRow(label: string) {
 	>
 		<div class="-mx-1 overflow-hidden px-1.5 pb-1">
 			<div class="mt-1.5 flex flex-col gap-1">
-				{#each steps as row, index (row.label)}
-					{@const rowOpen = openRows.has(row.label)}
+				{#each steps as row, index (row.id ?? index)}
+					{@const rowKey = row.id ?? String(index)}
+					{@const rowOpen = openRows.has(rowKey)}
 					<div class="card-fade-up" style="animation-delay: calc(var(--stagger-step) * {index});">
 						<button
 							type="button"
 							aria-expanded={rowOpen}
-							onclick={() => toggleRow(row.label)}
+							onclick={() => toggleRow(rowKey)}
 							class="group/row -mx-[3px] flex h-7 outline-none focus-visible:ring-2 focus-visible:ring-ring w-[calc(100%+6px)] min-w-0 items-center gap-2 rounded-md px-[3px] text-left transition-colors duration-(--duration-instant) hover:bg-accent"
 						>
 							<span

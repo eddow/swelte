@@ -178,6 +178,7 @@
 	--gradient-accent: linear-gradient(to right, oklch(72% 0.18 195) 0%, oklch(68% 0.22 295) 100%);
 }
 
+[data-theme='dark'],
 .dark {
 	--background: oklch(17% 0.002 265);
 	--foreground: oklch(96% 0.001 265);

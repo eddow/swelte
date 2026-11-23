@@ -2,7 +2,6 @@
 import { tick } from 'svelte'
 import { DraftStore, RunTracker, capabilityFailure, createMemorySink } from '@swelte/ai'
 import { applyTheme, setTheme, storedTheme, type Theme } from '#lib/theme.js'
-import { ApprovalStore, authorizeShellCall, runAllowlisted } from '#lib/shell.js'
 import {
 	activeAiConfig,
 	createAiConfig,
@@ -17,15 +16,11 @@ import {
 } from '#lib/ai-config.js'
 import { onMount } from 'svelte'
 import {
-	ai_chat,
 	ai_key_status,
 	ai_models,
-	approve,
 	chat,
-	deny,
 	exec,
 	send_input,
-	shell_handoff,
 	shell_release,
 	shell_tool_deny,
 	shell_tool_resume,
@@ -67,7 +62,7 @@ let activeTurn = $state('turn-1')
 let turnSeq = $state(1)
 let verdict = $state('')
 let note = $state('')
-let approvalTtl = $state('300000')
+let deciding = $state(false)
 let termLines: TermLine[] = $state([])
 let messages: ChatMsg[] = $state([])
 let approvals: PendingApproval[] = $state([])
@@ -80,6 +75,7 @@ let parkedDrive: { opId: string; tool: string; args: string; holder: string } | 
 // driving tail may park `shell.exec`/`shell.send_input` for approval.
 let driveScope = $state(false)
 let streaming = $state(false)
+let chatAbort: AbortController | null = null
 // Exec lifecycle: while an exec is in flight the input forwards keystrokes
 // to its stdin (send_input) instead of starting a new command; the run
 // button is enabled only when idle with non-empty input and no chat reply
@@ -105,7 +101,6 @@ let chatEl: HTMLElement | null = null
 let chatFollowing = $state(true)
 let termFollowing = $state(true)
 let dark = $state(false)
-const store = new ApprovalStore()
 const card = new DraftStore({ title: '', note: '' })
 const sink = createMemorySink()
 const tracker = new RunTracker()
@@ -360,17 +355,10 @@ function markToolsDone(id: string, ok: boolean): AiToolCall[] {
 
 async function runHumanCommand(raw: string) {
 	const cmd = raw.trim()
+	// Human commands run the real sandboxed shell: only an empty command
+	// is rejected locally (terminal only, never the chat pane).
 	if (!cmd || execRunning) return
 	termKeys = ''
-	const gate = authorizeShellCall('human', cmd)
-	if (!gate.allowed) {
-		// Local rejection: never published, so paint it directly as one
-		// prompt line + one reason line — no string-sniffing involved.
-		pushTerm(`$ ${cmd}`, '')
-		pushTerm('', gate.reason)
-		pushMsg('assistant', gate.reason)
-		return
-	}
 	execRunning = true
 	try {
 		const res = await exec({ cmd, op_id: nextOp(), caller: 'human' })
@@ -409,10 +397,10 @@ function submitTerm() {
 	if (execRunning) void sendKeystroke(termKeys)
 	else void runHumanCommand(termKeys || 'help')
 }
-async function sendChat() {
-	const text = composer.trim()
-	if (!text || streaming) return
-	composer = ''
+async function sendChat(continuation = '') {
+	const text = continuation ? 'Continuing after approved tool' : composer.trim()
+	if (!text || streaming || (!continuation && parkedDrive)) return
+	if (!continuation) composer = ''
 	autoGrow()
 	streaming = true
 	status = 'running'
@@ -420,9 +408,13 @@ async function sendChat() {
 	// Pin the turn now: an interrupt mid-reply must attribute this exchange
 	// to the turn it started on, not the one it settles on.
 	const turn = activeTurn
+	const controller = new AbortController()
+	chatAbort = controller
 	const cfg = activeAiConfig(aiConfigs, activeAiId)
-	pushHistory(text)
-	pushMsg('user', text, { meta: turn })
+	if (!continuation) {
+		pushHistory(text)
+		pushMsg('user', text, { meta: turn })
+	}
 	const waitId = pushMsg('assistant', '', {
 		author: `${cfg.adapter} · ${cfg.model}`,
 		meta: turn,
@@ -444,13 +436,15 @@ async function sendChat() {
 		const form = new URLSearchParams({
 			adapter: cfg.adapter,
 			model: cfg.model,
-			prompt: text,
+			prompt: continuation ? text : messages.slice(-10).map(m => `${m.role}: ${m.body.slice(0, 2000)}`).join('\n'),
 			temperature: String(cfg.run.temperature ?? -1),
 			max_tokens: String(cfg.run.maxTokens ?? -1),
 			system: cfg.run.system ?? '',
 			drive: driveScope ? '1' : '0',
+			continuation,
 		})
-		const res = await fetch('/?q=ai_stream', {
+		const res = await fetch('/?/ai_stream', {
+			signal: controller.signal,
 			method: 'POST',
 			headers: { 'content-type': 'application/x-www-form-urlencoded', accept: 'text/event-stream' },
 			body: form.toString(),
@@ -471,6 +465,7 @@ async function sendChat() {
 		const seenSeq = new Set<number>()
 		for (;;) {
 			const { done, value } = await reader.read()
+			if (controller.signal.aborted || turn !== activeTurn) { await reader.cancel(); return }
 			buf += decoder.decode(value ?? new Uint8Array(), { stream: !done })
 			let idx: number
 			while ((idx = buf.indexOf('\n\n')) >= 0) {
@@ -522,6 +517,10 @@ async function sendChat() {
 				} else if (event === 'tool.progress') {
 					const p = parsed.payload ?? {}
 					const progressTool = typeof p.tool === 'string' ? p.tool : p.tool?.name
+					if (!progressTool) {
+						resolveMsg(waitId, { thinking: [{ label: p.label ?? 'Thinking', status: 'active' }] })
+						continue
+					}
 					const id = p.callId ?? progressTool ?? `tool-${seq ?? Date.now()}`
 					resolveMsg(waitId, {
 						thinking: [
@@ -531,7 +530,7 @@ async function sendChat() {
 						tools: upsertTool(waitId, {
 							id,
 							label: p.label ?? progressTool ?? 'tool call',
-							chip: progressTool ?? id,
+							chip: 'console',
 							status: 'active',
 							detail: p.detail ? [p.detail] : [],
 						}),
@@ -556,9 +555,9 @@ async function sendChat() {
 							...approvals,
 							{
 								opId: p.op_id,
-								cmd: typeof p.args === 'string' ? p.args : JSON.stringify(p.args),
+								cmd: describeToolArgs(p.args),
 								status: 'pending',
-								note: `parked ${typeof p.tool === 'string' ? p.tool : 'tool'} — approve resumes, deny drops`,
+								note: p.label ?? 'Approval required',
 							},
 						]
 					} else if (p.op_id && toolName && p.args && p.holder) {
@@ -566,7 +565,7 @@ async function sendChat() {
 					}
 					resolveMsg(waitId, {
 						tools: upsertTool(waitId, {
-							id: p.callId ?? `approval-${seq ?? Date.now()}`,
+							id: p.op_id ?? p.callId ?? `approval-${seq ?? Date.now()}`,
 							label: p.label ?? 'Approval requested',
 							chip: 'approval',
 							status: 'pending',
@@ -577,14 +576,14 @@ async function sendChat() {
 				} else if (event === 'terminal') {
 					gotTerminal = true
 					const reason = parsed.payload?.reason ?? 'completed'
-					tracker.finish(reason === 'completed' ? 'completed' : 'failed', parsed.envelope?.seq ?? 0)
+					tracker.finish(reason === 'completed' || reason === 'waiting_approval' ? 'completed' : 'failed', parsed.envelope?.seq ?? 0)
 					resolveMsg(waitId, {
 						body: assembled,
 						pending: false,
 						thinkingActive: false,
-						tools: markToolsDone(waitId, reason === 'completed'),
+						tools: reason === 'waiting_approval' ? messages.find(m => m.id === waitId)?.tools : markToolsDone(waitId, reason === 'completed'),
 					})
-					if (reason !== 'completed') {
+					if (reason !== 'completed' && reason !== 'waiting_approval') {
 						throw new Error(parsed.payload?.error ?? `run ${reason}`)
 					}
 				}
@@ -611,6 +610,7 @@ async function sendChat() {
 		verdict = capabilityFailure({ input: ['video'], output: ['text'] }, [])
 		status = 'done'
 	} catch (e) {
+		if (controller.signal.aborted) { resolveMsg(waitId, { body: assembled || 'Interrupted', pending: false, thinkingActive: false }); return }
 		// Settle the transient bubble too — a failed turn must not hang
 		// in its dimmed state; keep partial text when the stream died mid-run.
 		resolveMsg(waitId, { body: assembled || 'send failed — try again', pending: false })
@@ -618,10 +618,12 @@ async function sendChat() {
 		status = 'error'
 	} finally {
 		streaming = false
+		if (chatAbort === controller) chatAbort = null
 	}
 }
 
 async function interrupt() {
+	chatAbort?.abort()
 	// Stop press while the AI drives: release the lease (backend flips to
 	// `human`), drop any parked call, and bump the turn so late output
 	// rejects. Spec §3 preempt.
@@ -629,6 +631,9 @@ async function interrupt() {
 		await shell_release({ holder: parkedDrive?.holder ?? '' })
 	} catch {
 		/* no live lease — the turn bump below still rejects stale output */
+	}
+	if (parkedDrive) {
+		approvals = approvals.map(a => a.opId === parkedDrive?.opId && a.status === 'pending' ? { ...a, status: 'denied', note: 'Interrupted by human' } : a)
 	}
 	parkedDrive = null
 	driveScope = false
@@ -648,92 +653,34 @@ async function interrupt() {
 	status = 'idle'
 }
 
-async function proposeAi(cmd: string) {
-	// Legacy manual path (offline/test): parks on the retired `exec(caller:'ai')`
-	// gate, which now fails actionably pointing at `tool_shell_exec`. The live
-	// AI path dispatches through the tools route approval table instead (§6).
-	const gate = authorizeShellCall('ai', cmd)
-	if (!gate.needsApproval) {
-		await runHumanCommand(cmd)
-		return
-	}
-	const opId = nextOp()
-	store.request('ai', cmd, opId)
-	try {
-		await exec({ cmd, op_id: opId, caller: 'ai' })
-	} catch (e) {
-		note = e instanceof Error ? e.message : String(e)
-	}
-	approvals = [...approvals, { opId, cmd, status: 'pending', note: 'waiting for human approval' }]
+function describeToolArgs(args: string): string {
+ try {
+  const value = JSON.parse(args) as { cmd?: string; url?: string; keys?: string }
+  return value.cmd ?? value.url ?? value.keys ?? 'Console action'
+ } catch { return 'Console action' }
 }
 
 async function decide(opId: string, allow: boolean) {
-	const item = approvals.find((a) => a.opId === opId)
-	if (!item) return
-	const ttl = Number.parseInt(approvalTtl, 10)
-	if (Number.isFinite(ttl) && ttl < 0) {
-		item.status = 'expired'
-		item.note = 'approval expired before decision'
-		approvals = [...approvals]
-		return
-	}
-	try {
-		if (allow) await approve({ cmd: item.cmd, op_id: opId, caller: 'ai' })
-		else await deny({ cmd: item.cmd, op_id: opId, caller: 'ai' })
-		store.decide(opId, allow ? 'approved' : 'denied')
-		// Stage B resume: a parked driving call resumes through the
-		// dispatch table (holder-bound, exact-args, replay-safe).
-		if (parkedDrive && parkedDrive.opId === opId) {
-			const parked = parkedDrive
-			parkedDrive = null
-			if (allow) {
-				try {
-					const res = await shell_tool_resume({
-						op_id: opId,
-						holder: parked.holder,
-						tool: parked.tool,
-						args_json: parked.args,
-					})
-					store.decide(opId, 'approved')
-					paintExec(parked.tool, `${res.output} ✓ approved`)
-					pushMsg('assistant', `approved + ran: ${parked.tool} → ${res.output}`)
-				} catch (e) {
-					pushMsg('assistant', `resume failed: ${e instanceof Error ? e.message : String(e)}`)
-				}
-			} else {
-				try {
-					await shell_tool_deny({
-						op_id: opId,
-						holder: parked.holder,
-						tool: parked.tool,
-						args_json: parked.args,
-					})
-				} catch {
-					/* advisory record may not exist — the drop is what matters */
-				}
-				pushMsg('assistant', `denied: ${parked.tool}`)
-			}
-			item.status = allow ? 'approved' : 'denied'
-			item.note = allow ? 'resumed through the dispatch table' : 'denied by human'
-			approvals = [...approvals]
-			return
-		}
-		if (allow) {
-			// Legacy demo path: the human `exec` RPC AI gate is retired, so
-			// approval confirms the advisory record and paints the queued
-			// command as a human run (double-gate note in spec §4).
-			const res = await exec({ cmd: item.cmd, op_id: opId, caller: 'human' })
-			paintExec(item.cmd, `${res.output} ✓ approved`)
-			pushMsg('assistant', `approved + ran: ${item.cmd} → ${res.output}`)
-		} else {
-			pushMsg('assistant', `denied: ${item.cmd}`)
-		}
-		item.status = allow ? 'approved' : 'denied'
-		item.note = allow ? 'executed once; duplicates replay the receipt' : 'denied by human'
-		approvals = [...approvals]
-	} catch (e) {
-		showError(e)
-	}
+ const item = approvals.find(a => a.opId === opId)
+ if (!item || item.status !== 'pending' || deciding || !parkedDrive || parkedDrive.opId !== opId) return
+ const parked = parkedDrive
+ deciding = true
+ try {
+  const args = { op_id: opId, holder: parked.holder, tool: parked.tool, args_json: parked.args }
+  const res = allow ? await shell_tool_resume(args) : await shell_tool_deny(args)
+  messages = messages.map(m => ({ ...m, tools: m.tools?.map(t => t.id === opId ? { ...t, status: allow ? 'done' as const : 'failed' as const } : t) }))
+  item.status = allow ? 'approved' : 'denied'
+  item.note = allow ? 'Executed; continuing with the tool result' : 'Denied by human'
+  approvals = [...approvals]
+  parkedDrive = null
+  if (allow && res.continuation) await sendChat(res.continuation)
+ } catch (e) {
+  // Keep the operation available for a lost-ack retry; never label a failed
+  // dispatch as approved or silently execute it through the human RPC.
+  item.note = e instanceof Error ? e.message : String(e)
+  approvals = [...approvals]
+  showError(e)
+ } finally { deciding = false }
 }
 // The single output path, started once on mount: subscribe to the backend
 // room over SSE (scrollback tail first, then live lines). Every publish()
@@ -750,10 +697,6 @@ async function watchShell() {
 		live = false
 		showError(e)
 	}
-}
-
-function aiDemo() {
-	void proposeAi('echo hello-from-ai')
 }
 
 // Recent user prompts (newest first, capped) for the history picker —
@@ -851,13 +794,10 @@ function toggleTheme(next: boolean) {
 			</p>
 		</div>
 		<div class="shell-meta">
-			<div class="badge badge-outline gap-2">
+			<div class="badge badge-outline gap-2" title="run status">
 				<span class={`status-dot status-${status}`}></span>
 				{status}
 			</div>
-			<div class="badge badge-outline">turn {activeTurn}</div>
-			<div class="badge badge-outline">card &ldquo;{card.current.value.title || '—'}&rdquo;</div>
-			<div class="badge badge-outline">{sink.events.length} trace events</div>
 			<label class="swap swap-rotate btn btn-ghost btn-circle btn-sm" aria-label="Toggle dark mode">
 				<input
 					type="checkbox"
@@ -892,8 +832,14 @@ function toggleTheme(next: boolean) {
 		<section class="card pane" aria-label="chat">
 			<div class="pane-head">
 				<h2>chat</h2>
+				<span class="pane-model">{activeAiConfig(aiConfigs, activeAiId).name}</span>
 			</div>
-			<div class="ai-config-row">
+			<details class="ai-config">
+				<summary class="ai-config-summary" title="AI configuration">
+					<span aria-hidden="true" class="gear">&#9881;</span>
+					<span class="ai-config-current">{activeAiConfig(aiConfigs, activeAiId).name}</span>
+				</summary>
+				<div class="ai-config-row">
 				<label class="ai-config-label">
 					<span>AI configuration</span>
 					<select
@@ -1050,6 +996,7 @@ function toggleTheme(next: boolean) {
 					</div>
 				</div>
 			{/if}
+			</details>
 			<div
 				class="transcript"
 				bind:this={chatEl}
@@ -1061,22 +1008,12 @@ function toggleTheme(next: boolean) {
 				{#if !messages.length}
 					<div class="pane-empty">
 						<p class="pane-empty-title">Start a conversation</p>
-						<p>Ask or say hello — the deterministic adapter echoes it straight back.</p>
+						<p>Ask or say hello — to get started.</p>
 					</div>
 				{/if}
 				{#each messages as m (m.id)}
 					<div class={`bubble-row ${m.role} ${m.pending ? 'is-pending' : ''}`}>
 						<div class={`chat ${m.role === 'user' ? 'chat-end' : 'chat-start'}`}>
-							{#if m.author || m.meta}
-								<div class="chat-header">
-									{#if m.author}
-										<span>{m.author}</span>
-									{/if}
-									{#if m.meta}
-										<time>{m.meta}</time>
-									{/if}
-								</div>
-							{/if}
 							<div class={`chat-bubble ${m.role === 'user' ? 'chat-bubble-primary' : ''}`}>
 								{#if m.role === 'assistant'}
 									<AiAnswer
@@ -1088,7 +1025,6 @@ function toggleTheme(next: boolean) {
 										tools={m.tools ?? []}
 										text={m.body}
 										streaming={m.pending}
-										author={m.pending ? undefined : m.author}
 									/>
 								{:else}
 									{m.body}
@@ -1111,14 +1047,14 @@ function toggleTheme(next: boolean) {
 			{/if}
 			<form
 				class="composerbar"
-				onsubmit={(e) => {
-					e.preventDefault()
-					sendChat()
-				}}
+			onsubmit={(e) => {
+				e.preventDefault()
+				void sendChat()
+			}}
 			>
 				{#if promptHistory.length}
 					<details class="history">
-						<summary class="btn btn-ghost btn-sm" aria-label="Prompt history">↺</summary>
+						<summary class="history-btn" aria-label="Prompt history" title="Prompt history">↺</summary>
 						<ul>
 							{#each promptHistory as h (h)}
 								<li>
@@ -1143,69 +1079,62 @@ function toggleTheme(next: boolean) {
 					bind:value={composer}
 					oninput={autoGrow}
 					onkeydown={composerKeydown}
-					placeholder="say hello ⏎ send · ⇧⏎ newline"
+					placeholder="Prompt or tag a flavor with @"
 					aria-label="chat message"
 					rows="1"
 				></textarea>
-				{#if streaming}
-					<button class="btn btn-warning btn-sm composergo" type="button" onclick={interrupt}>
-						■ stop
+				{#if streaming || parkedDrive}
+					<button class="sendbtn is-stop" type="button" onclick={interrupt} aria-label="Stop generating" title="Stop">
+						<svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><rect x="3.5" y="3.5" width="9" height="9" rx="1.5" fill="currentColor"/></svg>
 					</button>
 				{:else}
 					<button
-						class="btn btn-primary btn-sm composergo"
+						class="sendbtn"
 						type="submit"
-						disabled={!composer.trim()}
+						disabled={!composer.trim() || !!parkedDrive || deciding}
+						aria-label="Send message"
+						title="Send"
 					>
-						↑ send
+						<svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="M8 3v9M3.5 8.5 8 3.5l4.5 5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
 					</button>
 				{/if}
-				<button class="btn btn-ghost btn-sm" type="button" onclick={aiDemo}>
-					AI: echo hello-from-ai
-				</button>
-				<label class="pane-hint drive">
+				<label class="drivetoggle" title="Let AI use shell and browse tools this turn">
 					<input
 						type="checkbox"
 						bind:checked={driveScope}
-						aria-label="let AI use the terminal this turn"
+						aria-label="Let AI use shell and browse tools this turn"
 					>
-					let AI use terminal this turn
+					<span aria-hidden="true">⌨</span>
 				</label>
 			</form>
-			{#if verdict}
-				<p class="pane-hint">capability probe: {verdict}</p>
-			{/if}
-			<h3 class="queue-head">
+			{#if approvals.length}
+				<h3 class="queue-head">
 				approvals <span class="badge badge-warning badge-sm">{pending.length} pending</span>
 			</h3>
-			<p class="pane-hint">
-				Gate: caller + exact args + op id.
-				<label
-					>ttl ms <input class="input input-bordered input-xs ttl" bind:value={approvalTtl}></label
-				>
-				(negative forces expiry)
-			</p>
-			{#if !approvals.length}
-				<p class="pane-hint">No proposals yet — click “AI: echo hello-from-ai”.</p>
-			{/if}
+			<details class="adv">
+				<summary>how approvals work</summary>
+				<p class="pane-hint">
+					Approvals bind the exact action and expire with the 90 second terminal lease.
+				</p>
+			</details>
 			<div class="queue" role="list" aria-label="approval queue">
 				{#each approvals as a (a.opId)}
 					<div class={`gate gate-${a.status}`} role="listitem">
 						<div class="gate-main">
-							<span class="badge badge-sm badge-ghost font-mono">shell.exec</span>
+							<span class="badge badge-sm badge-ghost font-mono">tool action</span>
 							<code class="gate-cmd">{a.cmd}</code>
 							<span
 								class={`badge badge-sm badge-${a.status === 'pending' ? 'warning' : a.status === 'approved' ? 'success' : 'error'}`}
 								>{a.status}</span
 							>
 						</div>
-						<div class="gate-sub">{a.note} · <code>{a.opId}</code></div>
+						<div class="gate-sub" title={a.opId}>{a.note}</div>
 						{#if a.status === 'pending'}
 							<div class="gate-actions">
-								<button class="btn btn-sm btn-primary" onclick={() => decide(a.opId, true)}>
+								<button class="btn btn-sm btn-primary" disabled={deciding || streaming} onclick={() => decide(a.opId, true)}>
 									approve + run once
 								</button>
-								<button class="btn btn-sm btn-ghost" onclick={() => decide(a.opId, false)}>
+								<button class="btn btn-sm btn-ghost" disabled={deciding || streaming} onclick={() => decide(a.opId, false)}>
 									deny
 								</button>
 							</div>
@@ -1213,6 +1142,7 @@ function toggleTheme(next: boolean) {
 					</div>
 				{/each}
 			</div>
+			{/if}
 		</section>
 		<!-- right: terminal — live backend shell, auto-subscribed on mount -->
 		<section class="card pane" aria-label="terminal">
@@ -1262,46 +1192,53 @@ function toggleTheme(next: boolean) {
 					submitTerm()
 				}}
 			>
-				<span class="ps1" aria-hidden="true">{execRunning ? '…' : '›'}</span>
 				<input
 					class="promptinput"
 					bind:value={termKeys}
-					placeholder={execRunning ? 'type stdin for the running command…' : 'echo hi ⏎ run'}
+					placeholder={execRunning ? 'type stdin for the running command…' : 'ls, cd src, cat <file>'}
 					aria-label={execRunning ? 'stdin for the running command' : 'terminal command'}
 				>
 				<button
-					class="btn btn-primary btn-sm promptgo"
+					class="promptgo"
 					type="submit"
 					disabled={submitDisabled}
 					aria-label={execRunning ? 'send keystroke to stdin' : 'run command'}
+					title={execRunning ? 'Send keystroke' : 'Run'}
 				>
-					{execRunning ? '···' : '⏎ run'}
+					{#if execRunning}
+						<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><rect x="3.5" y="3.5" width="9" height="9" rx="1.5" fill="currentColor" /></svg>
+					{:else}
+						<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M8 3v9M3.5 8.5 8 3.5l4.5 5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" /></svg>
+					{/if}
 				</button>
 			</form>
-			<details class="trace">
-				<summary>trace <span class="badge badge-sm badge-ghost">{traceShown.length}</span></summary>
-				<label class="pane-hint"
-					>filter
-					<input
-						class="input input-bordered input-xs"
-						bind:value={traceFilter}
-						placeholder="turn-1"
-					></label
-				>
-				<pre class="tracebody">{traceShown.length
-	? traceShown
-			.map((e) => `${e.runId} ${e.turnId ?? '-'} ${e.outputId} #${e.seq} ${e.kind}`)
-			.join('\n')
-	: '(no events yet)'}</pre>
-			</details>
 		</section>
 	</section>
 	{#if note}
 		<div class="alert alert-error mt-4"><span>{note}</span></div>
 	{/if}
-	<p class="foot">
-		local preview of <code>runAllowlisted('echo hi') = {runAllowlisted('echo hi')}</code>
-	</p>
+	<details class="devdrawer">
+		<summary>developer <span class="badge badge-sm badge-ghost">{sink.events.length}</span></summary>
+		<div class="devgrid">
+			<p class="pane-hint">turn {activeTurn}</p>
+			{#if verdict}
+				<p class="pane-hint">capability probe: {verdict}</p>
+			{/if}
+			<label class="pane-hint devfilter"
+				>trace filter
+				<input
+					class="input input-bordered input-xs"
+					bind:value={traceFilter}
+					placeholder="turn-1"
+				></label
+			>
+			<pre class="devtrace">{traceShown.length
+	? traceShown
+		.map((e) => `${e.runId} ${e.turnId ?? '-'} ${e.outputId} #${e.seq} ${e.kind}`)
+		.join('\n')
+	: '(no events yet)'}</pre>
+		</div>
+	</details>
 </main>
 <style>
 /* Shell example: Baby UI docs presentation on the repo's docs-site stack
@@ -1395,12 +1332,64 @@ function toggleTheme(next: boolean) {
 	letter-spacing: 0.1em;
 	opacity: 0.6;
 }
-/* AI configuration picker + editor (chat pane head). */
+.pane-model {
+	font-size: 0.72rem;
+	opacity: 0.55;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	max-width: 16rem;
+}
+/* AI configuration picker + editor: collapsed gear popover, not inline. */
+.ai-config {
+	position: relative;
+}
+.ai-config-summary {
+	display: inline-flex;
+	align-items: center;
+	gap: 0.4rem;
+	list-style: none;
+	cursor: pointer;
+	font-size: 0.78rem;
+	color: var(--color-base-content);
+	opacity: 0.6;
+	padding: 0.15rem 0.35rem;
+	border-radius: 0.4rem;
+}
+.ai-config-summary:hover {
+	opacity: 1;
+	background: var(--color-base-200);
+}
+.ai-config-summary::-webkit-details-marker {
+	display: none;
+}
+.ai-config-summary .gear {
+	font-size: 0.85rem;
+	line-height: 1;
+}
+.ai-config-current {
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	max-width: 14rem;
+}
 .ai-config-row {
+	position: absolute;
+	top: calc(100% + 0.35rem);
+	left: 0;
+	z-index: 20;
+	min-width: 16rem;
 	display: flex;
 	gap: 0.5rem;
 	align-items: flex-end;
+	justify-content: space-between;
 	flex-wrap: wrap;
+	background: var(--color-base-100);
+	color: var(--color-base-content);
+	border: 1px solid var(--color-base-300);
+	border-radius: var(--radius-box);
+	padding: 0.6rem 0.7rem;
+	box-shadow: var(--shadow-md, 0 4px 12px rgb(0 0 0 / 0.15));
 }
 .ai-config-label {
 	display: flex;
@@ -1505,6 +1494,16 @@ function toggleTheme(next: boolean) {
 .bubble-row .chat {
 	--chat-bubble-max-width: 42rem;
 }
+/* Assistant bubbles: default daisyUI is base-300 with inherited ink —
+ * unreadable on dark. Pin an explicit themed surface + ink both ways. */
+.bubble-row .chat-start .chat-bubble:not(.chat-bubble-primary) {
+	background: var(--color-base-200);
+	color: var(--color-base-content);
+	border: 1px solid var(--color-base-300);
+}
+.bubble-row .chat-end .chat-bubble-primary {
+	color: var(--color-primary-content);
+}
 .bubble-row.is-pending .chat-bubble {
 	opacity: 0.55;
 }
@@ -1521,44 +1520,88 @@ function toggleTheme(next: boolean) {
 .bubble-row {
 	animation: rise-in 160ms ease-out;
 }
-/* Composer-spirited chat bar: history picker + auto-growing field + a
- * send/stop button that never moves. Card surface, daisyUI borders. */
+/* Chat composer: input left, circular send right. Mirrors the target:
+ * short placeholder, icon-only send/stop, history + terminal-scope as
+ * quiet icon affordances. Card surface, daisyUI borders — readable in
+ * both themes via base-content tokens. */
 .composerbar {
 	display: flex;
 	gap: 0.5rem;
-	align-items: flex-end;
-	border: 1px solid var(--color-base-300);
-	border-radius: var(--radius-box);
-	background: var(--color-base-100);
-	padding: 0.4rem;
-}
-.composerbar:focus-within {
-	border-color: var(--color-primary);
+	align-items: center;
+	background: transparent;
+	border: 0;
+	padding: 0;
+	color: var(--color-base-content);
 }
 .composerinput {
 	flex: 1;
 	min-width: 0;
-	background: transparent;
-	border: 0;
+	background: var(--color-base-100);
+	border: 1px solid var(--color-base-300);
+	border-radius: var(--radius-box);
+	padding: 0.55rem 0.8rem;
 	outline: 0;
 	resize: none;
+	color: inherit;
 	font-size: 0.9rem;
 	line-height: 1.4;
 	max-height: none;
 }
-.composergo {
-	flex-shrink: 0;
+.composerinput:focus {
+	border-color: var(--color-primary);
 }
-.composergo:disabled {
+.composerinput::placeholder {
+	color: var(--color-base-content);
 	opacity: 0.45;
 }
+/* Round icon send/stop — arrow only, no text (cf. target screenshot). */
+.sendbtn {
+	display: inline-flex;
+	flex-shrink: 0;
+	align-items: center;
+	justify-content: center;
+	width: 2.25rem;
+	height: 2.25rem;
+	border-radius: 999px;
+	border: 1px solid var(--color-base-300);
+	background: var(--color-base-100);
+	color: var(--color-base-content);
+	cursor: pointer;
+}
+.sendbtn:hover:not(:disabled) {
+	border-color: var(--color-primary);
+	color: var(--color-primary);
+}
+.sendbtn:disabled {
+	opacity: 0.35;
+	cursor: default;
+}
+.sendbtn.is-stop {
+	background: var(--color-warning);
+	border-color: var(--color-warning);
+	color: var(--color-warning-content, #1a1a1a);
+}
+/* History + terminal-scope as quiet icon buttons, not talkative pills. */
 .history {
 	position: relative;
 	flex-shrink: 0;
 }
-.history summary {
+.history-btn {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 1.75rem;
+	height: 1.75rem;
+	border-radius: 999px;
 	list-style: none;
 	cursor: pointer;
+	color: var(--color-base-content);
+	opacity: 0.55;
+	font-size: 0.9rem;
+}
+.history-btn:hover {
+	opacity: 1;
+	background: var(--color-base-200);
 }
 .history summary::-webkit-details-marker {
 	display: none;
@@ -1576,6 +1619,7 @@ function toggleTheme(next: boolean) {
 	max-height: 12rem;
 	overflow: auto;
 	background: var(--color-base-100);
+	color: var(--color-base-content);
 	border: 1px solid var(--color-base-300);
 	border-radius: var(--radius-box);
 	box-shadow: var(--shadow-md, 0 4px 12px rgb(0 0 0 / 0.15));
@@ -1594,6 +1638,37 @@ function toggleTheme(next: boolean) {
 .history li button:hover {
 	background: var(--color-base-200);
 }
+.drivetoggle {
+	display: inline-flex;
+	flex-shrink: 0;
+	align-items: center;
+	justify-content: center;
+	width: 1.75rem;
+	height: 1.75rem;
+	border-radius: 999px;
+	cursor: pointer;
+	color: var(--color-base-content);
+	opacity: 0.55;
+	position: relative;
+}
+.drivetoggle:hover {
+	opacity: 1;
+	background: var(--color-base-200);
+}
+.drivetoggle:has(input:checked) {
+	opacity: 1;
+	background: var(--color-warning);
+	color: var(--color-warning-content, #1a1a1a);
+}
+.drivetoggle input {
+	position: absolute;
+	opacity: 0;
+	pointer-events: none;
+}
+.drivetoggle span {
+	font-size: 0.9rem;
+	line-height: 1;
+}
 .pane-empty {
 	border: 1px dashed var(--color-base-300);
 	border-radius: var(--radius-box);
@@ -1610,40 +1685,55 @@ function toggleTheme(next: boolean) {
 .jump {
 	align-self: center;
 }
-/* Composer-spirited terminal prompt: one bordered bar — `›` prefix,
- * mono input, run/stop button that never moves. Terminal glass in both
- * themes, daisyUI tokens for borders and focus.
- */
+/* Terminal prompt: boxed input + detached round icon send (mirrors chat). */
 .promptbar {
 	display: flex;
 	gap: 0.5rem;
 	align-items: center;
-	background: #07090f;
-	border: 1px solid #232842;
-	border-radius: var(--radius-box);
-	padding: 0.4rem 0.4rem 0.4rem 0.7rem;
+	background: transparent;
+	border: 0;
+	padding: 0;
+	color: var(--color-base-content);
 }
-.promptbar:focus-within {
+.promptbar:focus-within .promptinput {
 	border-color: var(--color-primary);
 }
 .promptinput {
 	flex: 1;
 	min-width: 0;
-	background: transparent;
-	border: 0;
+	background: var(--color-base-100);
+	border: 1px solid var(--color-base-300);
+	border-radius: var(--radius-box);
+	padding: 0.55rem 0.8rem;
 	outline: 0;
-	color: #e8eaf0;
-	font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-	font-size: 0.9rem;
+	color: inherit;
+	font:
+		0.9rem / 1.4 var(--font-mono, ui-monospace, monospace);
 }
 .promptinput::placeholder {
-	color: #5b6486;
+	color: var(--color-base-content);
+	opacity: 0.45;
 }
 .promptgo {
+	display: inline-flex;
 	flex-shrink: 0;
+	align-items: center;
+	justify-content: center;
+	width: 2.25rem;
+	height: 2.25rem;
+	border-radius: 999px;
+	border: 1px solid var(--color-base-300);
+	background: var(--color-base-100);
+	color: var(--color-base-content);
+	cursor: pointer;
+}
+.promptgo:hover:not(:disabled) {
+	border-color: var(--color-primary);
+	color: var(--color-primary);
 }
 .promptgo:disabled {
-	opacity: 0.45;
+	opacity: 0.35;
+	cursor: default;
 }
 .pane-hint {
 	font-size: 0.8rem;
@@ -1711,10 +1801,13 @@ function toggleTheme(next: boolean) {
 	color: var(--color-success);
 	opacity: 1;
 }
+/* Terminal screen: themed surface, not a hardcoded dark glass — the old
+ * #07090f + #232842 pair was unreadable in light mode and invisible in dark.
+ * Prompt lines stay green-tinted via the success token. */
 .screen {
-	background: #07090f;
-	color: #d7dbee;
-	border: 1px solid #232842;
+	background: var(--color-base-200);
+	color: var(--color-base-content);
+	border: 1px solid var(--color-base-300);
 	border-radius: var(--radius-box);
 	padding: 0.7rem;
 	font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
@@ -1729,41 +1822,58 @@ function toggleTheme(next: boolean) {
 	margin-top: 0.35rem;
 }
 .prompt {
-	color: #8ef0b2;
+	color: var(--color-success-strong, var(--color-success));
 }
 .output {
-	color: #d7dbee;
+	color: inherit;
 	opacity: 0.9;
 }
 .screen-idle {
 	opacity: 0.55;
 	margin: 0;
 }
-.ps1 {
-	color: var(--color-success);
-	font-family: ui-monospace, Menlo, monospace;
+/* Collapsed how-it-works + dev drawer. The trace/error/console styles below
+ * stay token-driven; no hardcoded glass. */
+.adv {
+	border-top: 1px solid var(--color-base-300);
+	padding-top: 0.4rem;
+	margin-top: 0.5rem;
 }
-.trace {
+.adv summary {
+	cursor: pointer;
+	font-size: 0.75rem;
+	text-transform: uppercase;
+	letter-spacing: 0.1em;
+	opacity: 0.55;
+}
+.devdrawer {
+	margin-top: 1rem;
 	border-top: 1px solid var(--color-base-300);
 	padding-top: 0.5rem;
 }
-.trace summary {
+.devdrawer summary {
 	cursor: pointer;
-	font-size: 0.8rem;
+	font-size: 0.75rem;
 	text-transform: uppercase;
 	letter-spacing: 0.1em;
-	opacity: 0.6;
+	opacity: 0.55;
 	display: flex;
 	gap: 0.5rem;
 	align-items: center;
 }
-.trace .pane-hint {
-	margin: 0.5rem 0;
+.devgrid {
+	display: grid;
+	gap: 0.5rem;
+	margin-top: 0.5rem;
 }
-.tracebody {
-	background: #07090f;
-	color: #9fe8bb;
-	border: 1px solid #232842;
+.devfilter {
+	display: grid;
+	gap: 0.25rem;
+}
+.devtrace {
+	background: var(--color-base-200);
+	color: var(--color-base-content);
+	border: 1px solid var(--color-base-300);
 	border-radius: var(--radius-box);
 	padding: 0.7rem;
 	max-height: 10rem;
@@ -1771,11 +1881,6 @@ function toggleTheme(next: boolean) {
 	font-size: 0.78rem;
 	white-space: pre-wrap;
 	margin: 0;
-}
-.foot {
-	font-size: 0.8rem;
-	opacity: 0.6;
-	margin-top: 1rem;
 }
 @keyframes pulse {
 	50% {

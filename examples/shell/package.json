@@ -8,6 +8,7 @@
     "build": "swelte build",
     "preview": "swelte preview",
     "check": "swelte check",
+    "test:integration": "npm run build && node --test tests/agent.integration.mjs",
     "pretest": "tsc -p tsconfig.test.json",
     "test": "node --test --test-reporter=spec \"dist-test/**/*.test.js\""
   },

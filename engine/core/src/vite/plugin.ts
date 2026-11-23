@@ -130,6 +130,11 @@ export function swelte(options: SweltePluginOptions = {}): Plugin {
 	const prodWasmName = 'app_lib.wasm'
 	let activeRoot = ''
 	let isBuild = false
+	// Dev-only guard ref: set in configureServer (never runs in build, so a
+	// null ref means "not dev" and the B-dance guard below stays inert).
+	let devServer: {
+		moduleGraph: { getModuleById(id: string): unknown; invalidateModule(m: unknown): void }
+	} | null = null
 	// Serialize generate(): configResolved fires a void generate() while
 	// buildStart runs another — concurrent runs interleave file writes
 	// (stale routes.js wins the race). Chain on the in-flight promise.
@@ -2501,7 +2506,27 @@ export declare const dev: boolean
 			}
 			// Codegen for direct `.v` imports (spec §4). The id is the virtual
 			// `\0swelte:v:<abs path>` minted in resolveId above.
-			if (!id.startsWith('\0swelte:v:')) return null
+			if (!id.startsWith('\0swelte:v:')) {
+				// Dev-only B dance: a ?svelte&type=style id reaching us means
+				// vite-plugin-svelte missed its CSS cache (cold-start race).
+				// Returning null would fall through to Vite's fs loader, which
+				// serves the raw .svelte file to Tailwind -> `Invalid
+				// declaration: Markdown`. Serve a placeholder instead and
+				// invalidate so the re-request hits the warm cache.
+				if (devServer && /\.svelte\?.*[?&]type=style/.test(id)) {
+					const srv = devServer
+					queueMicrotask(() => {
+						try {
+							const m = srv.moduleGraph.getModuleById(id)
+							if (m) srv.moduleGraph.invalidateModule(m)
+						} catch {
+							/* best-effort */
+						}
+					})
+					return '/* swelte: svelte css pending — refreshed on re-request */'
+				}
+				return null
+			}
 			const abs = id.slice('\0swelte:v:'.length).split('?')[0]
 			const root = (serverRoot() as string | null) || activeRoot || process.cwd()
 			const routesAbs = resolve(root, routesDir)
@@ -2560,6 +2585,7 @@ export declare const dev: boolean
 			return null
 		},
 		configureServer(server) {
+			devServer = server as unknown as typeof devServer
 			// Root-anchored (never cwd-relative): language-server and
 			// non-cwd roots resolve through server.config.root.
 			const root = server.config.root

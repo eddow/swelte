@@ -4,7 +4,7 @@ import { DraftStore } from '@swelte/ai'
 import { RunTracker } from '@swelte/ai'
 import { createSseParser, decodeSseEvent, encodeSseEvent } from '@swelte/ai'
 import { createMemorySink } from '@swelte/ai'
-import { ApprovalStore, authorizeShellCall, driverHolds, parseDriver, runAllowlisted } from '../src/lib/shell.js'
+import { ApprovalStore, authorizeShellCall, driverHolds, parseDriver, runAllowlisted, runApproved } from '../src/lib/shell.js'
 import {
 	activeAiConfig,
 	createAiConfig,
@@ -18,14 +18,36 @@ import {
 } from '../src/lib/ai-config.js'
 
 describe('shell example: one backend shell shared by chat + terminal', () => {
-	it('human allowlisted commands run; unknown commands fail actionably', () => {
+	it('human commands always run; unsupported names are honest, never fake', () => {
 		const ok = authorizeShellCall('human', 'echo hello shared shell')
 		assert.equal(ok.allowed, true)
+		assert.equal(ok.needsApproval, false)
 		assert.equal(runAllowlisted('echo hello shared shell'), 'hello shared shell')
-		const bad = authorizeShellCall('human', 'rm -rf /')
-		assert.equal(bad.allowed, false)
-		assert.ok(bad.reason.includes('not allowlisted'))
-		assert.throws(() => runAllowlisted('rm -rf /'), /not allowlisted/)
+		// Destructive / unlisted names are unsupported — honestly, in the
+		// terminal only. No "not allowlisted" error, no fake `ran:`.
+		const other = authorizeShellCall('human', 'rm -rf /')
+		assert.equal(other.allowed, true)
+		assert.equal(other.needsApproval, false)
+		assert.throws(() => runApproved('rm -rf /'), /unsupported command/)
+		assert.throws(() => runAllowlisted('rm -rf /'), /unsupported command/)
+		// Live-backed commands are honest offline too: they need the backend.
+		assert.throws(() => runAllowlisted('ls'), /needs backend/)
+		assert.throws(() => runAllowlisted('cd /tmp'), /needs backend/)
+		assert.throws(() => runAllowlisted('cat README.md'), /needs backend/)
+		assert.equal(runApproved('ls'), 'approved for live execution: ls')
+	})
+
+	it('ai commands inside the sandbox park for human approval — never point-blank refused', () => {
+		// Sandbox commands park.
+		const gate = authorizeShellCall('ai', 'ls')
+		assert.equal(gate.allowed, false)
+		assert.equal(gate.needsApproval, true)
+		// Unlisted AI commands also park (human confirms, backend
+		// enforces the final gate after the decision).
+		const outside = authorizeShellCall('ai', 'rm -rf /')
+		assert.equal(outside.allowed, false)
+		assert.equal(outside.needsApproval, true)
+		assert.ok(outside.reason.includes('human approval'))
 	})
 
 	it('ai commands need human approval; approve executes exactly once', () => {
@@ -53,6 +75,16 @@ describe('shell example: one backend shell shared by chat + terminal', () => {
 		store.request('ai', 'echo no', 'op-denied')
 		store.decide('op-denied', 'denied')
 		assert.throws(() => store.markExecuted('op-denied'), /denied/)
+	})
+
+	it('approval IDs cannot be rebound and expired grants cannot execute', () => {
+		const store = new ApprovalStore()
+		store.request('ai', 'pwd', 'bound')
+		assert.throws(() => store.request('human', 'pwd', 'bound'), /binding mismatch/)
+		assert.throws(() => store.request('ai', 'ls', 'bound'), /binding mismatch/)
+		const expired = store.request('ai', 'pwd', 'expired-grant', -1)
+		expired.decision = 'approved'
+		assert.throws(() => store.markExecuted('expired-grant'), /expired/)
 	})
 
 	it('driver lease: holder-bound single driver, advisory preemption (§3)', () => {
@@ -299,7 +331,9 @@ describe('shell tools (Phase C): declarations, per-run selection, dispatch', () 
 			entries.map((e) => e.name).sort(),
 			[
 				'backend.shell_tools.tool_publish_note',
+				'backend.shell_tools.tool_shell_browse',
 				'backend.shell_tools.tool_shell_exec',
+				'backend.shell_tools.tool_shell_query',
 				'backend.shell_tools.tool_shell_read_output',
 				'backend.shell_tools.tool_shell_send_input',
 				'backend.shell_tools.tool_shorten',
@@ -318,7 +352,7 @@ describe('shell tools (Phase C): declarations, per-run selection, dispatch', () 
 		assert.equal(exec?.sideEffect, true)
 		const input = entries.find((e) => e.name.endsWith('tool_shell_send_input'))
 		assert.equal(input?.sideEffect, true)
-		for (const e of entries.filter((x) => x !== note && x !== exec && x !== input)) {
+		for (const e of entries.filter((x) => x !== note && x !== exec && x !== input && !x.name.endsWith('tool_shell_browse'))) {
 			assert.equal(e.sideEffect, false)
 		}
 		const top = entries.find((e) => e.name.endsWith('tool_top_commands'))

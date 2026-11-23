@@ -1,76 +1,65 @@
-# `examples/shell` — one shared backend shell, chat + terminal
+# Shell console
 
-A `@swelte/ai` consumer example (never published as a library). One allowlisted
-backend shell (`echo pwd whoami help cat`) is shared by two faces on `/`:
+A local shared console with an assistant and a native filesystem terminal.
+Copy `.env.example` to `.env`, set a provider key, and run `npm run dev`.
+Keys stay on the server. Choose an adapter/model in the chat settings.
 
-- **chat pane** (left) — a ChatComposer-spirited thread plus queue: author/meta
-  headers per turn, transient dimmed reply bubble that settles when the reply
-  lands, send that flips to Stop (interrupt) while streaming, auto-growing
-  textarea (Enter sends, Shift+Enter breaks the line, IME-safe), and a prompt
-  history picker for resends; an AI-configuration picker chooses among saved
-  adapter + model + run configs (configure gear adds/edits/deletes). The send
-  box carries a "let AI use terminal this turn" scope: checked, the turn hands
-  `shell:driver` to the AI (`ai:<runId/turn-1>`, 90 s TTL) and the model may
-  park `shell.exec` / `shell.send_input` calls that wait for human approval;
-  the approval queue below gates parked AI calls (`shell_tool_resume` /
-  `shell_tool_deny` → dispatch-table decide + dispatch, holder-bound,
-  replay-safe); reads (`shell.read_output`) resolve inline with no approval.
-- **terminal pane** (right) — auto-subscribes to the backend room over SSE on
-  mount (no connect buttons): type a command, Enter runs it via `@[rpc] exec`.
-  The room speaks one framed protocol (`exec\n<cmd>\n<output>` / `chat\n<msg>` /
-  `stdin\n<keys>`, one publish per event); the terminal renders exec frames and
-  stdin echoes only, prompt and output on their own lines, deduped against the
-  optimistic paint — every command/output pair displays exactly once, never
-  interleaved, chat chatter never leaks in. One Compose-style prompt bar is the
-  whole input: idle Enter runs, while a command runs Enter forwards keystrokes
-  to its stdin (`cat` waits briefly for input, then returns it).
+The assistant knows its tools on the first model request. It can read recent
+terminal output, choose a tool when needed, and use its result to answer or
+choose another tool. Each request allows up to eight model/tool steps. Recent
+chat messages and a bounded terminal tail provide context for subsequent turns.
+OpenRouter, OpenAI Responses and Anthropic use the same example-local text tool
+protocol. Model decisions are buffered to keep tool syntax out of the chat;
+progress and final answers travel over SSE. This is not native provider tool
+calling or token-by-token provider streaming.
 
-AI-proposed side effects never run without a human decision on the backend
-dispatch-table record (`caller` + tool + exact args + op id):
+Read-only `pwd`, `whoami`, `help`, and `ls [path]` queries run directly, without
+a toggle or approval. Enable the keyboard toggle beside Send to allow other shell **and browse** actions
+for that turn. Every action opens the approval queue with its exact arguments.
+Approve executes through the generated dispatcher and automatically asks the
+model to continue using the actual result. Deny ends the parked action. Stop
+aborts the chat request and releases terminal control. Human terminal commands
+preempt the AI lease. Read-only queries and observations need no approval.
 
-- `authorizeShellCall('ai', …)` marks them `needsApproval` for instant UI
-  feedback; the first parked AI call creates one `pending` record and the
-  approval queue (`approve` / `deny` on the queued advisory record, plus
-  `shell_tool_resume` / `shell_tool_deny` on the dispatch-table record for
-  parked driving calls) decides exactly once — duplicates replay the stored
-  result, expiries and flips deny.
-- The live AI path dispatches through the generated `tools` table
-  (`tool_shell_exec` / `tool_shell_send_input` holder-lease gated,
-  `tool_shell_read_output` read-only). A legacy `exec(caller:'ai')` gate stays
-  as the offline/test path: it fails actionably pointing at `tool_shell_exec`.
-- The "AI: echo hello-from-ai" button exercises that offline path; the driving
-  turn (`drive=1`) exercises the live parked path without a provider key in
-  `deterministic` mode (parks `pwd` + `waiting_approval`).
+Supported shell commands are `echo`, `pwd`, `whoami`, `help`, `ls`, `cd`, and
+`cat <file>`. Filesystem paths resolve physically within the server's initial
+working directory, including symlink checks. Bare human `cat` accepts queued
+stdin. This console does not launch an OS shell: arbitrary programs, pipes,
+redirects, package installation and file writes are unavailable.
 
-Human control is preemptive: any human terminal submit or Stop press flips
-`shell:driver` back to `human`, a parked in-flight call resolves
-denied/superseded, and the human command runs the unchanged allowlisted path.
-Next AI turn after human activity receives a transcript tail (last 5
-scrollback frames, ≤1024 B) as re-entry context. Approvals are per-turn and
-expire with the lease — there is no standing AI control.
+`tool_shell_browse` fetches an explicitly approved HTTPS URL with no credentials
+or cookies, no automatic redirects, a ten second read timeout, a 64 KiB receive
+limit and a 4 KiB returned-content cap. It returns status, URL and raw text/HTML.
+It does not run JavaScript, search the web, click links or control a browser.
+Each subsequent URL needs its own approval. Approved URLs can reach networks
+accessible to the server; the HTTP reader is not a network sandbox.
 
-AI configurations (`src/lib/ai-config.ts`, persisted in `localStorage`) hold
-adapter + model + run config (temperature, max tokens, system prompt) — never
-API keys. Keyed adapters (`openrouter`, `openai`, `anthropic`) run server-side
-through `ai_chat`/`ai_key_status` in `src/routes/+page.v`, which reads keys from
-server env only; the `deterministic` adapter echoes offline through the same RPC.
-Copy `.env.example` to `.env` and add keys there (`swelte dev`/`build`/`preview`
-load it; real env vars win when set).
+The backend binds pending operations to server-generated operation and holder
+IDs, tool name and exact serialized arguments. A live 90 second lease is
+required to execute. A mutex serializes approval dispatch, and successful
+receipts replay without running the command again. The UI never falls back to
+executing a failed AI action as a human command. Side effects are unavailable
+through the GET demo endpoint. Model-provided caller labels do not grant
+private reporting rows.
 
-The frontend gate lives in `src/lib/shell.ts` (plain TS, offline-testable)
-with the advisory driver-lease mirror (`parseDriver` / `driverHolds`,
-`DRIVER_TTL_S = 90`); the authoritative allowlist + approval
-records live in the route backend (`src/routes/+page.v`) and the generated
-`tools` module. Per-turn budgets: request args ≤256 B, results /
-transcript tail ≤1024 B (truncation marked). Presentation follows the Baby UI
-docs style on the repo's docs-site stack (daisyUI `light --default, dark` on
-`<html data-theme>`, stored pref + OS default, pre-paint boot, header toggle).
-The page is client-only (`src/routes/+page.ts` opts out with
-`export const ssr = false` — live streams don't SSR-render).
+This is a **single trusted local console**, with shared cwd, transcript, stdin
+and driver state across tabs. The human POST endpoints are the authority;
+there is no login or per-user identity separating people who can access the
+console. The generated approval table is process-local; a restart invalidates
+pending approvals, while successful KV receipts remain available. Use a new
+turn after a lease expires or the server restarts.
 
 ```sh
-npm install
-npx swelte dev     # :5174 + V backend :8131 — open /
-npm test           # offline unit suite (no backend needed)
-npx swelte build && npx swelte preview
+npm test                  # offline tests and native reporting probe
+npm run test:integration  # builds, then tests the compiled backend with a local provider fixture
+npm run build
+npm run preview
 ```
+
+The integration suite uses a temporary database and sandbox. It verifies all
+three keyed adapter response shapes, tool awareness, observation feedback,
+approval binding, continuation, receipt replay, denial, human preemption, URL
+validation, symlink confinement, and the GET approval restriction. It does not
+use real model keys or exercise an external provider's model behavior.
+`SHELL_AI_BASE_URL` optionally overrides the provider base URL for a local
+fixture or compatible proxy; keep it unset for the standard provider endpoints.
