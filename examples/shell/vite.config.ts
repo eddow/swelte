@@ -1,3 +1,6 @@
+import { createHash } from 'node:crypto';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { defineConfig } from 'vite';
 import tailwindcss from '@tailwindcss/vite';
 import { svelte } from '@sveltejs/vite-plugin-svelte';
@@ -22,6 +25,33 @@ const svelteOptions = {
 
 export default defineConfig({
   plugins: [
+    {
+      name: 'shell-source-revision',
+      resolveId(id) { if (id === 'virtual:shell-revision') return '\0shell-revision'; },
+      load(id) {
+        if (id !== '\0shell-revision') return;
+        const source = (path: string) => { const file = fileURLToPath(new URL(path, import.meta.url)); return readFileSync(file, 'utf8'); };
+        const hash = (paths: string[]) => createHash('sha256').update(paths.map(source).join('\n')).digest('hex');
+        return `export const expectedBackendRevision = ${JSON.stringify(hash(['./src/routes/+page.v','./src/lib/backend/shell_tools.v','./src/lib/backend/shell_fs.v']))}; export const uiRevision = ${JSON.stringify(hash(['./src/routes/+page.svelte','./src/lib/shell.ts','./src/lib/ai-answer.svelte']))};`;
+      },
+      configureServer(server) {
+        const files = ['./src/routes/+page.v', './src/lib/backend/shell_tools.v', './src/lib/backend/shell_fs.v'].map(path => fileURLToPath(new URL(path, import.meta.url)));
+        server.watcher.add(files);
+        const changed = (file: string) => {
+          if (!files.includes(file)) return;
+          const mod = server.moduleGraph.getModuleById('\0shell-revision');
+          if (mod) server.moduleGraph.invalidateModule(mod);
+          server.ws.send({ type: 'full-reload' });
+        };
+        server.watcher.on('change', changed);
+        server.httpServer?.once('close', () => server.watcher.off('change', changed));
+      },
+      handleHotUpdate(ctx) {
+        const mod = ctx.server.moduleGraph.getModuleById('\0shell-revision');
+        if (mod) ctx.server.moduleGraph.invalidateModule(mod);
+        if (ctx.file.endsWith('.v')) ctx.server.ws.send({ type: 'full-reload' });
+      },
+    },
     tailwindcss(),
     svelte(svelteOptions as Parameters<typeof svelte>[0]),
     swelte({

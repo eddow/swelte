@@ -1630,7 +1630,8 @@ fn swelte_sse_write(connection &net.TcpConn, pch chan []string, done chan bool, 
 			break
 		}
 		n++
-		sse_conn.send_message(data: e) or { break }
+		// SSE requires a data prefix on every payload line, not only the first.
+		conn.write_string('data: ' + e.replace('\r\n', '\n').replace('\r', '\n').replace('\n', '\ndata: ') + '\n\n') or { break }
 	}
 	sse_conn.send_message(data: 'swelte:close') or {}
 	sse_conn.send_message(event: 'close', data: 'Closing the connection', retry: -1) or {}

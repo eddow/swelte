@@ -1,0 +1,747 @@
+{
+  "date": "2026-11-24",
+  "adapter": "openrouter",
+  "model": "openai/gpt-4o-mini",
+  "configuration": {
+    "run": "provider defaults"
+  },
+  "starts": [
+    {
+      "backend_revision": "0c43d9e37d27cc65aec715e59f216e454e4f1643e4eedb807410bcc3d5b8bd6e",
+      "boot_id": "1795513997806822447",
+      "driver": "human",
+      "seq": 0,
+      "room_version": "v2",
+      "uiBundle": "assets/index-DyNXLh4L.js",
+      "uiBundleHash": "ff104b1f377180fba129c62c5a1f8707b530ef8c4477ff8e201a18843d833637"
+    },
+    {
+      "backend_revision": "0c43d9e37d27cc65aec715e59f216e454e4f1643e4eedb807410bcc3d5b8bd6e",
+      "boot_id": "1795514059762834783",
+      "driver": "human",
+      "seq": 0,
+      "room_version": "v2",
+      "uiBundle": "assets/index-DyNXLh4L.js",
+      "uiBundleHash": "ff104b1f377180fba129c62c5a1f8707b530ef8c4477ff8e201a18843d833637"
+    }
+  ],
+  "samples": [
+    {
+      "boot": 0,
+      "conversation": "clean",
+      "scenario": "S1",
+      "attempt": 0,
+      "elapsedMs": 1667,
+      "modelRequests": 2,
+      "toolStarts": 1,
+      "toolLabels": [
+        "label=Read working directory origin=native"
+      ],
+      "terminal": {
+        "reason": "completed"
+      },
+      "answer": "The current working directory is `/home/fmdm/dev/swelte/examples/shell`.",
+      "passed": true
+    },
+    {
+      "boot": 0,
+      "conversation": "clean",
+      "scenario": "S1",
+      "attempt": 1,
+      "elapsedMs": 1469,
+      "modelRequests": 2,
+      "toolStarts": 1,
+      "toolLabels": [
+        "label=Read working directory origin=native"
+      ],
+      "terminal": {
+        "reason": "completed"
+      },
+      "answer": "The current working directory of the console is `/home/fmdm/dev/swelte/examples/shell`.",
+      "passed": true
+    },
+    {
+      "boot": 0,
+      "conversation": "clean",
+      "scenario": "S1",
+      "attempt": 2,
+      "elapsedMs": 1673,
+      "modelRequests": 2,
+      "toolStarts": 1,
+      "toolLabels": [
+        "label=Read working directory origin=native"
+      ],
+      "terminal": {
+        "reason": "completed"
+      },
+      "answer": "The current working directory is `/home/fmdm/dev/swelte/examples/shell`.",
+      "passed": true
+    },
+    {
+      "boot": 0,
+      "conversation": "clean",
+      "scenario": "S1",
+      "attempt": 3,
+      "elapsedMs": 1758,
+      "modelRequests": 2,
+      "toolStarts": 1,
+      "toolLabels": [
+        "label=Read working directory origin=native"
+      ],
+      "terminal": {
+        "reason": "completed"
+      },
+      "answer": "The current working directory of our console is `/home/fmdm/dev/swelte/examples/shell`.",
+      "passed": true
+    },
+    {
+      "boot": 0,
+      "conversation": "clean",
+      "scenario": "S1",
+      "attempt": 4,
+      "elapsedMs": 1584,
+      "modelRequests": 2,
+      "toolStarts": 1,
+      "toolLabels": [
+        "label=Read working directory origin=native"
+      ],
+      "terminal": {
+        "reason": "completed"
+      },
+      "answer": "The current working directory is `/home/fmdm/dev/swelte/examples/shell`.",
+      "passed": true
+    },
+    {
+      "boot": 0,
+      "conversation": "clean",
+      "scenario": "S2",
+      "attempt": 0,
+      "elapsedMs": 4811,
+      "modelRequests": 3,
+      "toolStarts": 2,
+      "toolLabels": [
+        "label=Read working directory origin=native",
+        "label=List project files origin=native"
+      ],
+      "terminal": {
+        "reason": "completed"
+      },
+      "answer": "You are in the directory: `/home/fmdm/dev/swelte/examples/shell`.\n\nThe files and directories here are:\n- `.baby-ui/`\n- `.env`\n- `.env.example`\n- `.swelte/`\n- `README.md`\n- `components.json`\n- `data/`\n- `dist/`\n- `dist-test/`\n- `index.html`\n- `node_modules/`\n- `package.json`\n- `src/`\n- `svelte.config.js`\n- `tests/`\n- `tsconfig.json`\n- `tsconfig.test.json`\n- `vite.config.ts`",
+      "passed": true
+    },
+    {
+      "boot": 0,
+      "conversation": "clean",
+      "scenario": "S2",
+      "attempt": 1,
+      "elapsedMs": 4421,
+      "modelRequests": 3,
+      "toolStarts": 2,
+      "toolLabels": [
+        "label=Read working directory origin=native",
+        "label=List project files origin=native"
+      ],
+      "terminal": {
+        "reason": "completed"
+      },
+      "answer": "You are currently in the directory: `/home/fmdm/dev/swelte/examples/shell`. \n\nThe files and directories present here are:\n- .baby-ui/\n- .env\n- .env.example\n- .swelte/\n- README.md\n- components.json\n- data/\n- dist/\n- dist-test/\n- index.html\n- node_modules/\n- package.json\n- src/\n- svelte.config.js\n- tests/\n- tsconfig.json\n- tsconfig.test.json\n- vite.config.ts",
+      "passed": true
+    },
+    {
+      "boot": 0,
+      "conversation": "clean",
+      "scenario": "S2",
+      "attempt": 2,
+      "elapsedMs": 4323,
+      "modelRequests": 3,
+      "toolStarts": 2,
+      "toolLabels": [
+        "label=Read working directory origin=native",
+        "label=List project files origin=native"
+      ],
+      "terminal": {
+        "reason": "completed"
+      },
+      "answer": "You are in the directory `/home/fmdm/dev/swelte/examples/shell`. The files and folders here are:\n\n- .baby-ui/\n- .env\n- .env.example\n- .swelte/\n- README.md\n- components.json\n- data/\n- dist/\n- dist-test/\n- index.html\n- node_modules/\n- package.json\n- src/\n- svelte.config.js\n- tests/\n- tsconfig.json\n- tsconfig.test.json\n- vite.config.ts",
+      "passed": true
+    },
+    {
+      "boot": 0,
+      "conversation": "clean",
+      "scenario": "S2",
+      "attempt": 3,
+      "elapsedMs": 4109,
+      "modelRequests": 3,
+      "toolStarts": 2,
+      "toolLabels": [
+        "label=Read working directory origin=native",
+        "label=List project files origin=native"
+      ],
+      "terminal": {
+        "reason": "completed"
+      },
+      "answer": "You are in the directory: `/home/fmdm/dev/swelte/examples/shell`. The files and folders here are:\n\n- .baby-ui/\n- .env\n- .env.example\n- .swelte/\n- README.md\n- components.json\n- data/\n- dist/\n- dist-test/\n- index.html\n- node_modules/\n- package.json\n- src/\n- svelte.config.js\n- tests/\n- tsconfig.json\n- tsconfig.test.json\n- vite.config.ts",
+      "passed": true
+    },
+    {
+      "boot": 0,
+      "conversation": "clean",
+      "scenario": "S2",
+      "attempt": 4,
+      "elapsedMs": 4450,
+      "modelRequests": 3,
+      "toolStarts": 2,
+      "toolLabels": [
+        "label=Read working directory origin=native",
+        "label=List project files origin=native"
+      ],
+      "terminal": {
+        "reason": "completed"
+      },
+      "answer": "We are located in the directory: `/home/fmdm/dev/swelte/examples/shell`.\n\nThe files and folders in this directory include:\n\n- .baby-ui/\n- .env\n- .env.example\n- .swelte/\n- README.md\n- components.json\n- data/\n- dist/\n- dist-test/\n- index.html\n- node_modules/\n- package.json\n- src/\n- svelte.config.js\n- tests/\n- tsconfig.json\n- tsconfig.test.json\n- vite.config.ts",
+      "passed": true
+    },
+    {
+      "boot": 0,
+      "conversation": "existing",
+      "scenario": "S1",
+      "attempt": 0,
+      "elapsedMs": 1510,
+      "modelRequests": 2,
+      "toolStarts": 1,
+      "toolLabels": [
+        "label=Read working directory origin=native"
+      ],
+      "terminal": {
+        "reason": "completed"
+      },
+      "answer": "The current working directory is `/home/fmdm/dev/swelte/examples/shell`.",
+      "passed": true
+    },
+    {
+      "boot": 0,
+      "conversation": "existing",
+      "scenario": "S1",
+      "attempt": 1,
+      "elapsedMs": 1620,
+      "modelRequests": 2,
+      "toolStarts": 1,
+      "toolLabels": [
+        "label=Read working directory origin=native"
+      ],
+      "terminal": {
+        "reason": "completed"
+      },
+      "answer": "The current working directory of our console is `/home/fmdm/dev/swelte/examples/shell`.",
+      "passed": true
+    },
+    {
+      "boot": 0,
+      "conversation": "existing",
+      "scenario": "S1",
+      "attempt": 2,
+      "elapsedMs": 1416,
+      "modelRequests": 2,
+      "toolStarts": 1,
+      "toolLabels": [
+        "label=Read working directory origin=native"
+      ],
+      "terminal": {
+        "reason": "completed"
+      },
+      "answer": "The current working directory of our console is `/home/fmdm/dev/swelte/examples/shell`.",
+      "passed": true
+    },
+    {
+      "boot": 0,
+      "conversation": "existing",
+      "scenario": "S1",
+      "attempt": 3,
+      "elapsedMs": 2002,
+      "modelRequests": 2,
+      "toolStarts": 1,
+      "toolLabels": [
+        "label=Read working directory origin=native"
+      ],
+      "terminal": {
+        "reason": "completed"
+      },
+      "answer": "The current working directory of our console is `/home/fmdm/dev/swelte/examples/shell`.",
+      "passed": true
+    },
+    {
+      "boot": 0,
+      "conversation": "existing",
+      "scenario": "S1",
+      "attempt": 4,
+      "elapsedMs": 1690,
+      "modelRequests": 2,
+      "toolStarts": 1,
+      "toolLabels": [
+        "label=Read working directory origin=native"
+      ],
+      "terminal": {
+        "reason": "completed"
+      },
+      "answer": "The current working directory of our console is `/home/fmdm/dev/swelte/examples/shell`.",
+      "passed": true
+    },
+    {
+      "boot": 0,
+      "conversation": "existing",
+      "scenario": "S2",
+      "attempt": 0,
+      "elapsedMs": 4379,
+      "modelRequests": 3,
+      "toolStarts": 2,
+      "toolLabels": [
+        "label=Read working directory origin=native",
+        "label=List project files origin=native"
+      ],
+      "terminal": {
+        "reason": "completed"
+      },
+      "answer": "We are in the directory `/home/fmdm/dev/swelte/examples/shell`, and the files here are:\n\n- .baby-ui/\n- .env\n- .env.example\n- .swelte/\n- README.md\n- components.json\n- data/\n- dist/\n- dist-test/\n- index.html\n- node_modules/\n- package.json\n- src/\n- svelte.config.js\n- tests/\n- tsconfig.json\n- tsconfig.test.json\n- vite.config.ts",
+      "passed": true
+    },
+    {
+      "boot": 0,
+      "conversation": "existing",
+      "scenario": "S2",
+      "attempt": 1,
+      "elapsedMs": 4678,
+      "modelRequests": 3,
+      "toolStarts": 2,
+      "toolLabels": [
+        "label=Read working directory origin=native",
+        "label=List project files origin=native"
+      ],
+      "terminal": {
+        "reason": "completed"
+      },
+      "answer": "We are in the directory `/home/fmdm/dev/swelte/examples/shell`, and the files here are:\n\n- .baby-ui/\n- .env\n- .env.example\n- .swelte/\n- README.md\n- components.json\n- data/\n- dist/\n- dist-test/\n- index.html\n- node_modules/\n- package.json\n- src/\n- svelte.config.js\n- tests/\n- tsconfig.json\n- tsconfig.test.json\n- vite.config.ts",
+      "passed": true
+    },
+    {
+      "boot": 0,
+      "conversation": "existing",
+      "scenario": "S2",
+      "attempt": 2,
+      "elapsedMs": 4644,
+      "modelRequests": 3,
+      "toolStarts": 2,
+      "toolLabels": [
+        "label=Read working directory origin=native",
+        "label=List project files origin=native"
+      ],
+      "terminal": {
+        "reason": "completed"
+      },
+      "answer": "We are in the directory `/home/fmdm/dev/swelte/examples/shell`, and the files here are:\n\n- .baby-ui/\n- .env\n- .env.example\n- .swelte/\n- README.md\n- components.json\n- data/\n- dist/\n- dist-test/\n- index.html\n- node_modules/\n- package.json\n- src/\n- svelte.config.js\n- tests/\n- tsconfig.json\n- tsconfig.test.json\n- vite.config.ts",
+      "passed": true
+    },
+    {
+      "boot": 0,
+      "conversation": "existing",
+      "scenario": "S2",
+      "attempt": 3,
+      "elapsedMs": 5133,
+      "modelRequests": 3,
+      "toolStarts": 2,
+      "toolLabels": [
+        "label=Read working directory origin=native",
+        "label=List project files origin=native"
+      ],
+      "terminal": {
+        "reason": "completed"
+      },
+      "answer": "We are in the directory `/home/fmdm/dev/swelte/examples/shell`, and the files here are:\n\n- .baby-ui/\n- .env\n- .env.example\n- .swelte/\n- README.md\n- components.json\n- data/\n- dist/\n- dist-test/\n- index.html\n- node_modules/\n- package.json\n- src/\n- svelte.config.js\n- tests/\n- tsconfig.json\n- tsconfig.test.json\n- vite.config.ts",
+      "passed": true
+    },
+    {
+      "boot": 0,
+      "conversation": "existing",
+      "scenario": "S2",
+      "attempt": 4,
+      "elapsedMs": 4455,
+      "modelRequests": 3,
+      "toolStarts": 2,
+      "toolLabels": [
+        "label=Read working directory origin=native",
+        "label=List project files origin=native"
+      ],
+      "terminal": {
+        "reason": "completed"
+      },
+      "answer": "We are in the directory `/home/fmdm/dev/swelte/examples/shell`, and the files here are:\n\n- .baby-ui/\n- .env\n- .env.example\n- .swelte/\n- README.md\n- components.json\n- data/\n- dist/\n- dist-test/\n- index.html\n- node_modules/\n- package.json\n- src/\n- svelte.config.js\n- tests/\n- tsconfig.json\n- tsconfig.test.json\n- vite.config.ts",
+      "passed": true
+    },
+    {
+      "boot": 1,
+      "conversation": "clean",
+      "scenario": "S1",
+      "attempt": 0,
+      "elapsedMs": 1564,
+      "modelRequests": 2,
+      "toolStarts": 1,
+      "toolLabels": [
+        "label=Read working directory origin=native"
+      ],
+      "terminal": {
+        "reason": "completed"
+      },
+      "answer": "The current working directory is `/home/fmdm/dev/swelte/examples/shell`.",
+      "passed": true
+    },
+    {
+      "boot": 1,
+      "conversation": "clean",
+      "scenario": "S1",
+      "attempt": 1,
+      "elapsedMs": 1506,
+      "modelRequests": 2,
+      "toolStarts": 1,
+      "toolLabels": [
+        "label=Read working directory origin=native"
+      ],
+      "terminal": {
+        "reason": "completed"
+      },
+      "answer": "The current working directory of our console is `/home/fmdm/dev/swelte/examples/shell`.",
+      "passed": true
+    },
+    {
+      "boot": 1,
+      "conversation": "clean",
+      "scenario": "S1",
+      "attempt": 2,
+      "elapsedMs": 1421,
+      "modelRequests": 2,
+      "toolStarts": 1,
+      "toolLabels": [
+        "label=Read working directory origin=native"
+      ],
+      "terminal": {
+        "reason": "completed"
+      },
+      "answer": "The current working directory is `/home/fmdm/dev/swelte/examples/shell`.",
+      "passed": true
+    },
+    {
+      "boot": 1,
+      "conversation": "clean",
+      "scenario": "S1",
+      "attempt": 3,
+      "elapsedMs": 2208,
+      "modelRequests": 2,
+      "toolStarts": 1,
+      "toolLabels": [
+        "label=Read working directory origin=native"
+      ],
+      "terminal": {
+        "reason": "completed"
+      },
+      "answer": "The current working directory of the console is `/home/fmdm/dev/swelte/examples/shell`.",
+      "passed": true
+    },
+    {
+      "boot": 1,
+      "conversation": "clean",
+      "scenario": "S1",
+      "attempt": 4,
+      "elapsedMs": 1409,
+      "modelRequests": 2,
+      "toolStarts": 1,
+      "toolLabels": [
+        "label=Read working directory origin=native"
+      ],
+      "terminal": {
+        "reason": "completed"
+      },
+      "answer": "The current working directory is `/home/fmdm/dev/swelte/examples/shell`.",
+      "passed": true
+    },
+    {
+      "boot": 1,
+      "conversation": "clean",
+      "scenario": "S2",
+      "attempt": 0,
+      "elapsedMs": 4039,
+      "modelRequests": 3,
+      "toolStarts": 2,
+      "toolLabels": [
+        "label=Read working directory origin=native",
+        "label=List project files origin=native"
+      ],
+      "terminal": {
+        "reason": "completed"
+      },
+      "answer": "We are in the directory: `/home/fmdm/dev/swelte/examples/shell`.\n\nThe files and folders here are:\n\n- .baby-ui/\n- .env\n- .env.example\n- .swelte/\n- README.md\n- components.json\n- data/\n- dist/\n- dist-test/\n- index.html\n- node_modules/\n- package.json\n- src/\n- svelte.config.js\n- tests/\n- tsconfig.json\n- tsconfig.test.json\n- vite.config.ts",
+      "passed": true
+    },
+    {
+      "boot": 1,
+      "conversation": "clean",
+      "scenario": "S2",
+      "attempt": 1,
+      "elapsedMs": 4392,
+      "modelRequests": 3,
+      "toolStarts": 2,
+      "toolLabels": [
+        "label=Read working directory origin=native",
+        "label=List project files origin=native"
+      ],
+      "terminal": {
+        "reason": "completed"
+      },
+      "answer": "You are in the directory: `/home/fmdm/dev/swelte/examples/shell`.\n\nHere are the files and directories present:\n\n- .baby-ui/\n- .env\n- .env.example\n- .swelte/\n- README.md\n- components.json\n- data/\n- dist/\n- dist-test/\n- index.html\n- node_modules/\n- package.json\n- src/\n- svelte.config.js\n- tests/\n- tsconfig.json\n- tsconfig.test.json\n- vite.config.ts",
+      "passed": true
+    },
+    {
+      "boot": 1,
+      "conversation": "clean",
+      "scenario": "S2",
+      "attempt": 2,
+      "elapsedMs": 4185,
+      "modelRequests": 3,
+      "toolStarts": 2,
+      "toolLabels": [
+        "label=Read working directory origin=native",
+        "label=List project files origin=native"
+      ],
+      "terminal": {
+        "reason": "completed"
+      },
+      "answer": "You are in the directory: `/home/fmdm/dev/swelte/examples/shell`. The files and directories present here are:\n\n- .baby-ui/\n- .env\n- .env.example\n- .swelte/\n- README.md\n- components.json\n- data/\n- dist/\n- dist-test/\n- index.html\n- node_modules/\n- package.json\n- src/\n- svelte.config.js\n- tests/\n- tsconfig.json\n- tsconfig.test.json\n- vite.config.ts",
+      "passed": true
+    },
+    {
+      "boot": 1,
+      "conversation": "clean",
+      "scenario": "S2",
+      "attempt": 3,
+      "elapsedMs": 4500,
+      "modelRequests": 3,
+      "toolStarts": 2,
+      "toolLabels": [
+        "label=Read working directory origin=native",
+        "label=List project files origin=native"
+      ],
+      "terminal": {
+        "reason": "completed"
+      },
+      "answer": "You are currently in the directory `/home/fmdm/dev/swelte/examples/shell`. The files and folders present here are:\n\n- .baby-ui/\n- .env\n- .env.example\n- .swelte/\n- README.md\n- components.json\n- data/\n- dist/\n- dist-test/\n- index.html\n- node_modules/\n- package.json\n- src/\n- svelte.config.js\n- tests/\n- tsconfig.json\n- tsconfig.test.json\n- vite.config.ts",
+      "passed": true
+    },
+    {
+      "boot": 1,
+      "conversation": "clean",
+      "scenario": "S2",
+      "attempt": 4,
+      "elapsedMs": 4513,
+      "modelRequests": 3,
+      "toolStarts": 2,
+      "toolLabels": [
+        "label=Read working directory origin=native",
+        "label=List project files origin=native"
+      ],
+      "terminal": {
+        "reason": "completed"
+      },
+      "answer": "You are in the directory: `/home/fmdm/dev/swelte/examples/shell`. The files and folders present here are:\n\n- `.baby-ui/`\n- `.env`\n- `.env.example`\n- `.swelte/`\n- `README.md`\n- `components.json`\n- `data/`\n- `dist/`\n- `dist-test/`\n- `index.html`\n- `node_modules/`\n- `package.json`\n- `src/`\n- `svelte.config.js`\n- `tests/`\n- `tsconfig.json`\n- `tsconfig.test.json`\n- `vite.config.ts`",
+      "passed": true
+    },
+    {
+      "boot": 1,
+      "conversation": "existing",
+      "scenario": "S1",
+      "attempt": 0,
+      "elapsedMs": 1519,
+      "modelRequests": 2,
+      "toolStarts": 1,
+      "toolLabels": [
+        "label=Read working directory origin=native"
+      ],
+      "terminal": {
+        "reason": "completed"
+      },
+      "answer": "The current working directory is `/home/fmdm/dev/swelte/examples/shell`.",
+      "passed": true
+    },
+    {
+      "boot": 1,
+      "conversation": "existing",
+      "scenario": "S1",
+      "attempt": 1,
+      "elapsedMs": 1354,
+      "modelRequests": 2,
+      "toolStarts": 1,
+      "toolLabels": [
+        "label=Read working directory origin=native"
+      ],
+      "terminal": {
+        "reason": "completed"
+      },
+      "answer": "Our console is located at `/home/fmdm/dev/swelte/examples/shell`.",
+      "passed": true
+    },
+    {
+      "boot": 1,
+      "conversation": "existing",
+      "scenario": "S1",
+      "attempt": 2,
+      "elapsedMs": 1388,
+      "modelRequests": 2,
+      "toolStarts": 1,
+      "toolLabels": [
+        "label=Read working directory origin=native"
+      ],
+      "terminal": {
+        "reason": "completed"
+      },
+      "answer": "The current working directory is `/home/fmdm/dev/swelte/examples/shell`.",
+      "passed": true
+    },
+    {
+      "boot": 1,
+      "conversation": "existing",
+      "scenario": "S1",
+      "attempt": 3,
+      "elapsedMs": 1471,
+      "modelRequests": 2,
+      "toolStarts": 1,
+      "toolLabels": [
+        "label=Read working directory origin=native"
+      ],
+      "terminal": {
+        "reason": "completed"
+      },
+      "answer": "Our console is located at `/home/fmdm/dev/swelte/examples/shell`.",
+      "passed": true
+    },
+    {
+      "boot": 1,
+      "conversation": "existing",
+      "scenario": "S1",
+      "attempt": 4,
+      "elapsedMs": 1961,
+      "modelRequests": 2,
+      "toolStarts": 1,
+      "toolLabels": [
+        "label=Read working directory origin=native"
+      ],
+      "terminal": {
+        "reason": "completed"
+      },
+      "answer": "The current working directory is `/home/fmdm/dev/swelte/examples/shell`.",
+      "passed": true
+    },
+    {
+      "boot": 1,
+      "conversation": "existing",
+      "scenario": "S2",
+      "attempt": 0,
+      "elapsedMs": 4042,
+      "modelRequests": 3,
+      "toolStarts": 2,
+      "toolLabels": [
+        "label=Read working directory origin=native",
+        "label=List project files origin=native"
+      ],
+      "terminal": {
+        "reason": "completed"
+      },
+      "answer": "We are located at `/home/fmdm/dev/swelte/examples/shell`. The files and directories here are:\n\n- `.baby-ui/`\n- `.env`\n- `.env.example`\n- `.swelte/`\n- `README.md`\n- `components.json`\n- `data/`\n- `dist/`\n- `dist-test/`\n- `index.html`\n- `node_modules/`\n- `package.json`\n- `src/`\n- `svelte.config.js`\n- `tests/`\n- `tsconfig.json`\n- `tsconfig.test.json`\n- `vite.config.ts`",
+      "passed": true
+    },
+    {
+      "boot": 1,
+      "conversation": "existing",
+      "scenario": "S2",
+      "attempt": 1,
+      "elapsedMs": 4906,
+      "modelRequests": 3,
+      "toolStarts": 2,
+      "toolLabels": [
+        "label=Read working directory origin=native",
+        "label=List project files origin=native"
+      ],
+      "terminal": {
+        "reason": "completed"
+      },
+      "answer": "We are located at `/home/fmdm/dev/swelte/examples/shell`. The files and directories here are:\n\n- `.baby-ui/`\n- `.env`\n- `.env.example`\n- `.swelte/`\n- `README.md`\n- `components.json`\n- `data/`\n- `dist/`\n- `dist-test/`\n- `index.html`\n- `node_modules/`\n- `package.json`\n- `src/`\n- `svelte.config.js`\n- `tests/`\n- `tsconfig.json`\n- `tsconfig.test.json`\n- `vite.config.ts`",
+      "passed": true
+    },
+    {
+      "boot": 1,
+      "conversation": "existing",
+      "scenario": "S2",
+      "attempt": 2,
+      "elapsedMs": 4308,
+      "modelRequests": 3,
+      "toolStarts": 2,
+      "toolLabels": [
+        "label=Read working directory origin=native",
+        "label=List project files origin=native"
+      ],
+      "terminal": {
+        "reason": "completed"
+      },
+      "answer": "We are located at `/home/fmdm/dev/swelte/examples/shell`. The files and directories here are:\n\n- `.baby-ui/`\n- `.env`\n- `.env.example`\n- `.swelte/`\n- `README.md`\n- `components.json`\n- `data/`\n- `dist/`\n- `dist-test/`\n- `index.html`\n- `node_modules/`\n- `package.json`\n- `src/`\n- `svelte.config.js`\n- `tests/`\n- `tsconfig.json`\n- `tsconfig.test.json`\n- `vite.config.ts`",
+      "passed": true
+    },
+    {
+      "boot": 1,
+      "conversation": "existing",
+      "scenario": "S2",
+      "attempt": 3,
+      "elapsedMs": 4416,
+      "modelRequests": 3,
+      "toolStarts": 2,
+      "toolLabels": [
+        "label=Read working directory origin=native",
+        "label=List project files origin=native"
+      ],
+      "terminal": {
+        "reason": "completed"
+      },
+      "answer": "We are located at `/home/fmdm/dev/swelte/examples/shell`. The files and directories here are:\n\n- `.baby-ui/`\n- `.env`\n- `.env.example`\n- `.swelte/`\n- `README.md`\n- `components.json`\n- `data/`\n- `dist/`\n- `dist-test/`\n- `index.html`\n- `node_modules/`\n- `package.json`\n- `src/`\n- `svelte.config.js`\n- `tests/`\n- `tsconfig.json`\n- `tsconfig.test.json`\n- `vite.config.ts`",
+      "passed": true
+    },
+    {
+      "boot": 1,
+      "conversation": "existing",
+      "scenario": "S2",
+      "attempt": 4,
+      "elapsedMs": 5216,
+      "modelRequests": 3,
+      "toolStarts": 2,
+      "toolLabels": [
+        "label=Read working directory origin=native",
+        "label=List project files origin=native"
+      ],
+      "terminal": {
+        "reason": "completed"
+      },
+      "answer": "We are located at `/home/fmdm/dev/swelte/examples/shell`. The files and directories here are:\n\n- `.baby-ui/`\n- `.env`\n- `.env.example`\n- `.swelte/`\n- `README.md`\n- `components.json`\n- `data/`\n- `dist/`\n- `dist-test/`\n- `index.html`\n- `node_modules/`\n- `package.json`\n- `src/`\n- `svelte.config.js`\n- `tests/`\n- `tsconfig.json`\n- `tsconfig.test.json`\n- `vite.config.ts`",
+      "passed": true
+    }
+  ],
+  "failures": [],
+  "summary": {
+    "S1": {
+      "samples": 20,
+      "passed": 20,
+      "p50": 1519,
+      "p95": 2002,
+      "max": 2208
+    },
+    "S2": {
+      "samples": 20,
+      "passed": 20,
+      "p50": 4421,
+      "p95": 5133,
+      "max": 5216
+    }
+  }
+}

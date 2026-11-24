@@ -6,20 +6,29 @@ Keys stay on the server. Choose an adapter/model in the chat settings.
 
 The assistant knows its tools on the first model request. It can read recent
 terminal output, choose a tool when needed, and use its result to answer or
-choose another tool. Each request allows up to eight model/tool steps. Recent
+choose another tool. The loop has an eight-step backstop and a hard 25-second turn budget.
+Cwd-only questions have a 15-second budget, one fresh read and at most two
+model requests. Each provider wait is bounded by ten seconds or the remaining
+turn budget. Recent
 chat messages and a bounded terminal tail provide context for subsequent turns.
-OpenRouter, OpenAI Responses and Anthropic use the same example-local text tool
-protocol. Model decisions are buffered to keep tool syntax out of the chat;
-progress and final answers travel over SSE. This is not native provider tool
-calling or token-by-token provider streaming.
+OpenRouter, OpenAI Responses and Anthropic use native provider-shaped tool calls
+(`tool_calls[]`, `function_call` + `function_call_output`, `tool_use` +
+`tool_result`, each with a typed result message delivered back to the model)
+where the model advertises them; a documented bounded text fallback remains for
+legacy model ids, with one repair per turn and allowlist/content guards. Model
+decisions are buffered to keep tool syntax out of the chat;
+progress and final answers travel over SSE. Native result delivery plus the
+text mirror keeps history linked; this is not token-by-token provider
+streaming.
 
 Read-only `pwd`, `whoami`, `help`, and `ls [path]` queries run directly, without
 a toggle or approval. Enable the keyboard toggle beside Send to allow other shell **and browse** actions
 for that turn. Every action opens the approval queue with its exact arguments.
 Approve executes through the generated dispatcher and automatically asks the
 model to continue using the actual result. Deny ends the parked action. Stop
-aborts the chat request and releases terminal control. Human terminal commands
-preempt the AI lease. Read-only queries and observations need no approval.
+settles unfinished UI work immediately and releases terminal control. Late
+provider replies and approval acknowledgements cannot resume a stopped turn. Human terminal commands
+from either tab preempt the AI lease and settle the parked turn. Read-only queries and observations need no approval.
 
 Supported shell commands are `echo`, `pwd`, `whoami`, `help`, `ls`, `cd`, and
 `cat <file>`. Filesystem paths resolve physically within the server's initial
@@ -50,8 +59,11 @@ pending approvals, while successful KV receipts remain available. Use a new
 turn after a lease expires or the server restarts.
 
 ```sh
-npm test                  # offline tests and native reporting probe
-npm run test:integration  # builds, then tests the compiled backend with a local provider fixture
+npm test                  # offline unit tests
+npm run check
+npm run test:integration  # builds, then runs native fixtures and Chrome lifecycle tests
+npm run test:reload       # isolated dev/build coexistence and browser reconnect, three cycles
+npm run test:live         # opt-in paid provider requests; uses server .env key
 npm run build
 npm run preview
 ```
@@ -63,3 +75,16 @@ validation, symlink confinement, and the GET approval restriction. It does not
 use real model keys or exercise an external provider's model behavior.
 `SHELL_AI_BASE_URL` optionally overrides the provider base URL for a local
 fixture or compatible proxy; keep it unset for the standard provider endpoints.
+
+The revision badge compares the running backend's embedded source fingerprint
+with the UI's expected fingerprint; `STALE` requires a matching rebuild/reload.
+Terminal stream frames have stable sequence IDs, so reconnects replay scrollback
+without duplicating output and repeated real commands stay distinct.
+
+Live usability is validated for **OpenRouter / `openai/gpt-4o-mini`**, with
+provider-default generation settings. OpenAI Responses and Anthropic have
+wire-shaped fixture coverage, not live certification. See the
+[acceptance gates](../../docs/specs/shell-usability.md) and
+[dated evidence](../../docs/specs/shell-usability-evidence-2026-11-24.md).
+Chrome tests require `google-chrome` or `CHROME_BIN`. Live tests use temporary
+databases and browser profiles and do not run as part of `npm test`.

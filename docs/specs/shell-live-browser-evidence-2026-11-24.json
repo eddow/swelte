@@ -1,0 +1,61 @@
+{
+  "date": "2026-11-24",
+  "adapter": "openrouter",
+  "model": "openai/gpt-4o-mini",
+  "scenarios": [
+    {
+      "question": "what is your pwd ?",
+      "elapsedMs": 2764,
+      "passed": true
+    },
+    {
+      "question": "Just tell me where our console is (pwd) and what we can find there",
+      "elapsedMs": 5025,
+      "passed": true
+    },
+    {
+      "question": "what is your pwd ?",
+      "elapsedMs": 1507,
+      "passed": true
+    },
+    {
+      "question": "Please run echo live-approval-probe",
+      "expected": "live-approval-probe",
+      "approved": true,
+      "passed": true
+    },
+    {
+      "question": "Read https://example.com and briefly give me its title.",
+      "expected": "Example Domain",
+      "approved": true,
+      "passed": true
+    },
+    {
+      "question": "Stop live model work",
+      "elapsedMs": 9,
+      "passed": true
+    },
+    {
+      "question": "pwd after Stop",
+      "passed": true
+    },
+    {
+      "question": "human cd src, then fresh pwd",
+      "passed": true
+    }
+  ],
+  "revision": {
+    "backend_revision": "0c43d9e37d27cc65aec715e59f216e454e4f1643e4eedb807410bcc3d5b8bd6e",
+    "boot_id": "1795513996659738592",
+    "driver": "human",
+    "seq": 0,
+    "room_version": "v2"
+  },
+  "ui": {
+    "testid": "revision",
+    "backendRev": "0c43d9e37d27cc65aec715e59f216e454e4f1643e4eedb807410bcc3d5b8bd6e",
+    "uiRev": "8b8c0d7df73351ed3fffbe906c12e8663907dd5de634fb6f0be32c997e10fa9c",
+    "expectedBackendRev": "0c43d9e37d27cc65aec715e59f216e454e4f1643e4eedb807410bcc3d5b8bd6e",
+    "bootId": "1795513996659738592"
+  }
+}

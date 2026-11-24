@@ -1,327 +1,190 @@
 # Shell usability roadmap and acceptance gates
 
-Status: proposed recovery plan; **the shell is not usability-accepted**.
-Updated: 2026-11-23. Scope: `examples/shell`, its provider loop, console UI,
-tool dispatch, human control and development reload path. Framework changes
-belong here only when they are required to make this consumer reliable.
+Status: **completed and accepted for OpenRouter / `openai/gpt-4o-mini`**.
+OpenAI Responses and Anthropic remain fixture-only, not live-certified.
 
-This document defines intended behavior and evidence required to claim it.
-It does not certify the current implementation. Passing unit tests, a scripted
-provider fixture, a successful build, or one successful live turn does not
-establish usable agent behavior.
+Updated 2026-11-24. Scope: `examples/shell`, provider dispatch, approval,
+shared terminal, cancellation and development reload. This document owns the
+shell's usability gate; completion of the broader AI roadmap does not imply it.
 
-## Starting evidence
-
-The user has reported these failures in the same console integration:
-
-- Tool names and JSON appear in the assistant answer instead of executing.
-- Model progress appears as a tool call (`Thinking`, `model-0`).
-- A simple working-directory question asks for a terminal toggle.
-- After fixes and individual successful probes, `what is your pwd ?` still
-  produces six “Inspect the console” rows marked “running”, takes 29 seconds,
-  and ends with “Interrupted” instead of answering.
-
-The latest report is the blocking regression. Six visible rows do not by
-themselves prove six backend executions: execution counts, model requests,
-results delivered to the model, and UI updates must be measured separately.
-Do not assign a root cause from the screenshot alone.
-
-The current source has an eight-step provider loop, a text-based tool protocol,
-read-only console queries, approval-gated actions, SSE events, and a shared
-console. These mechanisms exist, but their composition has not met this spec.
-The loop currently appends results to a text prompt, and tool rows are normally
-settled at turn end rather than at the actual completion of each call. Both
-paths require investigation before another claim of completion.
+The reported incident was a `pwd` question that showed six running “Inspect the
+console” rows for 29 seconds and ended “Interrupted”. Earlier reports showed
+raw tool syntax and requests to enable a toggle for read-only inspection.
+The original runtime and complete conversation were not captured. Its exact
+replay is unavailable; a synthetic repeated-read regression and a reconstructed
+conversation using the supplied messages are retained instead.
 
 ## Product contract
 
-A user can ask an ordinary console question and get a short, grounded answer.
-The agent uses the minimum operations needed, reports each operation honestly,
-and stops once the task is answered. The user should not have to understand
-provider protocols, driver leases or tool identifiers.
+Ordinary console questions receive short answers grounded in actual tool
+results. Read-only `pwd`, `whoami`, `help` and `ls [path]` need no action toggle,
+approval or driver lease. Other supported actions require the action toggle
+and approval of their exact arguments. Read permission never grants actions.
 
-Read-only inspection (`pwd`, `whoami`, `help`, `ls [path]`) is available without
-an action toggle or approval. Other actions follow an explicit backend policy;
-read-only permission must never silently expand into `cd`, stdin, file writes,
-arbitrary shell execution, or web access. Current supported commands and the
-HTTPS-reader limits must remain accurately described in the example README.
-This roadmap does not authorize adding an unrestricted OS shell or full browser.
+This is a single trusted local console. Its cwd, transcript and stdin are shared
+across tabs. Client caller strings are not authenticated identities. The human
+POST endpoints are authoritative; this example has no multi-user isolation.
+The terminal is an allowlisted filesystem console, not an unrestricted OS shell.
+Browse is an approved HTTPS text reader, not an interactive browser. See the
+[capabilities and limits](../../examples/shell/README.md).
 
 ## Success markers
 
-All markers below are targets, not claims of present behavior. Count actual
-backend starts, not rendered rows. Timing starts when the user submits and
-excludes application startup. Measure with a monotonic clock.
+Count actual backend starts independently from model requests, SSE deliveries
+and rendered rows. Measure submission latency with a monotonic clock, excluding
+startup. A failed deadline is a failed sample.
 
-### S1 — A working-directory question finishes
+### S1 — Working directory
 
-Reproduce with both `what is your pwd ?` and `Where is our console?`:
+For `what is your pwd ?` and `Where is our console?`:
 
-- Exactly one successful working-directory read; no other tool is necessary.
-- At most two model requests: choose the read, then answer from its result.
-- The answer contains the actual canonical cwd, matching the backend console.
-- No toggle request, approval request, repeated inspection or manual Stop.
-- One readable tool row, such as “Read working directory”, reaches `done`
-  when the read returns, even if the model is still composing its answer.
-- No tool syntax, internal module names, JSON, holder IDs or operation IDs in
-  the ordinary answer or default tool-row presentation.
-- One successful turn terminal event; no remaining “running” rows.
+- Exactly one successful `pwd` read and no unnecessary tool.
+- At most two model requests, with actual cwd in the final answer.
+- No approval, toggle request, raw protocol, manual Stop or stale running row.
+- Fixture completion within one second; live p95 ≤10 seconds, total deadline
+  15 seconds.
 
-For deterministic provider fixtures, answer within one second after submission.
-For the live supported provider/model matrix, target p95 at most ten seconds
-and enforce a fifteen-second total deadline for this simple question. A deadline
-failure is a failed run, not a reason to loosen the target without review.
+The backend constrains cwd-only tasks to one fresh read even when older
+conversation messages requested a listing. Native capable models must choose
+that read first and answer after its result; repeated reads reuse the result.
 
-### S2 — Location and contents require no repetition
+### S2 — Location and contents
 
-For `Where are we and what files are here?`:
+For `Where are we and what files are here?`, execute one `pwd` and one `ls`,
+with at most three model requests. Answer from both actual results. Both rows
+settle independently. Fixture completion within one second; live p95 ≤15
+seconds with a 25-second total deadline.
 
-- One cwd read and one directory listing, each executed once.
-- At most three model requests with sequential calls; fewer are acceptable
-  when the provider supports a correctly handled batch.
-- The final answer uses both actual results and lists a few real entries.
-- No repeated read of unchanged state and no generic history lookup in place
-  of inspecting the current console.
-- Both rows finish independently; the final answer and turn settle normally.
+### S3 — Current state and reuse
 
-For deterministic fixtures, answer within one second. For the live supported
-provider/model matrix, target p95 at most fifteen seconds and enforce a
-twenty-five-second total deadline for this two-read task.
+A human or approved `cd` followed by `pwd` returns the new directory. A completed
+read may be reused only within the same turn and unchanged console revision.
+Duplicates create neither another execution nor another row; a new question
+must inspect current state. Failed reads remain typed failures and are not cached.
 
-### S3 — Follow-ups observe current state
+### S4 — Honest lifecycle and presentation
 
-After a human changes cwd, another `pwd` returns the new directory. Cached
-results must be invalidated by relevant console state changes. A duplicate
-within one unchanged turn must not create another execution or another row.
-A new user question is not a replay of an earlier turn.
+Thinking is model progress, not a tool call. Default tool rows use short labels
+such as “Read working directory”, “List project files” or “Read a web page”.
+Raw arguments and internal identifiers belong in diagnostics or the approval
+queue, not the answer.
 
-### S4 — Tool and turn states are honest
+Each actual call has a stable ID. The UI maps waiting approval to `pending`,
+execution to `active`, successful receipt to `done`, and failed/denied/expired/
+interrupted unfinished work to `failed` with its turn/error context. These are
+presentation states, not a claim that the console can undo completed effects.
 
-The UI distinguishes model work, tool execution, waiting for approval, and
-final-answer generation. Thinking is never counted as a tool call.
+A result settles its row within 250 ms in a foreground browser. Completed rows
+survive later provider failures and Stop. Replay cannot downgrade settled rows
+or create duplicate keys. Completion, disconnect and failure leave no active
+rows. Approval waiting remains pending until a decision, not falsely completed
+by its `waiting_approval` terminal event.
 
-Each call has a stable ID and a lifecycle: requested → running → succeeded,
-failed, denied, expired, or cancelled. Approval waiting precedes execution;
-it is not “running”. These conceptual states may map to existing wire types,
-but the mapping must be explicit and tested.
+### S5 — Authorization and continuation
 
-A success or failure event settles its row within 250 ms of receipt in a
-foreground browser. No terminal turn can retain running rows. Successful calls
-remain successful when a later model request fails or the user presses Stop;
-completed work must not be retroactively labelled interrupted or failed.
-Repeated progress delivery updates the same row. Two legitimate calls with
-the same description remain distinct and do not cause duplicate-key errors.
-Raw payloads may be available in an explicitly expanded diagnostic view.
+Read-only inspection works with actions off or on. Actions execute zero times
+before approval and once afterwards. Backend approval binds operation ID,
+holder, tool, exact validated arguments, boot and live driver lease. Changed
+arguments/holder, denied/expired/superseded operations fail closed.
 
-### S5 — Approval is necessary only where policy requires it
+Concurrent decisions and lost acknowledgements replay the stored successful
+receipt without redispatch. Continuation tokens are consumed atomically; two
+requests cannot start two model loops. Continuation restores the saved provider,
+model, system and generation settings. A late approval acknowledgement after
+Stop cannot restart the model.
 
-- Read-only inspection never depends on acquiring a driver lease.
-- An action executes zero times before approval, and once after approval.
-- Approval binds caller, tool, exact validated arguments, operation ID and
-  applicable driver lease. Changed arguments or holder identity are rejected.
-- Denied, expired or superseded actions execute zero times. The model does not
-  retry them under another name or through the human execution RPC.
-- Duplicate decisions, concurrent decisions and lost acknowledgements cannot
-  execute an action again. A replay returns its existing receipt.
-- An approved result resumes the task without losing the original request,
-  changing its provider configuration unexpectedly, or reopening the same
-  approval. Repeated continuation requests cannot start duplicate agent loops.
-- Pending operations fail closed after restart; receipts and UI recovery have
-  documented lifetimes. Two tabs cannot both own an active driving lease.
+Pending approvals and unused continuations fail closed after restart.
+Successful receipts persist in the console's KV database and remain
+binding-checked. The generated approval table and mutex are process-local;
+multiple server processes sharing a database are not supported or certified.
 
-The local shared-console trust model remains explicit. Caller strings supplied
-by a model or client are not authenticated user identities.
+### S6 — Stop, preemption and bounded failure
 
-### S6 — Stop and failures finish predictably
+Stop settles the visible turn within 500 ms, releases control, ignores late
+packets and permits the next turn. Human terminal input from either tab preempts
+the agent. No new tool may start after cancellation; authorization is rechecked
+at execution. Already completed actions cannot be undone by Stop.
 
-Stop visibly settles the turn within 500 ms, releases human control, and
-prevents later packets from updating that turn. In-flight provider requests
-are aborted where supported; otherwise their late results are detached and
-ignored, with a bounded request timeout. No new tool starts after cancellation
-or after human preemption; action authorization is rechecked at execution.
+Provider waits have a hard watchdog: the smaller of 10 seconds and the remaining
+turn budget, checked at most 100 ms apart. Detached late HTTP responses have no
+stream or dispatch authority. Socket timeouts alone are insufficient. Budget,
+provider and protocol failures finish with an error rather than a fabricated
+answer or perpetual spinner.
 
-Automatic timeouts, exhausted budgets and no-progress detection produce a
-brief actionable failure, never a fabricated answer or a perpetual spinner.
-“Interrupted” is reserved for actual interruption, not ordinary completion.
-If some work succeeded, the UI preserves its receipt and explains what remains.
-A failed turn must not block the next human command or chat turn.
+### S7 — Tested source is served
 
-### S7 — Development serves the tested revision
+The backend embeds a SHA-256 fingerprint of route/tools/filesystem source.
+The UI carries its expected backend fingerprint and its own source fingerprint;
+the badge polls for mismatch and boot changes. A protocol constant is not a
+source revision. Production JS bundle names/hashes are recorded separately.
 
-The dev backend and UI expose a comparable build/revision identifier in a
-read-only diagnostic surface. Before a live acceptance run, record both and
-verify they match the source under test. A failed reload is visible rather
-than silently retaining an apparently current backend.
+A production build while dev remains open must not prevent later backend
+compilation. Recreate the session executable directory after generation.
+Prove three consecutive build/edit/reload cycles with changed backend hash,
+changed boot, matching UI expectation, one terminal frame after reconnect and
+no active rows. Sequential terminal frames carry stable sequence IDs; real
+repeated commands remain distinct while replay/optimistic echoes collapse.
 
-Run a production build while dev is open, then change a backend source file.
-Dev must recover its temporary executable directory, reload successfully, and
-serve the new revision without manual directory repair. Verify this across
-three consecutive rebuild/reload cycles. The browser must reconnect without
-duplicating terminal frames or leaving tool rows running.
+## Completion roadmap
 
-## Ordered implementation roadmap
+Checkmarks refer to the linked evidence, with provider scope and test limits
+recorded in the [dated evidence](shell-usability-evidence-2026-11-24.md).
 
-Milestones are deliberately unchecked. Complete them in order; document any
-exception and its evidence rather than treating earlier smoke tests as proof.
+- [x] **P0: reproduce and measure.** Synthetic repeated `pwd` fixture; correlated
+  model/tool/turn events, execution counts and metadata-only diagnostics.
+  The original incident is not claimed as an exact replay.
+- [x] **P1: bounded result-aware inspection.** Canonical read reuse, revision
+  invalidation, latest-task scope, hard watchdog and no late dispatch.
+- [x] **P2: provider transport.** Native aliases and linked typed results for
+  OpenRouter, OpenAI Responses and Anthropic on wire-shaped fixtures; bounded
+  legacy text fallback. No raw tool syntax in normal answers.
+- [x] **P3: rendered lifecycle.** Completion, provider failure, approval pending,
+  replay, disconnect, Stop and foreground receipt-to-paint assertions.
+- [x] **P4: human control and recovery.** Authorization, delayed-ack Stop,
+  cross-tab control and all three build/edit/browser reload cycles pass.
+- [x] **P5: repeated live acceptance.** Final source/build passes 40/40 live
+  samples plus eight live Chrome scenarios for OpenRouter/gpt-4o-mini. Other
+  adapters remain fixture-only; see the dated evidence.
 
-### P0 — Reproduce and measure the failing turn
+Any unexplained loop, raw protocol leak, unauthorized action or stale running
+row reopens the affected marker. Do not replace missing evidence with a passing
+unrelated test count.
 
-- [ ] Preserve the reported `pwd` conversation as a regression scenario,
-  including preceding messages, selected model/configuration, toggle state,
-  browser state, active backend revision and the final interruption.
-- [ ] Add correlated run, turn, model-request and tool-call IDs to diagnostics.
-  Record requested tool, normalized arguments hash, console-state revision,
-  actual execution start/end, result receipt, result delivered to the model,
-  UI state transitions, cancellation and terminal reason with timings.
-- [ ] Keep keys and credentials out of diagnostics. Record prompt/result bodies
-  only with explicit diagnostic opt-in and redaction; metadata is the default.
-- [ ] Distinguish six model decisions, six dispatches, repeated SSE delivery,
-  and six UI rows. Identify where useful progress stops.
-- [ ] Add a reproducible test that fails on the reported loop or state mismatch.
+## Repeatable acceptance pack
 
-Exit: one trace explains the failing sequence, and a regression detects it.
-A request timeout or a test that mirrors a handwritten parser is not sufficient.
+From `examples/shell`:
 
-### P1 — Make inspection bounded and result-aware
+```sh
+npm test                  # offline unit tests
+npm run check
+npm run test:integration  # build, native fixtures, Chrome lifecycle and signal-wait tests
+npm run test:reload       # isolated dev + production build, three browser reload cycles
+npm run test:live         # opt-in real provider requests; requires server .env key
+```
 
-- [ ] Give ordinary read-only questions a direct inspection path with clear
-  command-specific labels and authoritative results.
-- [ ] Canonicalize tool identity and typed arguments before dispatch. Within a
-  turn and unchanged console revision, reuse an identical completed read.
-- [ ] After a sufficient read, require a final answer rather than allowing
-  unlimited inspection. A repeated identical request does not restart work:
-  return the existing result and allow one answer-only model attempt, then
-  finish with a concise failure or an explicitly attributed console result.
-- [ ] Bound total wall-clock time, model requests, tool starts, repair attempts
-  and no-progress retries independently. Eight iterations is a ceiling, not
-  permission to spend eight calls answering `pwd`.
-- [ ] Ensure only executed calls and their corresponding results enter history;
-  unexecuted batch entries must not be described as completed.
-- [ ] Test S1–S3 against the actual backend and model request payloads.
+Chrome tests require `google-chrome` or `CHROME_BIN`; the signal test needs a
+system C compiler on POSIX. Live scripts deliberately do not run under `npm test`.
+Tests use temporary databases/profiles; reload tests copy the project without
+its `.env` and leave the user's running app untouched.
 
-Exit: S1 and S2 pass with adversarial fixtures that repeatedly ask for the same
-read, ignore a result, emit multiple requests, or return malformed output.
+For each declared live pair collect ≥20 S1 and ≥20 S2 samples, evenly split
+between clean and existing conversations and across ≥2 process starts. Record
+all answers/failures, timings (p50/p95/max), model requests, tool starts,
+approvals, backend/boot and bundle revisions. Require ≥95% grounded completion
+inside budget, zero duplicate unchanged-read execution, protocol leaks,
+unauthorized actions or stale rows. The harness currently requires 100% of
+its samples. Existing sessions reconstruct only the user-supplied incident
+messages, not unknown original state.
 
-### P2 — Make tool transport a typed contract
+Browser proof additionally covers action approval/resume, an approved HTTPS
+read, Stop, current cwd after human `cd`, and revision agreement. Deterministic
+suites cover denial, invalid URL, fetch failure, binding changes, concurrent
+resume/continuation, real TTL lapse, real restart, provider failure, malformed
+calls, repeated frames, disconnect and late packets. Controlled SSE is used to
+hold the short tool/final phases open for reproducible Stop assertions; this
+must be distinguished from a live provider running that phase.
 
-- [ ] Use provider-native structured tool calls where the adapter/model supports
-  them, including native call IDs and corresponding result messages. Keep
-  provider translation outside the console UI.
-- [ ] Select supported tool-capable models explicitly. An unsupported model gets
-  a clear capability error or a documented bounded fallback before a run.
-- [ ] If a text fallback remains, specify its grammar, normalization and single
-  bounded repair. Cover canonical, shortened, bare and fenced requests,
-  multiline JSON, escaped quotes, multiple calls, and invalid output.
-- [ ] Reject invalid or unavailable operations before execution. Never render
-  protocol fragments as a successful assistant answer or recursively repair
-  without a deadline. Preserve tool errors as errors, not success-shaped text.
-- [ ] Prove adapter conformance through actual wire requests and responses,
-  including result delivery, rather than only final-text response fixtures.
-
-Exit: each supported adapter passes identical semantic scenarios by changing
-only provider configuration. Parser tolerance alone cannot close this milestone.
-
-### P3 — Tie presentation to execution lifecycle
-
-- [ ] Emit start and completion/failure events at the actual dispatch boundary,
-  correlated by stable call ID. Model progress uses its own event/state.
-- [ ] Update rows per call, not only when the whole turn ends. Track pending
-  approval separately and retain completed receipts after Stop or errors.
-- [ ] Show a specific short description, such as “Read working directory”,
-  “List project files” or “Read a web page”. Keep raw protocol in diagnostics.
-- [ ] Verify real rendered UI for event replay, repeated descriptions,
-  approval/resume, disconnect, cancellation and provider failure.
-
-Exit: S4 passes in browser tests; screenshots alone and backend-only tests do
-not demonstrate event lifecycle correctness.
-
-### P4 — Prove human control and recovery
-
-- [ ] Exercise all S5 binding, replay, concurrency, denial, expiry and restart
-  scenarios against the backend rather than an advisory frontend store.
-- [ ] Exercise S6 with Stop during model work, a running tool, approval waiting,
-  approval resume and final-answer generation. Include human input from another
-  tab and late provider packets after interruption.
-- [ ] Fix and test the build/dev coexistence failure described in S7.
-- [ ] Verify shared transcript, cwd and terminal output stay consistent after
-  reload/reconnect; distinguish this local sharing from user authentication.
-
-Exit: S5–S7 pass, including browser assertions and actual execution counts.
-
-### P5 — Accept usability through repeated live runs
-
-- [ ] Run the acceptance pack below on declared supported provider/model pairs.
-- [ ] Publish a dated evidence record with source and runtime revisions,
-  configuration, repetitions, latency distribution, model requests, backend
-  executions, approval counts, row outcomes and final answers.
-- [ ] Repeat the original reported conversation in the actual console, not
-  only an isolated prompt or a newly created clean session.
-- [ ] Mark individual markers accepted only with linked evidence. Any recurrence
-  of an unexplained loop, raw protocol leak, unauthorized action, or stale
-  running row reopens the relevant marker and blocks overall acceptance.
-
-Exit: all required markers pass. Do not describe the shell as fixed based on
-one live success or an unrelated passing test count.
-
-## Acceptance pack and evidence rules
-
-Use four layers of evidence:
-
-1. **Deterministic backend tests:** actual dispatch, result feedback, loop
-   budgets and authorization. Include a provider fixture that requests `pwd`
-   repeatedly even after receiving its result. Assert backend execution count,
-   model-request count, terminal reason and answer, not just rendered text.
-2. **Adapter conformance:** real provider-shaped tool calls and result messages
-   for OpenRouter, OpenAI Responses and Anthropic, including error and partial
-   response paths. Fixture success establishes protocol handling, not live
-   model reliability.
-3. **Browser tests:** submit, observe individual row completion, approve/deny,
-   interrupt, reconnect and retry. Assert no stale running rows, no technical
-   noise in the default view, and no duplicate frames.
-4. **Live usability runs:** pin provider and model identifiers, include the
-   default selected configuration, and run both a clean session and the
-   reported multi-turn conversation. Report each supported combination
-   separately; unsupported or untested combinations stay explicitly unaccepted.
-
-For each supported provider/model pair, collect at least 20 S1 runs and 20 S2
-runs, split evenly between clean and existing conversations, with at least two
-independent application starts. Report sample count, p50/p95/max latency and
-all failures. Initial release target: at least 95% grounded completion within
-the scenario's budget, zero repeated executions of an unchanged read within
-a turn, zero raw protocol leaks, zero unauthorized actions, and zero stale
-running rows after a terminal event. Every observed failure needs a trace and
-a disposition; the original reported scenario must pass before acceptance.
-
-Include these scenarios in the pack:
-
-- `what is your pwd ?`, then a paraphrase in the same conversation.
-- `Where are we and what files are here?`, with known fixture entries.
-- Human `cd` followed by another `pwd`; ensure the result is current.
-- Tool toggle off/on; inspection works in both, other action policy is intact.
-- Model requests the same read six times; execution is deduplicated and the
-  turn ends within its budget instead of depending on the user pressing Stop.
-- Approve once, duplicate approval, concurrent approval, changed arguments,
-  denied action, expired lease, lost acknowledgement and restart.
-- Provider timeout/error, malformed request, invalid arguments, unavailable
-  tool, multiple requests, repeated SSE frames and disconnect mid-result.
-- Stop in each phase; new chat and terminal input immediately afterwards.
-- A production build followed by dev edits and browser reconnect.
-- Approved HTTPS read, invalid URL, failed fetch and denial; never describe an
-  HTTP reader as an interactive browser or failed content as successfully read.
-
-Store evidence alongside the spec in a dated companion file when produced.
-Until that evidence exists, the roadmap remains open.
-
-## Relevant implementation and related plans
-
-- [Shell example and supported capabilities](../../examples/shell/README.md)
-- [Provider loop and approval endpoints](../../examples/shell/src/routes/+page.v)
-- [Frontend stream handling and cancellation](../../examples/shell/src/routes/+page.svelte)
-- [Tool implementations](../../examples/shell/src/lib/backend/shell_tools.v)
-- [Filesystem console](../../examples/shell/src/lib/backend/shell_fs.v)
-- [Compiled-backend fixture tests](../../examples/shell/tests/agent.integration.mjs)
-- [AI package and provider roadmap](ai.md)
-
-Earlier completed checkboxes in broader AI plans describe implementation
-milestones. They must not be read as acceptance of the shell's current
-end-to-end usability; this document owns that gate.
+Live certification is per provider/model. OpenAI Responses and Anthropic
+fixture conformance does not certify their live behavior. No keys or secret
+prompt/result dumps belong in diagnostic traces. The opt-in acceptance artifacts
+contain only the deliberately supplied test prompts and console fixture results.

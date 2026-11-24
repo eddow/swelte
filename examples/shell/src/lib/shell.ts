@@ -1,9 +1,61 @@
+// Pure tool-row lifecycle helpers (S4/P3): merge one tool row by stable call
+// ID, settle rows only at terminal outcome, settle one row at its completion
+// event. Framework-free so unit tests and the browser harness share them;
+// `+page.svelte` delegates to these (identical behavior).
+export interface ToolRow {
+	id: string
+	label: string
+	chip: string
+	status: 'pending' | 'active' | 'done' | 'failed'
+	detail?: string[]
+}
+
+// Merge one tool row into a tool session (append or update by id).
+export function upsertToolRow(rows: ToolRow[], tool: ToolRow): ToolRow[] {
+	const tools = [...rows]
+	const at = tools.findIndex((t) => t.id === tool.id)
+	if (at >= 0) {
+		const prev = tools[at]!
+		// Never downgrade a settled row: a late progress frame after a
+		// result event keeps the settled status (result-before-progress
+		// safe). A specific label wins over the generic trace placeholder.
+		const keepStatus = prev.status === 'done' || prev.status === 'failed' ? prev.status : tool.status
+		const generic = (s: string) => !s || s === 'tool call' || s === 'Use a console tool'
+		const keepLabel = generic(tool.label) && !generic(prev.label) ? prev.label : tool.label || prev.label
+		tools[at] = { ...prev, ...tool, status: keepStatus, label: keepLabel, detail: [...(prev.detail ?? []), ...(tool.detail ?? [])] }
+	} else {
+		tools.push(tool)
+	}
+	return tools
+}
+
+// Settle only unsettled rows: completed work stays completed when a later
+// model request fails or the user presses Stop. Only active/pending rows flip.
+export function markToolsDoneRows(rows: ToolRow[], ok: boolean): ToolRow[] {
+	return rows.map((t) =>
+		t.status === 'active' || t.status === 'pending'
+			? { ...t, status: ok ? ('done' as const) : ('failed' as const) }
+			: t
+	)
+}
+
+// Settle one row at its actual completion event, by stable call ID — not at
+// turn end. Completed receipts survive later Stop/errors (see above).
+export function settleToolRow(rows: ToolRow[], callId: string, ok: boolean): ToolRow[] {
+	return rows.map((t) =>
+		t.id === callId && (t.status === 'active' || t.status === 'pending')
+			? { ...t, status: ok ? ('done' as const) : ('failed' as const) }
+			: t
+	)
+}
+
 // shell frontend helper: optimistic gating + in-memory approvals + driver lease.
 // Consumer-side only — the authoritative backend allowlist + approval
 // records live in the dispatch table (generated `tools` module) and the
 // driver lease + scrollback live in route KV (`src/routes/+page.v`);
 // this mirrors them for instant UI feedback and offline tests.
 export type ShellCaller = 'human' | 'ai'
+
 
 export interface ShellDecision {
 	allowed: boolean

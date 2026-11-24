@@ -1,7 +1,7 @@
 // `swelte dev`: compile the V backend, own its executable directly,
 // and manage Vite through its Node API. Stop only resources we created.
 import { type ChildProcess, spawn } from 'node:child_process'
-import { existsSync, mkdtempSync, readdirSync, readFileSync, statSync, watch } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, statSync, watch } from 'node:fs'
 import { rm } from 'node:fs/promises'
 import { createServer, type Server } from 'node:net'
 import { join, resolve } from 'node:path'
@@ -381,6 +381,9 @@ export async function runDev(ctx: Ctx): Promise<void> {
 			`server-${generation}${process.platform === 'win32' ? '.exe' : ''}`
 		)
 		await ui!.prepare()
+		// A production build may clean the generated directory while dev lives.
+		// Recreate our executable directory before each compilation.
+		mkdirSync(sessionDir!, { recursive: true })
 		if (stopping) throw new Error('build cancelled')
 		let vArgs: string[] = ['-o', binary, join(genAbs, 'server.v')]
 		const withGlobals = needsGlobals(genAbs)

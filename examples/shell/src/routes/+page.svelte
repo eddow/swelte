@@ -1,6 +1,8 @@
 <script lang="ts">
 import { tick } from 'svelte'
+import { expectedBackendRevision, uiRevision } from 'virtual:shell-revision'
 import { DraftStore, RunTracker, capabilityFailure, createMemorySink } from '@swelte/ai'
+import { markToolsDoneRows, settleToolRow, upsertToolRow } from '#lib/shell.js'
 import { applyTheme, setTheme, storedTheme, type Theme } from '#lib/theme.js'
 import {
 	activeAiConfig,
@@ -22,10 +24,17 @@ import {
 	exec,
 	send_input,
 	shell_release,
+	shell_revision,
 	shell_tool_deny,
 	shell_tool_resume,
 	stream,
 } from '#routes/+page.v'
+
+// S7: backend revision identity for the read-only diagnostics surface.
+// Recorded alongside the frontend bundle hash before any acceptance run.
+let backendRev = $state('')
+let bootId = $state('')
+let revMismatch = $state(false)
 
 import AiAnswer, { type AiThinkingStep, type AiToolCall } from '#lib/ai-answer.svelte'
 
@@ -63,6 +72,7 @@ let turnSeq = $state(1)
 let verdict = $state('')
 let note = $state('')
 let deciding = $state(false)
+let decisionGeneration = 0
 let termLines: TermLine[] = $state([])
 let messages: ChatMsg[] = $state([])
 let approvals: PendingApproval[] = $state([])
@@ -254,6 +264,16 @@ function showError(e: unknown) {
 	note = e instanceof Error ? e.message : String(e)
 }
 
+// S7: compare the live backend revision against the recorded one. Called on
+// mount (records the pair for this session) and before acceptance runs; a
+// changed boot id after the same revision means a restart, a changed
+// revision means a stale bundle check.
+function checkRevision(seen: { backend_revision: string; boot_id: string }) {
+ backendRev = seen.backend_revision
+ bootId = seen.boot_id
+ revMismatch = seen.backend_revision !== expectedBackendRevision
+}
+
 function isNearBottom(el: HTMLElement | null) {
 	if (!el) return true
 	return el.scrollHeight - el.scrollTop - el.clientHeight < 80
@@ -279,10 +299,10 @@ function pushTerm(prompt: string, body: string) {
 	followTerm()
 }
 
-function paintExec(cmd: string, output: string) {
+function paintExec(cmd: string, output: string, seq?: number) {
 	// Single paint for one exec frame, optimistic or echoed — first call
 	// wins, the twin is dropped. Commands and output always stay paired.
-	const frame = `exec\n${cmd}\n${output}`
+	const frame = seq ? `seq:${seq}` : `exec\n${cmd}\n${output}`
 	if (seenFrames.has(frame)) return
 	seenFrames.add(frame)
 	lineSeq += 1
@@ -291,25 +311,33 @@ function paintExec(cmd: string, output: string) {
 }
 
 function pushLine(line: string) {
+ let seq: number | undefined
+ if (line.startsWith('frame\n')) {
+  const end = line.indexOf('\n', 6)
+  if (end < 0) return
+  seq = Number(line.slice(6, end))
+  line = line.slice(end + 1)
+ }
 	// Room protocol: `exec\n<cmd>\n<output>` or `chat\n<msg>`. The
 	// terminal renders exec frames only — chat echoes stay in the chat
 	// pane. Unframed (pre-v2) tails are dropped, never sniffed.
 	const nl = line.indexOf('\n')
 	const kind = nl < 0 ? '' : line.slice(0, nl)
 	const rest = nl < 0 ? '' : line.slice(nl + 1)
+	if (kind === 'chat' && rest === 'driver → human (human-input)' && (streaming || parkedDrive)) { interruptLocally(); return }
 	if (kind !== 'exec' && kind !== 'stdin') return
 	if (kind === 'stdin') {
 		// Keystroke echo: someone's stdin, painted dim — never a command.
-		paintStdin(rest)
+		paintStdin(rest, seq)
 		return
 	}
 	const sep = rest.indexOf('\n')
-	paintExec(sep < 0 ? rest : rest.slice(0, sep), sep < 0 ? '' : rest.slice(sep + 1))
+	paintExec(sep < 0 ? rest : rest.slice(0, sep), sep < 0 ? '' : rest.slice(sep + 1), seq)
 }
 
 // Single paint for a stdin echo line — optimistic or echoed, first wins.
-function paintStdin(keys: string) {
-	const frame = `stdin\n${keys}`
+function paintStdin(keys: string, seq?: number) {
+	const frame = seq ? `seq:${seq}` : `stdin\n${keys}`
 	if (seenFrames.has(frame)) return
 	seenFrames.add(frame)
 	lineSeq += 1
@@ -330,27 +358,26 @@ function resolveMsg(id: string, patch: Partial<ChatMsg>) {
 }
 
 // Merge one tool row into a message's tool session (append or update by id).
+// Delegates to the pure `upsertToolRow` helper (shared with tests).
 function upsertTool(id: string, tool: AiToolCall): AiToolCall[] {
 	const msg = messages.find((m) => m.id === id)
-	const tools = [...(msg?.tools ?? [])]
-	const at = tools.findIndex((t) => t.id === tool.id)
-	if (at >= 0) {
-		const prev = tools[at]!
-		tools[at] = { ...prev, ...tool, detail: [...(prev.detail ?? []), ...(tool.detail ?? [])] }
-	} else {
-		tools.push(tool)
-	}
-	return tools
+	return upsertToolRow([...(msg?.tools ?? [])], tool as never) as never
 }
 
-// Settle every tool row when the run ends (done, or failed on error).
+// Settle only unsettled rows: completed work stays completed when a later
+// model request fails or the user presses Stop. Successful calls remain
+// successful (P3/S4); only active/pending rows flip on terminal outcome.
 function markToolsDone(id: string, ok: boolean): AiToolCall[] {
 	const msg = messages.find((m) => m.id === id)
-	return (msg?.tools ?? []).map((t) =>
-		t.status === 'active' || t.status === 'pending'
-			? { ...t, status: ok ? ('done' as const) : ('failed' as const) }
-			: t
-	)
+	return markToolsDoneRows([...(msg?.tools ?? [])], ok) as never
+}
+
+// P3: settle one row at its actual completion event, by stable call ID —
+// not at turn end. A success/failure event settles its row within one frame;
+// completed receipts survive later Stop/errors (markToolsDone guards that).
+function settleTool(msgId: string, callId: string, ok: boolean): AiToolCall[] {
+	const msg = messages.find((m) => m.id === msgId)
+	return settleToolRow([...(msg?.tools ?? [])], callId, ok) as never
 }
 
 async function runHumanCommand(raw: string) {
@@ -362,7 +389,7 @@ async function runHumanCommand(raw: string) {
 	execRunning = true
 	try {
 		const res = await exec({ cmd, op_id: nextOp(), caller: 'human' })
-		paintExec(cmd, res.output)
+		paintExec(cmd, res.output, res.seq)
 		sink.record({
 			runId: 'run-shell',
 			turnId: activeTurn,
@@ -384,8 +411,8 @@ async function sendKeystroke(raw: string) {
 	if (!keys) return
 	termKeys = ''
 	try {
-		await send_input({ keys })
-		paintStdin(keys)
+		const receipt = await send_input({ keys })
+		paintStdin(keys, Number(receipt.split(':')[1]) || undefined)
 	} catch (e) {
 		showError(e)
 	}
@@ -515,6 +542,11 @@ async function sendChat(continuation = '') {
 						verdict = ''
 					}
 				} else if (event === 'tool.progress') {
+					// P3: rows track the execution lifecycle per call. A frame
+					// with a tool name starts/updates its row `active`; the
+					// label-only `Thinking` frame is model progress, never a
+					// tool row (P0). Completion arrives via `shell.trace`
+					// below — never at turn end.
 					const p = parsed.payload ?? {}
 					const progressTool = typeof p.tool === 'string' ? p.tool : p.tool?.name
 					if (!progressTool) {
@@ -532,47 +564,65 @@ async function sendChat(continuation = '') {
 							label: p.label ?? progressTool ?? 'tool call',
 							chip: 'console',
 							status: 'active',
-							detail: p.detail ? [p.detail] : [],
+							detail: [],
 						}),
 					})
 					followChat()
-				} else if (event === 'approval.request') {
-					const p = parsed.payload ?? {}
-					const toolName = typeof p.tool === 'string' ? p.tool : p.tool?.name
-					// Parked driving call carries the full tool triple, so the
-					// human decision can resume it (approve) or drop it (deny).
-					// Mirror it into the approvals queue too — the queue is the
-					// clickable surface (`decide`), the thread row is narrative.
-					if (
-						p.op_id &&
-						toolName &&
-						p.args &&
-						p.holder &&
-						!approvals.some((a) => a.opId === p.op_id)
-					) {
-						parkedDrive = { opId: p.op_id, tool: toolName, args: p.args, holder: p.holder }
-						approvals = [
-							...approvals,
-							{
-								opId: p.op_id,
-								cmd: describeToolArgs(p.args),
-								status: 'pending',
-								note: p.label ?? 'Approval required',
-							},
-						]
-					} else if (p.op_id && toolName && p.args && p.holder) {
-						parkedDrive = { opId: p.op_id, tool: toolName, args: p.args, holder: p.holder }
+				} else if (event === 'shell.trace') {
+					// Execution-lifecycle channel, result-before-progress
+					// safe: tool.start creates the row when the progress
+					// frame has not arrived yet; tool.result settles the
+					// same callId. Failed arrives typed, never sniffed.
+					const p = parsed.payload as unknown as {
+						event?: string
+						call_id?: string
+						reason?: string
+						failed?: boolean
+						label?: string
+						tool?: string
+						size?: number
 					}
-					resolveMsg(waitId, {
-						tools: upsertTool(waitId, {
-							id: p.op_id ?? p.callId ?? `approval-${seq ?? Date.now()}`,
-							label: p.label ?? 'Approval requested',
-							chip: 'approval',
-							status: 'pending',
-							detail: p.detail ? [p.detail] : [],
-						}),
-					})
-					followChat()
+					if ((p.event === 'tool.start' || p.event === 'tool.result') && p.call_id) {
+						resolveMsg(waitId, {
+							thinking: [
+								{ label: 'Contacting provider', status: 'done' },
+								{ label: p.label ?? p.tool ?? 'Running tool', status: 'active' },
+							],
+							tools: upsertTool(waitId, {
+								id: p.call_id,
+								label: messages.find(m => m.id === waitId)?.tools?.find(t => t.id === p.call_id)?.label ?? p.label ?? p.tool ?? 'tool call',
+								chip: 'console',
+								status: 'active',
+								detail: [],
+							}),
+						})
+					}
+					if (p.event === 'tool.result' && p.call_id) {
+						resolveMsg(waitId, { tools: settleTool(waitId, p.call_id, !p.failed) })
+						followChat()
+					}
+					// `tool.reused` needs no row change: the original row is
+					// already done, and reuse creates no new row by design.
+				} else if (event === 'approval.request') {
+						// Parked driving call: mirror into the queue (clickable) + thread row.
+						const ap = parsed.payload ?? {}
+						const aname = typeof ap.tool === 'string' ? ap.tool : ap.tool?.name
+						if (ap.op_id && aname && ap.args && ap.holder && !approvals.some((a) => a.opId === ap.op_id)) {
+							parkedDrive = { opId: ap.op_id, tool: aname, args: ap.args, holder: ap.holder }
+							approvals = [...approvals, { opId: ap.op_id, cmd: describeToolArgs(ap.args), status: 'pending', note: ap.label ?? 'Approval required' }]
+						} else if (ap.op_id && aname && ap.args && ap.holder) {
+							parkedDrive = { opId: ap.op_id, tool: aname, args: ap.args, holder: ap.holder }
+						}
+						resolveMsg(waitId, {
+							tools: upsertTool(waitId, {
+								id: ap.op_id ?? ap.callId ?? 0,
+								label: ap.label ?? 'Approval requested',
+								chip: 'approval',
+								status: 'pending',
+								detail: ap.detail ? [ap.detail] : [],
+							}),
+						})
+						followChat()
 				} else if (event === 'terminal') {
 					gotTerminal = true
 					const reason = parsed.payload?.reason ?? 'completed'
@@ -610,30 +660,47 @@ async function sendChat(continuation = '') {
 		verdict = capabilityFailure({ input: ['video'], output: ['text'] }, [])
 		status = 'done'
 	} catch (e) {
-		if (controller.signal.aborted) { resolveMsg(waitId, { body: assembled || 'Interrupted', pending: false, thinkingActive: false }); return }
+		// P1: settle BOTH the message and its tool rows on abort/failure.
+		// An aborted request must leave zero `active` rows: the bubble text
+		// resolves AND every unsettled row flips failed.
+		if (controller.signal.aborted) {
+			resolveMsg(waitId, {
+				body: assembled || 'Interrupted',
+				pending: false,
+				thinkingActive: false,
+				tools: markToolsDone(waitId, false),
+			})
+			return
+		}
 		// Settle the transient bubble too — a failed turn must not hang
 		// in its dimmed state; keep partial text when the stream died mid-run.
-		resolveMsg(waitId, { body: assembled || 'send failed — try again', pending: false })
+		resolveMsg(waitId, { body: assembled || 'send failed — try again', pending: false, thinkingActive: false, tools: markToolsDone(waitId, false) })
 		showError(e)
 		status = 'error'
 	} finally {
-		streaming = false
-		if (chatAbort === controller) chatAbort = null
+		if (chatAbort === controller) { streaming = false; chatAbort = null }
 	}
 }
 
-async function interrupt() {
+function interruptLocally() {
+	decisionGeneration++
+	deciding = false
 	chatAbort?.abort()
 	// Stop press while the AI drives: release the lease (backend flips to
-	// `human`), drop any parked call, and bump the turn so late output
-	// rejects. Spec §3 preempt.
-	try {
-		await shell_release({ holder: parkedDrive?.holder ?? '' })
-	} catch {
-		/* no live lease — the turn bump below still rejects stale output */
-	}
+	// `human`), drop any parked call, settle every active row on the live
+	// bubble (P1: zero `active` rows may survive a Stop), and bump the turn
+	// so late output rejects. Spec §3 preempt.
 	if (parkedDrive) {
 		approvals = approvals.map(a => a.opId === parkedDrive?.opId && a.status === 'pending' ? { ...a, status: 'denied', note: 'Interrupted by human' } : a)
+	}
+	// P1: settle active rows on EVERY open assistant bubble of this turn —
+	// the stream catch settles the waitId bubble, but bubbles from earlier
+	// requests in the same turn (or a bubble whose request already detached)
+	// would otherwise keep `running` rows forever.
+	for (const m of messages) {
+		if (m.role === 'assistant' && m.meta === activeTurn) {
+			resolveMsg(m.id, { tools: markToolsDone(m.id, false) })
+		}
 	}
 	parkedDrive = null
 	driveScope = false
@@ -651,6 +718,14 @@ async function interrupt() {
 	activeTurn = `turn-${turnSeq}`
 	pushMsg('assistant', `interrupted — continuing in ${activeTurn}; stale output rejected.`)
 	status = 'idle'
+	streaming = false
+	chatAbort = null
+
+}
+
+async function interrupt() {
+ interruptLocally()
+ try { await shell_release({ holder: '' }) } catch { /* local UI has already settled */ }
 }
 
 function describeToolArgs(args: string): string {
@@ -664,10 +739,13 @@ async function decide(opId: string, allow: boolean) {
  const item = approvals.find(a => a.opId === opId)
  if (!item || item.status !== 'pending' || deciding || !parkedDrive || parkedDrive.opId !== opId) return
  const parked = parkedDrive
+ const decisionTurn = activeTurn
+ const generation = ++decisionGeneration
  deciding = true
  try {
   const args = { op_id: opId, holder: parked.holder, tool: parked.tool, args_json: parked.args }
   const res = allow ? await shell_tool_resume(args) : await shell_tool_deny(args)
+  if (decisionTurn !== activeTurn || generation !== decisionGeneration) return
   messages = messages.map(m => ({ ...m, tools: m.tools?.map(t => t.id === opId ? { ...t, status: allow ? 'done' as const : 'failed' as const } : t) }))
   item.status = allow ? 'approved' : 'denied'
   item.note = allow ? 'Executed; continuing with the tool result' : 'Denied by human'
@@ -680,23 +758,24 @@ async function decide(opId: string, allow: boolean) {
   item.note = e instanceof Error ? e.message : String(e)
   approvals = [...approvals]
   showError(e)
- } finally { deciding = false }
+ } finally { if (generation === decisionGeneration) deciding = false }
 }
 // The single output path, started once on mount: subscribe to the backend
 // room over SSE (scrollback tail first, then live lines). Every publish()
 // from any RPC lands here exactly once — the RPC calls above paint
 // optimistically with their seq, and those echoes are dropped in pushLine.
+let watchingShell = true
 async function watchShell() {
-	try {
-		for await (const line of stream({})) {
-			if (line === '__ping__') continue
-			pushLine(line)
-			await tick()
-		}
-	} catch (e) {
-		live = false
-		showError(e)
-	}
+ while (watchingShell) {
+  try {
+   live = true
+   for await (const line of stream({})) {
+    if (!watchingShell) return
+    if (line !== '__ping__') { pushLine(line); await tick() }
+   }
+  } catch { live = false }
+  if (watchingShell) await new Promise(resolve => setTimeout(resolve, 500))
+ }
 }
 
 // Recent user prompts (newest first, capped) for the history picker —
@@ -737,7 +816,7 @@ function composerKeydown(e: KeyboardEvent) {
 // idle + empty runs `help`; running + non-empty forwards a stdin keystroke;
 // running + empty is disabled.
 let submitDisabled = $derived(
-	termKeys.trim().length === 0 ? execRunning : !execRunning && streaming
+	execRunning && termKeys.trim().length === 0
 )
 
 let pending = $derived(approvals.filter((a) => a.status === 'pending'))
@@ -775,6 +854,18 @@ onMount(() => {
 		})
 	live = true
 	void watchShell()
+	// S7: record the backend revision pair for this session; a changed boot
+	// or revision on a later poll surfaces visibly instead of silently
+	// retaining an apparently current backend.
+	let disposed = false
+	const refreshRevision = async () => {
+		try { const seen = await shell_revision({ dummy: '' }); if (!disposed) checkRevision(seen) }
+			catch { if (!disposed) revMismatch = true }
+	}
+	void refreshRevision()
+	const revisionTimer = setInterval(refreshRevision, 1000)
+	return () => { disposed = true; watchingShell = false; clearInterval(revisionTimer) }
+
 })
 
 function toggleTheme(next: boolean) {
@@ -797,6 +888,17 @@ function toggleTheme(next: boolean) {
 			<div class="badge badge-outline gap-2" title="run status">
 				<span class={`status-dot status-${status}`}></span>
 				{status}
+			</div>
+			<div
+				class="badge badge-outline gap-2"
+				title={backendRev ? `backend ${backendRev} · boot ${bootId}` : 'backend revision unknown'}
+				data-testid="revision"
+				data-backend-rev={backendRev}
+				data-ui-rev={uiRevision}
+				data-expected-backend-rev={expectedBackendRevision}
+				data-boot-id={bootId}
+			>
+				{backendRev ? `${backendRev.slice(0, 12)}${revMismatch ? ' · STALE' : ''}` : 'rev …'}
 			</div>
 			<label class="swap swap-rotate btn btn-ghost btn-circle btn-sm" aria-label="Toggle dark mode">
 				<input

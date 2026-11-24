@@ -26,6 +26,7 @@ pub const shell_scroll_cap = 200
 pub const shell_stdin_prefix = 'shell:stdin:'
 pub const shell_stdin_seq_key = 'shell:stdin:seq'
 pub const shell_stdin_head_key = 'shell:stdin:head'
+pub const shell_boot_key = 'shell:boot'
 pub const shell_stdin_scope_prefix = 'shell:stdin:scope:'
 // Turn-scoped lease: ninety seconds covers a model wait + human approve.
 pub const shell_driver_ttl_s = 90
@@ -73,17 +74,19 @@ fn shell_run_allowlisted(cmd string) string {
 
 // Publish one scrollback frame over KV + room (mirrors the route `publish`).
 fn shell_publish(line string) int {
+	shell_event_lock()
+	defer { shell_event_unlock() }
 	if (kv_get(shell_version_key) or { '' }) != shell_room_version {
 		kv_set(shell_version_key, shell_room_version) or {}
 		kv_set(shell_seq_key, '0') or {}
 	}
 	mut seq := (kv_get(shell_seq_key) or { '0' }).int() + 1
 	kv_set(shell_seq_key, seq.str()) or {}
-	kv_set(shell_line_prefix + seq.str(), line) or {}
+	kv_set(shell_line_prefix + seq.str(), 'frame\n' + seq.str() + '\n' + line) or {}
 	if seq > shell_scroll_cap {
 		kv_del(shell_line_prefix + (seq - shell_scroll_cap).str()) or {}
 	}
-	emit('shell', line)
+	emit('shell', 'frame\n' + seq.str() + '\n' + line)
 	return seq
 }
 
@@ -535,7 +538,7 @@ pub fn tool_shell_read_output(args ShellReadArgs) !ShellReadRow {
 		for i <= last {
 			line := kv_get(shell_line_prefix + i.str()) or { '' }
 			if line != '' {
-				kind, rest := shell_split_frame(line)
+				kind, rest := shell_split_frame(shell_unwrap_frame(line))
 				if kind == 'exec' {
 					cmd, output := shell_split_frame(rest)
 					lines << shell_frame_short('exec', cmd, output)
@@ -586,13 +589,17 @@ pub fn tool_shell_browse(args ShellBrowseArgs) !ShellBrowseRow {
 		return error('shell: driver lease not held')
 	}
 	parsed := urllib.parse(args.url)!
-	if parsed.scheme != 'https' || parsed.host == '' || parsed.user != none {
+	// urllib supplies an empty Userinfo even without credentials. Inspect the
+	// authority separator instead; reject empty userinfo (https://@host) too.
+	authority := args.url.all_after('://').all_before('/').all_before('?').all_before('#')
+	if parsed.scheme != 'https' || parsed.host == '' || authority.contains('@') {
 		return error('browse requires an HTTPS URL without credentials')
 	}
 	response := http.fetch(
 		url:                  args.url
+		enable_http2:         false
 		allow_redirect:       false
-		max_retries:          0
+		max_retries:          1
 		read_timeout:         10 * time.second
 		stop_receiving_limit: 65536
 	)!
@@ -638,4 +645,21 @@ pub fn tool_shell_query(args ShellQueryArgs) !ShellQueryRow {
 	return ShellQueryRow{
 		output: shell_fs_run(args.cmd)
 	}
+}
+
+__global shell_event_mutex = &sync.Mutex{}
+pub fn shell_event_lock() {
+	shell_event_mutex.lock()
+}
+
+pub fn shell_event_unlock() {
+	shell_event_mutex.unlock()
+}
+
+// Legacy v2 frames remain readable; new frames have stable sequence identity.
+pub fn shell_unwrap_frame(line string) string {
+	if !line.starts_with('frame\n') { return line }
+	rest := line[6..]
+	index := rest.index('\n') or { return '' }
+	return rest[index + 1..]
 }

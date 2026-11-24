@@ -8,9 +8,12 @@
     "build": "swelte build",
     "preview": "swelte preview",
     "check": "swelte check",
-    "test:integration": "npm run build && node --test tests/agent.integration.mjs",
+    "test:integration": "npm run build && npm run test:regression",
     "pretest": "tsc -p tsconfig.test.json",
-    "test": "node --test --test-reporter=spec \"dist-test/**/*.test.js\""
+    "test": "node --test --test-reporter=spec \"dist-test/**/*.test.js\"",
+    "test:regression": "node --test --test-concurrency=1 tests/agent.integration.mjs tests/browser.cdp.mjs tests/browser.lifecycle.mjs tests/recovery.integration.mjs tests/select.integration.mjs",
+    "test:reload": "node tests/dev-reload.mjs",
+    "test:live": "node tests/live-usability.mjs && node tests/browser.live.mjs"
   },
   "dependencies": {
     "@docvia/markdown": "^3.0.0",

@@ -4,7 +4,7 @@ import { DraftStore } from '@swelte/ai'
 import { RunTracker } from '@swelte/ai'
 import { createSseParser, decodeSseEvent, encodeSseEvent } from '@swelte/ai'
 import { createMemorySink } from '@swelte/ai'
-import { ApprovalStore, authorizeShellCall, driverHolds, parseDriver, runAllowlisted, runApproved } from '../src/lib/shell.js'
+import { ApprovalStore, authorizeShellCall, driverHolds, markToolsDoneRows, parseDriver, runAllowlisted, runApproved, settleToolRow, upsertToolRow } from '../src/lib/shell.js'
 import {
 	activeAiConfig,
 	createAiConfig,
@@ -141,6 +141,34 @@ describe('shell example: one backend shell shared by chat + terminal', () => {
 		push(a.slice(0, 12))
 		push(a.slice(12) + b)
 		assert.deepEqual(seen, ['text.delta', 'terminal'])
+	})
+
+	it('S4/P3 rows: upsert/settle/markDone share the rendered lifecycle (no downgrade, settled survives)', () => {
+		// The page delegates to these helpers; proving them here covers the
+		// DOM rows by construction (same code path, same ids).
+		let rows = upsertToolRow([], { id: 'c1', label: 'Read working directory', chip: 'console', status: 'active' })
+		rows = upsertToolRow(rows, { id: 'c2', label: 'List project files', chip: 'console', status: 'active' })
+		assert.equal(new Set(rows.map((r) => r.id)).size, 2, 'distinct call ids stay distinct')
+		// Result-before-progress safe: a late active progress frame must not
+		// downgrade a settled row; a specific label wins over the placeholder.
+		rows = settleToolRow(rows, 'c1', true)
+		rows = upsertToolRow(rows, { id: 'c1', label: 'Use a console tool', chip: 'console', status: 'active' })
+		assert.equal(rows.find((r) => r.id === 'c1')?.status, 'done')
+		assert.equal(rows.find((r) => r.id === 'c1')?.label, 'Read working directory')
+		// Terminal outcome settles only unsettled rows: done survives Stop/failure.
+		rows = markToolsDoneRows(rows, false)
+		assert.equal(rows.find((r) => r.id === 'c1')?.status, 'done', 'settled stays settled')
+		assert.equal(rows.find((r) => r.id === 'c2')?.status, 'failed', 'active flips on failure')
+		// Pending approval rows are distinct and survive a completed sibling.
+		rows = upsertToolRow(rows, { id: 'op-1', label: 'Run a console command', chip: 'approval', status: 'pending' })
+		rows = markToolsDoneRows(rows, true)
+		assert.equal(rows.find((r) => r.id === 'op-1')?.status, 'done')
+	})
+
+	it('S4/P3: repeated progress delivery updates the same row (no duplicates)', () => {
+		let rows = upsertToolRow([], { id: 'c1', label: 'Read working directory', chip: 'console', status: 'active' })
+		for (let i = 0; i < 5; i++) rows = upsertToolRow(rows, { id: 'c1', label: 'Read working directory', chip: 'console', status: 'active' })
+		assert.equal(rows.length, 1, 'replay collapses to one row')
 	})
 
 	it('AI configs: defaults cover every implemented adapter, none carries keys', () => {

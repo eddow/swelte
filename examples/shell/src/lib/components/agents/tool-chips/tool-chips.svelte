@@ -81,7 +81,7 @@ function toggleRow(label: string) {
 				{#each steps as row, index (row.id ?? index)}
 					{@const rowKey = row.id ?? String(index)}
 					{@const rowOpen = openRows.has(rowKey)}
-					<div class="card-fade-up" style="animation-delay: calc(var(--stagger-step) * {index});">
+					<div data-tool-call-id={row.id} data-tool-state={row.status} class="card-fade-up" style="animation-delay: calc(var(--stagger-step) * {index});">
 						<button
 							type="button"
 							aria-expanded={rowOpen}
