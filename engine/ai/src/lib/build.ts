@@ -24,7 +24,7 @@ export interface ToolManifest {
 	tools: ToolManifestEntry[]
 }
 
-/** V wire types the tool projection supports (docs/types.md surface:
+/** V wire types the tool projection supports (openspec/specs/type-projection/reference.md surface:
  *  string/bool/ints/floats, []T, []u8→blob, map[string]T→record, time.Time→epoch,
  *  ?T optional. `json.Any`/`unknown` and named non-struct types fail. */
 function fieldSchema(

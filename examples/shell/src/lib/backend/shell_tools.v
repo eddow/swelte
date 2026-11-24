@@ -1,5 +1,5 @@
 // Shell control primitives + reporting/driver tools for the agentic shell
-// (spec `docs/specs/agentic-shell.md`). `module backend`: the tools plugin
+// (spec `openspec/specs/shell-console/spec.md`). `module backend`: the tools plugin
 // claims `@[tool]` fns here; side-effect tools dispatch through the
 // generated `tools` module approval table. Human-path RPCs live in
 // `src/routes/+page.v` (module shell) and use `backend.kv_*` for the same

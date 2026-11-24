@@ -15,7 +15,7 @@ export function schemaId(id: SchemaIdentity): string {
 }
 
 // Supported V wire types: the subset that generates versioned JSON Schema
-// and TS representations (docs/types.md projection surface).
+// and TS representations (openspec/specs/type-projection/reference.md projection surface).
 export type WireScalar = 'string' | 'boolean' | 'number' | 'blob' | 'epoch'
 export type WireFieldType =
 	| { scalar: WireScalar; nullable: boolean; optional: boolean }

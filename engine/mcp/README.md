@@ -63,6 +63,6 @@ not line-level.
 
 ## Design docs
 
-- [MCP](https://github.com/eddow/swelte/blob/master/docs/mcp.md) — MCP server (built)
-- [RPC](https://github.com/eddow/swelte/blob/master/docs/rpc.md) — `.v` imports, attributes, transport (built)
-- [Types](https://github.com/eddow/swelte/blob/master/docs/types.md) — V → TS projection (built)
+- [MCP](https://github.com/eddow/swelte/blob/master/openspec/specs/agent-tooling/reference.md) — MCP server (built)
+- [RPC](https://github.com/eddow/swelte/blob/master/openspec/specs/rpc/reference.md) — `.v` imports, attributes, transport (built)
+- [Types](https://github.com/eddow/swelte/blob/master/openspec/specs/type-projection/reference.md) — V → TS projection (built)

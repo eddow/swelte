@@ -1,5 +1,5 @@
 // Sandboxed filesystem shell for the agentic shell example
-// (`docs/specs/agentic-shell.md`). `module backend`: same module as
+// (`openspec/specs/shell-console/spec.md`). `module backend`: same module as
 // `shell_tools.v`, so the route (`+page.v`, module shell) and the AI tool
 // (`tool_shell_exec`) share one real implementation — no shell-out, no
 // subprocess, only native `os` reads + a KV-tracked cwd jailed to the

@@ -57,17 +57,17 @@ only: no async render, no streaming.
   shim header).
 * **Cost: ~1MB on top of the binary, ~ms render budget** — measured: 5.1MB → 6.1MB,
   `renderRoute` ~0.012ms in-process, browser `GET /` ~3–12ms wall,
-  16MB cap ≈ 200× the bundle. Full numbers in [docs/ssr.md](https://github.com/eddow/swelte/blob/master/docs/ssr.md).
+  16MB cap ≈ 200× the bundle. Full numbers in [openspec/specs/ssr/reference.md](https://github.com/eddow/swelte/blob/master/openspec/specs/ssr/reference.md).
 
 Guard failures retain the existing shell/error fallback by default.
 `SWELTE_SSR_STRICT=1` rejects unexpected renderer fallback with HTTP 500.
 Native diagnostics report route and reason (timeout, memory, output limit,
 compile/load or exception) without props or exception bodies. Head and body
 output grow within explicit limits; overflow fails rather than dropping head
-metadata. See `docs/ssr.md` for the contract and native acceptance tests.
+metadata. See `openspec/specs/ssr/reference.md` for the contract and native acceptance tests.
 
 ## Further reading
 
-* [docs/ssr.md](https://github.com/eddow/swelte/blob/master/docs/ssr.md) — the built record: ownership, request path,
+* [openspec/specs/ssr/reference.md](https://github.com/eddow/swelte/blob/master/openspec/specs/ssr/reference.md) — the built record: ownership, request path,
   `@[load]` cascade, measured budgets, gate halves.
 * `c/README.md` — vendored QuickJS version, file list, build.

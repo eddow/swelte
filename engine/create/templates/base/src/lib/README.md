@@ -7,4 +7,4 @@
 //
 // Svelte components and TypeScript helpers live here too. Export the public
 // API from index.ts. `swelte package` builds this directory into package/;
-// src/routes stays local application/demo code. See `docs/libraries.md`.
+// src/routes stays local application/demo code. See `openspec/specs/library-packaging/reference.md`.

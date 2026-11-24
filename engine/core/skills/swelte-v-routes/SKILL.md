@@ -92,7 +92,7 @@ For channels on bundled V 0.5.2, bind array payloads before sending inside
 send an empty array. A `select` with `else` does not reliably observe closed
 receives. Use an explicit buffered completion notification when polling.
 Stream callbacks should capture owned heap resources rather than request
-contexts whose lifetime ends at takeover. See `docs/lifecycle.md` for drain,
+contexts whose lifetime ends at takeover. See `openspec/specs/native-lifecycle/reference.md` for drain,
 resource ownership, private reporting and room cleanup.
 
 ## Type table (V → TS)
@@ -116,8 +116,8 @@ Unknown `@[rpc]` fn → 404 + `available` fns. Missing `"fn"` → 400. Bad JSON 
 
 Stable — no spec dependency:
 
-- `docs/rpc.md` — imports, attributes, transport (source of truth)
-- `docs/types.md` — V → TS projection, codegen
-- `docs/errors.md` — error envelope, SPA-first rule
-- `docs/forms.md` — verbs + `?q` no-JS 303, `fail`-lite, `deserialize`, `use:enhance` / `applyAction` cycle
-- `docs/config.md` — routing knobs, `src/app.v` lifecycle, `+route.svelte` nesting, per-route types, `#app/*`, locals/cookies, `HEAD`/`OPTIONS`, no-JS, per-route `ssr=false`-lite (`export const ssr = false` → `Hand` skips rendering, serves SPA shell)
+- `openspec/specs/rpc/reference.md` — imports, attributes, transport (source of truth)
+- `openspec/specs/type-projection/reference.md` — V → TS projection, codegen
+- `openspec/specs/errors/reference.md` — error envelope, SPA-first rule
+- `openspec/specs/forms/reference.md` — verbs + `?q` no-JS 303, `fail`-lite, `deserialize`, `use:enhance` / `applyAction` cycle
+- `openspec/specs/configuration/reference.md` — routing knobs, `src/app.v` lifecycle, `+route.svelte` nesting, per-route types, `#app/*`, locals/cookies, `HEAD`/`OPTIONS`, no-JS, per-route `ssr=false`-lite (`export const ssr = false` → `Hand` skips rendering, serves SPA shell)

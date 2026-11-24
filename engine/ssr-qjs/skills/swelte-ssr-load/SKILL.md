@@ -64,7 +64,7 @@ same selection. Boundaries retain wrappers strictly above their directory,
 using successful parent load data, and replace the local wrapper/page. A broken
 boundary or retained wrapper falls back to the next ancestor. SSR records the
 chosen boundary for hydration. Unknown URLs select matching ungrouped scopes,
-then root. JSON/API errors retain their envelope. See `docs/ssr.md`.
+then root. JSON/API errors retain their envelope. See `openspec/specs/ssr/reference.md`.
 
 ## Prerender
 
@@ -74,12 +74,12 @@ leaf flags override them. The native crawler skips redirects/errors/SPA shells,
 keeps `/` dynamic and only prunes artifacts recorded in its ownership manifest.
 Assert translated body/head and hydrate actual static files; HTTP 200 alone
 can be an unrendered shell. Canonicals need the application's public origin,
-while `$app/state.url` rebases to the browser hosting URL. See `docs/config.md`.
+while `$app/state.url` rebases to the browser hosting URL. See `openspec/specs/configuration/reference.md`.
 
 Native ISR (`swelte.isr`) caches only public anonymous queryless HTML GETs.
 Background loopback rendering uses ordinary guards/loads, publishes only complete
 successful SSR, and atomically replaces cached HTML. Stale/error responses retain
-the prior entry; credentials/data requests bypass caching. See `docs/config.md`.
+the prior entry; credentials/data requests bypass caching. See `openspec/specs/configuration/reference.md`.
 `#app/images` resolves generated build-time image metadata in both SSR and client.
 
 ## Installed UI dependencies
@@ -108,10 +108,10 @@ package installation does not make an asynchronous or Node backend QJS-safe.
 
 Stable — all built including per-route `ssr=false`-lite:
 
-- `docs/ssr.md` — ownership, request path, cascade, contract, budgets, gate (source of truth)
-- `docs/internal/load.md` — cascade design rationale (ephemeral; contract lives in `rpc.md`)
-- `docs/rpc.md` — `@[load]` attribute rule
-- `docs/config.md` — per-route `ssr=false`-lite (`export const ssr = false` → manifest flag → `Hand` skips rendering, serves SPA shell; async universal `load` stays client-only)
-- `docs/coming-from-sveltekit.md` — `ssr=false`-lite rendering row
+- `openspec/specs/ssr/reference.md` — ownership, request path, cascade, contract, budgets, gate (source of truth)
+- `openspec/specs/page-lifecycle/load-design.md` — cascade design rationale (ephemeral; contract lives in `rpc.md`)
+- `openspec/specs/rpc/reference.md` — `@[load]` attribute rule
+- `openspec/specs/configuration/reference.md` — per-route `ssr=false`-lite (`export const ssr = false` → manifest flag → `Hand` skips rendering, serves SPA shell; async universal `load` stays client-only)
+- `openspec/specs/sveltekit-compatibility/reference.md` — `ssr=false`-lite rendering row
 
-- `docs/ssr.md` — ownership, request path, cascade, contract, budgets, and verified SSR behavior
+- `openspec/specs/ssr/reference.md` — ownership, request path, cascade, contract, budgets, and verified SSR behavior

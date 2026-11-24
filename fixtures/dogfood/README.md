@@ -22,7 +22,7 @@ repository's product library. The command prints tested toolchain versions;
 Vite 6 remains the supported pilot baseline, without claiming Vite 8 support.
 
 The synthetic `sample-lib/src/lib` follows the library schema in
-`docs/libraries.md`: real `svelte-package` output and declarations, raw native V exports, and author-only
+`openspec/specs/library-packaging/reference.md`: real `svelte-package` output and declarations, raw native V exports, and author-only
 `src/routes` excluded from the tarball.
 
 For editor type resolution in the checked-in fixture, run
@@ -54,7 +54,7 @@ that `$app/state.url` uses that host's origin.
 
 `--keep` retains the generated scratch project for debugging. To measure that
 native binary, run `npm run measure:dogfood -- <scratch>/app [report.json]`.
-See [measurement method and sample](../../docs/native-runtime-measurements.md)
+See [measurement method and sample](../../openspec/specs/native-lifecycle/measurements.md)
 for startup/RSS/HTML/stream concurrency results and their scope.
 
 Run `npm run test:dogfood:postgres -- --browser` with PostgreSQL client commands on

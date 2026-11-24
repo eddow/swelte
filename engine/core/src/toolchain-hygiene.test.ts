@@ -53,7 +53,7 @@ describe('toolchain PATH hygiene', () => {
 	})
 })
 
-describe('cross-build target OS (docs/cli.md)', () => {
+describe('cross-build target OS (openspec/specs/command-line/reference.md)', () => {
 	it('hostTargetOs maps process.platform to V -os vocabulary', () => {
 		const host = hostTargetOs()
 		assert.ok(host === 'linux' || host === 'macos' || host === 'windows')

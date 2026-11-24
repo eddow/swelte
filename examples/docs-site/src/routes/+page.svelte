@@ -81,7 +81,7 @@ import { codeHtml } from '#lib/snippets.gen.js'
 		></path>
 	</svg>
 	<span
-		>The reference docs live in <code>docs/*.md</code>. This site provides separately maintained
+		>The reference docs live in <code>openspec/specs/*/reference.md</code>. This site provides separately maintained
 		guides.</span
 	>
 </div>

@@ -1,3 +1,4 @@
+import {writeEvidence} from './evidence-output.mjs'
 // Explicit network acceptance run. Uses the configured server key, never records it.
 import assert from 'node:assert/strict'
 import {mkdtemp,rm,writeFile,readFile} from 'node:fs/promises'
@@ -55,8 +56,7 @@ for(const scenario of ['S1','S2']){
  const samples=record.samples.filter(s=>s.scenario===scenario), times=samples.map(s=>s.elapsedMs).sort((a,b)=>a-b)
  record.summary[scenario]={samples:samples.length,passed:samples.filter(s=>s.passed).length,p50:times[Math.ceil(times.length*.5)-1],p95:times[Math.ceil(times.length*.95)-1],max:times.at(-1)}
 }
-const output=process.env.SHELL_LIVE_EVIDENCE??projectRoot+'../../docs/specs/shell-live-evidence-2026-11-24.json'
-await writeFile(output,JSON.stringify(record,null,2)+'\n')
+await writeEvidence('shell-live-evidence',record,process.env.SHELL_LIVE_EVIDENCE)
 console.log(JSON.stringify(record.summary))
 assert.equal(record.failures.length,0,JSON.stringify(record.failures))
 assert.ok(record.summary.S1.p95<=10000 && record.summary.S2.p95<=15000,'live latency gate')

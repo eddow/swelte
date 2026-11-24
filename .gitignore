@@ -16,3 +16,4 @@ engine/vvm/.active-system-path
 tmp/
 .env*
 !.env.example
+/examples/shell/test-results/

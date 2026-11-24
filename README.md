@@ -66,23 +66,23 @@ toolchain — no manual install). `swelte build` typechecks, compiles
 
 Built behavior, user-facing only:
 
-- [SSR](https://github.com/eddow/swelte/blob/master/docs/ssr.md) — ownership, request path, `@[load]`
+- [SSR](https://github.com/eddow/swelte/blob/master/openspec/specs/ssr/reference.md) — ownership, request path, `@[load]`
   cascade, `+error` contract, measured budgets, gate
-- [RPC](https://github.com/eddow/swelte/blob/master/docs/rpc.md) — `.v` imports, attributes, transport
-- [npm V libraries](https://github.com/eddow/swelte/blob/master/docs/npm-v-libraries.md) — publish and consume reusable native/WASM V modules through npm
-- [Types](https://github.com/eddow/swelte/blob/master/docs/types.md) — V → TS projection, codegen
-- [Errors](https://github.com/eddow/swelte/blob/master/docs/errors.md) — error envelope, `SwelteRpcError`, SPA-first rule
-- [Config](https://github.com/eddow/swelte/blob/master/docs/config.md) — `svelte.config.js` (`swelte` key) + `SWELTE_*` env knobs, routing, per-route types
-- [Forms](https://github.com/eddow/swelte/blob/master/docs/forms.md) — verbs + `?q`, no-JS 303, `fail`-lite, `deserialize`
-- [CLI](https://github.com/eddow/swelte/blob/master/docs/cli.md) — `dev`/`build`/`preview`/`test`/`check`/`init` (+ Plus-owned `migrate` via `plugins: [dbPlugin]`)
-- [Example](https://github.com/eddow/swelte/blob/master/docs/example.md) — the `something` example
-- [Versus](https://github.com/eddow/swelte/blob/master/docs/versus.md) — Swelte vs. other full-stack paradigms (positioning)
-- [Coming from SvelteKit](https://github.com/eddow/swelte/blob/master/docs/coming-from-sveltekit.md) — migration map
-- [Plus](https://github.com/eddow/swelte/blob/master/docs/plus.md) — `@swelte/plus` plugins: scheduled jobs (`@[cron]` ticks, retry, console log), embedded SQLite/KV (`swelte migrate`), rooms/sockets on the `rooms`-plugin hub (`swelte({ plugins: [roomsPlugin] })`)
+- [RPC](https://github.com/eddow/swelte/blob/master/openspec/specs/rpc/reference.md) — `.v` imports, attributes, transport
+- [npm V libraries](https://github.com/eddow/swelte/blob/master/openspec/specs/npm-v-libraries/reference.md) — publish and consume reusable native/WASM V modules through npm
+- [Types](https://github.com/eddow/swelte/blob/master/openspec/specs/type-projection/reference.md) — V → TS projection, codegen
+- [Errors](https://github.com/eddow/swelte/blob/master/openspec/specs/errors/reference.md) — error envelope, `SwelteRpcError`, SPA-first rule
+- [Config](https://github.com/eddow/swelte/blob/master/openspec/specs/configuration/reference.md) — `svelte.config.js` (`swelte` key) + `SWELTE_*` env knobs, routing, per-route types
+- [Forms](https://github.com/eddow/swelte/blob/master/openspec/specs/forms/reference.md) — verbs + `?q`, no-JS 303, `fail`-lite, `deserialize`
+- [CLI](https://github.com/eddow/swelte/blob/master/openspec/specs/command-line/reference.md) — `dev`/`build`/`preview`/`test`/`check`/`init` (+ Plus-owned `migrate` via `plugins: [dbPlugin]`)
+- [Example](https://github.com/eddow/swelte/blob/master/openspec/specs/example-app/reference.md) — the `something` example
+- [Versus](https://github.com/eddow/swelte/blob/master/openspec/specs/architecture/reference.md) — Swelte vs. other full-stack paradigms (positioning)
+- [Coming from SvelteKit](https://github.com/eddow/swelte/blob/master/openspec/specs/sveltekit-compatibility/reference.md) — migration map
+- [Plus](https://github.com/eddow/swelte/blob/master/openspec/specs/plus/reference.md) — `@swelte/plus` plugins: scheduled jobs (`@[cron]` ticks, retry, console log), embedded SQLite/KV (`swelte migrate`), rooms/sockets on the `rooms`-plugin hub (`swelte({ plugins: [roomsPlugin] })`)
 
 ### Application and library builds
 
 Every Swelte project supports `swelte build` for its application (`dist/`) and
 `swelte package` for reusable `src/lib` code (`package/`). Routes stay local to
 the application or demo and are excluded from published packages. There is no
-app/library project kind. See [packaging and public exports](docs/libraries.md).
+app/library project kind. See [packaging and public exports](openspec/specs/library-packaging/reference.md).

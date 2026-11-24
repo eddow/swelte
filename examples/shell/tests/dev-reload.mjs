@@ -1,3 +1,4 @@
+import {writeEvidence} from './evidence-output.mjs'
 // Isolated real dev/build coexistence; never touches the user's running app.
 import assert from 'node:assert/strict'
 import {mkdtemp,cp,symlink,readFile,writeFile,rm,mkdir} from 'node:fs/promises'
@@ -58,7 +59,7 @@ try{
   evidence.cycles.at(-1).terminalFrames=1
   before=after;console.log('dev/build reload cycle',cycle,'PASS')
  }
- await writeFile(join(projectRoot,'../../docs/specs/shell-dev-reload-evidence-2026-11-24.json'),JSON.stringify(evidence,null,2)+'\n')
+ await writeEvidence('shell-dev-reload-evidence',evidence)
 }catch(error){ console.error(log.join('').slice(-3000));if(browser)console.error(await evalJs(browser.cdp,`({revision:{...document.querySelector('[data-testid=revision]')?.dataset},body:document.body.innerText.slice(-3000)})`));throw error; }finally{
  await browser?.close()
  if(dev){dev.kill('SIGTERM');await Promise.race([once(dev,'exit'),sleep(5000)]);if(dev.exitCode===null)dev.kill('SIGKILL')}

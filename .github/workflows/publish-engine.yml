@@ -1,6 +1,6 @@
 # Manually launched: build + npm-publish engine packages (independent patches).
 #
-# Selection follows docs/specs/versioning.md: the registry gate diffs every
+# Selection follows openspec/specs/versioning/spec.md: the registry gate diffs every
 # active workspace version against npm and approves exactly what needs
 # publishing — the plan preview and the publish step consume the same gate
 # output, so the reviewed list is the published list. Publishes in

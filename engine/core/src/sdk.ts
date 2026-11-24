@@ -45,7 +45,7 @@ export class SwelteRpcError extends Error {
 	}
 }
 
-// Client-side mirror of the V `SwelteResponse` envelope (see `docs/types.md`).
+// Client-side mirror of the V `SwelteResponse` envelope (see `openspec/specs/type-projection/reference.md`).
 // Verbs returning `SwelteResponse` (or the `(int, string)` sugar, which
 // projects to the same `tsret`) resolve this envelope — NOT the decoded
 // body: `{ status, headers, cookies, body }`, where `body` is the raw text

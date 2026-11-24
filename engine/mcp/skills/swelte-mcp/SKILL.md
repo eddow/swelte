@@ -6,7 +6,7 @@ description: Query a Swelte project via the @swelte/mcp server — route tree, t
 # Swelte MCP
 
 The `@swelte/mcp` server (stdio only) exposes the project to agents.
-Spawn it per the client's `mcpServers` config (`docs/mcp.md`); the
+Spawn it per the client's `mcpServers` config (`openspec/specs/agent-tooling/reference.md`); the
 tools below are what it offers.
 
 ## Tools

@@ -1,5 +1,5 @@
 // Version tooling for the shared-line / independent-patch policy
-// (docs/specs/versioning.md).
+// (openspec/specs/versioning/spec.md).
 //
 // Active release line: 0.2 — participants core, vvm, ssr-qjs, mcp, ai, create, plus, qjs
 // share major.minor, each owns its patch counter.
@@ -310,7 +310,7 @@ if (!cmd || cmd === 'patch' || cmd === 'line-cut') {
 	checkCommand(rest)
 } else if (['minor', 'major'].includes(cmd) || /^\d+\.\d+\.\d+/.test(cmd)) {
 	console.error(
-		`sync-version: lockstep bumps removed (see docs/specs/versioning.md). Use 'patch <pkg>' or 'line-cut <major.minor>'.`,
+		`sync-version: lockstep bumps removed (see openspec/specs/versioning/spec.md). Use 'patch <pkg>' or 'line-cut <major.minor>'.`,
 	)
 	process.exit(1)
 } else {

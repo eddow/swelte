@@ -59,13 +59,13 @@ Also rejected in SSR-compiled components: `node:` imports, `fetch(`, top-level `
 
 ## `+error.svelte` contract
 
-Directory `+error.svelte` boundaries inherit through physical ancestry (including groups), props `{ status?: number; message?: string }`. SSR and client share selection and parent fallback. Boundaries retain wrappers strictly above their directory and replace the local wrapper/page. See `docs/ssr.md`.
+Directory `+error.svelte` boundaries inherit through physical ancestry (including groups), props `{ status?: number; message?: string }`. SSR and client share selection and parent fallback. Boundaries retain wrappers strictly above their directory and replace the local wrapper/page. See `openspec/specs/ssr/reference.md`.
 
 ## Sources
 
 Stable — no spec dependency for the above
 (`use:enhance`/`applyAction` and `ssr=false` are built —
-see `docs/forms.md`, `docs/config.md`, `docs/coming-from-sveltekit.md`):
+see `openspec/specs/forms/reference.md`, `openspec/specs/configuration/reference.md`, `openspec/specs/sveltekit-compatibility/reference.md`):
 
-- `docs/example.md` — canonical component patterns
-- `docs/ssr.md` — SSR component rule, `+error` contract
+- `openspec/specs/example-app/reference.md` — canonical component patterns
+- `openspec/specs/ssr/reference.md` — SSR component rule, `+error` contract

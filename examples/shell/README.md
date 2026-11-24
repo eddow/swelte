@@ -84,7 +84,11 @@ without duplicating output and repeated real commands stay distinct.
 Live usability is validated for **OpenRouter / `openai/gpt-4o-mini`**, with
 provider-default generation settings. OpenAI Responses and Anthropic have
 wire-shaped fixture coverage, not live certification. See the
-[acceptance gates](../../docs/specs/shell-usability.md) and
-[dated evidence](../../docs/specs/shell-usability-evidence-2026-11-24.md).
+[acceptance gates](../../openspec/specs/shell-console/spec.md) and
+[dated evidence](../../examples/shell/tests/evidence/2026-11-24/README.md).
 Chrome tests require `google-chrome` or `CHROME_BIN`. Live tests use temporary
 databases and browser profiles and do not run as part of `npm test`.
+
+Generated run reports go to the ignored `test-results/` directory. Reviewed,
+dated acceptance snapshots are preserved under [tests/evidence/](tests/evidence/README.md),
+outside the specification and planning trees.

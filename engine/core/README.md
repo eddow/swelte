@@ -44,7 +44,7 @@ swelte --help | --version
 
 `swelte migrate [--root dir] [--db path]` resolves from the project's
 configured `swelte({ plugins: [dbPlugin] })` entry (`@swelte/plus/db`) —
-see `docs/cli.md` + `docs/plus.md`. Core alone ships no `migrate`.
+see `openspec/specs/command-line/reference.md` + `openspec/specs/plus/reference.md`. Core alone ships no `migrate`.
 
 New projects: `npm create @swelte [<dir>] [...]` (`@swelte/create`
 scaffolder).
@@ -81,6 +81,6 @@ Set `SWELTE_V_VERSION=<ver>` to pin a different V version at install time
 
 ## Design docs
 
-- [RPC](https://github.com/eddow/swelte/blob/master/docs/rpc.md) — `.v` imports, attributes, transport (built)
-- [Types](https://github.com/eddow/swelte/blob/master/docs/types.md) — V → TS projection (built)
-- [Errors](https://github.com/eddow/swelte/blob/master/docs/errors.md) — envelope, SPA-first rule (built).
+- [RPC](https://github.com/eddow/swelte/blob/master/openspec/specs/rpc/reference.md) — `.v` imports, attributes, transport (built)
+- [Types](https://github.com/eddow/swelte/blob/master/openspec/specs/type-projection/reference.md) — V → TS projection (built)
+- [Errors](https://github.com/eddow/swelte/blob/master/openspec/specs/errors/reference.md) — envelope, SPA-first rule (built).

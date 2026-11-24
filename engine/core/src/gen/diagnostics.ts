@@ -69,7 +69,7 @@ function relPosix(abs: string, f: string): string {
 
 /** Collect warnings for a project root (mirrors generate() warn sites).
  * With `{ lib: true }`, additionally validates the library schema from
- * `docs/libraries.md` (no side effects): `swelte.v.exports` rules plus
+ * `openspec/specs/library-packaging/reference.md` (no side effects): `swelte.v.exports` rules plus
  * `exports`/`files` packaging coverage and the no-`src/routes`-leak rule.
  * Library-schema violations surface as `lib-*` diagnostics (warnings, same
  * as every other `check` entry — never build errors). */
@@ -211,7 +211,7 @@ export async function collectDiagnostics(
 			const rBase = routesDir.startsWith('src/') ? routesDir.slice(4) : routesDir
 			const lBase = libDir.startsWith('src/') ? libDir.slice(4) : libDir
 			// Framework-owned singletons: lifecycle hooks + param matchers
-			// live directly under src/ by design (see docs/coming-from-sveltekit.md).
+			// live directly under src/ by design (see openspec/specs/sveltekit-compatibility/reference.md).
 			const owned = new Set(['app.v', 'matchers.v'])
 			for (const f of listVFiles(srcAbs)) {
 				const rel = f
@@ -415,7 +415,7 @@ interface LibPackageJson {
 	}
 }
 
-/** Library-schema checks (`swelte check --lib`, see `docs/libraries.md`).
+/** Library-schema checks (`swelte check --lib`, see `openspec/specs/library-packaging/reference.md`).
  * Pure reads over `package.json` + the declared V sources: no staging, no
  * tarball, no build. Every violation is a `lib-*` warning. */
 export function collectLibDiagnostics(

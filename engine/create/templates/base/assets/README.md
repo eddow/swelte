@@ -1,4 +1,4 @@
-// Project-local images for `swelte build` (`docs/images.md`):
+// Project-local images for `swelte build` (`openspec/specs/images/reference.md`):
 // `svelte.config.js` → `swelte: { images: [{ src: 'assets/hero.png',
 // widths: [320, 640, 1280] }] }` — host-native PNG/JPEG resize to WebP,
 // emitted as `dist/images/*` (import the generated metadata via

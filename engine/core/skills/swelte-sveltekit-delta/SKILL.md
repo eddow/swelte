@@ -15,7 +15,7 @@ Core remains engine-agnostic, with `Hand`/dispatcher ownership, server-only
 Directory `+error.svelte` files inherit through physical ancestry, including
 route groups, with matching SSR/client selection and parent fallback. Boundaries
 retain wrappers strictly above their directory and replace the local wrapper
-and page. See `docs/ssr.md` for hydration and unknown-URL behavior.
+and page. See `openspec/specs/ssr/reference.md` for hydration and unknown-URL behavior.
 
 `raw_body []u8` is available for webhook HMAC checks alongside parsed form/files.
 Existing primitives do not establish full application migration parity: page
@@ -25,9 +25,9 @@ dependencies; Swelte's Plus plugins (`jobs`, `db`) own only what they declare.
 
 ## Sources
 
-- `docs/forms.md` — `use:enhance` / `applyAction` cycle (stable)
-- `docs/config.md` — prerender/SSG/ISR, targets, offline fallback (stable)
-- `docs/cli.md` — `build --target`, `export` (stable)
-- `docs/versus.md` — positioning (stable)
+- `openspec/specs/forms/reference.md` — `use:enhance` / `applyAction` cycle (stable)
+- `openspec/specs/configuration/reference.md` — prerender/SSG/ISR, targets, offline fallback (stable)
+- `openspec/specs/command-line/reference.md` — `build --target`, `export` (stable)
+- `openspec/specs/architecture/reference.md` — positioning (stable)
 
-Native build-time images: `swelte.images` PNG/JPEG sources → resized WebP + `#app/images` metadata (host libwebp build dependency). Explicit offline mutations: `serviceWorker.outbox` + `enqueueOffline`/`flushOutbox`/`listOutbox`, IndexedDB and Background Sync; endpoints deduplicate `Idempotency-Key`. See `docs/images.md` and `docs/outbox.md`.
+Native build-time images: `swelte.images` PNG/JPEG sources → resized WebP + `#app/images` metadata (host libwebp build dependency). Explicit offline mutations: `serviceWorker.outbox` + `enqueueOffline`/`flushOutbox`/`listOutbox`, IndexedDB and Background Sync; endpoints deduplicate `Idempotency-Key`. See `openspec/specs/images/reference.md` and `openspec/specs/offline-outbox/reference.md`.

@@ -1,3 +1,4 @@
+import {writeEvidence} from './evidence-output.mjs'
 import assert from 'node:assert/strict'
 import {mkdtemp,rm,writeFile} from 'node:fs/promises'
 import {join} from 'node:path'
@@ -53,6 +54,6 @@ try{
  evidence.scenarios.push({question:'human cd src, then fresh pwd',passed:true})
  evidence.ui=await evalJs(cdp,`({...document.querySelector('[data-testid="revision"]').dataset})`)
  assert.equal(evidence.ui.backendRev,evidence.ui.expectedBackendRev)
- await writeFile(projectRoot+'../../docs/specs/shell-live-browser-evidence-2026-11-24.json',JSON.stringify(evidence,null,2)+'\n')
+ await writeEvidence('shell-live-browser-evidence',evidence)
  console.log('Live browser scenarios passed:',evidence.scenarios.length)
 }catch(error){if(browser)console.error(await evalJs(browser.cdp,`document.body.innerText`));throw error;}finally{await browser?.close();await server.stop();await rm(dir,{recursive:true,force:true})}

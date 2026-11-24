@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 import { parseStructs, parseVFile, tsTypeFor } from './vite.js'
 
-describe('tsTypeFor projection matrix (docs/types.md)', () => {
+describe('tsTypeFor projection matrix (openspec/specs/type-projection/reference.md)', () => {
 	const cases: Array<[string, string]> = [
 		['int', 'number'],
 		['i64', 'number'],
@@ -68,7 +68,7 @@ describe('tsTypeFor projection matrix (docs/types.md)', () => {
 				['d', 'Blob'],
 				['e', 'string[]'],
 				// `map[string]int` projects `Record<string, unknown>` (associative
-				// array shape — value type stays opaque, see docs/types.md).
+				// array shape — value type stays opaque, see openspec/specs/type-projection/reference.md).
 				['f', 'Record<string, unknown>'],
 				['g', 'string | null'],
 				['h', 'unknown'],

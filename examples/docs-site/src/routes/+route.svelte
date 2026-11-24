@@ -296,7 +296,7 @@ const groups: { title: string; links: { href: string; label: string }[] }[] = [
 			{/each}
 			<div class="divider"></div>
 			<div class="px-2 text-xs opacity-60">
-				<p>Reference documentation: <code>docs/*.md</code>.</p>
+				<p>Reference documentation: <code>openspec/specs/*/reference.md</code>.</p>
 				<p>This site renders it — same content, browseable.</p>
 			</div>
 		</aside>

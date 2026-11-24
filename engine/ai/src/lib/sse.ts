@@ -1,7 +1,7 @@
 // Phase B: SSE framing for a streaming POST response. Text deltas,
 // transcript revisions, citations, tool progress, approval requests and
 // structured patches share one response; each SSE message carries one
-// envelope + payload pair. App-owned framing per docs/streaming.md — the
+// envelope + payload pair. App-owned framing per openspec/specs/streaming/reference.md — the
 // transport moves bytes, this module owns the event shape.
 import type { AiEnvelope } from './envelope.js'
 
