@@ -60,7 +60,14 @@ function toolSteps(calls: AiToolCall[]): ToolStep[] {
 		id: c.id,
 		status: c.status,
 		label: c.label,
-		chip: c.status === 'done' ? 'done' : c.status === 'pending' ? 'approval' : c.status === 'failed' ? 'failed' : 'running',
+		chip:
+			c.status === 'done'
+				? 'done'
+				: c.status === 'pending'
+					? 'approval'
+					: c.status === 'failed'
+						? 'failed'
+						: 'running',
 		mono: false,
 		detailMono: true,
 		detail: [

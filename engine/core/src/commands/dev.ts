@@ -1,7 +1,15 @@
 // `swelte dev`: compile the V backend, own its executable directly,
 // and manage Vite through its Node API. Stop only resources we created.
 import { type ChildProcess, spawn } from 'node:child_process'
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, statSync, watch } from 'node:fs'
+import {
+	existsSync,
+	mkdirSync,
+	mkdtempSync,
+	readdirSync,
+	readFileSync,
+	statSync,
+	watch,
+} from 'node:fs'
 import { rm } from 'node:fs/promises'
 import { createServer, type Server } from 'node:net'
 import { join, resolve } from 'node:path'

@@ -269,9 +269,9 @@ function showError(e: unknown) {
 // changed boot id after the same revision means a restart, a changed
 // revision means a stale bundle check.
 function checkRevision(seen: { backend_revision: string; boot_id: string }) {
- backendRev = seen.backend_revision
- bootId = seen.boot_id
- revMismatch = seen.backend_revision !== expectedBackendRevision
+	backendRev = seen.backend_revision
+	bootId = seen.boot_id
+	revMismatch = seen.backend_revision !== expectedBackendRevision
 }
 
 function isNearBottom(el: HTMLElement | null) {
@@ -311,20 +311,23 @@ function paintExec(cmd: string, output: string, seq?: number) {
 }
 
 function pushLine(line: string) {
- let seq: number | undefined
- if (line.startsWith('frame\n')) {
-  const end = line.indexOf('\n', 6)
-  if (end < 0) return
-  seq = Number(line.slice(6, end))
-  line = line.slice(end + 1)
- }
+	let seq: number | undefined
+	if (line.startsWith('frame\n')) {
+		const end = line.indexOf('\n', 6)
+		if (end < 0) return
+		seq = Number(line.slice(6, end))
+		line = line.slice(end + 1)
+	}
 	// Room protocol: `exec\n<cmd>\n<output>` or `chat\n<msg>`. The
 	// terminal renders exec frames only — chat echoes stay in the chat
 	// pane. Unframed (pre-v2) tails are dropped, never sniffed.
 	const nl = line.indexOf('\n')
 	const kind = nl < 0 ? '' : line.slice(0, nl)
 	const rest = nl < 0 ? '' : line.slice(nl + 1)
-	if (kind === 'chat' && rest === 'driver → human (human-input)' && (streaming || parkedDrive)) { interruptLocally(); return }
+	if (kind === 'chat' && rest === 'driver → human (human-input)' && (streaming || parkedDrive)) {
+		interruptLocally()
+		return
+	}
 	if (kind !== 'exec' && kind !== 'stdin') return
 	if (kind === 'stdin') {
 		// Keystroke echo: someone's stdin, painted dim — never a command.
@@ -463,7 +466,12 @@ async function sendChat(continuation = '') {
 		const form = new URLSearchParams({
 			adapter: cfg.adapter,
 			model: cfg.model,
-			prompt: continuation ? text : messages.slice(-10).map(m => `${m.role}: ${m.body.slice(0, 2000)}`).join('\n'),
+			prompt: continuation
+				? text
+				: messages
+						.slice(-10)
+						.map((m) => `${m.role}: ${m.body.slice(0, 2000)}`)
+						.join('\n'),
 			temperature: String(cfg.run.temperature ?? -1),
 			max_tokens: String(cfg.run.maxTokens ?? -1),
 			system: cfg.run.system ?? '',
@@ -492,7 +500,10 @@ async function sendChat(continuation = '') {
 		const seenSeq = new Set<number>()
 		for (;;) {
 			const { done, value } = await reader.read()
-			if (controller.signal.aborted || turn !== activeTurn) { await reader.cancel(); return }
+			if (controller.signal.aborted || turn !== activeTurn) {
+				await reader.cancel()
+				return
+			}
 			buf += decoder.decode(value ?? new Uint8Array(), { stream: !done })
 			let idx: number
 			while ((idx = buf.indexOf('\n\n')) >= 0) {
@@ -590,7 +601,12 @@ async function sendChat(continuation = '') {
 							],
 							tools: upsertTool(waitId, {
 								id: p.call_id,
-								label: messages.find(m => m.id === waitId)?.tools?.find(t => t.id === p.call_id)?.label ?? p.label ?? p.tool ?? 'tool call',
+								label:
+									messages.find((m) => m.id === waitId)?.tools?.find((t) => t.id === p.call_id)
+										?.label ??
+									p.label ??
+									p.tool ??
+									'tool call',
 								chip: 'console',
 								status: 'active',
 								detail: [],
@@ -604,34 +620,54 @@ async function sendChat(continuation = '') {
 					// `tool.reused` needs no row change: the original row is
 					// already done, and reuse creates no new row by design.
 				} else if (event === 'approval.request') {
-						// Parked driving call: mirror into the queue (clickable) + thread row.
-						const ap = parsed.payload ?? {}
-						const aname = typeof ap.tool === 'string' ? ap.tool : ap.tool?.name
-						if (ap.op_id && aname && ap.args && ap.holder && !approvals.some((a) => a.opId === ap.op_id)) {
-							parkedDrive = { opId: ap.op_id, tool: aname, args: ap.args, holder: ap.holder }
-							approvals = [...approvals, { opId: ap.op_id, cmd: describeToolArgs(ap.args), status: 'pending', note: ap.label ?? 'Approval required' }]
-						} else if (ap.op_id && aname && ap.args && ap.holder) {
-							parkedDrive = { opId: ap.op_id, tool: aname, args: ap.args, holder: ap.holder }
-						}
-						resolveMsg(waitId, {
-							tools: upsertTool(waitId, {
-								id: ap.op_id ?? ap.callId ?? 0,
-								label: ap.label ?? 'Approval requested',
-								chip: 'approval',
+					// Parked driving call: mirror into the queue (clickable) + thread row.
+					const ap = parsed.payload ?? {}
+					const aname = typeof ap.tool === 'string' ? ap.tool : ap.tool?.name
+					if (
+						ap.op_id &&
+						aname &&
+						ap.args &&
+						ap.holder &&
+						!approvals.some((a) => a.opId === ap.op_id)
+					) {
+						parkedDrive = { opId: ap.op_id, tool: aname, args: ap.args, holder: ap.holder }
+						approvals = [
+							...approvals,
+							{
+								opId: ap.op_id,
+								cmd: describeToolArgs(ap.args),
 								status: 'pending',
-								detail: ap.detail ? [ap.detail] : [],
-							}),
-						})
-						followChat()
+								note: ap.label ?? 'Approval required',
+							},
+						]
+					} else if (ap.op_id && aname && ap.args && ap.holder) {
+						parkedDrive = { opId: ap.op_id, tool: aname, args: ap.args, holder: ap.holder }
+					}
+					resolveMsg(waitId, {
+						tools: upsertTool(waitId, {
+							id: ap.op_id ?? ap.callId ?? 0,
+							label: ap.label ?? 'Approval requested',
+							chip: 'approval',
+							status: 'pending',
+							detail: ap.detail ? [ap.detail] : [],
+						}),
+					})
+					followChat()
 				} else if (event === 'terminal') {
 					gotTerminal = true
 					const reason = parsed.payload?.reason ?? 'completed'
-					tracker.finish(reason === 'completed' || reason === 'waiting_approval' ? 'completed' : 'failed', parsed.envelope?.seq ?? 0)
+					tracker.finish(
+						reason === 'completed' || reason === 'waiting_approval' ? 'completed' : 'failed',
+						parsed.envelope?.seq ?? 0
+					)
 					resolveMsg(waitId, {
 						body: assembled,
 						pending: false,
 						thinkingActive: false,
-						tools: reason === 'waiting_approval' ? messages.find(m => m.id === waitId)?.tools : markToolsDone(waitId, reason === 'completed'),
+						tools:
+							reason === 'waiting_approval'
+								? messages.find((m) => m.id === waitId)?.tools
+								: markToolsDone(waitId, reason === 'completed'),
 					})
 					if (reason !== 'completed' && reason !== 'waiting_approval') {
 						throw new Error(parsed.payload?.error ?? `run ${reason}`)
@@ -674,11 +710,19 @@ async function sendChat(continuation = '') {
 		}
 		// Settle the transient bubble too — a failed turn must not hang
 		// in its dimmed state; keep partial text when the stream died mid-run.
-		resolveMsg(waitId, { body: assembled || 'send failed — try again', pending: false, thinkingActive: false, tools: markToolsDone(waitId, false) })
+		resolveMsg(waitId, {
+			body: assembled || 'send failed — try again',
+			pending: false,
+			thinkingActive: false,
+			tools: markToolsDone(waitId, false),
+		})
 		showError(e)
 		status = 'error'
 	} finally {
-		if (chatAbort === controller) { streaming = false; chatAbort = null }
+		if (chatAbort === controller) {
+			streaming = false
+			chatAbort = null
+		}
 	}
 }
 
@@ -691,7 +735,11 @@ function interruptLocally() {
 	// bubble (P1: zero `active` rows may survive a Stop), and bump the turn
 	// so late output rejects. Spec §3 preempt.
 	if (parkedDrive) {
-		approvals = approvals.map(a => a.opId === parkedDrive?.opId && a.status === 'pending' ? { ...a, status: 'denied', note: 'Interrupted by human' } : a)
+		approvals = approvals.map((a) =>
+			a.opId === parkedDrive?.opId && a.status === 'pending'
+				? { ...a, status: 'denied', note: 'Interrupted by human' }
+				: a
+		)
 	}
 	// P1: settle active rows on EVERY open assistant bubble of this turn —
 	// the stream catch settles the waitId bubble, but bubbles from earlier
@@ -720,45 +768,58 @@ function interruptLocally() {
 	status = 'idle'
 	streaming = false
 	chatAbort = null
-
 }
 
 async function interrupt() {
- interruptLocally()
- try { await shell_release({ holder: '' }) } catch { /* local UI has already settled */ }
+	interruptLocally()
+	try {
+		await shell_release({ holder: '' })
+	} catch {
+		/* local UI has already settled */
+	}
 }
 
 function describeToolArgs(args: string): string {
- try {
-  const value = JSON.parse(args) as { cmd?: string; url?: string; keys?: string }
-  return value.cmd ?? value.url ?? value.keys ?? 'Console action'
- } catch { return 'Console action' }
+	try {
+		const value = JSON.parse(args) as { cmd?: string; url?: string; keys?: string }
+		return value.cmd ?? value.url ?? value.keys ?? 'Console action'
+	} catch {
+		return 'Console action'
+	}
 }
 
 async function decide(opId: string, allow: boolean) {
- const item = approvals.find(a => a.opId === opId)
- if (!item || item.status !== 'pending' || deciding || !parkedDrive || parkedDrive.opId !== opId) return
- const parked = parkedDrive
- const decisionTurn = activeTurn
- const generation = ++decisionGeneration
- deciding = true
- try {
-  const args = { op_id: opId, holder: parked.holder, tool: parked.tool, args_json: parked.args }
-  const res = allow ? await shell_tool_resume(args) : await shell_tool_deny(args)
-  if (decisionTurn !== activeTurn || generation !== decisionGeneration) return
-  messages = messages.map(m => ({ ...m, tools: m.tools?.map(t => t.id === opId ? { ...t, status: allow ? 'done' as const : 'failed' as const } : t) }))
-  item.status = allow ? 'approved' : 'denied'
-  item.note = allow ? 'Executed; continuing with the tool result' : 'Denied by human'
-  approvals = [...approvals]
-  parkedDrive = null
-  if (allow && res.continuation) await sendChat(res.continuation)
- } catch (e) {
-  // Keep the operation available for a lost-ack retry; never label a failed
-  // dispatch as approved or silently execute it through the human RPC.
-  item.note = e instanceof Error ? e.message : String(e)
-  approvals = [...approvals]
-  showError(e)
- } finally { if (generation === decisionGeneration) deciding = false }
+	const item = approvals.find((a) => a.opId === opId)
+	if (!item || item.status !== 'pending' || deciding || !parkedDrive || parkedDrive.opId !== opId)
+		return
+	const parked = parkedDrive
+	const decisionTurn = activeTurn
+	const generation = ++decisionGeneration
+	deciding = true
+	try {
+		const args = { op_id: opId, holder: parked.holder, tool: parked.tool, args_json: parked.args }
+		const res = allow ? await shell_tool_resume(args) : await shell_tool_deny(args)
+		if (decisionTurn !== activeTurn || generation !== decisionGeneration) return
+		messages = messages.map((m) => ({
+			...m,
+			tools: m.tools?.map((t) =>
+				t.id === opId ? { ...t, status: allow ? ('done' as const) : ('failed' as const) } : t
+			),
+		}))
+		item.status = allow ? 'approved' : 'denied'
+		item.note = allow ? 'Executed; continuing with the tool result' : 'Denied by human'
+		approvals = [...approvals]
+		parkedDrive = null
+		if (allow && res.continuation) await sendChat(res.continuation)
+	} catch (e) {
+		// Keep the operation available for a lost-ack retry; never label a failed
+		// dispatch as approved or silently execute it through the human RPC.
+		item.note = e instanceof Error ? e.message : String(e)
+		approvals = [...approvals]
+		showError(e)
+	} finally {
+		if (generation === decisionGeneration) deciding = false
+	}
 }
 // The single output path, started once on mount: subscribe to the backend
 // room over SSE (scrollback tail first, then live lines). Every publish()
@@ -766,16 +827,21 @@ async function decide(opId: string, allow: boolean) {
 // optimistically with their seq, and those echoes are dropped in pushLine.
 let watchingShell = true
 async function watchShell() {
- while (watchingShell) {
-  try {
-   live = true
-   for await (const line of stream({})) {
-    if (!watchingShell) return
-    if (line !== '__ping__') { pushLine(line); await tick() }
-   }
-  } catch { live = false }
-  if (watchingShell) await new Promise(resolve => setTimeout(resolve, 500))
- }
+	while (watchingShell) {
+		try {
+			live = true
+			for await (const line of stream({})) {
+				if (!watchingShell) return
+				if (line !== '__ping__') {
+					pushLine(line)
+					await tick()
+				}
+			}
+		} catch {
+			live = false
+		}
+		if (watchingShell) await new Promise((resolve) => setTimeout(resolve, 500))
+	}
 }
 
 // Recent user prompts (newest first, capped) for the history picker —
@@ -815,9 +881,7 @@ function composerKeydown(e: KeyboardEvent) {
 // Idle + non-empty starts the command (blocked while a chat reply streams);
 // idle + empty runs `help`; running + non-empty forwards a stdin keystroke;
 // running + empty is disabled.
-let submitDisabled = $derived(
-	execRunning && termKeys.trim().length === 0
-)
+let submitDisabled = $derived(execRunning && termKeys.trim().length === 0)
 
 let pending = $derived(approvals.filter((a) => a.status === 'pending'))
 let traceShown = $derived(
@@ -859,13 +923,20 @@ onMount(() => {
 	// retaining an apparently current backend.
 	let disposed = false
 	const refreshRevision = async () => {
-		try { const seen = await shell_revision({ dummy: '' }); if (!disposed) checkRevision(seen) }
-			catch { if (!disposed) revMismatch = true }
+		try {
+			const seen = await shell_revision({ dummy: '' })
+			if (!disposed) checkRevision(seen)
+		} catch {
+			if (!disposed) revMismatch = true
+		}
 	}
 	void refreshRevision()
 	const revisionTimer = setInterval(refreshRevision, 1000)
-	return () => { disposed = true; watchingShell = false; clearInterval(revisionTimer) }
-
+	return () => {
+		disposed = true
+		watchingShell = false
+		clearInterval(revisionTimer)
+	}
 })
 
 function toggleTheme(next: boolean) {
@@ -942,162 +1013,162 @@ function toggleTheme(next: boolean) {
 					<span class="ai-config-current">{activeAiConfig(aiConfigs, activeAiId).name}</span>
 				</summary>
 				<div class="ai-config-row">
-				<label class="ai-config-label">
-					<span>AI configuration</span>
-					<select
-						class="select select-bordered select-sm ai-config-select"
-						value={activeAiConfig(aiConfigs, activeAiId).id}
-						onchange={(e) => selectAiConfig(e.currentTarget.value)}
-					>
-						{#each aiConfigs as cfg (cfg.id)}
-							<option value={cfg.id}>
-								{cfg.name} ({cfg.adapter} · {cfg.model}{configuredFor(cfg.adapter)
-									? ''
-									: ' · key missing'})
-							</option>
-						{/each}
-					</select>
-				</label>
-				<button class="btn btn-sm" onclick={() => (showAiSettings = !showAiSettings)}>
-					{showAiSettings ? 'hide settings' : 'configure'}
-				</button>
-			</div>
-			{#if activeAiConfig(aiConfigs, activeAiId).adapter !== 'deterministic' &&
-				!configuredFor(activeAiConfig(aiConfigs, activeAiId).adapter)}
-				<p class="pane-hint">
-					server key missing — add
-					{activeAiConfig(aiConfigs, activeAiId).adapter === 'openrouter'
-						? 'OPENROUTER_API_KEY'
-						: activeAiConfig(aiConfigs, activeAiId).adapter === 'openai'
-							? 'OPENAI_API_KEY'
-							: 'ANTHROPIC_API_KEY'}
-					to <code>.env</code>, then restart
-					<code>swelte dev</code>
-				</p>
-			{/if}
-			{#if showAiSettings}
-				{@const settingsCfg = activeAiConfig(aiConfigs, activeAiId)}
-				<div class="ai-settings">
-					<ul class="ai-list">
-						{#each aiConfigs as cfg (cfg.id)}
-							<li class:active={cfg.id === settingsCfg.id}>
-								<span class="ai-name">{cfg.name}</span>
-								<span class="ai-detail"
-									>{cfg.adapter} · {cfg.model}{cfg.run.temperature !== undefined
-										? ` · t=${cfg.run.temperature}`
-										: ''}{cfg.run.maxTokens !== undefined
-										? ` · max=${cfg.run.maxTokens}`
-										: ''}{configuredFor(cfg.adapter) ? '' : ' · key missing'}</span
-								>
-								<span class="ai-row-actions">
-									<button class="btn btn-xs" onclick={() => selectAiConfig(cfg.id)}>use</button>
-									<button class="btn btn-xs" onclick={() => startAiEdit(cfg)}>edit</button>
-									<button
-										class="btn btn-xs"
-										onclick={() => deleteAiConfig(cfg.id)}
-										disabled={aiConfigs.length <= 1}
+					<label class="ai-config-label">
+						<span>AI configuration</span>
+						<select
+							class="select select-bordered select-sm ai-config-select"
+							value={activeAiConfig(aiConfigs, activeAiId).id}
+							onchange={(e) => selectAiConfig(e.currentTarget.value)}
+						>
+							{#each aiConfigs as cfg (cfg.id)}
+								<option value={cfg.id}>
+									{cfg.name} ({cfg.adapter} · {cfg.model}{configuredFor(cfg.adapter)
+										? ''
+										: ' · key missing'})
+								</option>
+							{/each}
+						</select>
+					</label>
+					<button class="btn btn-sm" onclick={() => (showAiSettings = !showAiSettings)}>
+						{showAiSettings ? 'hide settings' : 'configure'}
+					</button>
+				</div>
+				{#if activeAiConfig(aiConfigs, activeAiId).adapter !== 'deterministic' &&
+					!configuredFor(activeAiConfig(aiConfigs, activeAiId).adapter)}
+					<p class="pane-hint">
+						server key missing — add
+						{activeAiConfig(aiConfigs, activeAiId).adapter === 'openrouter'
+							? 'OPENROUTER_API_KEY'
+							: activeAiConfig(aiConfigs, activeAiId).adapter === 'openai'
+								? 'OPENAI_API_KEY'
+								: 'ANTHROPIC_API_KEY'}
+						to <code>.env</code>, then restart
+						<code>swelte dev</code>
+					</p>
+				{/if}
+				{#if showAiSettings}
+					{@const settingsCfg = activeAiConfig(aiConfigs, activeAiId)}
+					<div class="ai-settings">
+						<ul class="ai-list">
+							{#each aiConfigs as cfg (cfg.id)}
+								<li class:active={cfg.id === settingsCfg.id}>
+									<span class="ai-name">{cfg.name}</span>
+									<span class="ai-detail"
+										>{cfg.adapter} · {cfg.model}{cfg.run.temperature !== undefined
+											? ` · t=${cfg.run.temperature}`
+											: ''}{cfg.run.maxTokens !== undefined
+											? ` · max=${cfg.run.maxTokens}`
+											: ''}{configuredFor(cfg.adapter) ? '' : ' · key missing'}</span
 									>
-										delete
-									</button>
-								</span>
-							</li>
-						{/each}
-					</ul>
-					<button class="btn btn-sm" onclick={startAiCreate}>new configuration</button>
-					<div class="ai-form">
-						<h3>{editingAiId ? 'edit configuration' : 'new configuration'}</h3>
-						<label>
-							name
-							<input
-								class="input input-bordered input-sm"
-								bind:value={aiFormName}
-								placeholder="OpenRouter fast"
-							>
-						</label>
-						<label>
-							adapter
-							<select
-								class="select select-bordered select-sm"
-								bind:value={aiFormAdapter}
-								onchange={() => void refreshLiveModels(aiFormAdapter)}
-							>
-								<option value="deterministic">deterministic (offline echo)</option>
-								<option value="openrouter">openrouter (server key)</option>
-								<option value="openai">openai (server key)</option>
-								<option value="anthropic">anthropic (server key)</option>
-							</select>
-						</label>
-						<label>
-							model
-							<input
-								class="input input-bordered input-sm"
-								bind:value={aiFormModel}
-								list="ai-model-suggestions"
-								placeholder={aiFormAdapter === 'deterministic'
-									? 'deterministic-1'
-									: aiFormAdapter === 'openrouter'
-										? 'openai/gpt-4o-mini'
-										: aiFormAdapter === 'openai'
-											? 'gpt-4o-mini'
-											: 'claude-3-5-haiku-latest'}
-							>
-							<datalist id="ai-model-suggestions">
-								{#each modelSuggestions(aiFormAdapter) as m}
-									<option value={m}></option>
-								{/each}
-							</datalist>
-							{#if liveModelsLoading}
-								<p class="pane-hint">loading live model list…</p>
-							{/if}
-						</label>
-						<label>
-							system prompt (optional)
-							<textarea
-								class="textarea textarea-bordered textarea-sm"
-								bind:value={aiFormSystem}
-								rows="2"
-								placeholder="You are a shell assistant…"
-							></textarea>
-						</label>
-						<div class="ai-form-row">
+									<span class="ai-row-actions">
+										<button class="btn btn-xs" onclick={() => selectAiConfig(cfg.id)}>use</button>
+										<button class="btn btn-xs" onclick={() => startAiEdit(cfg)}>edit</button>
+										<button
+											class="btn btn-xs"
+											onclick={() => deleteAiConfig(cfg.id)}
+											disabled={aiConfigs.length <= 1}
+										>
+											delete
+										</button>
+									</span>
+								</li>
+							{/each}
+						</ul>
+						<button class="btn btn-sm" onclick={startAiCreate}>new configuration</button>
+						<div class="ai-form">
+							<h3>{editingAiId ? 'edit configuration' : 'new configuration'}</h3>
 							<label>
-								temperature (optional)
+								name
 								<input
 									class="input input-bordered input-sm"
-									bind:value={aiFormTemperature}
-									inputmode="decimal"
-									placeholder="0.7"
+									bind:value={aiFormName}
+									placeholder="OpenRouter fast"
 								>
 							</label>
 							<label>
-								max tokens (optional)
+								adapter
+								<select
+									class="select select-bordered select-sm"
+									bind:value={aiFormAdapter}
+									onchange={() => void refreshLiveModels(aiFormAdapter)}
+								>
+									<option value="deterministic">deterministic (offline echo)</option>
+									<option value="openrouter">openrouter (server key)</option>
+									<option value="openai">openai (server key)</option>
+									<option value="anthropic">anthropic (server key)</option>
+								</select>
+							</label>
+							<label>
+								model
 								<input
 									class="input input-bordered input-sm"
-									bind:value={aiFormMaxTokens}
-									inputmode="numeric"
-									placeholder="512"
+									bind:value={aiFormModel}
+									list="ai-model-suggestions"
+									placeholder={aiFormAdapter === 'deterministic'
+										? 'deterministic-1'
+										: aiFormAdapter === 'openrouter'
+											? 'openai/gpt-4o-mini'
+											: aiFormAdapter === 'openai'
+												? 'gpt-4o-mini'
+												: 'claude-3-5-haiku-latest'}
 								>
+								<datalist id="ai-model-suggestions">
+									{#each modelSuggestions(aiFormAdapter) as m}
+										<option value={m}></option>
+									{/each}
+								</datalist>
+								{#if liveModelsLoading}
+									<p class="pane-hint">loading live model list…</p>
+								{/if}
 							</label>
-						</div>
-						<p class="pane-hint">
-							API keys are never entered here — the server reads them from
-							<code>.env</code> (OPENROUTER_API_KEY, OPENAI_API_KEY, ANTHROPIC_API_KEY).
-						</p>
-						<div class="ai-form-actions">
-							<button class="btn" onclick={saveAiForm}>save</button>
-							<button
-								class="btn"
-								onclick={() => {
-									showAiSettings = false
-									editingAiId = null
-								}}
-							>
-								cancel
-							</button>
+							<label>
+								system prompt (optional)
+								<textarea
+									class="textarea textarea-bordered textarea-sm"
+									bind:value={aiFormSystem}
+									rows="2"
+									placeholder="You are a shell assistant…"
+								></textarea>
+							</label>
+							<div class="ai-form-row">
+								<label>
+									temperature (optional)
+									<input
+										class="input input-bordered input-sm"
+										bind:value={aiFormTemperature}
+										inputmode="decimal"
+										placeholder="0.7"
+									>
+								</label>
+								<label>
+									max tokens (optional)
+									<input
+										class="input input-bordered input-sm"
+										bind:value={aiFormMaxTokens}
+										inputmode="numeric"
+										placeholder="512"
+									>
+								</label>
+							</div>
+							<p class="pane-hint">
+								API keys are never entered here — the server reads them from
+								<code>.env</code> (OPENROUTER_API_KEY, OPENAI_API_KEY, ANTHROPIC_API_KEY).
+							</p>
+							<div class="ai-form-actions">
+								<button class="btn" onclick={saveAiForm}>save</button>
+								<button
+									class="btn"
+									onclick={() => {
+										showAiSettings = false
+										editingAiId = null
+									}}
+								>
+									cancel
+								</button>
+							</div>
 						</div>
 					</div>
-				</div>
-			{/if}
+				{/if}
 			</details>
 			<div
 				class="transcript"
@@ -1149,14 +1220,16 @@ function toggleTheme(next: boolean) {
 			{/if}
 			<form
 				class="composerbar"
-			onsubmit={(e) => {
-				e.preventDefault()
-				void sendChat()
-			}}
+				onsubmit={(e) => {
+					e.preventDefault()
+					void sendChat()
+				}}
 			>
 				{#if promptHistory.length}
 					<details class="history">
-						<summary class="history-btn" aria-label="Prompt history" title="Prompt history">↺</summary>
+						<summary class="history-btn" aria-label="Prompt history" title="Prompt history">
+							↺
+						</summary>
 						<ul>
 							{#each promptHistory as h (h)}
 								<li>
@@ -1186,8 +1259,16 @@ function toggleTheme(next: boolean) {
 					rows="1"
 				></textarea>
 				{#if streaming || parkedDrive}
-					<button class="sendbtn is-stop" type="button" onclick={interrupt} aria-label="Stop generating" title="Stop">
-						<svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><rect x="3.5" y="3.5" width="9" height="9" rx="1.5" fill="currentColor"/></svg>
+					<button
+						class="sendbtn is-stop"
+						type="button"
+						onclick={interrupt}
+						aria-label="Stop generating"
+						title="Stop"
+					>
+						<svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">
+							<rect x="3.5" y="3.5" width="9" height="9" rx="1.5" fill="currentColor" />
+						</svg>
 					</button>
 				{:else}
 					<button
@@ -1197,7 +1278,16 @@ function toggleTheme(next: boolean) {
 						aria-label="Send message"
 						title="Send"
 					>
-						<svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="M8 3v9M3.5 8.5 8 3.5l4.5 5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+						<svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">
+							<path
+								d="M8 3v9M3.5 8.5 8 3.5l4.5 5"
+								fill="none"
+								stroke="currentColor"
+								stroke-width="1.8"
+								stroke-linecap="round"
+								stroke-linejoin="round"
+							/>
+						</svg>
 					</button>
 				{/if}
 				<label class="drivetoggle" title="Let AI use shell and browse tools this turn">
@@ -1211,39 +1301,47 @@ function toggleTheme(next: boolean) {
 			</form>
 			{#if approvals.length}
 				<h3 class="queue-head">
-				approvals <span class="badge badge-warning badge-sm">{pending.length} pending</span>
-			</h3>
-			<details class="adv">
-				<summary>how approvals work</summary>
-				<p class="pane-hint">
-					Approvals bind the exact action and expire with the 90 second terminal lease.
-				</p>
-			</details>
-			<div class="queue" role="list" aria-label="approval queue">
-				{#each approvals as a (a.opId)}
-					<div class={`gate gate-${a.status}`} role="listitem">
-						<div class="gate-main">
-							<span class="badge badge-sm badge-ghost font-mono">tool action</span>
-							<code class="gate-cmd">{a.cmd}</code>
-							<span
-								class={`badge badge-sm badge-${a.status === 'pending' ? 'warning' : a.status === 'approved' ? 'success' : 'error'}`}
-								>{a.status}</span
-							>
-						</div>
-						<div class="gate-sub" title={a.opId}>{a.note}</div>
-						{#if a.status === 'pending'}
-							<div class="gate-actions">
-								<button class="btn btn-sm btn-primary" disabled={deciding || streaming} onclick={() => decide(a.opId, true)}>
-									approve + run once
-								</button>
-								<button class="btn btn-sm btn-ghost" disabled={deciding || streaming} onclick={() => decide(a.opId, false)}>
-									deny
-								</button>
+					approvals <span class="badge badge-warning badge-sm">{pending.length} pending</span>
+				</h3>
+				<details class="adv">
+					<summary>how approvals work</summary>
+					<p class="pane-hint">
+						Approvals bind the exact action and expire with the 90 second terminal lease.
+					</p>
+				</details>
+				<div class="queue" role="list" aria-label="approval queue">
+					{#each approvals as a (a.opId)}
+						<div class={`gate gate-${a.status}`} role="listitem">
+							<div class="gate-main">
+								<span class="badge badge-sm badge-ghost font-mono">tool action</span>
+								<code class="gate-cmd">{a.cmd}</code>
+								<span
+									class={`badge badge-sm badge-${a.status === 'pending' ? 'warning' : a.status === 'approved' ? 'success' : 'error'}`}
+									>{a.status}</span
+								>
 							</div>
-						{/if}
-					</div>
-				{/each}
-			</div>
+							<div class="gate-sub" title={a.opId}>{a.note}</div>
+							{#if a.status === 'pending'}
+								<div class="gate-actions">
+									<button
+										class="btn btn-sm btn-primary"
+										disabled={deciding || streaming}
+										onclick={() => decide(a.opId, true)}
+									>
+										approve + run once
+									</button>
+									<button
+										class="btn btn-sm btn-ghost"
+										disabled={deciding || streaming}
+										onclick={() => decide(a.opId, false)}
+									>
+										deny
+									</button>
+								</div>
+							{/if}
+						</div>
+					{/each}
+				</div>
 			{/if}
 		</section>
 		<!-- right: terminal — live backend shell, auto-subscribed on mount -->
@@ -1297,7 +1395,9 @@ function toggleTheme(next: boolean) {
 				<input
 					class="promptinput"
 					bind:value={termKeys}
-					placeholder={execRunning ? 'type stdin for the running command…' : 'ls, cd src, cat <file>'}
+					placeholder={execRunning
+						? 'type stdin for the running command…'
+						: 'ls, cd src, cat <file>'}
 					aria-label={execRunning ? 'stdin for the running command' : 'terminal command'}
 				>
 				<button
@@ -1308,9 +1408,20 @@ function toggleTheme(next: boolean) {
 					title={execRunning ? 'Send keystroke' : 'Run'}
 				>
 					{#if execRunning}
-						<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><rect x="3.5" y="3.5" width="9" height="9" rx="1.5" fill="currentColor" /></svg>
+						<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
+							<rect x="3.5" y="3.5" width="9" height="9" rx="1.5" fill="currentColor" />
+						</svg>
 					{:else}
-						<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M8 3v9M3.5 8.5 8 3.5l4.5 5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" /></svg>
+						<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
+							<path
+								d="M8 3v9M3.5 8.5 8 3.5l4.5 5"
+								fill="none"
+								stroke="currentColor"
+								stroke-width="1.8"
+								stroke-linecap="round"
+								stroke-linejoin="round"
+							/>
+						</svg>
 					{/if}
 				</button>
 			</form>
@@ -1320,7 +1431,9 @@ function toggleTheme(next: boolean) {
 		<div class="alert alert-error mt-4"><span>{note}</span></div>
 	{/if}
 	<details class="devdrawer">
-		<summary>developer <span class="badge badge-sm badge-ghost">{sink.events.length}</span></summary>
+		<summary>
+			developer <span class="badge badge-sm badge-ghost">{sink.events.length}</span>
+		</summary>
 		<div class="devgrid">
 			<p class="pane-hint">turn {activeTurn}</p>
 			{#if verdict}
@@ -1336,8 +1449,8 @@ function toggleTheme(next: boolean) {
 			>
 			<pre class="devtrace">{traceShown.length
 	? traceShown
-		.map((e) => `${e.runId} ${e.turnId ?? '-'} ${e.outputId} #${e.seq} ${e.kind}`)
-		.join('\n')
+			.map((e) => `${e.runId} ${e.turnId ?? '-'} ${e.outputId} #${e.seq} ${e.kind}`)
+			.join('\n')
 	: '(no events yet)'}</pre>
 		</div>
 	</details>
@@ -1809,8 +1922,7 @@ function toggleTheme(next: boolean) {
 	padding: 0.55rem 0.8rem;
 	outline: 0;
 	color: inherit;
-	font:
-		0.9rem / 1.4 var(--font-mono, ui-monospace, monospace);
+	font: 0.9rem / 1.4 var(--font-mono, ui-monospace, monospace);
 }
 .promptinput::placeholder {
 	color: var(--color-base-content);

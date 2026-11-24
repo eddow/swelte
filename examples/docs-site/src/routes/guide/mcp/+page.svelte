@@ -24,16 +24,17 @@ import { codeHtml } from '#lib/snippets.gen.js'
 </p>
 
 <p class="opacity-80 mt-2 text-sm">
-	Add this server to your MCP client’s global/user configuration to make it available across projects.
-	Merge it into the existing <code>mcpServers</code> object; the file location and schema depend on the client.
-	Project-level configuration is also an option for a single workspace.
+	Add this server to your MCP client’s global/user configuration to make it available across
+	projects. Merge it into the existing <code>mcpServers</code> object; the file location and schema
+	depend on the client. Project-level configuration is also an option for a single workspace.
 </p>
 <div class="mt-2">
 	<Code snippet={codeHtml['mcp-json']} dense title="config" />
 </div>
 <p class="text-sm opacity-70 mt-2">
-	Tools default to the server’s working directory. If your client starts a globally configured server
-	outside the project, pass the Swelte project path as the tool’s <code>root</code> parameter.
+	Tools default to the server’s working directory. If your client starts a globally configured
+	server outside the project, pass the Swelte project path as the tool’s
+	<code>root</code> parameter.
 </p>
 <p class="text-sm opacity-70 mt-2">Or via the bin: <code>swelte-mcp</code> (stdio, no args).</p>
 

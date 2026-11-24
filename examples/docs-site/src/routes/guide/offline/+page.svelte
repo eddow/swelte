@@ -22,8 +22,8 @@ import { codeHtml } from '#lib/snippets.gen.js'
 	<span
 		>Enable with <code>swelte.serviceWorker.enabled: true</code> in <code>svelte.config.js</code> or
 		<code>SWELTE_SW=1</code>
-		in the env (env wins). See <code>openspec/specs/configuration/reference.md</code> §Service worker + §Offline fallback
-		page.</span
+		in the env (env wins). See <code>openspec/specs/configuration/reference.md</code> §Service
+		worker + §Offline fallback page.</span
 	>
 </div>
 

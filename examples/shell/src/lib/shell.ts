@@ -19,10 +19,18 @@ export function upsertToolRow(rows: ToolRow[], tool: ToolRow): ToolRow[] {
 		// Never downgrade a settled row: a late progress frame after a
 		// result event keeps the settled status (result-before-progress
 		// safe). A specific label wins over the generic trace placeholder.
-		const keepStatus = prev.status === 'done' || prev.status === 'failed' ? prev.status : tool.status
+		const keepStatus =
+			prev.status === 'done' || prev.status === 'failed' ? prev.status : tool.status
 		const generic = (s: string) => !s || s === 'tool call' || s === 'Use a console tool'
-		const keepLabel = generic(tool.label) && !generic(prev.label) ? prev.label : tool.label || prev.label
-		tools[at] = { ...prev, ...tool, status: keepStatus, label: keepLabel, detail: [...(prev.detail ?? []), ...(tool.detail ?? [])] }
+		const keepLabel =
+			generic(tool.label) && !generic(prev.label) ? prev.label : tool.label || prev.label
+		tools[at] = {
+			...prev,
+			...tool,
+			status: keepStatus,
+			label: keepLabel,
+			detail: [...(prev.detail ?? []), ...(tool.detail ?? [])],
+		}
 	} else {
 		tools.push(tool)
 	}
@@ -55,7 +63,6 @@ export function settleToolRow(rows: ToolRow[], callId: string, ok: boolean): Too
 // driver lease + scrollback live in route KV (`src/routes/+page.v`);
 // this mirrors them for instant UI feedback and offline tests.
 export type ShellCaller = 'human' | 'ai'
-
 
 export interface ShellDecision {
 	allowed: boolean
@@ -97,7 +104,8 @@ export function authorizeShellCall(caller: ShellCaller, cmd: string): ShellDecis
 	// Human terminal input runs the real sandboxed shell directly — no
 	// "not allowlisted" error, not in the terminal, not in the chat.
 	// Unsupported names return an honest message from the backend.
-	if (caller === 'human') return { allowed: true, reason: 'human command runs sandboxed', needsApproval: false }
+	if (caller === 'human')
+		return { allowed: true, reason: 'human command runs sandboxed', needsApproval: false }
 	// AI proposals always park for human approval — even outside the demo
 	// allowlist. Point-blank refusal would deny the human any chance to
 	// confirm; the dispatch table + tool body enforce the final gate after
@@ -117,7 +125,8 @@ export function runAllowlisted(cmd: string): string {
 	const name = parts[0] ?? ''
 	if (!ALLOWLIST.has(name)) throw new Error(`unsupported command: ${name} (try help)`)
 	if (name === 'echo') return parts.slice(1).join(' ')
-	if (name === 'help') return 'commands: echo pwd whoami help ls cd cat <file>  (sandboxed to the project root; bare cat reads stdin)'
+	if (name === 'help')
+		return 'commands: echo pwd whoami help ls cd cat <file>  (sandboxed to the project root; bare cat reads stdin)'
 	if (name === 'whoami') return 'swelte-shell'
 	if (name === 'cat' && parts.length === 1) return '(stdin arrives over the live room)'
 	if (name === 'pwd' || name === 'ls' || name === 'cd' || name === 'cat')
@@ -157,7 +166,8 @@ export class ApprovalStore {
 	request(caller: ShellCaller, cmd: string, opId: string, ttlMs = 300_000): ApprovalRecord {
 		const existing = this.records.get(opId)
 		if (existing) {
-			if (existing.caller !== caller || existing.cmd !== cmd) throw new Error(`approval ${opId} binding mismatch`)
+			if (existing.caller !== caller || existing.cmd !== cmd)
+				throw new Error(`approval ${opId} binding mismatch`)
 			return existing
 		}
 		const rec: ApprovalRecord = {
