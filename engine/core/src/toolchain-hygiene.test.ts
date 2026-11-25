@@ -241,11 +241,11 @@ describe('shared QJS link matrix (SSR and/or agent bridge)', () => {
 			// Each bridge links its glue first, the engine after it.
 			writeFileSync(
 				join(gen, 'routes', 'swelte_qjs_bridge.v'),
-				`${realBridge('/abs/libqjs_render.a')}\n#flag /abs/libqjs.a@START_LIBS`,
+				`${realBridge('/abs/libqjs_render.a')}\n#flag /abs/libqjs.a@START_LIBS`
 			)
 			writeFileSync(
 				join(gen, 'agent', 'agent_bridge.v'),
-				`${realBridge('/abs/libqjs_agent.a')}\n#flag /abs/libqjs.a@START_LIBS`,
+				`${realBridge('/abs/libqjs_agent.a')}\n#flag /abs/libqjs.a@START_LIBS`
 			)
 			assert.deepEqual(needsQjsLink(gen), ['ssr', 'agent'])
 			// Engine linked once no matter how many bridges consume it;

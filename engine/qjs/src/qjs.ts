@@ -175,8 +175,8 @@ export function buildQjsLib(opts: {
 	 *  the resolved default. */
 	targetCc?: string
 	fromUrl?: string
- sourceDir?: string
- archiveName?: string
+	sourceDir?: string
+	archiveName?: string
 }): QjsLibOut {
 	const fromUrlForCc = opts.fromUrl ?? import.meta.url
 	const root = resolve(opts.root)
@@ -185,7 +185,7 @@ export function buildQjsLib(opts: {
 	const qjsDir = join(genAbs, 'qjs')
 	mkdirSync(qjsDir, { recursive: true })
 	const engineDir = qjsCDir(fromUrlForCc)
- const cDir = opts.sourceDir ?? engineDir
+	const cDir = opts.sourceDir ?? engineDir
 	// Target pair from env (build.ts publishes the resolved effective pair
 	// before vite runs). Shared normalize via qjsTargetPair — one rule.
 	const { os: effOs, arch: effArch, cross } = qjsTargetPair()
@@ -194,7 +194,9 @@ export function buildQjsLib(opts: {
 	// never silently link the wrong ABI. Object files are per-target too
 	// (`quickjs.<os>-<arch>.o`) — one qjs/ dir, no clobber between targets.
 	const archiveName = opts.archiveName ?? 'qjs'
- const lib = cross ? join(qjsDir, `lib${archiveName}-${effOs}-${effArch}.a`) : join(qjsDir, `lib${archiveName}.a`)
+	const lib = cross
+		? join(qjsDir, `lib${archiveName}-${effOs}-${effArch}.a`)
+		: join(qjsDir, `lib${archiveName}.a`)
 	const objSuffix = cross ? `.${effOs}-${effArch}.o` : '.o'
 	// Absolute system cc + conda-free env: conda's ld shadows the system
 	// linker and breaks both this archive step and V's later `v -o` link.
@@ -225,7 +227,10 @@ export function buildQjsLib(opts: {
 	if (!rebuild) {
 		try {
 			const libMt = statSync(lib).mtimeMs
-			for (const f of [...readdirSync(cDir).map(f => join(cDir, f)), ...readdirSync(engineDir).map(f => join(engineDir, f))]) {
+			for (const f of [
+				...readdirSync(cDir).map((f) => join(cDir, f)),
+				...readdirSync(engineDir).map((f) => join(engineDir, f)),
+			]) {
 				if (statSync(f).mtimeMs > libMt) {
 					rebuild = true
 					break
@@ -249,7 +254,8 @@ export function buildQjsLib(opts: {
 					'-fPIC',
 					'-I',
 					cDir,
- '-I', engineDir,
+					'-I',
+					engineDir,
 					'-c',
 					join(cDir, f),
 					'-o',

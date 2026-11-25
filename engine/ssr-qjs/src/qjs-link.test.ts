@@ -1,7 +1,7 @@
-import { createRequire } from 'node:module'
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
 import { existsSync, mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import { delimiter, dirname, join } from 'node:path'
 import { describe, it } from 'node:test'
@@ -121,7 +121,20 @@ int main(void) {
 		}
 		execFileSync(
 			cc!,
-			['-I', cDir, '-I', join(dirname(createRequire(import.meta.url).resolve('@swelte/ssr-qjs/package.json')), 'c'), source, join(root, '.swelte/qjs/libqjs_render.a'), out1.lib, '-lm', '-lpthread', '-ldl', '-o', executable],
+			[
+				'-I',
+				cDir,
+				'-I',
+				join(dirname(createRequire(import.meta.url).resolve('@swelte/ssr-qjs/package.json')), 'c'),
+				source,
+				join(root, '.swelte/qjs/libqjs_render.a'),
+				out1.lib,
+				'-lm',
+				'-lpthread',
+				'-ldl',
+				'-o',
+				executable,
+			],
 			{ timeout: 30_000, env }
 		)
 		assert.match(

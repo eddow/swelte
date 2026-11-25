@@ -2138,7 +2138,8 @@ export declare const dev: boolean
 								// pruned). No staged sources live here anymore;
 								// consumer V modules prune as include dirs.
 								continue
-							}							if (e.name.startsWith('.')) continue
+							}
+							if (e.name.startsWith('.')) continue
 							if (generatedOwners.has(e.name)) continue
 							if (!wanted.has(e.name)) {
 								try {
