@@ -919,9 +919,9 @@ pub fn publish(args PageArgs) ![]PageRow {
 			}
 		})
 
-	describe('agent plugin: shared qjs staging + bridge + one archive', () => {
-		it('agent bridge evaluates real JS through the shared module (native v test)', function () {
-			// Full PTC eval path in V: staged `module qjs` + emitted agent
+	describe('agent plugin: agent_eval staging + bridge + two archives', () => {
+		it('agent bridge evaluates real JS through the AI-owned module (native v test)', function () {
+			// Full PTC eval path in V: staged `module agent_eval` + emitted agent
 			// bridge + the real shared archive. Proves the bridge contract
 			// (`agent_run_eval`) against the actual QuickJS engine — pure
 			// eval, stub-rejected binding (host dispatcher not yet wired),
@@ -945,23 +945,23 @@ pub fn publish(args PageArgs) ![]PageRow {
 			}
 			const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'swelte-agent-c1-'))
 			try {
-				// Stage the shared module + emit the bridge exactly as the
-				// plugin generate() does, then compile a probe against them
-				// with the real archive (mtime-guarded — reuses the SSR
-				// archive when present, proving link-once).
+				// Stage the AI-owned module + emit the bridge exactly as the
+				// plugin generate() does, then compile a probe against both
+				// archives (engine + AI glue, each mtime-guarded).
 				const { agentQjsModuleDir, agentBridgeSrc } = require('../src/lib/build.js') as typeof import('../src/lib/build.js')
 				const qjsSrc = agentQjsModuleDir() as string
-				const qjsDst = path.join(dir, 'qjs')
+				const qjsDst = path.join(dir, 'agent_eval')
 				fs.mkdirSync(qjsDst, { recursive: true })
 				for (const f of fs.readdirSync(qjsSrc)) {
 					if (f.endsWith('.v')) fs.copyFileSync(path.join(qjsSrc, f), path.join(qjsDst, f))
 				}
 				const agentDst = path.join(dir, 'agent')
 				fs.mkdirSync(agentDst, { recursive: true })
-				// Build (or reuse) the shared archive in the probe dir.
+				// Build both archives in the probe dir (engine + AI glue).
 				const { buildQjsLib } = require('@swelte/qjs') as typeof import('@swelte/qjs')
 				const built = buildQjsLib({ root: dir, outDir: '.' }) as { lib: string; cDir: string }
-				fs.writeFileSync(path.join(agentDst, 'agent_bridge.v'), agentBridgeSrc(built.lib, built.cDir, 1000, 16))
+				const agentLib = buildQjsLib({ root: dir, outDir: '.', sourceDir: path.join(qjsSrc, '..', 'c'), archiveName: 'qjs_agent' })
+				fs.writeFileSync(path.join(agentDst, 'agent_bridge.v'), agentBridgeSrc(built.lib, built.cDir, 1000, 16, { lib: agentLib.lib, cDir: agentLib.cDir }))
 				fs.writeFileSync(
 					path.join(dir, 'probe_main.v'),
 					[
@@ -1023,34 +1023,28 @@ pub fn publish(args PageArgs) ![]PageRow {
 				fs.rmSync(dir, { recursive: true, force: true })
 			}
 		})
-		it('agentQjsModuleDir resolves to the same bytes the SSR adapter stages', async () => {
-			const fs = require('node:fs') as typeof import('node:fs')
-			const path = require('node:path') as typeof import('node:path')
-			const { agentQjsModuleDir } = await import('../src/lib/build.js')
-			const dir = agentQjsModuleDir()
-			assert.ok(fs.existsSync(path.join(dir, 'qjs.v')), `qjs.v missing in ${dir}`)
-			assert.ok(fs.existsSync(path.join(dir, 'agent.v')), `agent.v missing in ${dir}`)
-			assert.ok(
-				fs.existsSync(path.join(dir, 'c', 'swelte_qjs.c')),
-				`render glue missing in ${dir}/c`
-			)
-			assert.ok(
-				fs.existsSync(path.join(dir, 'c', 'swelte_agent.c')),
-				`agent glue missing in ${dir}/c`
-			)
-			// Same package both consumers resolve: one engine, staged once
-			// no matter how many bridges import it.
-			const { qjsCDir } = await import('@swelte/qjs')
-			const qjsUrl = import.meta.resolve('@swelte/qjs')
-			assert.equal(fs.realpathSync(dir), fs.realpathSync(path.join(qjsCDir(qjsUrl), '..')))
-		})
+		it('agentQjsModuleDir resolves AI-owned evaluation sources', async () => {
+ const fs = require('node:fs') as typeof import('node:fs')
+ const path = require('node:path') as typeof import('node:path')
+ const { agentQjsModuleDir } = await import('../src/lib/build.js')
+ const dir = agentQjsModuleDir()
+ assert.ok(fs.existsSync(path.join(dir, 'agent.v')))
+ assert.ok(fs.existsSync(path.join(dir, '..', 'c', 'swelte_agent.c')))
+ assert.ok(!fs.existsSync(path.join(dir, '..', 'c', 'swelte_render.c')))
+ })
 		it('agent bridge source carries the shared-link contract', async () => {
 			const { agentBridgeSrc } = await import('../src/lib/build.js')
-			const src = agentBridgeSrc('/abs/libqjs.a', '/abs/c', 1000, 16)
+			const src = agentBridgeSrc('/abs/libqjs.a', '/abs/c', 1000, 16, {
+				lib: '/abs/libqjs_agent.a',
+				cDir: '/abs/agent-c',
+			})
 			assert.ok(src.includes('module agent'), 'bridge is module agent')
-			assert.ok(src.includes('import qjs'), 'bridge imports the shared module')
+			assert.ok(src.includes('import agent_eval'), 'bridge imports the AI-owned module')
 			assert.ok(src.includes('__global'), 'bridge opts into needsQjsLink')
-			assert.ok(src.includes('/abs/libqjs.a@START_LIBS'), 'bridge links the shared archive')
+			// Dependency order: AI glue first, engine after it.
+			const glueAt = src.indexOf('/abs/libqjs_agent.a@START_LIBS')
+			const engineAt = src.indexOf('/abs/libqjs.a@START_LIBS')
+			assert.ok(glueAt >= 0 && engineAt > glueAt, 'bridge links glue before engine')
 			assert.ok(src.includes('#include "swelte_agent.h"'), 'bridge includes the agent glue')
 			assert.ok(src.includes('agent_run_eval'), 'bridge exposes the eval entry')
 			assert.ok(src.includes('return 1000'), 'bridge bakes the timeout budget')
@@ -1058,7 +1052,7 @@ pub fn publish(args PageArgs) ![]PageRow {
 			// dispatcher module stays QJS-free (no include, no flag).
 			assert.ok(!src.includes('swelte_tool_dispatch'), 'bridge never touches named dispatch')
 		})
-		it('agent plugin stages qjs/ + emits the bridge; removal prunes both', async () => {
+		it('agent plugin stages agent_eval/ + emits the bridge; removal prunes both', async () => {
 			const fs = require('node:fs') as typeof import('node:fs')
 			const path = require('node:path') as typeof import('node:path')
 			const { createAgentPlugin } = await import('../src/lib/tools.js')
@@ -1093,30 +1087,22 @@ pub fn publish(args PageArgs) ![]PageRow {
 				assert.ok(src.includes('module agent'), 'emitted bridge is module agent')
 				assert.ok(src.includes('__global'), 'emitted bridge opts into the QJS link')
 				assert.ok(
-					fs.existsSync(path.join(root, '.swelte', 'qjs', 'qjs.v')),
-					'shared qjs module staged'
+					fs.existsSync(path.join(root, '.swelte', 'agent_eval', 'agent.v')),
+					'AI-owned agent_eval module staged'
 				)
-				assert.ok(
-					fs.existsSync(path.join(root, '.swelte', 'qjs', 'agent.v')),
-					'agent V half staged'
-				)
-				// The staged module is byte-identical to the resolved source
-				// (no drift between the two consumers is possible).
+				// The staged module is byte-identical to the resolved source.
 				const { agentQjsModuleDir } = await import('../src/lib/build.js')
-				for (const f of ['qjs.v', 'agent.v']) {
-					assert.equal(
-						fs.readFileSync(path.join(root, '.swelte', 'qjs', f), 'utf8'),
-						fs.readFileSync(path.join(agentQjsModuleDir(), f), 'utf8'),
-						`staged ${f} matches the shared source`
-					)
-				}
+				assert.equal(
+					fs.readFileSync(path.join(root, '.swelte', 'agent_eval', 'agent.v'), 'utf8'),
+					fs.readFileSync(path.join(agentQjsModuleDir(), 'agent.v'), 'utf8'),
+					'staged agent.v matches the AI-owned source'
+				)
 				// Removal prunes the bridge + the staged sources. The prebuilt
-				// archive stays (mtime-guarded build artifact, inert without
+				// archives stay (mtime-guarded build artifacts, inert without
 				// a bridge — same rule as the SSR adapter's qjs/ dir).
 				await generateWith(root, [])
 				assert.equal(fs.existsSync(path.join(root, '.swelte', 'agent')), false)
-				assert.equal(fs.existsSync(path.join(root, '.swelte', 'qjs', 'qjs.v')), false)
-				assert.equal(fs.existsSync(path.join(root, '.swelte', 'qjs', 'agent.v')), false)
+				assert.equal(fs.existsSync(path.join(root, '.swelte', 'agent_eval', 'agent.v')), false)
 			} finally {
 				process.chdir(prevCwd)
 				fs.rmSync(root, { recursive: true, force: true })

@@ -1,8 +1,9 @@
+import { createRequire } from 'node:module'
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
 import { existsSync, mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { delimiter, join } from 'node:path'
+import { delimiter, dirname, join } from 'node:path'
 import { describe, it } from 'node:test'
 import { qjsCDir, whichCC } from '@swelte/qjs'
 import { bridgeSrc, buildQjsProd } from './qjs.js'
@@ -17,7 +18,7 @@ describe('item 25 — QJS prod bridge (gcc-gated)', () => {
 		assert.ok(existsSync(out1.lib))
 		assert.ok(existsSync(out1.bridge))
 		assert.ok(out1.bridge.endsWith(join('.swelte', 'routes', 'swelte_qjs_bridge.v')))
-		assert.ok(out1.flags.includes('-lqjs -lm'))
+		assert.ok(out1.flags.includes('libqjs.a -lm'))
 		assert.ok(out1.qjscNote.length > 0)
 		const mt1 = statSync(out1.lib).mtimeMs
 		// Second build with no source change: archive untouched.
@@ -31,7 +32,7 @@ describe('item 25 — QJS prod bridge (gcc-gated)', () => {
 		writeFileSync(
 			source,
 			`
-#include "swelte_qjs.h"
+#include "swelte_render.h"
 #include <assert.h>
 #include <pthread.h>
 #include <stdio.h>
@@ -120,7 +121,7 @@ int main(void) {
 		}
 		execFileSync(
 			cc!,
-			['-I', cDir, source, out1.lib, '-lm', '-lpthread', '-ldl', '-o', executable],
+			['-I', cDir, '-I', join(dirname(createRequire(import.meta.url).resolve('@swelte/ssr-qjs/package.json')), 'c'), source, join(root, '.swelte/qjs/libqjs_render.a'), out1.lib, '-lm', '-lpthread', '-ldl', '-o', executable],
 			{ timeout: 30_000, env }
 		)
 		assert.match(
@@ -131,11 +132,17 @@ int main(void) {
 	})
 
 	it('bridgeSrc interpolates timeout/mem constants, no template holes', () => {
-		// Pure-shape half: runs even without a compiler.
-		const src = bridgeSrc('/lib/libqjs.a', '/c/dir', 50, 16)
+		// Pure-shape half: runs even without a compiler. Two archives in
+		// dependency order: the SSR render glue first, the engine after it.
+		const src = bridgeSrc('/lib/libqjs.a', '/c/dir', 50, 16, {
+			lib: '/lib/libqjs_render.a',
+			cDir: '/render/dir',
+		})
 		assert.ok(src.includes('return 50'))
 		assert.ok(src.includes('u32(16)'))
-		assert.ok(src.includes('swelte_qjs.h'))
+		assert.ok(src.includes('swelte_render.h'), 'bridge includes the SSR render glue')
+		assert.ok(src.includes('/lib/libqjs_render.a@START_LIBS'), 'bridge links the render archive')
+		assert.ok(src.includes('/lib/libqjs.a@START_LIBS'), 'bridge links the engine archive after it')
 		assert.ok(!src.includes('${timeoutMs}') && !src.includes('${memoryMB}'))
 	})
 })

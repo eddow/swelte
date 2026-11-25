@@ -1,12 +1,15 @@
 // Shared embedded-QuickJS archive builder (leaf, consumer-agnostic —
-// never core). Compiles vendored C (`c/*.c` + glue) with gcc into
-// `<outDir>/qjs/libqjs.a`. (V's tcc cannot compile quickjs.c; V links
-// one prebuilt archive per #flag — hence .a, not loose .o files.)
-// SSR (`@swelte/ssr-qjs` `buildQjsProd` — bridge emission + render.js
-// coupling) and PTC (`@swelte/ai` agent plugin) both call `buildQjsLib`
-// and link the SAME archive path — the second caller no-ops.
+// never core). Compiles vendored C (`c/*.c`) with gcc into
+// `<outDir>/qjs/libqjs.a`, plus per-consumer glue archives when callers
+// pass `sourceDir` + `archiveName` (`libqjs_render.a` for SSR,
+// `libqjs_agent.a` for the agent). (V's tcc cannot compile quickjs.c; V
+// links one prebuilt archive per #flag — hence .a, not loose .o files.)
+// The SSR adapter (`@swelte/ssr-qjs` `buildQjsProd` — bridge emission +
+// render.js coupling) builds the engine archive and its own render archive;
+// the PTC agent plugin (`@swelte/ai`) builds the engine archive and its own
+// agent archive. Each consumer links its glue after the engine.
 import { execFileSync, execSync } from 'node:child_process'
-import { existsSync, mkdirSync, readdirSync, statSync } from 'node:fs'
+import { existsSync, mkdirSync, readdirSync, rmSync, statSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -161,9 +164,10 @@ export interface QjsLibOut {
 	effArch: string
 }
 
-/** Build (or reuse, mtime-guarded) the shared `.swelte/qjs/libqjs.a`.
- *  Consumer-agnostic: SSR and PTC call this and get back the SAME archive
- *  path — the second caller no-ops. */
+/** Build (or reuse, mtime-guarded) the engine archive `.swelte/qjs/libqjs.a`,
+ *  or a per-consumer glue archive when `sourceDir` + `archiveName` are
+ *  given (`libqjs_render.a`, `libqjs_agent.a`). The glue archives compile
+ *  under the same compiler/target configuration and link after the engine. */
 export function buildQjsLib(opts: {
 	root: string
 	outDir?: string
@@ -171,6 +175,8 @@ export function buildQjsLib(opts: {
 	 *  the resolved default. */
 	targetCc?: string
 	fromUrl?: string
+ sourceDir?: string
+ archiveName?: string
 }): QjsLibOut {
 	const fromUrlForCc = opts.fromUrl ?? import.meta.url
 	const root = resolve(opts.root)
@@ -178,12 +184,8 @@ export function buildQjsLib(opts: {
 	const genAbs = join(root, outDir)
 	const qjsDir = join(genAbs, 'qjs')
 	mkdirSync(qjsDir, { recursive: true })
-	const cDir = qjsCDir(fromUrlForCc)
-	if (!existsSync(join(cDir, 'swelte_agent.c'))) {
-		throw new Error(
-			`[swelte:qjs] agent glue missing at ${cDir} (shared engine checkout incomplete)`
-		)
-	}
+	const engineDir = qjsCDir(fromUrlForCc)
+ const cDir = opts.sourceDir ?? engineDir
 	// Target pair from env (build.ts publishes the resolved effective pair
 	// before vite runs). Shared normalize via qjsTargetPair — one rule.
 	const { os: effOs, arch: effArch, cross } = qjsTargetPair()
@@ -191,7 +193,8 @@ export function buildQjsLib(opts: {
 	// gets per-target `libqjs-<os>-<arch>.a` so a stale host archive can
 	// never silently link the wrong ABI. Object files are per-target too
 	// (`quickjs.<os>-<arch>.o`) — one qjs/ dir, no clobber between targets.
-	const lib = cross ? join(qjsDir, `libqjs-${effOs}-${effArch}.a`) : join(qjsDir, 'libqjs.a')
+	const archiveName = opts.archiveName ?? 'qjs'
+ const lib = cross ? join(qjsDir, `lib${archiveName}-${effOs}-${effArch}.a`) : join(qjsDir, `lib${archiveName}.a`)
 	const objSuffix = cross ? `.${effOs}-${effArch}.o` : '.o'
 	// Absolute system cc + conda-free env: conda's ld shadows the system
 	// linker and breaks both this archive step and V's later `v -o` link.
@@ -222,8 +225,8 @@ export function buildQjsLib(opts: {
 	if (!rebuild) {
 		try {
 			const libMt = statSync(lib).mtimeMs
-			for (const f of cFiles) {
-				if (statSync(join(cDir, f)).mtimeMs > libMt) {
+			for (const f of [...readdirSync(cDir).map(f => join(cDir, f)), ...readdirSync(engineDir).map(f => join(engineDir, f))]) {
+				if (statSync(f).mtimeMs > libMt) {
 					rebuild = true
 					break
 				}
@@ -246,6 +249,7 @@ export function buildQjsLib(opts: {
 					'-fPIC',
 					'-I',
 					cDir,
+ '-I', engineDir,
 					'-c',
 					join(cDir, f),
 					'-o',
@@ -260,6 +264,7 @@ export function buildQjsLib(opts: {
 		let arBin = 'ar'
 		const llvmAr = join(dirname(cc), process.platform === 'win32' ? 'llvm-ar.exe' : 'llvm-ar')
 		if (cross && existsSync(llvmAr)) arBin = llvmAr
+		rmSync(lib, { force: true })
 		execFileSync(arBin, ['rcs', lib, ...objs], { stdio: ['ignore', 'pipe', 'pipe'], env: ccEnv })
 	}
 	return { lib, cDir, qjsDir, cross, effOs, effArch }

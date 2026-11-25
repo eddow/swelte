@@ -10,7 +10,8 @@
 // from host (`vvm prepare` installs zig + writes the wrapper on `npm i`).
 // Smoke probe + prerender crawl skip (foreign binary can't boot — assert
 // artifacts only). WASM untouched (always `-os browser`); QJS needs the
-// per-OS-ARCH `libqjs-<os>-<arch>.a` (built by the same zig wrapper).
+// per-OS-ARCH archives (engine `libqjs-<os>-<arch>.a` + each consumer's
+// glue, built by the same zig wrapper).
 import { execFileSync } from 'node:child_process'
 import { cpSync, existsSync, mkdirSync, readdirSync, statSync, writeFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
@@ -283,15 +284,26 @@ export async function runBuild(ctx: Ctx): Promise<void> {
 	const nativeCc = cross ? '' : resolveHostCC(import.meta.url)
 	let vExtra: string[] = []
 	if (!coreOnly) {
-		// Cross + bridge: needs the per-OS-ARCH archive or the host
-		// libqjs.a would silently link the wrong ABI — fail fast with
-		// the exact fix (adapter builds it under the same zig wrapper).
-		if (cross && !existsSync(join(genAbs, 'qjs', `libqjs-${effOs}-${effArch}.a`))) {
-			throw new Error(
-				`cross-build ${effOs}-${effArch} with QJS embed: no per-target archive at .swelte/qjs/libqjs-${effOs}-${effArch}.a ` +
-					`(the host-prebuilt libqjs.a would link the wrong ABI). ` +
-					`Run: npx vvm prepare --target-os ${effOs} --target-arch ${effArch} (builds the archive under zig-cc).`
-			)
+		// Cross + bridge: needs the per-OS-ARCH archives or the host
+		// archives would silently link the wrong ABI — fail fast with
+		// the exact fix. Every `#flag ...@START_LIBS` archive the bridges
+		// link must have its per-target build (engine + each consumer's
+		// glue: `libqjs-<os>-<arch>.a`, `libqjs_render-<os>-<arch>.a`,
+		// `libqjs_agent-<os>-<arch>.a` as linked).
+		if (cross) {
+			const { bridgeLinkedArchives } = await import('../toolchain.js')
+			// Host `lib<name>.a` → per-target `lib<name>-<os>-<arch>.a`
+			// (same rule `buildQjsLib` uses when naming archives).
+			const crossFor = (abs: string): string =>
+				abs.replace(/lib([A-Za-z0-9_]+)\.a$/, `lib$1-${effOs}-${effArch}.a`)
+			const missing = bridgeLinkedArchives(genAbs).filter((a) => !existsSync(crossFor(a)))
+			if (missing.length > 0) {
+				throw new Error(
+					`cross-build ${effOs}-${effArch} with QJS embed: no per-target archive for ${missing.join(', ')} ` +
+						`(want ${missing.map(crossFor).join(', ')} — the host-prebuilt archives would link the wrong ABI). ` +
+						`Run: npx vvm prepare --target-os ${effOs} --target-arch ${effArch} (builds the archives under zig-cc).`
+				)
+			}
 		}
 		if (cross && !zigCc) {
 			throw new Error(

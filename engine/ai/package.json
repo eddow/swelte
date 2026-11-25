@@ -23,7 +23,9 @@
 		"package",
 		"src/lib/**/*.v",
 		"LICENSE-MIT",
-		"package.json"
+		"package.json",
+		"c",
+		"v"
 	],
 	"scripts": {
 		"dev": "swelte dev",

@@ -233,17 +233,28 @@ describe('shared QJS link matrix (SSR and/or agent bridge)', () => {
 		}
 	})
 
-	it('both bridges reference the SAME archive: linked once', () => {
+	it('both bridges share the engine archive; glue archives stay per-consumer', () => {
 		const gen = mkGen()
 		try {
 			mkdirSync(join(gen, 'routes'), { recursive: true })
 			mkdirSync(join(gen, 'agent'), { recursive: true })
-			writeFileSync(join(gen, 'routes', 'swelte_qjs_bridge.v'), realBridge('/abs/libqjs.a'))
-			writeFileSync(join(gen, 'agent', 'agent_bridge.v'), realBridge('/abs/libqjs.a'))
+			// Each bridge links its glue first, the engine after it.
+			writeFileSync(
+				join(gen, 'routes', 'swelte_qjs_bridge.v'),
+				`${realBridge('/abs/libqjs_render.a')}\n#flag /abs/libqjs.a@START_LIBS`,
+			)
+			writeFileSync(
+				join(gen, 'agent', 'agent_bridge.v'),
+				`${realBridge('/abs/libqjs_agent.a')}\n#flag /abs/libqjs.a@START_LIBS`,
+			)
 			assert.deepEqual(needsQjsLink(gen), ['ssr', 'agent'])
-			// One archive on the link line no matter how many bridges
-			// consume it — never linked twice.
-			assert.deepEqual(bridgeLinkedArchives(gen), ['/abs/libqjs.a'])
+			// Engine linked once no matter how many bridges consume it;
+			// each glue archive appears exactly once.
+			assert.deepEqual(bridgeLinkedArchives(gen), [
+				'/abs/libqjs_render.a',
+				'/abs/libqjs.a',
+				'/abs/libqjs_agent.a',
+			])
 			assert.equal(hasRealBridge(gen), true)
 		} finally {
 			rmSync(gen, { recursive: true, force: true })

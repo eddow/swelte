@@ -1,8 +1,12 @@
 // `swelte_agent` — PTC agent-eval C glue between V and vendored QuickJS.
 //
-// Sibling of `swelte_qjs.*` (SSR render glue), same guard family, different
-// contract: evaluate agent-authored JavaScript in a dedicated context with
-// time/memory/call-count/result-size budgets, then return.
+// Sibling of the SSR render glue (`@swelte/ssr-qjs` `swelte_render.*`), same
+// guard family, different contract: evaluate agent-authored JavaScript in a
+// dedicated context with time/memory/call-count/result-size budgets, then
+// return. Engine primitives (runtime handles, budget clock/interrupt) are
+// declared by the shared engine's `swelte_qjs.h` and defined in the engine
+// archive; this header only declares the agent entry, which the AI consumer
+// compiles into its own archive and links after the engine.
 //
 // OWNERSHIP (V 0.5.2 autofree): same rule as the render glue — NEVER return
 // malloc'd pointers. The caller passes fixed V-side buffers + lengths, C

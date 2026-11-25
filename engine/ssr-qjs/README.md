@@ -25,11 +25,16 @@ src/   compose (ssr.ts) · swelte() wrapper (vite.ts) · QJS link (qjs.ts)
        dev sidecar (dev.ts) · runSsrCheck + ssrPlugin (cli.ts, vite.ts)
 shims/ QJS-safe substitutes (2 svelte internals + SDK shim)
 
-The vendored QuickJS engine + shared V module live in `@swelte/qjs`
-(`engine/qjs/`): `c/` sources, `swelte_qjs.*` render glue, `qjs.v` +
-`agent.v`. This package consumes them via `buildQjsProd` (over the
-`buildQjsLib` archive builder from `@swelte/qjs`) — it owns the
-SSR compiler and adapter, not the engine.
+The vendored QuickJS engine lives in `@swelte/qjs` (`engine/qjs/`):
+engine-owned `c/` sources (runtime/context lifecycle, evaluation budgets,
+interrupt clock) plus the `buildQjsLib` archive builder. Each consumer owns
+its glue: SSR render driver (`swelte_render.*` in this package's `c/`) and
+V bridge (`routes/swelte_qjs_bridge.v`, self-contained — no shared V
+module). This package consumes them via `buildQjsProd` (over the
+`buildQjsLib` archive builder from `@swelte/qjs`) — it owns the SSR
+compiler and adapter, not the engine. The agent consumer (`@swelte/ai`)
+owns `swelte_agent.*` + its `agent_eval` V module the same way and links
+its glue after the same engine archive.
 ```
 
 ## Constraints (sync renderer, V-owned data)

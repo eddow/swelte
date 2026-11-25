@@ -9,7 +9,7 @@
 //
 // Named tool calls never touch this path — they dispatch through
 // `swelte_tool_dispatch` with no JS runtime involved.
-module qjs
+module agent_eval
 
 #include "swelte_qjs.h"
 #include "swelte_agent.h"

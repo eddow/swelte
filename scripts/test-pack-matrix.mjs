@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// test-pack-matrix.mjs \u2014 \u00a74 box 1: build clean consumers from packed packages.
+// test-pack-matrix.mjs — \u00a74 box 1: build clean consumers from packed packages.
 // Packs core / plus / ai to tarballs, installs three isolated consumers, and
 // asserts the release boundary without a native compile:
 //   - core-alone: no Plus install, no `./jobs` core export, no `migrate` CLI.

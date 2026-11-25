@@ -92,8 +92,10 @@ export function needsGlobals(genAbs: string): boolean {
  *  shapes count: the SSR bridge (`routes/swelte_qjs_bridge.v`, render
  *  contract) and the PTC agent bridge (`agent/agent_bridge.v`, eval
  *  contract). Either one needs the real C compiler (only quickjs.c does)
- *  and the single shared `.swelte/qjs/libqjs.a`. Provider-only apps emit
- *  neither: native link, no QJS. Decides the `-cc` override. */
+ *  and its archives under `.swelte/qjs/` (engine `libqjs.a` plus the
+ *  consumer's glue: SSR `libqjs_render.a`, agent `libqjs_agent.a`).
+ *  Provider-only apps emit neither: native link, no QJS. Decides the
+ *  `-cc` override. */
 export function hasRealBridge(genAbs: string): boolean {
 	return needsQjsLink(genAbs).length > 0
 }
@@ -105,8 +107,9 @@ export function hasRealBridge(genAbs: string): boolean {
  *  `.swelte/qjs/` cleaned without a rebuild) so dev/build can self-heal
  *  instead of dying in the linker.
  *
- *  Deduplicated: SSR + PTC reference the SAME archive (one QuickJS build,
- *  linked once no matter how many bridges consume it). */
+ *  Deduplicated: each archive path appears once no matter how many
+ *  bridges link it (the engine archive is shared; each glue archive
+ *  belongs to exactly one consumer). */
 /** Which QJS consumer bridges exist in `.swelte/`: subset of
  *  `['ssr', 'agent']`. A bridge counts only when real (adapter/plugin
  *  emitted, contains `__global`) — core's no-op stub never counts.

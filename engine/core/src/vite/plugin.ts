@@ -2106,13 +2106,14 @@ export declare const dev: boolean
 						}
 					}
 					// Prune stale plugin module dirs (renamed/removed includes).
-					// `qjs/` is shared: staged `module qjs` sources (owned by
-					// plugin includes — prune `*.v` when no plugin stages it)
-					// plus the prebuilt archive (`libqjs*.a`, `*.o` — owned by
-					// the archive builder, mtime-guarded, never pruned: a
-					// stale archive is inert without a bridge and rebuilds on
-					// source change; the QJS-bridge-pass regenerate runs AFTER
-					// vite build created it).
+					// `qjs/` holds the prebuilt archives (engine `libqjs*.a` +
+					// each consumer's glue `*.a`, `*.o` — owned by the archive
+					// builder, mtime-guarded, never pruned: a stale archive is
+					// inert without a bridge and rebuilds on source change;
+					// the QJS-bridge-pass regenerate runs AFTER vite build
+					// created it). Staged consumer V modules
+					// (`.swelte/agent_eval/`) prune with their plugin like
+					// any other include dir.
 					// (§1: plugin generate() outputs (`.swelte/<name>/`) are
 					// owned by writePluginOutputs — never prune a dir listed
 					// there, even when it holds no V include module.)
@@ -2132,20 +2133,12 @@ export declare const dev: boolean
 							if (SWELTE_GEN_CORE_DIRS.includes(e.name)) continue
 							if (e.name.startsWith('npm_')) continue
 							if (ADAPTER_OWNED_DIRS.has(e.name)) {
-								// Shared dir: drop staged sources when unstaged,
-								// keep build artifacts (see above).
-								if (!wanted.has(e.name)) {
-									try {
-										for (const f of readdirSync(join(genDir, e.name))) {
-											if (f.endsWith('.v')) rmSync(join(genDir, e.name, f), { force: true })
-										}
-									} catch {
-										/* ignore */
-									}
-								}
+								// Archive dir: build artifacts only (engine +
+								// consumer glue archives, mtime-guarded, never
+								// pruned). No staged sources live here anymore;
+								// consumer V modules prune as include dirs.
 								continue
-							}
-							if (e.name.startsWith('.')) continue
+							}							if (e.name.startsWith('.')) continue
 							if (generatedOwners.has(e.name)) continue
 							if (!wanted.has(e.name)) {
 								try {

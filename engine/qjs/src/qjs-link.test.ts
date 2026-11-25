@@ -35,77 +35,35 @@ describe('qjs — shared archive build (gcc-gated)', () => {
 #include <stdio.h>
 #include <string.h>
 
-static int render(const char *source, int timeout, int memory) {
-    int handle = swelte_qjs_new_runtime();
-    assert(handle);
-    char head[64], body[256];
-    int nh = 0, nb = 0;
-    int rc = swelte_qjs_render_head_body(handle, source, strlen(source), "/", 1, "{}", 2,
-        head, sizeof(head), &nh, body, sizeof(body), &nb, timeout, memory);
-    swelte_qjs_free_runtime(handle);
-    return rc;
-}
-
-static void *rotate(void *arg) {
-    long index = (long)arg;
-    char source[256], expected[32];
-    snprintf(expected, sizeof(expected), "bundle-%ld", index);
-    snprintf(source, sizeof(source), "export function renderRoute(){return {head:'',body:'%s'}}", expected);
-    for (int n = 0; n < 60; n++) {
-        int handle = swelte_qjs_new_runtime();
-        assert(handle);
-        char body[64];
-        int rc = swelte_qjs_render(handle, source, strlen(source), "/", 1, "{}", 2,
-            body, sizeof(body), 1000, 16);
-        assert(rc == (int)strlen(expected));
-        assert(strcmp(body, expected) == 0);
-        swelte_qjs_free_runtime(handle);
-    }
-    return NULL;
-}
-
-static void diagnostics(void) {
-    int handle = swelte_qjs_new_runtime();
-    assert(handle);
-    char head[64], body[256];
-    struct { char text[32]; char guard; } detail;
-    detail.guard = 42;
-    memset(detail.text, 'X', sizeof(detail.text));
-    int nh = 0, nb = 0;
-    const char *source = "export function renderRoute(){throw Error('private cause with a deliberately long detail')}";
-    int rc = swelte_qjs_render_report(handle, source, strlen(source), "/", 1, "{}", 2,
-        head, sizeof(head), &nh, body, sizeof(body), &nb, 1000, 16,
-        detail.text, sizeof(detail.text));
-    assert(rc == -1);
-    assert(strstr(detail.text, "private cause"));
-    assert(detail.text[31] == 0 && detail.guard == 42);
-    source = "export function renderRoute(){globalThis.__swelteSsrPage={renderError:'caught private cause'};return {head:'',body:'safe'}}";
-    rc = swelte_qjs_render_report(handle, source, strlen(source), "/", 1, "{}", 2,
-        head, sizeof(head), &nh, body, sizeof(body), &nb, 1000, 16,
-        detail.text, sizeof(detail.text));
-    assert(rc == 0 && strcmp(body, "safe") == 0);
-    assert(strcmp(detail.text, "caught private cause") == 0);
-    source = "export function renderRoute(){return {head:'',body:'ok'}}";
-    rc = swelte_qjs_render_report(handle, source, strlen(source), "/", 1, "{}", 2,
-        head, sizeof(head), &nh, body, sizeof(body), &nb, 1000, 16,
-        detail.text, sizeof(detail.text));
-    assert(rc == 0 && detail.text[0] == 0 && detail.guard == 42);
-    swelte_qjs_free_runtime(handle);
-}
-
 int main(void) {
-    diagnostics();
-    assert(render("export function renderRoute(){return {head:'',body:'ok'}}", 1000, 16) == 0);
-    assert(render("export function renderRoute(){throw Error('private detail')}", 1000, 16) == -1);
-    assert(render("export function renderRoute(){while(true){}}", 10, 16) == -5);
-    int oom = render("export function renderRoute(){let a=[];while(true)a.push(new Array(10000).fill(1))}", 2000, 8);
-    assert(oom == -6);
-    assert(render("invalid JavaScript !", 1000, 16) == -3);
-    pthread_t threads[8];
-    for (long n = 0; n < 8; n++) assert(!pthread_create(&threads[n], NULL, rotate, (void *)n));
-    for (int n = 0; n < 8; n++) assert(!pthread_join(threads[n], NULL));
-    puts("native QJS limits and concurrent bundle isolation passed");
+ int handle = swelte_qjs_new_runtime();
+ assert(handle);
+ JSRuntime *rt = swelte_qjs_rt_at(handle);
+ JSContext *ctx = JS_NewContext(rt);
+ JSValue value = JS_Eval(ctx, "1+2", 3, "<test>", JS_EVAL_TYPE_GLOBAL);
+ int result;
+ assert(!JS_ToInt32(ctx, &result, value) && result == 3);
+ JS_FreeValue(ctx, value);
+ value = JS_Eval(ctx, "throw Error()", 13, "<test>", JS_EVAL_TYPE_GLOBAL);
+ assert(JS_IsException(value));
+ JS_FreeValue(ctx, JS_GetException(ctx));
+ swelte_qjs_budget budget = {swelte_qjs_now_ms(), 10, 0};
+ JS_SetInterruptHandler(rt, swelte_qjs_interrupt, &budget);
+ value = JS_Eval(ctx, "while(true){}", 13, "<test>", JS_EVAL_TYPE_GLOBAL);
+ assert(JS_IsException(value) && budget.interrupted);
+ JS_FreeValue(ctx, JS_GetException(ctx));
+ JS_SetInterruptHandler(rt, NULL, NULL);
+ JS_SetMemoryLimit(rt, 1024 * 1024);
+ const char *oom = "let a=[];while(true)a.push(new Array(10000).fill(1))";
+ value = JS_Eval(ctx, oom, strlen(oom), "<test>", JS_EVAL_TYPE_GLOBAL);
+ assert(JS_IsException(value));
+ JS_FreeValue(ctx, JS_GetException(ctx));
+ JS_FreeContext(ctx);
+ swelte_qjs_free_runtime(handle);
+ assert(!swelte_qjs_rt_at(handle));
+ puts("native QJS limits passed");
 }
+
 `
 		)
 		const executable = join(root, 'probe')
@@ -131,6 +89,6 @@ int main(void) {
 	it('qjsCDir resolves the installed @swelte/qjs package (single candidate)', () => {
 		const cDir = qjsCDir(import.meta.url)
 		assert.ok(existsSync(join(cDir, 'swelte_qjs.c')))
-		assert.ok(existsSync(join(cDir, 'swelte_agent.c')))
+		assert.ok(!existsSync(join(cDir, 'swelte_agent.c')))
 	})
 })

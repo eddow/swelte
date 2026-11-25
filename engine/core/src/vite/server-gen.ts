@@ -1378,7 +1378,7 @@ ${arm(emitArms, qualErr)}
 // Room accessor: Plus-owned (rooms plugin). Failing stub — unreachable
 // without the plugin (room fns never reach core dispatch).
 pub fn ${prefix}sse_room(qualifier string, req SwelteRequest, sub fn (string) chan string, emit fn (string) bool) ! {
-	return error('no sse room route \u2014 register roomsPlugin')
+	return error('no sse room route — register roomsPlugin')
 }
 `
 	return `

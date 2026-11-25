@@ -20,7 +20,8 @@
     "shims",
     "LICENSE-MIT",
     "package.json",
-    "skills"
+    "skills",
+    "c"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.json",

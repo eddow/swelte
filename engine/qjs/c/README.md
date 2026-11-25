@@ -1,4 +1,4 @@
-# `engine/qjs/` — shared embedded-QuickJS V module + vendored engine
+# `engine/qjs/` — shared embedded-QuickJS engine primitives + archive builder
 
 ## Upstream
 
@@ -23,10 +23,8 @@
 | `quickjs-atom.h`, `quickjs-opcode.h` | upstream (included by `quickjs.c`) |
 | `quickjs-libc.h` | upstream header ONLY — `quickjs-libc.c` is deliberately NOT vendored (it carries `std`/`os` I/O: the render AND agent contexts must have no fs/net/process) |
 | `libregexp.*`, `libunicode.*`, `cutils.*`, `dtoa.*`, `list.h`, `unicode_gen_def.h` | upstream support sources consumed via `#include` from `quickjs.c` |
-| `swelte_qjs.c`, `swelte_qjs.h` | Swelte-owned C glue (render contract, guards) |
-| `swelte_agent.*` | Swelte-owned C glue (PTC agent-eval contract, guards) — step 2 |
-| `../qjs.v` | Shared V half (`module qjs`): budgets, failure taxonomy, buffer discipline |
-| `../agent.v` | Agent V half (`module qjs`): `agent_eval` + budgets |
+| `swelte_qjs.c`, `swelte_qjs.h` | engine-owned C glue: runtime/context lifecycle, evaluation budgets, interrupt clock, job-pump plumbing (no render/agent policy) |
+| consumer glue | lives with its owner, NOT here: SSR render driver in `@swelte/ssr-qjs` (`engine/ssr-qjs/c/swelte_render.*`), agent eval in `@swelte/ai` (`engine/ai/c/swelte_agent.*`) |
 
 ## Why vendored (not a submodule / system package)
 

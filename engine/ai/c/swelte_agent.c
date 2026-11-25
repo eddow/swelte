@@ -1,10 +1,11 @@
 // `swelte_agent` C glue — see swelte_agent.h for the contract.
 //
-// Shares the runtime-handle table, budget clock and diagnostic discipline
-// with `swelte_qjs.c` (same archive, one table, one mutex). Agent programs
-// are async (top-level await allowed); bindings arrive as a V-owned JSON
-// table; the V host — not C — authorizes every native call. No I/O globals
-// are ever registered: bindings are the only bridge to the native side.
+// The runtime-handle table, budget clock and diagnostic discipline live in
+// the shared engine (`@swelte/qjs` `swelte_qjs.c`, its own archive and
+// mutex). This file is the AI consumer's own archive: agent programs are
+// async (top-level await allowed); bindings arrive as a V-owned JSON table;
+// the V host — not C — authorizes every native call. No I/O globals are
+// ever registered: bindings are the only bridge to the native side.
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -17,35 +18,10 @@
 #include "swelte_qjs.h"
 
 typedef struct {
-    uint64_t start_ms;
-    int timeout_ms;
-    int interrupted;
-} swelte_agent_budget;
-
-typedef struct {
     int calls;
     int max_calls;
 } swelte_agent_host;
 
-static uint64_t swelte_agent_now_ms(void) {
-    struct timespec ts;
-    clock_gettime(CLOCK_MONOTONIC, &ts);
-    return (uint64_t)ts.tv_sec * 1000u + (uint64_t)ts.tv_nsec / 1000000u;
-}
-
-static int swelte_agent_interrupt(JSRuntime *rt, void *opaque) {
-    (void)rt;
-    swelte_agent_budget *b = (swelte_agent_budget *)opaque;
-    if (b->timeout_ms <= 0)
-        return 0;
-    if (swelte_agent_now_ms() - b->start_ms >= (uint64_t)b->timeout_ms) {
-        b->interrupted = 1;
-        return 1;
-    }
-    return 0;
-}
-
-// Diagnostics mirror the render glue's UTF-8-safe copy.
 static void swelte_agent_copy_diagnostic(JSContext *ctx, JSValueConst value,
                                          char *buf, int cap) {
     if (!buf || cap < 2 || JS_IsUndefined(value) || JS_IsNull(value)) return;
@@ -78,7 +54,7 @@ static void swelte_agent_copy_diagnostic(JSContext *ctx, JSValueConst value,
 // Map a JS failure to a return code: -6 when the engine reports
 // out-of-memory (mirrors the render glue), -5 on interruption, else -1.
 static int swelte_agent_fail_code(JSContext *ctx, JSValueConst err,
-                                  swelte_agent_budget *budget) {
+                                  swelte_qjs_budget *budget) {
     if (budget->interrupted)
         return -5;
     int rc = -1;
@@ -169,28 +145,24 @@ static int swelte_agent_parse_bindings(const char *json, int json_len,
 // serialized (proves the validation input exists) and JSON-unserializable
 // args fail closed with TypeError. The binding index travels as the
 // C-function `magic` (set at registration); the per-eval registry lives in
-// the static slot claimed for the duration of the eval.
+// the context opaque pointer for the duration of the eval.
 
-// Per-eval binding registry: claimed in the static slot before the context
-// holds no lock while running JS; the slot is claimed before the context
-// is created and released after it is freed — nested evals impossible).
+// Each context owns a borrowed registry for the duration of its evaluation.
 typedef struct {
     swelte_agent_bindings *bindings;
     swelte_agent_host *host;
 } swelte_agent_registry;
 
-static pthread_mutex_t swelte_agent_mu = PTHREAD_MUTEX_INITIALIZER;
-static swelte_agent_registry swelte_agent_active = { NULL, NULL };
 
 static JSValue swelte_agent_call(JSContext *ctx, JSValueConst this_val, int argc,
                                  JSValueConst *argv, int magic, JSValue *func_data) {
     (void)this_val;
     (void)argc;
     int index = magic;
-    swelte_agent_registry reg;
-    pthread_mutex_lock(&swelte_agent_mu);
-    reg = swelte_agent_active;
-    pthread_mutex_unlock(&swelte_agent_mu);
+    swelte_agent_registry *registry = JS_GetContextOpaque(ctx);
+    if (!registry)
+        return JS_ThrowInternalError(ctx, "agent: host unavailable");
+    swelte_agent_registry reg = *registry;
     if (!reg.bindings || !reg.host)
         return JS_ThrowInternalError(ctx, "agent: host unavailable");
     if (index < 0 || index >= reg.bindings->count)
@@ -286,12 +258,12 @@ int swelte_agent_eval(int rt_handle, const char *src, int src_len,
         return -3;
     if (mem_cap_mb > 0)
         JS_SetMemoryLimit(rt, (size_t)mem_cap_mb * 1024u * 1024u);
-    swelte_agent_budget budget;
-    budget.start_ms = swelte_agent_now_ms();
+    swelte_qjs_budget budget;
+    budget.start_ms = swelte_qjs_now_ms();
     budget.timeout_ms = timeout_ms;
     budget.interrupted = 0;
     if (timeout_ms > 0)
-        JS_SetInterruptHandler(rt, swelte_agent_interrupt, &budget);
+        JS_SetInterruptHandler(rt, swelte_qjs_interrupt, &budget);
     swelte_agent_bindings bindings;
     int brc = swelte_agent_parse_bindings(bindings_json, bindings_len, &bindings);
     if (brc != 0) {
@@ -308,12 +280,9 @@ int swelte_agent_eval(int rt_handle, const char *src, int src_len,
     swelte_agent_host host;
     host.calls = 0;
     host.max_calls = max_calls;
-    // Claim the per-eval registry slot, then register bindings against it.
+    // The stack registry remains valid until this context is freed.
     swelte_agent_registry claimed = { &bindings, &host };
-    pthread_mutex_lock(&swelte_agent_mu);
-    swelte_agent_registry prev = swelte_agent_active;
-    swelte_agent_active = claimed;
-    pthread_mutex_unlock(&swelte_agent_mu);
+    JS_SetContextOpaque(ctx, &claimed);
     int rc = -3;
     int reg = swelte_agent_register_bindings(ctx, &bindings);
     if (reg != 0) {
@@ -360,7 +329,7 @@ int swelte_agent_eval(int rt_handle, const char *src, int src_len,
         if (pending == 0)
             break;
         if (budget.timeout_ms > 0 &&
-            swelte_agent_now_ms() - budget.start_ms >= (uint64_t)budget.timeout_ms) {
+            swelte_qjs_now_ms() - budget.start_ms >= (uint64_t)budget.timeout_ms) {
             budget.interrupted = 1;
             JS_FreeValue(ctx, promise);
             rc = -5;
@@ -436,11 +405,7 @@ int swelte_agent_eval(int rt_handle, const char *src, int src_len,
             rc = 0;
     }
 done:
-    // Release the registry slot (restore the previous occupant, normally
-    // empty — nested evals impossible: the host never re-enters C).
-    pthread_mutex_lock(&swelte_agent_mu);
-    swelte_agent_active = prev;
-    pthread_mutex_unlock(&swelte_agent_mu);
+    JS_SetContextOpaque(ctx, NULL);
     JS_FreeContext(ctx);
     if (timeout_ms > 0)
         JS_SetInterruptHandler(rt, NULL, NULL);
