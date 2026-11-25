@@ -22,7 +22,6 @@ import {
 	ai_models,
 	chat,
 	exec,
-	send_input,
 	shell_release,
 	shell_revision,
 	shell_tool_deny,
@@ -81,15 +80,12 @@ let approvals: PendingApproval[] = $state([])
 // closes `waiting_approval`; the human decision resumes it via
 // `shell_tool_resume` (approve) or drops it (deny).
 let parkedDrive: { opId: string; tool: string; args: string; holder: string } | null = $state(null)
-// hands off `shell:driver` to the AI before the text pass, so the
-// driving tail may park `shell.exec`/`shell.send_input` for approval.
-let driveScope = $state(false)
+// Every chat turn hands off `shell:driver` to the AI before the text pass,
+// so the driving tail may park `shell.exec`/`shell.send_input` for approval.
 let streaming = $state(false)
 let chatAbort: AbortController | null = null
-// Exec lifecycle: while an exec is in flight the input forwards keystrokes
-// to its stdin (send_input) instead of starting a new command; the run
-// button is enabled only when idle with non-empty input and no chat reply
-// streaming.
+// Exec lifecycle: while an exec is in flight the terminal send is disabled;
+// a new command starts only once the run settles.
 let execRunning = $state(false)
 // Single output path: the page auto-subscribes to the backend room over
 // SSE on mount (client-only page, `export const ssr = false`). No connect
@@ -364,7 +360,7 @@ function resolveMsg(id: string, patch: Partial<ChatMsg>) {
 // Delegates to the pure `upsertToolRow` helper (shared with tests).
 function upsertTool(id: string, tool: AiToolCall): AiToolCall[] {
 	const msg = messages.find((m) => m.id === id)
-	return upsertToolRow([...(msg?.tools ?? [])], tool as never) as never
+	return upsertToolRow([...(msg?.tools ?? [])], tool)
 }
 
 // Settle only unsettled rows: completed work stays completed when a later
@@ -372,7 +368,7 @@ function upsertTool(id: string, tool: AiToolCall): AiToolCall[] {
 // successful (P3/S4); only active/pending rows flip on terminal outcome.
 function markToolsDone(id: string, ok: boolean): AiToolCall[] {
 	const msg = messages.find((m) => m.id === id)
-	return markToolsDoneRows([...(msg?.tools ?? [])], ok) as never
+	return markToolsDoneRows([...(msg?.tools ?? [])], ok)
 }
 
 // P3: settle one row at its actual completion event, by stable call ID —
@@ -380,7 +376,7 @@ function markToolsDone(id: string, ok: boolean): AiToolCall[] {
 // completed receipts survive later Stop/errors (markToolsDone guards that).
 function settleTool(msgId: string, callId: string, ok: boolean): AiToolCall[] {
 	const msg = messages.find((m) => m.id === msgId)
-	return settleToolRow([...(msg?.tools ?? [])], callId, ok) as never
+	return settleToolRow([...(msg?.tools ?? [])], callId, ok)
 }
 
 async function runHumanCommand(raw: string) {
@@ -407,25 +403,11 @@ async function runHumanCommand(raw: string) {
 	}
 }
 
-// Keystrokes for a running command's stdin. Painted optimistically as a
-// `› keys` echo; the SSE `stdin` frame twin is dropped by the frame key.
-async function sendKeystroke(raw: string) {
-	const keys = raw.trim()
-	if (!keys) return
-	termKeys = ''
-	try {
-		const receipt = await send_input({ keys })
-		paintStdin(keys, Number(receipt.split(':')[1]) || undefined)
-	} catch (e) {
-		showError(e)
-	}
-}
-
-// Single terminal submit: a running command gets keystrokes (stdin),
-// an idle shell runs the typed command. The input clears on both.
+// Single terminal submit: runs the typed command when idle. While a command
+// is in flight the send button is disabled, so submitTerm never fires.
 function submitTerm() {
-	if (execRunning) void sendKeystroke(termKeys)
-	else void runHumanCommand(termKeys || 'help')
+	if (execRunning) return
+	void runHumanCommand(termKeys || 'help')
 }
 async function sendChat(continuation = '') {
 	const text = continuation ? 'Continuing after approved tool' : composer.trim()
@@ -475,7 +457,7 @@ async function sendChat(continuation = '') {
 			temperature: String(cfg.run.temperature ?? -1),
 			max_tokens: String(cfg.run.maxTokens ?? -1),
 			system: cfg.run.system ?? '',
-			drive: driveScope ? '1' : '0',
+			drive: '1',
 			continuation,
 		})
 		const res = await fetch('/?/ai_stream', {
@@ -645,7 +627,7 @@ async function sendChat(continuation = '') {
 					}
 					resolveMsg(waitId, {
 						tools: upsertTool(waitId, {
-							id: ap.op_id ?? ap.callId ?? 0,
+							id: String(ap.op_id ?? ap.callId ?? 0),
 							label: ap.label ?? 'Approval requested',
 							chip: 'approval',
 							status: 'pending',
@@ -751,7 +733,6 @@ function interruptLocally() {
 		}
 	}
 	parkedDrive = null
-	driveScope = false
 	tracker.endOutput('out-text')
 	sink.record({
 		runId: 'run-shell',
@@ -877,11 +858,8 @@ function composerKeydown(e: KeyboardEvent) {
 	}
 }
 
-// Submit gate: the button is enabled only when submitting does something.
-// Idle + non-empty starts the command (blocked while a chat reply streams);
-// idle + empty runs `help`; running + non-empty forwards a stdin keystroke;
-// running + empty is disabled.
-let submitDisabled = $derived(execRunning && termKeys.trim().length === 0)
+// Submit gate: the terminal send is disabled while a command is running.
+let submitDisabled = $derived(execRunning)
 
 let pending = $derived(approvals.filter((a) => a.status === 'pending'))
 let traceShown = $derived(
@@ -1290,14 +1268,6 @@ function toggleTheme(next: boolean) {
 						</svg>
 					</button>
 				{/if}
-				<label class="drivetoggle" title="Let AI use shell and browse tools this turn">
-					<input
-						type="checkbox"
-						bind:checked={driveScope}
-						aria-label="Let AI use shell and browse tools this turn"
-					>
-					<span aria-hidden="true">⌨</span>
-				</label>
 			</form>
 			{#if approvals.length}
 				<h3 class="queue-head">
@@ -1395,34 +1365,27 @@ function toggleTheme(next: boolean) {
 				<input
 					class="promptinput"
 					bind:value={termKeys}
-					placeholder={execRunning
-						? 'type stdin for the running command…'
-						: 'ls, cd src, cat <file>'}
-					aria-label={execRunning ? 'stdin for the running command' : 'terminal command'}
+					placeholder="ls, cd src, cat <file>"
+					aria-label="terminal command"
+					disabled={execRunning}
 				>
 				<button
 					class="promptgo"
 					type="submit"
 					disabled={submitDisabled}
-					aria-label={execRunning ? 'send keystroke to stdin' : 'run command'}
-					title={execRunning ? 'Send keystroke' : 'Run'}
+					aria-label="run command"
+					title="Run"
 				>
-					{#if execRunning}
-						<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
-							<rect x="3.5" y="3.5" width="9" height="9" rx="1.5" fill="currentColor" />
-						</svg>
-					{:else}
-						<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
-							<path
-								d="M8 3v9M3.5 8.5 8 3.5l4.5 5"
-								fill="none"
-								stroke="currentColor"
-								stroke-width="1.8"
-								stroke-linecap="round"
-								stroke-linejoin="round"
-							/>
-						</svg>
-					{/if}
+					<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
+						<path
+							d="M8 3v9M3.5 8.5 8 3.5l4.5 5"
+							fill="none"
+							stroke="currentColor"
+							stroke-width="1.8"
+							stroke-linecap="round"
+							stroke-linejoin="round"
+						/>
+					</svg>
 				</button>
 			</form>
 		</section>
@@ -1852,37 +1815,6 @@ function toggleTheme(next: boolean) {
 }
 .history li button:hover {
 	background: var(--color-base-200);
-}
-.drivetoggle {
-	display: inline-flex;
-	flex-shrink: 0;
-	align-items: center;
-	justify-content: center;
-	width: 1.75rem;
-	height: 1.75rem;
-	border-radius: 999px;
-	cursor: pointer;
-	color: var(--color-base-content);
-	opacity: 0.55;
-	position: relative;
-}
-.drivetoggle:hover {
-	opacity: 1;
-	background: var(--color-base-200);
-}
-.drivetoggle:has(input:checked) {
-	opacity: 1;
-	background: var(--color-warning);
-	color: var(--color-warning-content, #1a1a1a);
-}
-.drivetoggle input {
-	position: absolute;
-	opacity: 0;
-	pointer-events: none;
-}
-.drivetoggle span {
-	font-size: 0.9rem;
-	line-height: 1;
 }
 .pane-empty {
 	border: 1px dashed var(--color-base-300);

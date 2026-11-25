@@ -32,6 +32,7 @@ describe('create-@swelte scaffolds (no prompt in tests)', () => {
 		assert.deepEqual(pkg.files, ['package', 'src/lib/**/*.v'])
 		assert.ok(existsSync(join(parent, 'readme-app', 'src/lib/index.ts')))
 		assert.equal(pkg.scripts['build:local'], 'swelte build --local')
+		assert.equal(pkg.scripts['check:svelte'], 'svelte-check --compiler-warnings "a11y:ignore"')
 		assert.ok(!('build:deploy' in pkg.scripts) && !('preview:deploy' in pkg.scripts))
 		assert.ok(readme.includes('readme-app'))
 	})

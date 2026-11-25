@@ -79,7 +79,7 @@ test('compiled console: tools, approval, continuation, replay, denial and preemp
    assert.ok(observed.filter(e => e.envelope.kind === 'tool.progress' && !e.payload.tool).every(e => !e.payload.callId))
    assert.ok(observed.filter(e => e.payload.text).every(e => !e.payload.text.includes('<backend.')))
   }
-  // Latest screenshot: bare exec syntax, terminal toggle off. It must read
+  // Bare exec syntax normalizes to the read path. It must read
   // the real cwd and feed the result back, without approval or leaked syntax.
   for (const adapter of ['openrouter', 'openai', 'anthropic']) {
    reply = req => {

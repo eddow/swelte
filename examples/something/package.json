@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "swelte dev",
     "build": "swelte build",
-    "preview": "swelte preview"
+    "preview": "swelte preview",
+    "check:svelte": "svelte-check --compiler-warnings \"a11y:ignore\""
   },
   "dependencies": {
     "@swelte/core": "^0.2.0",

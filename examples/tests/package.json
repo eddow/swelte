@@ -14,7 +14,8 @@
     "test:e2e:preview": "SERVE=direct node --test --test-reporter=spec \"tests/e2e/preview.test.js\" && SERVE=preview node --test --test-reporter=spec \"tests/e2e/preview.test.js\"",
     "test:e2e:all": "npm run test:e2e:preview && npm run test:e2e:dev",
     "test:full": "npm test && npm run build && npm run test:unit && npm run test:e2e:all",
-    "test:ssr": "swelte-ssr check"
+    "test:ssr": "swelte ssr-check",
+    "check:svelte": "svelte-check --compiler-warnings \"a11y:ignore\""
   },
   "dependencies": {
     "svelte": "^5.0.0",

@@ -16,7 +16,8 @@
     "./package.json": "./package.json",
     "./Panel.svelte": {
       "types": "./package/Panel.svelte.d.ts",
-      "svelte": "./package/Panel.svelte"
+      "svelte": "./package/Panel.svelte",
+      "default": "./package/Panel.svelte"
     },
     "./v/text.v": { "types": "./package/text.d.ts" },
     "./v/runner.v": { "default": "./src/lib/backend/runner/api.v" }

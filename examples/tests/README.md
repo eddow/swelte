@@ -35,7 +35,7 @@ with 1/10th the surface.
 | JS unit | `npm run test:unit` (`node:test`) | generated contract, SSR manifest + `renderRoute` compose |
 | E2E build | `npm run test:e2e` (same battery × `SERVE=direct` + `SERVE=preview`) | `/` SSR HTML, `/api/ping` JSON, `/nope` 404, `/boom` 400 + full parity battery (load envelope/headers/cookies/status/redirect, typed 403, `@[error]` sanitize, `@[reroute]`, version stamp, layout cut, preload links, per-route limits, manifest flags, prerender dist) |
 | E2E dev | `npm run test:e2e:dev` (spawns `swelte dev`) | shared contract vs V backend + Vite SPA shell + RPC proxy + WASM module + `.svelte` HMR + V restart |
-| SSR gate | `npm run test:ssr` (`swelte-ssr check`) | sidecar → Hand → prod binary halves + single artifact |
+| SSR gate | `npm run test:ssr` (`swelte ssr-check`) | sidecar → Hand → prod binary halves + single artifact |
 
 ## Run
 

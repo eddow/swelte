@@ -22,8 +22,8 @@ text mirror keeps history linked; this is not token-by-token provider
 streaming.
 
 Read-only `pwd`, `whoami`, `help`, and `ls [path]` queries run directly, without
-a toggle or approval. Enable the keyboard toggle beside Send to allow other shell **and browse** actions
-for that turn. Every action opens the approval queue with its exact arguments.
+approval. Other shell **and browse** actions always run through the approval
+queue with their exact arguments.
 Approve executes through the generated dispatcher and automatically asks the
 model to continue using the actual result. Deny ends the parked action. Stop
 settles unfinished UI work immediately and releases terminal control. Late

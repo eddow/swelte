@@ -105,7 +105,8 @@ test('rendered inspection, completion, failures, replay, cancellation and two-ta
   mode='slow';await submitChat(cdp,'Stop during model request');await waitFor(cdp,`!!document.querySelector('button.sendbtn.is-stop')`)
   await evalJs(cdp,`document.querySelector('button.sendbtn.is-stop').click()`);await settled();await sleep(1600)
   mode='pwd';await submitChat(cdp,'pwd after Stop');await settled()
-  mode='action';await evalJs(cdp,`document.querySelector('.drivetoggle input').click()`)
+  assert.equal(await evalJs(cdp, `document.querySelector('.drivetoggle')`), null)
+  mode='action'; // action fixture parks the approval (no toggle needed)
   await submitChat(cdp,'echo approved');await waitFor(cdp,`!!document.querySelector('.gate-pending')`)
   assert.equal(await evalJs(cdp,`[...document.querySelectorAll('[data-tool-state="pending"]')].length`),1)
   // Stop after execution but before a delayed approval acknowledgement must not
@@ -117,7 +118,7 @@ test('rendered inspection, completion, failures, replay, cancellation and two-ta
   await evalJs(cdp,`document.querySelector('button.sendbtn.is-stop').click()`);await settled();await sleep(900)
   assert.equal(providerRequests,beforeResume,'late approval acknowledgement cannot resume a stopped turn')
   assert.equal(await evalJs(cdp,`document.querySelectorAll('[data-tool-state="pending"],[data-tool-state="active"]').length`),0)
-  await evalJs(cdp,`document.querySelector('.drivetoggle input').click()`)
+  assert.equal(await evalJs(cdp, `document.querySelector('.drivetoggle')`), null)
   await submitChat(cdp,'echo approved again');await waitFor(cdp,`!!document.querySelector('.gate-pending')`)
   // A second real tab cannot take the first tab's driver; human input preempts it.
   const target2=await(await fetch(`http://127.0.0.1:${port}/json/new?${server.base}/`,{method:'PUT'})).json()

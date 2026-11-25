@@ -28,7 +28,7 @@ try{
   assert.equal(await evalJs(cdp,`document.querySelectorAll('[data-tool-state="active"]').length`),0)
   console.log('PASS',question);evidence.scenarios.push({question,elapsedMs:Math.round(performance.now()-start),passed:true})
  }
- await evalJs(cdp,`document.querySelector('.drivetoggle input').click()`)
+ assert.equal(await evalJs(cdp, `document.querySelector('.drivetoggle')`), null)
  for(const [question,expected] of [['Please run echo live-approval-probe','live-approval-probe'],['Read https://example.com and briefly give me its title.','Example Domain']]){
   await submitChat(cdp,question)
   await waitFor(cdp,`!!document.querySelector('.gate-pending')`,30000)

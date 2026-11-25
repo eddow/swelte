@@ -27,7 +27,8 @@
     "build": "swelte build",
     "build:local": "swelte build --local",
     "dev": "swelte dev",
-    "preview": "swelte preview"
+    "preview": "swelte preview",
+    "check:svelte": "svelte-check --compiler-warnings \"a11y:ignore\""
   },
   "type": "module",
   "version": "0.2.0"

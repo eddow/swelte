@@ -8,6 +8,7 @@
     "build": "swelte build",
     "preview": "swelte preview",
     "check": "swelte check",
+    "check:svelte": "svelte-check --compiler-warnings \"a11y:ignore\"",
     "test:integration": "npm run build && npm run test:regression",
     "pretest": "tsc -p tsconfig.test.json",
     "test": "node --test --test-reporter=spec \"dist-test/**/*.test.js\"",

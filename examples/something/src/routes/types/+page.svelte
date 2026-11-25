@@ -23,7 +23,7 @@ async function loadRow() {
 }
 async function loadCalc() {
 	try {
-		calcInfo = await calc_probe({ count: '3', ratio: '1.5', active: 'true' })
+		calcInfo = await calc_probe({ count: 3, ratio: 1.5, active: true })
 	} catch (e) {
 		showError(e)
 	}

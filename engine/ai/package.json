@@ -31,6 +31,7 @@
 		"build:local": "swelte build --local",
 		"preview": "swelte preview",
 		"check": "swelte check",
+		"check:svelte": "svelte-check --compiler-warnings \"a11y:ignore\"",
 		"package": "swelte package",
 		"pretest": "tsc -p tsconfig.test.json",
 		"test": "node --test --test-reporter=spec \"dist-test/**/*.test.js\"",

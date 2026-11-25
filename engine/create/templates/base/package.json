@@ -9,6 +9,7 @@
     "build:local": "swelte build --local",
     "preview": "swelte preview",
     "check": "swelte check",
+    "check:svelte": "svelte-check --compiler-warnings \"a11y:ignore\"",
     "postinstall": "npm-skills extract --skip-production --override",
     "package": "swelte package"
   },

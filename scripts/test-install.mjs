@@ -148,6 +148,26 @@ async function installCase(name, initArgs) {
 	if (!existsSync(join(dir, '.agents', 'skills'))) fail(`${name}: .agents/skills missing`)
 	if (!readdirSync(join(dir, '.agents', 'skills')).some((f) => f.includes('swelte-core-swelte-overview')))
 		fail(`${name}: core skills not extracted`)
+	// Svelte-side type gate: the scaffolded pages must survive svelte-check
+	// exactly as shipped (tsc never sees inside .svelte files). Discovery
+	// mode uses the scaffolded tsconfig (bundler resolution, like editors);
+	// --no-tsconfig would force node10 and go blind on exports maps.
+	// Uses the repo-root binary — templates don't install svelte-check.
+	try {
+		run(
+			process.execPath,
+			[
+				join(ROOT, 'node_modules', 'svelte-check', 'bin', 'svelte-check'),
+				'--workspace', dir,
+				'--compiler-warnings', 'a11y:ignore',
+			],
+			{ cwd: ROOT }
+		)
+	} catch (e) {
+		const out = e.stdout ?? e.message ?? ''
+		console.error(out.toString().split('\n').slice(-20).join('\n'))
+		fail(`svelte-check ${name}`)
+	}
 	console.log(`ok: ${name}`)
 }
 

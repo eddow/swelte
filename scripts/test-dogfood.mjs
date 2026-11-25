@@ -166,6 +166,36 @@ try {
     build: { outDir: 'dist' },
   })
   const manifest = JSON.parse(readFileSync(join(app, '.swelte/ssr-manifest.json'), 'utf8'))
+  // Svelte-side type gate: tsc only covers contract.ts + shim (never .svelte
+  // internals). The scratch app mirrors a real project here — generated
+  // .swelte/ + installed deps — so svelte-check resolves exactly like prod.
+  {
+    const cfgPath = join(app, 'tsconfig.svelte-check.json')
+    writeFileSync(cfgPath, JSON.stringify({
+      compilerOptions: {
+        target: 'ES2022', module: 'ESNext', moduleResolution: 'bundler', strict: true,
+        skipLibCheck: true, noEmit: true, allowJs: true, checkJs: false,
+        types: ['vite/client', 'svelte', 'node'],
+        paths: {
+          '#routes/*.v': ['./.swelte/types/routes/*.d.ts'],
+          '#lib/*.v': ['./.swelte/types/lib/*.d.ts'],
+          '#routes/*': ['./src/routes/*'],
+          '#lib/*': ['./src/lib/*'],
+          '$app/*': ['./.swelte/app/*'],
+          '#app/*': ['./.swelte/app/*', './.swelte/*.d.ts'],
+        },
+      },
+      include: ['src', '.swelte/types', '.swelte/v-shim.d.ts', '.swelte/app/*.d.ts', '.swelte/paths.d.ts', '.swelte/environment.d.ts'],
+    }, null, 2))
+    try {
+      run(process.execPath, [join(root, 'node_modules', 'svelte-check', 'bin', 'svelte-check'), '--tsconfig', cfgPath, '--compiler-warnings', 'a11y:ignore'], app, env)
+    } catch (error) {
+      throw new Error(`dogfood svelte-check failed\n${error.stdout ?? error.stderr ?? error.message}`)
+    } finally {
+      rmSync(cfgPath, { force: true })
+    }
+  }
+  console.log('dogfood: svelte-check clean (pages, routes, lib components)')
   const { loadConfig } = await import(pathToFileURL(join(root, 'engine/core/dist/gen/config.js')))
   writeFileSync(join(app, 'dist/isr.json'), JSON.stringify((await loadConfig(app)).isr))
   const renderJs = await emitRenderJs(manifest, { root: app, prod: true })

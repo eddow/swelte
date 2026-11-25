@@ -78,10 +78,10 @@ test('shell P3: rendered UI rows, revision badge, stop, reconnect (headless Chro
       assert.ok(revBadge.length > 0, 'S7: revision badge populated from shell_revision RPC')
       const bundle = await evalJs(cdp, `[...document.querySelectorAll('script')].map(s=>s.src).join(' ')`)
       assert.match(bundle, /assets\/index-/, 'S7: frontend bundle hash visible in served HTML')
-      // Deterministic adapter echoes offline (no provider loop): the
-      // rendered tool-row proof uses drive mode, which parks a real
-      // `tool_shell_exec pwd` approval through the backend first.
-      await evalJs(cdp, `(() => { const t = document.querySelector('.drivetoggle input'); if (!t.checked) { t.checked = true; t.dispatchEvent(new Event('input', { bubbles: true })); t.dispatchEvent(new Event('change', { bubbles: true })); } return document.querySelector('.drivetoggle input').checked; })()`)
+      // Deterministic adapter echoes offline (no provider loop): every
+      // turn drives, so this parks a real `tool_shell_exec pwd` approval
+      // through the backend first. The drive toggle is gone.
+      assert.equal(await evalJs(cdp, `document.querySelector('.drivetoggle')`), null)
       const sent = await submitChat(cdp, 'what is your pwd ?')
       if (String(sent).startsWith('no-composer')) throw new Error('no composer textarea')
       // Drive-mode deterministic stub parks `tool_shell_exec {"cmd":"pwd"}`:
@@ -136,11 +136,11 @@ test('shell P3: rendered UI rows, revision badge, stop, reconnect (headless Chro
       const staleRows = await evalJs(cdp, `[...document.querySelectorAll('[data-slot="tool-chips"]')].filter(c => /running|active/.test(c.textContent) && !/done/.test(c.textContent)).length`)
       assert.equal(staleRows, 0, 'no stale running rows after reconnect')
       await waitFor(cdp, `!!document.querySelector('textarea.composerinput')`, 12000)
-      await evalJs(cdp, `(() => { const t = document.querySelector('.drivetoggle input'); if (!t.checked) { t.checked = true; t.dispatchEvent(new Event('input', { bubbles: true })); t.dispatchEvent(new Event('change', { bubbles: true })); } return true; })()`)
-      // P1 Stop-must-settle (real path, no skip): reload resets the
-      // per-turn drive toggle, so re-enable it before parking the approval.
+      assert.equal(await evalJs(cdp, `document.querySelector('.drivetoggle')`), null)
+      // P1 Stop-must-settle (real path, no skip): every turn drives, so no
+      // re-enable step is needed before parking the approval.
       await waitFor(cdp, `!!document.querySelector('textarea.composerinput')`, 12000)
-      await evalJs(cdp, `(() => { const t = document.querySelector('.drivetoggle input'); if (!t.checked) { t.checked = true; t.dispatchEvent(new Event('input', { bubbles: true })); t.dispatchEvent(new Event('change', { bubbles: true })); } return true; })()`)
+      assert.equal(await evalJs(cdp, `document.querySelector('.drivetoggle')`), null)
       // P1 Stop-must-settle (real path, no skip): park a drive approval
       // (row `pending`, Stop button visible), press Stop WITHOUT approving,
       // and assert: parked gate denied, zero active/pending rows remain,

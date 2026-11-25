@@ -2,14 +2,24 @@
 import Panel from '@swelte-dogfood/sample-lib/Panel.svelte'
 import { getContext, onMount } from 'svelte'
 import { enqueueOffline, listOutbox, flushOutbox, retryOutbox, discardOutbox } from '@swelte/core'
+// Browser-harness handle: scripts/dogfood-outbox.mjs drives this global
+// through untyped evaluate() strings. Cast keeps the implicit-any out
+// without an ambient declaration (unsupported in instance script).
+type DogfoodOutbox = {
+	enqueueOffline: typeof enqueueOffline
+	listOutbox: typeof listOutbox
+	flushOutbox: typeof flushOutbox
+	retryOutbox: typeof retryOutbox
+	discardOutbox: typeof discardOutbox
+}
 onMount(() => {
-	globalThis.__dogfoodOutbox = {
+	;(globalThis as Record<string, unknown>).__dogfoodOutbox = {
 		enqueueOffline,
 		listOutbox,
 		flushOutbox,
 		retryOutbox,
 		discardOutbox,
-	}
+	} as DogfoodOutbox
 })
 import { enhance } from '$app/forms'
 import { page } from '$app/state'

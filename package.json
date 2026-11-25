@@ -14,9 +14,10 @@
     "test:unit": "npm run test --workspace=@swelte/qjs && npm run test --workspace=@swelte/core && npm run test --workspace=@swelte/plus && npm run test --workspace=@swelte/mcp && npm run test --workspace=@swelte/ssr-qjs && npm run test --workspace=@swelte/create && npm run test --workspace=@swelte/ai",
     "test:e2e": "npm run build:engine && node scripts/test-e2e.mjs",
     "test:examples": "npm run test:full --workspace=examples/tests",
+    "check:svelte": "for p in examples/shell examples/something examples/docs-site examples/tests engine/ai; do (cd \"$p\" && npm run --silent check:svelte) || exit 1; done && npm run check:dogfood",
     "test:dogfood": "node scripts/test-dogfood.mjs",
     "test:dogfood:postgres": "node scripts/test-dogfood.mjs --postgres-managed",
-    "prepare:dogfood": "npm run package --prefix fixtures/dogfood/sample-lib && npm install --prefix fixtures/dogfood/app --ignore-scripts --offline --no-audit --no-fund --package-lock=false",
+    "prepare:dogfood": "npm run package --prefix fixtures/dogfood/sample-lib && npm install --prefix fixtures/dogfood/app --ignore-scripts --offline --no-audit --no-fund --package-lock=false && node scripts/prepare-dogfood.mjs",
     "measure:dogfood": "node scripts/measure-dogfood.mjs",
     "version:sync": "node scripts/sync-version.mjs",
     "version:patch": "node scripts/sync-version.mjs patch",
@@ -25,11 +26,13 @@
     "version:check": "node scripts/sync-version.mjs check",
     "biome:check": "biome check .",
     "biome": "biome check --write .",
-    "biome:unsafe": "biome check --write . --unsafe"
+    "biome:unsafe": "biome check --write . --unsafe",
+    "check:dogfood": "npm run prepare:dogfood && svelte-check --workspace fixtures/dogfood/app"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.6.8",
     "@sveltejs/package": "^2.5.8",
+    "svelte-check": "^4.7.8",
     "typescript": "^5.0.0"
   }
 }

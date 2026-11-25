@@ -3,6 +3,8 @@ import { svelte } from '@sveltejs/vite-plugin-svelte';
 import { swelte } from '@swelte/ssr-qjs';
 // Room/WS e2e needs the Plus rooms plugin (explicit registration).
 import { roomsPlugin } from '@swelte/plus/rooms';
+// SSR gate: adapter CLI plugin (swelte ssr-check) — CLI-only, no generate output.
+import { ssrPlugin } from '@swelte/ssr-qjs/vite';
 import svelteConfig from './svelte.config.js';
 
 const vBackendUrl =
@@ -21,7 +23,8 @@ export default defineConfig({
     swelte({
       vBackendUrl,
       // Room-hub e2e (ws-rooms/ws-echo) — explicit Plus registration.
-      plugins: [roomsPlugin],
+      // SSR gate (swelte ssr-check) — CLI-only, generate-neutral.
+      plugins: [roomsPlugin, ssrPlugin],
     }),
   ],
 });

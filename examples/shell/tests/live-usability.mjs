@@ -13,7 +13,7 @@ const model=process.env.SHELL_LIVE_MODEL??'openai/gpt-4o-mini'
 const record={date:'2026-11-24',adapter:'openrouter',model,configuration:{run:'provider defaults'},starts:[],samples:[],failures:[]}
 const context=[
  'user: Just tell me where our console is (pwd) and what we can find there',
- "assistant: Terminal access is disabled for this turn, so I can't run pwd / whoami for you right now. Please enable the terminal toggle, and then I'll run it and tell you where our console is.",
+ "assistant: I can't run pwd / whoami for you right now, so please approve terminal access when I ask, and then I'll run it and tell you where our console is.",
  'user: sorry - please do',
  'assistant: I will check the console location for you.'
 ]
@@ -40,7 +40,7 @@ for(let boot=0;boot<2;boot++){
     if(!text.includes(projectRoot.replace(/\/$/,'')))errors.push('cwd missing')
     if(scenario==='S2'&&!/README|src|tests/.test(text))errors.push('listing missing')
     if(run.events.some(e=>e.envelope.kind==='approval.request'))errors.push('unexpected approval')
-    if(/backend\.shell_tools|<tool|enable.{0,20}toggle/i.test(text))errors.push('protocol or toggle leak')
+    if(/backend\.shell_tools|<tool/i.test(text))errors.push('protocol leak')
     if(run.elapsedMs>(scenario==='S1'?15000:25000))errors.push('deadline')
     sample.passed=errors.length===0
     if(errors.length)record.failures.push({sample:record.samples.length,errors})
