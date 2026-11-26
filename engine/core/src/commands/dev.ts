@@ -396,15 +396,30 @@ export async function runDev(ctx: Ctx): Promise<void> {
 		let vArgs: string[] = ['-o', binary, join(genAbs, 'server.v')]
 		const withGlobals = needsGlobals(genAbs)
 		const hasBridge = hasRealBridge(genAbs)
-		if (hasBridge) {
-			const cc = resolveHostCC(import.meta.url)
+		// Same `-cc` rule as `swelte build`: QJS bridges, third-party
+		// native C staged from `src/lib/backend/*.v` (see
+		// `linkNeedsNativeCC`), or the explicit `--cc` / `SWELTE_CC` /
+		// `swelte.cc` knob force `-cc <cc>`; plugin `__global`s alone
+		// stay tcc (globals flag only).
+		const { linkNeedsNativeCC, resolveExplicitCC } = await import('../toolchain.js')
+		const { loadConfig: loadCfg } = await import('../gen/config.js')
+		const devCfg = await loadCfg(root)
+		const explicitCC = resolveExplicitCC({ cli: ctx.opts.cc, config: devCfg.cc })
+		const nativeCC = explicitCC !== '' || linkNeedsNativeCC(genAbs)
+		if (hasBridge || nativeCC) {
+			const cc =
+				typeof explicitCC === 'string' && explicitCC !== ''
+					? explicitCC
+					: resolveHostCC(import.meta.url)
 			if (!cc) {
 				throw new Error(
 					'no C compiler: install gcc/clang or run `npx vvm prepare` (writes the host zig-cc wrapper)'
 				)
 			}
 			vArgs = ['-enable-globals', '-cc', cc, '-o', binary, join(genAbs, 'server.v')]
-			ctx.log(`QJS embed: -enable-globals -cc ${vArgs[2]} (bridge present)`)
+			ctx.log(
+				`QJS embed: -enable-globals -cc ${vArgs[2]} (${hasBridge ? 'bridge present' : typeof explicitCC === 'string' && explicitCC !== '' ? `explicit cc ${explicitCC}` : explicitCC !== '' ? 'explicit cc' : 'native C deps in staged backend'})`
+			)
 		} else if (withGlobals) {
 			vArgs = ['-enable-globals', '-o', binary, join(genAbs, 'server.v')]
 			ctx.log('plugin V modules: -enable-globals (__global in includes)')

@@ -27,6 +27,11 @@ const devCmd: Command = {
 			help: 'Enable SSR sidecar when @swelte/ssr-qjs is installed (default: auto; --no-ssr forces SPA)',
 			value: 'boolean',
 		},
+		{
+			name: 'cc',
+			help: 'C compiler for the V backend link: bare --cc forces -cc <auto>, --cc <path> uses it verbatim (also SWELTE_CC, swelte.cc)',
+			value: 'string',
+		},
 	],
 	async run(ctx: Ctx) {
 		await runDev(ctx)
@@ -60,6 +65,11 @@ const buildCmd: Command = {
 			name: 'local',
 			help: 'Force host-native build, ignoring the package.json swelte.targetOs/targetArch declaration',
 			value: 'boolean',
+		},
+		{
+			name: 'cc',
+			help: 'C compiler for the V backend link: bare --cc forces -cc <auto>, --cc <path> uses it verbatim (also SWELTE_CC, swelte.cc)',
+			value: 'string',
 		},
 	],
 	async run(ctx: Ctx) {

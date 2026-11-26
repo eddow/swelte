@@ -81,6 +81,16 @@ export interface SwelteOptions {
 	 *  postinstall downloads zig + writes the `zig-cc-<os>-<arch>`
 	 *  wrapper `swelte build` uses as `-cc` for that target. */
 	targetArch?: 'amd64' | 'arm64' | string
+	/** C compiler for the V backend link (`v -o ... -cc <cc>`).
+	 *  `true` forces `-cc <auto>` (system cc, else the vvm-managed host
+	 *  zig-cc wrapper) on a compile the detector would otherwise link
+	 *  natively under tcc — for C the detector can't see. A string is
+	 *  used verbatim as the `v -cc` path (a project-pinned
+	 *  gcc/clang/zig wrapper, e.g. a hermetic toolchain path).
+	 *  Unset (default) = auto only when needed: detector hit, real QJS
+	 *  bridge, or cross-build. CLI `--cc` wins, `SWELTE_CC` env middle
+	 *  (`1`/`true` = force, path = verbatim), this config last. */
+	cc?: boolean | string
 	/** Offline fallback page (opt-in service worker remainder): precached
 	 *  `dist/offline.html` served by `sw.js` on navigation failure. */
 	offline?: SwelteOfflineOptions
@@ -118,6 +128,8 @@ export interface ResolvedSwelteOptions
 	targetOs: 'linux' | 'macos' | 'windows' | ''
 	/** Cross-build arch: `amd64` | `arm64` or `''` (= host-native). */
 	targetArch: 'amd64' | 'arm64' | ''
+	/** Explicit C compiler: `''` (= auto) | `true` (= force `-cc <auto>`) | path (verbatim `v -cc`). */
+	cc: '' | true | string
 }
 
 /** Build the project config: `preprocess` + friends stay enumerable for the
@@ -180,6 +192,7 @@ function normalize(raw: SwelteOptions | null | undefined): ResolvedSwelteOptions
 		target: normalizeTarget(r.target),
 		targetOs: normalizeTargetOs(r.targetOs),
 		targetArch: normalizeTargetArch(r.targetArch),
+		cc: normalizeCC(r.cc),
 		offline: normalizeOffline(r.offline),
 		chunking: normalizeChunking(r.chunking),
 	} as ResolvedSwelteOptions
@@ -222,6 +235,22 @@ function normalizeIsr(raw: SwelteOptions['isr']): Record<string, number> {
 function normalizeTarget(raw: SwelteOptions['target']): ResolvedSwelteOptions['target'] {
 	if (raw === 'static' || raw === 'node' || raw === 'edge') return raw
 	return 'auto'
+}
+
+/** Lenient `swelte.cc` normalize: `true` stays force, a trimmed non-empty
+ *  string stays a verbatim path, everything else (`false`, `''`,
+ *  unknown) → `''` (= auto). Never throws. */
+function normalizeCC(raw: SwelteOptions['cc']): ResolvedSwelteOptions['cc'] {
+	if (raw === true) return true
+	if (typeof raw === 'string') {
+		const s = raw.trim()
+		if (s === '') return ''
+		const low = s.toLowerCase()
+		if (low === 'true' || low === '1' || low === 'yes') return true
+		if (low === 'false' || low === '0' || low === 'no' || low === 'off') return ''
+		return s
+	}
+	return ''
 }
 
 /** Lenient `swelte.targetArch` normalize: known arch (case-insensitive,
@@ -397,8 +426,9 @@ function mergePackageSwelte(dir: string, fileOpts: SwelteOptions): SwelteOptions
 	if (Object.keys(pkg).length === 0) return fileOpts
 	const out = { ...pkg, ...fileOpts }
 	// svelte.config `targetOs: ''` must not clobber package.json's value:
-	// re-apply package fields the file left empty/undefined.
-	for (const k of ['targetOs', 'targetArch'] as const) {
+	// re-apply package fields the file left empty/undefined. Same for
+	// `cc` (an explicit path/`true` in either file counts as set).
+	for (const k of ['targetOs', 'targetArch', 'cc'] as const) {
 		const fv = (fileOpts as Record<string, unknown>)[k]
 		const pv = (pkg as Record<string, unknown>)[k]
 		if ((fv === '' || fv === undefined) && pv !== undefined && pv !== '') {

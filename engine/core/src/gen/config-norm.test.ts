@@ -170,6 +170,23 @@ describe('config normalization (tmp roots)', () => {
 		assert.equal(cfg.offline.fallback, 'off')
 	})
 
+	it('cc normalizes: unset -> auto, true forces, string pins verbatim', async () => {
+		const off = await loadConfig(tmpCfgRoot())
+		assert.equal(off.cc, '')
+		const root = tmpCfgRoot()
+		writeFileSync(join(root, 'svelte.config.js'), `export default { swelte: { cc: true } }`)
+		assert.equal((await loadConfig(root)).cc, true)
+		const root2 = tmpCfgRoot()
+		writeFileSync(
+			join(root2, 'svelte.config.js'),
+			`export default { swelte: { cc: ' /opt/gcc ' } }`
+		)
+		assert.equal((await loadConfig(root2)).cc, '/opt/gcc')
+		const root3 = tmpCfgRoot()
+		writeFileSync(join(root3, 'svelte.config.js'), `export default { swelte: { cc: 'false' } }`)
+		assert.equal((await loadConfig(root3)).cc, '')
+	})
+
 	it('chunking defaults to layout; env wins over config', async () => {
 		const root = tmpCfgRoot()
 		const off = await loadConfig(root)

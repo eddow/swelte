@@ -128,4 +128,21 @@ describe('CLI parsing', () => {
 			assert.throws(() => parseArgs(findCommand(n)!, ['--local']), /unknown option/)
 		}
 	})
+
+	it('--cc parses: bare forces, path pins (build + dev)', () => {
+		for (const n of ['build', 'dev']) {
+			const cmd = findCommand(n)!
+			assert.equal(parseArgs(cmd, ['--cc']).opts.cc, true)
+			assert.equal(parseArgs(cmd, ['--cc', '/opt/gcc']).opts.cc, '/opt/gcc')
+			assert.equal(parseArgs(cmd, ['--cc=/opt/gcc']).opts.cc, '/opt/gcc')
+			// Followed by another flag, the bare form still forces.
+			assert.equal(parseArgs(cmd, ['--cc', '--root', 'x']).opts.cc, true)
+			// Explicit false still parses (negation clears the knob).
+			assert.equal(parseArgs(cmd, ['--cc=false']).opts.cc, 'false')
+		}
+		// preview/test reject it (backend-compile commands only)
+		for (const n of ['preview', 'test']) {
+			assert.throws(() => parseArgs(findCommand(n)!, ['--cc']), /unknown option/)
+		}
+	})
 })

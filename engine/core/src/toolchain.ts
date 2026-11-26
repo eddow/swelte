@@ -95,21 +95,16 @@ export function needsGlobals(genAbs: string): boolean {
  *  and its archives under `.swelte/qjs/` (engine `libqjs.a` plus the
  *  consumer's glue: SSR `libqjs_render.a`, agent `libqjs_agent.a`).
  *  Provider-only apps emit neither: native link, no QJS. Decides the
- *  `-cc` override. */
+ *  `-cc` override.
+ *
+ *  Third-party native code (app `src/lib/backend/*.v` staging its own
+ *  archives, e.g. a consumer-owned QuickJS glue) is invisible to this
+ *  check by construction — see `linkNeedsNativeCC` for the generic
+ *  detector that covers those. */
 export function hasRealBridge(genAbs: string): boolean {
 	return needsQjsLink(genAbs).length > 0
 }
 
-/** Absolute `#flag`-linked archive paths every real bridge needs to link.
- *  Parsed from each bridge's `#flag <abs>@START_LIBS` lines. Empty when no
- *  real bridge exists (stub has no C deps) or when unreadable. Used to
- *  detect DANGLING bridges (a real bridge whose archive is missing — e.g.
- *  `.swelte/qjs/` cleaned without a rebuild) so dev/build can self-heal
- *  instead of dying in the linker.
- *
- *  Deduplicated: each archive path appears once no matter how many
- *  bridges link it (the engine archive is shared; each glue archive
- *  belongs to exactly one consumer). */
 /** Which QJS consumer bridges exist in `.swelte/`: subset of
  *  `['ssr', 'agent']`. A bridge counts only when real (adapter/plugin
  *  emitted, contains `__global`) — core's no-op stub never counts.
@@ -131,6 +126,16 @@ export function needsQjsLink(genAbs: string): ('ssr' | 'agent')[] {
 	return out
 }
 
+/** Absolute `#flag`-linked archive paths every real bridge needs to link.
+ *  Parsed from each bridge's `#flag <abs>@START_LIBS` lines. Empty when no
+ *  real bridge exists (stub has no C deps) or when unreadable. Used to
+ *  detect DANGLING bridges (a real bridge whose archive is missing — e.g.
+ *  `.swelte/qjs/` cleaned without a rebuild) so dev/build can self-heal
+ *  instead of dying in the linker.
+ *
+ *  Deduplicated: each archive path appears once no matter how many
+ *  bridges link it (the engine archive is shared; each glue archive
+ *  belongs to exactly one consumer). */
 export function bridgeLinkedArchives(genAbs: string): string[] {
 	const files: string[] = []
 	if (needsQjsLink(genAbs).includes('ssr'))
@@ -148,6 +153,133 @@ export function bridgeLinkedArchives(genAbs: string): string[] {
 		}
 	}
 	return out
+}
+
+/** Explicit C-compiler override (`--cc` / `SWELTE_CC` / `swelte.cc`).
+ *  Precedence: CLI string wins, `SWELTE_CC` env middle, `swelte.cc`
+ *  config last (mirrors the targetOs/targetArch precedence shape).
+ *
+ *  Shape: `''` (default) = auto — build/dev pick the system cc, else the
+ *  vvm-managed host zig-cc wrapper, else fail with the `npx vvm prepare`
+ *  hint. `true` (`--cc` bare / `SWELTE_CC=1` / `cc: true`) forces
+ *  `-cc <auto>` on this compile unconditionally — for projects whose C
+ *  needs a real cc but matches no detector shape. A non-empty string
+ *  is used verbatim as `v -cc <path>` (a project-pinned gcc/clang/zig
+ *  wrapper, e.g. a hermetic toolchain path). `'false'`/`'0'`/empty env
+ *  and `cc: false` all normalize to `''` (auto). */
+export function resolveExplicitCC(opts: {
+	cli?: unknown
+	env?: unknown
+	config?: unknown
+}): '' | true | string {
+	const norm = (v: unknown): '' | true | string | undefined => {
+		if (v === undefined || v === null) return undefined
+		if (v === true) return true
+		if (v === false) return ''
+		if (typeof v === 'number') return v === 1 ? true : ''
+		const s = String(v).trim()
+		if (s === '') return undefined
+		const low = s.toLowerCase()
+		if (low === 'true' || low === '1' || low === 'yes') return true
+		if (low === 'false' || low === '0' || low === 'no' || low === 'off') return ''
+		return s
+	}
+	for (const src of [opts.cli, opts.env ?? process.env.SWELTE_CC, opts.config]) {
+		const n = norm(src)
+		if (n !== undefined) return n
+	}
+	return ''
+}
+
+/** Whether the staged `.swelte/` link needs a real C compiler (V's bundled
+ *  tcc can't handle the C it pulls). `true` for adapter-owned QJS bridges
+ *  AND for third-party/app-owned native code staged from
+ *  `src/lib/backend/*.v` — e.g. a consumer-owned QuickJS glue
+ *  (`.swelte/backend/qjsflags/qjsflags.v`) that links prebuilt archives
+ *  via `#flag $env('GOLEM_QJS_GLUE_LIB')` with no `__global` and no
+ *  adapter bridge anywhere.
+ *
+ *  Detection: every staged `.v` file outside core-owned dirs
+ *  (`routes/`, `generated/`, `types/`, `app/`, `dev/`) is scanned for the
+ *  two shapes tcc chokes on —
+ *
+ *  - a `#flag` line pulling a static archive: any `.a` token on the line
+ *    (literal `/abs/libqjs.a`, or env-resolved `$env('X_LIB')` whose
+ *    resolved value — or, when the var is unset, the `$env(...)` token
+ *    itself — ends in `.a`), on either side of V's `@START_LIBS`;
+ *  - a `#include` of a vendored native header that ships beside C
+ *    sources needing a real compiler (`swelte_qjs.h`, `quickjs.h`).
+ *
+ *  `hasRealBridge(genAbs) === true` implies `true` here (every real
+ *  bridge carries `__global` + archive `#flag`s), so callers switch on
+ *  this one predicate for the `-cc` decision and keep `needsQjsLink`
+ *  for the QJS-only bookkeeping (archive ABI check, dangling heal).
+ *
+ *  Conservative: `#flag -lm -lpthread -ldl` (system libs only) does NOT
+ *  match — plain-backend projects keep today's native link. A `true`
+ *  only upgrades the compile to `v -cc <real cc>`; it never changes
+ *  what gets linked. Never throws (unreadable dirs/files → `false`). */
+export function linkNeedsNativeCC(genAbs: string): boolean {
+	if (hasRealBridge(genAbs)) return true
+	try {
+		const skip = new Set(['routes', 'generated', 'types', 'app', 'dev'])
+		const stack: string[] = []
+		for (const e of readdirSync(genAbs, { withFileTypes: true })) {
+			if (!e.isDirectory() || e.name.startsWith('.') || skip.has(e.name)) continue
+			stack.push(join(genAbs, e.name))
+		}
+		const resolveEnvTokens = (s: string): string =>
+			s.replace(
+				/\$env\(\s*['"]([A-Za-z_][A-Za-z0-9_]*)['"]\s*\)/g,
+				(_m, name) => process.env[String(name)] ?? `$env(${String(name)})`
+			)
+		const scanFile = (file: string): boolean => {
+			let src = ''
+			try {
+				src = readFileSync(file, 'utf8')
+			} catch {
+				return false
+			}
+			for (const line of src.split('\n')) {
+				const t = line.trim()
+				if (t.startsWith('#include')) {
+					if (t.includes('swelte_qjs.h') || t.includes('quickjs.h')) return true
+					continue
+				}
+				if (!t.startsWith('#flag')) continue
+				const body = resolveEnvTokens(t.slice('#flag'.length))
+				for (const tok of body.split(/\s+/)) {
+					const clean = tok.replace(/^["']|["']$/g, '')
+					if (clean.toLowerCase().endsWith('.a')) return true
+				}
+			}
+			return false
+		}
+		while (stack.length > 0) {
+			const dir = stack.pop() as string
+			let kids: { name: string; isDirectory(): boolean; isFile(): boolean }[] = []
+			try {
+				kids = readdirSync(dir, { withFileTypes: true }) as unknown as typeof kids
+			} catch {
+				continue
+			}
+			for (const k of kids) {
+				const p = join(dir, k.name)
+				try {
+					if (k.isDirectory()) {
+						if (!k.name.startsWith('.')) stack.push(p)
+					} else if (k.isFile() && k.name.endsWith('.v')) {
+						if (scanFile(p)) return true
+					}
+				} catch {
+					/* unreadable entry — skip */
+				}
+			}
+		}
+	} catch {
+		/* unreadable gen dir — no native need */
+	}
+	return false
 }
 
 /** Delete a dangling bridge (real bridge whose linked archives are missing)

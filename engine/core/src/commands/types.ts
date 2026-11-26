@@ -60,6 +60,18 @@ export function parseArgs(cmd: Command, argv: string[]): { opts: Ctx['opts']; re
 				opts[def.name] = parseBoolFlag(rawVal)
 				i++
 			} else {
+				// `--cc` is an optional-value string: a bare `--cc` forces
+				// the auto pick (`true`), `--cc <path>` / `--cc=<path>`
+				// pins the compiler verbatim. Only `cc` gets this shape —
+				// every other string option still requires its value.
+				if (def.name === 'cc' && rawVal === undefined) {
+					const next = argv[i + 1]
+					if (next === undefined || next.startsWith('-')) {
+						opts[def.name] = true
+						i++
+						continue
+					}
+				}
 				const raw = eq >= 0 ? tok.slice(eq + 1) : argv[++i]
 				if (raw === undefined) throw new Error(`--${key} needs a value`)
 				opts[def.name] = def.value === 'number' ? Number(raw) : raw

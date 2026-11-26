@@ -274,17 +274,40 @@ export async function runBuild(ctx: Ctx): Promise<void> {
 	// needs a real C compiler). Plugin V modules (e.g. db's `backend/`) need
 	// `-enable-globals` too (their `__global`); the marker generate() writes
 	// says whether any were copied (tcc links those fine, no cc override).
-	// Core-only projects (stub bridge, no plugins) link natively, no flags.
+	// Third-party/app-owned native code (consumer QuickJS glue staged from
+	// `src/lib/backend/*.v`) likewise needs `-cc` — the generic
+	// `linkNeedsNativeCC` detector covers those (a real bridge implies it).
+	// An explicit `cc` knob (`--cc` / `SWELTE_CC` / `swelte.cc`) forces the
+	// `-cc` path even when no detector fires. Core-only projects (stub
+	// bridge, no plugins) link natively, no flags.
 	const coreOnly = !hasRealBridge(genAbs)
 	const withGlobals = needsGlobals(genAbs)
-	if (coreOnly && !cross && !withGlobals) ctx.log('core-only project: no QJS embed, links natively')
-	if (coreOnly && cross) ctx.log('core-only project: no QJS embed, cross needs only zig-cc')
+	const { linkNeedsNativeCC, resolveExplicitCC } = await import('../toolchain.js')
+	// Explicit knob: `--cc [path]` / `SWELTE_CC` / `swelte.cc` (`true` =
+	// force auto `-cc`; a path is used verbatim as `v -cc`). A bare
+	// `--cc` arrives via parseArgs as `true` (same as `SWELTE_CC=1`).
+	const explicitCC = resolveExplicitCC({ cli: ctx.opts.cc, config: cfg.cc })
+	const needsNativeCC = linkNeedsNativeCC(genAbs)
+	const forceCC = explicitCC !== ''
+	const wantCC = !coreOnly || needsNativeCC || forceCC
+	if (coreOnly && !cross && !withGlobals && !wantCC)
+		ctx.log('core-only project: no QJS embed, links natively')
+	else if (coreOnly && !cross && withGlobals && !wantCC)
+		ctx.log('plugin V modules: -enable-globals only (tcc links natively, no native C deps)')
+	if (coreOnly && cross && !wantCC)
+		ctx.log('core-only project: no QJS embed, cross needs only zig-cc')
 	// Native cc: system first, host-pair zig wrapper fallback ('' when
 	// neither exists — the guards below fail with the prepare hint).
-	const nativeCc = cross ? '' : resolveHostCC(import.meta.url)
+	// Explicit path (`--cc <path>` / `SWELTE_CC=<path>` / `swelte.cc`)
+	// wins verbatim; `true` falls through to this auto pick.
+	const nativeCc = cross
+		? ''
+		: typeof explicitCC === 'string' && explicitCC !== ''
+			? explicitCC
+			: resolveHostCC(import.meta.url)
 	let vExtra: string[] = []
-	if (!coreOnly) {
-		// Cross + bridge: needs the per-OS-ARCH archives or the host
+	if (wantCC) {
+		// Cross + QJS bridges: needs the per-OS-ARCH archives or the host
 		// archives would silently link the wrong ABI — fail fast with
 		// the exact fix. Every `#flag ...@START_LIBS` archive the bridges
 		// link must have its per-target build (engine + each consumer's
@@ -322,8 +345,15 @@ export async function runBuild(ctx: Ctx): Promise<void> {
 			// + zig-cc links clean on linux-aarch64-gnu).
 			vExtra.push('-d', 'use_bundled_libgc')
 		}
+		const ccWhy = !coreOnly
+			? 'bridge present'
+			: forceCC
+				? typeof explicitCC === 'string' && explicitCC !== ''
+					? `explicit cc ${explicitCC}`
+					: 'explicit cc'
+				: 'native C deps in staged backend'
 		ctx.log(
-			`QJS embed: -enable-globals -cc ${cross ? zigCc : nativeCc}${cross ? ' -d use_bundled_libgc' : ''} (bridge present)`
+			`QJS embed: -enable-globals -cc ${cross ? zigCc : nativeCc}${cross ? ' -d use_bundled_libgc' : ''} (${ccWhy})`
 		)
 	} else if (withGlobals) {
 		// Plugin V modules with `__global` (db backend), no bridge: globals

@@ -13,12 +13,14 @@ import {
 	healDanglingBridge,
 	hostTargetArch,
 	hostTargetOs,
+	linkNeedsNativeCC,
 	needsGlobals,
 	needsQjsLink,
 	needsSqliteAmalgamation,
 	normalizeTargetArch,
 	normalizeTargetOs,
 	resolveCC,
+	resolveExplicitCC,
 	resolveHostCC,
 	resolveTargetArch,
 	resolveTargetOs,
@@ -280,5 +282,113 @@ describe('shared QJS link matrix (SSR and/or agent bridge)', () => {
 		} finally {
 			rmSync(gen, { recursive: true, force: true })
 		}
+	})
+})
+
+describe('generic native-C detector (third-party backend archives)', () => {
+	const mkGen = (): string => mkdtempSync(join(tmpdir(), 'gen-nativecc-'))
+	const stagedBackend = (dir: string, name: string, src: string): void => {
+		mkdirSync(join(dir, 'backend', name), { recursive: true })
+		writeFileSync(join(dir, 'backend', name, `${name}.v`), src)
+	}
+	const plainBackend = "module plain\n\n@[get] pub fn hello() string {\n\treturn 'hi'\n}\n"
+
+	it('report case: $env archive flags with no bridge need a real cc', () => {
+		const gen = mkGen()
+		try {
+			assert.equal(linkNeedsNativeCC(gen), false)
+			stagedBackend(
+				gen,
+				'qjsflags',
+				[
+					'module qjsflags',
+					'',
+					'#include "golem_qjs_glue.h"',
+					'#include "swelte_qjs.h"',
+					'',
+					"#flag -I $env('GOLEM_QJS_ENGINE_CDIR')",
+					"#flag $env('GOLEM_QJS_GLUE_LIB')",
+					"#flag $env('GOLEM_QJS_ENGINE_LIB')",
+					'#flag -lm -lpthread -ldl',
+					'',
+				].join('\n')
+			)
+			// No adapter bridge anywhere — the old predicate stays blind.
+			assert.deepEqual(needsQjsLink(gen), [])
+			assert.equal(hasRealBridge(gen), false)
+			// Unset env: the `$env(...)` token itself ends in `.a`-able
+			// text? No — but the include of the vendored QJS header fires.
+			assert.equal(linkNeedsNativeCC(gen), true)
+		} finally {
+			rmSync(gen, { recursive: true, force: true })
+		}
+	})
+
+	it('env-resolved .a path matches with the var set', () => {
+		const gen = mkGen()
+		const key = 'SWELTE_TEST_GLUE_LIB'
+		const prev = process.env[key]
+		try {
+			process.env[key] = '/tmp/libgoftest.a'
+			stagedBackend(gen, 'custom', [`module custom`, ``, `#flag $env('${key}')`, ``].join('\n'))
+			assert.equal(linkNeedsNativeCC(gen), true)
+		} finally {
+			if (prev === undefined) delete process.env[key]
+			else process.env[key] = prev
+			rmSync(gen, { recursive: true, force: true })
+		}
+	})
+
+	it('plain backend (system libs only, no archive/header) stays native', () => {
+		const gen = mkGen()
+		try {
+			stagedBackend(
+				gen,
+				'plain',
+				['module plain', '', '#flag -lm -lpthread -ldl', '', plainBackend].join('\n')
+			)
+			assert.equal(linkNeedsNativeCC(gen), false)
+		} finally {
+			rmSync(gen, { recursive: true, force: true })
+		}
+	})
+
+	it('real bridge implies the generic detector (one predicate for -cc)', () => {
+		const gen = mkGen()
+		try {
+			mkdirSync(join(gen, 'routes'), { recursive: true })
+			writeFileSync(
+				join(gen, 'routes', 'swelte_qjs_bridge.v'),
+				['module routes', '', '__global x bool', '#flag /abs/libqjs.a@START_LIBS', ''].join('\n')
+			)
+			assert.equal(hasRealBridge(gen), true)
+			assert.equal(linkNeedsNativeCC(gen), true)
+		} finally {
+			rmSync(gen, { recursive: true, force: true })
+		}
+	})
+})
+
+describe('explicit cc knob (CLI > env > config)', () => {
+	it('CLI wins, path passes through verbatim', () => {
+		assert.equal(
+			resolveExplicitCC({ cli: '/opt/cc', env: '/env/cc', config: '/cfg/cc' }),
+			'/opt/cc'
+		)
+	})
+
+	it('bare --cc (true) forces; false-ish explicitly clears', () => {
+		assert.equal(resolveExplicitCC({ cli: true }), true)
+		assert.equal(resolveExplicitCC({ env: '1', config: '/cfg/cc' }), true)
+		assert.equal(resolveExplicitCC({ env: 'true' }), true)
+		// Negation blocks lower precedence (does NOT fall through).
+		assert.equal(resolveExplicitCC({ env: '0', config: '/cfg/cc' }), '')
+		assert.equal(resolveExplicitCC({ cli: false, env: '/env/cc' }), '')
+	})
+
+	it('config path used when CLI/env absent; default is auto', () => {
+		assert.equal(resolveExplicitCC({ config: '/cfg/cc' }), '/cfg/cc')
+		assert.equal(resolveExplicitCC({}), '')
+		assert.equal(resolveExplicitCC({ config: false }), '')
 	})
 })

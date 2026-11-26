@@ -67,7 +67,7 @@ adapter (or with `--no-ssr`) the URL stays unset and dev is SPA/static
 picks them up without a V restart. `swelte dev` needs no plugin;
 `SWELTE_PLUGINS=@swelte/ssr-qjs` adds `swelte ssr-check` (the CI gate, third-party plugin pattern).
 
-## `swelte build [--root dir] [--output path] [--port N] [--target auto|static|node|edge] [--target-os linux|macos|windows] [--target-arch amd64|arm64] [--local]`
+## `swelte build [--root dir] [--output path] [--port N] [--target auto|static|node|edge] [--target-os linux|macos|windows] [--target-arch amd64|arm64] [--local] [--cc [path]]`
 
 1. `generate()` into `.swelte/` (`routes/*.v` + `server_gen.v` +
    `.swelte/server.v` harness). Emits dev `.swelte/dev/<mod>.wasm` per file
@@ -87,6 +87,19 @@ picks them up without a V restart. `swelte dev` needs no plugin;
    generate() emits a no-op bridge stub (same symbol, returns not-ok,
    `SWELTE_SSR=1` falls through to the proxy at runtime); projects with
    plugin V modules (db backend) add `-enable-globals`.
+   Projects whose staged backend pulls C that tcc can't compile
+   (adapter bridges AND third-party archives, e.g. a consumer-owned
+   QuickJS glue linking its own prebuilt `.a` via `#flag $env(...)`)
+   get the same `-enable-globals -cc <cc>`: the generic detector scans
+   staged `.v` files (outside `routes/`/`generated/`/`types/`/`app/`/
+   `dev/`) for `#flag ... .a` lines (env-resolved) and vendored QJS
+   `#include`s (`swelte_qjs.h`, `quickjs.h`) — plain system-lib backends
+   (`-lm -lpthread -ldl` only) keep the native link. An explicit knob
+   forces the `-cc` path even when no detector fires: bare `--cc`
+   (or `SWELTE_CC=1`, `swelte.cc: true`) forces `-cc <auto>`; `--cc
+   <path>` (or `SWELTE_CC=<path>`, `swelte.cc: '<path>'`) pins `v -cc`
+   verbatim (CLI wins, `SWELTE_CC` middle, `swelte.cc` last). `swelte
+   dev` uses the same detector + knob.
    Cross-build: `--target-os <os> --target-arch <arch>` (CLI wins,
    `SWELTE_TARGET_OS`/`SWELTE_TARGET_ARCH` env middle,
    `swelte.targetOs`/`swelte.targetArch` config last — config also reads
